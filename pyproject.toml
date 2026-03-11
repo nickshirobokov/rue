@@ -29,7 +29,7 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/NickSherrow/well"
+Repository = "https://github.com/NickSherrow/rue"
 
 [dependency-groups]
 dev = [
