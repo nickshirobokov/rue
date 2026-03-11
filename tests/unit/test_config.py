@@ -1,0 +1,76 @@
+from pathlib import Path
+
+import pytest
+
+from rue.config import load_config
+
+
+def test_load_config_prefers_rue_toml(tmp_path: Path):
+    project = tmp_path
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(
+        """
+[tool.rue]
+test-paths = ["tests"]
+include-tags = ["slow"]
+maxfail = 1
+verbosity = 1
+addopts = ["-q"]
+""".strip()
+    )
+    test_file = project / "rue.toml"
+    test_file.write_text(
+        """
+test-paths = ["examples"]
+include-tags = ["smoke"]
+exclude-tags = ["slow"]
+keyword = "chatbot"
+db-path = ".rue/custom.db"
+save-to-db = false
+""".strip()
+    )
+
+    config = load_config(project)
+
+    assert config.test_paths == ["examples"]
+    assert config.include_tags == ["smoke"]
+    assert config.exclude_tags == ["slow"]
+    assert config.keyword == "chatbot"
+    assert config.maxfail == 1
+    assert config.verbosity == 1
+    assert config.addopts == ["-q"]
+    assert config.db_path == ".rue/custom.db"
+    assert config.save_to_db is False
+
+
+def test_load_config_defaults_when_missing(tmp_path: Path):
+    project = tmp_path
+    config = load_config(project)
+    assert config.test_paths == ["."]
+    assert config.include_tags == []
+    assert config.exclude_tags == []
+    assert config.keyword is None
+    assert config.maxfail is None
+    assert config.verbosity == 0
+    assert config.addopts == []
+    assert config.db_path is None
+    assert config.save_to_db is True
+
+
+@pytest.mark.parametrize(
+    "field,expected",
+    [
+        ("test_paths", ["."]),
+        ("include_tags", []),
+        ("exclude_tags", []),
+        ("keyword", None),
+        ("maxfail", None),
+        ("verbosity", 0),
+        ("addopts", []),
+        ("db_path", None),
+        ("save_to_db", True),
+    ],
+)
+def test_config_default_values(tmp_path: Path, field: str, expected):
+    config = load_config(tmp_path)
+    assert getattr(config, field) == expected

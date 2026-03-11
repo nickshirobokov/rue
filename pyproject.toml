@@ -1,0 +1,107 @@
+[project]
+name = "rue"
+dynamic = ["version"]
+description = "Testing Framework for AI Software"
+readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "Nikita Shirobokov", email = "shirobokov@me.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=2.6.1",
+    "pydantic>=2.12.3",
+    "python-dotenv>=1.2.1",
+    "rich>=14.2.0",
+    "anthropic[vertex]>=0.72.0",
+    "pydantic-settings>=2.11.0",
+    "httpx>=0.28.1",
+    "opentelemetry-sdk>=1.29.0",
+    "opentelemetry-instrumentation-openai>=0.49.0",
+    "opentelemetry-instrumentation-anthropic>=0.49.0",
+]
+
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14"
+]
+
+[project.urls]
+Repository = "https://github.com/NickSherrow/well"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.4.0",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+    "pytest-cov>=7.0.0",
+]
+lint = [
+    "mypy==1.19.1",
+    "ruff==0.15.4",
+]
+
+[project.scripts]
+rue = "rue.cli:main"
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rue"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["ALL",]
+ignore = [
+    "COM812", # conflicts with fomatters
+    "RUF012", # Conflicts with Pydantic
+    "TC001",  # Conflicts with Pydantic
+    "TC002",  # Conflicts with Pydantic
+    "TC003",  # Conflicts with Pydantic
+    "D107",   # Missing docstring in __init__
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "D",
+    "S",
+    "PLR2004",
+    "ANN", # TODO: Relax type annotations in tests
+    "T201", # Allow print statements in tests
+    "INP001", # __init__ not required in tests
+]
+
+[tool.ruff.format]
+quote-style = "double" # Like Black, use double quotes for strings
+indent-style = "space" # Like Black, use spaces for indentation
+docstring-code-format = true
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+lines-after-imports = 2
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+plugins = ["pydantic.mypy"]
+strict = true
+enable_error_code = "deprecated"

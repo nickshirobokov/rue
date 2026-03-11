@@ -1,0 +1,371 @@
+"""Resource system for dependency injection.
+
+Similar to pytest fixtures, resources provide injectable dependencies
+based on parameter name matching.
+"""
+
+import asyncio
+import inspect
+from collections.abc import AsyncGenerator, Callable, Generator
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, ParamSpec, TypeVar
+
+from rue.context import ResolverContext, resolver_context_scope
+from rue.context.output_capture import OutputBuffer, get_current_capture
+from rue.tracing import TraceContext, get_span_collector
+
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+class Scope(Enum):
+    """Resource lifecycle scope."""
+
+    CASE = "case"  # Fresh instance per test
+    SUITE = "suite"  # Shared across tests in same file
+    SESSION = "session"  # Shared across entire test run
+
+
+_RESOLUTION_PATH: ContextVar[tuple[tuple[Scope, str], ...]] = ContextVar(
+    "resource_resolution_path",
+    default=(),
+)
+
+
+@dataclass
+class ResourceDef:
+    """Definition of a registered resource."""
+
+    name: str
+    fn: Callable[..., Any]
+    scope: Scope
+    is_async: bool
+    is_generator: bool
+    is_async_generator: bool
+    dependencies: list[str] = field(default_factory=list)
+    on_resolve: Callable[[Any], Any] | None = None
+    on_injection: Callable[[Any], Any] | None = None
+    on_teardown: Callable[[Any], Any] | None = None
+
+
+_registry: dict[str, ResourceDef] = {}
+_builtin_registry: dict[str, ResourceDef] = {}
+
+
+def resource(
+    fn: Callable[P, T] | None = None,
+    *,
+    scope: Scope | str = Scope.CASE,
+    on_resolve: Callable[[Any], Any] | None = None,
+    on_injection: Callable[[Any], Any] | None = None,
+    on_teardown: Callable[[Any], Any] | None = None,
+) -> Any:
+    """Register a function as a resource for dependency injection."""
+
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        nonlocal scope
+        if isinstance(scope, str):
+            scope = Scope(scope)
+
+        sig = inspect.signature(fn)
+        deps = [p for p in sig.parameters if p != "self"]
+
+        is_async = inspect.iscoroutinefunction(fn)
+        is_async_gen = inspect.isasyncgenfunction(fn)
+        is_gen = inspect.isgeneratorfunction(fn)
+
+        defn = ResourceDef(
+            name=fn.__name__,
+            fn=fn,
+            scope=scope,
+            is_async=is_async or is_async_gen,
+            is_generator=is_gen,
+            is_async_generator=is_async_gen,
+            dependencies=deps,
+            on_resolve=on_resolve,
+            on_injection=on_injection,
+            on_teardown=on_teardown,
+        )
+        _registry[defn.name] = defn
+        return fn
+
+    if fn is not None:
+        return decorator(fn)
+    return decorator
+
+
+def get_registry() -> dict[str, ResourceDef]:
+    """Get the global resource registry."""
+    return _registry
+
+
+def clear_registry() -> None:
+    """Clear all registered resources."""
+    _registry.clear()
+    _registry.update(_builtin_registry)
+
+
+class ResourceResolver:
+    """Resolves and caches resources for test execution."""
+
+    def __init__(
+        self,
+        registry: dict[str, ResourceDef] | None = None,
+        *,
+        parent: "ResourceResolver | None" = None,
+    ) -> None:
+        self._registry = registry if registry is not None else _registry
+        self._cache: dict[tuple[Scope, str], Any] = {}
+        self._teardowns: list[
+            tuple[Scope, str, Generator[Any, None, None] | AsyncGenerator[Any, None]]
+        ] = []
+        self._parent = parent
+        self._shared_creation_locks: dict[tuple[Scope, str], asyncio.Lock] = (
+            parent._shared_creation_locks if parent is not None else {}
+        )
+
+    def _owner_resolver_for_scope(self, scope: Scope) -> "ResourceResolver":
+        if scope in {Scope.SUITE, Scope.SESSION} and self._parent is not None:
+            return self._parent._owner_resolver_for_scope(scope)
+        return self
+
+    async def _apply_on_injection(self, defn: ResourceDef, name: str, value: Any) -> Any:
+        if defn.on_injection:
+            try:
+                value = defn.on_injection(value)
+                if inspect.iscoroutine(value):
+                    value = await value
+            except Exception as e:
+                raise RuntimeError(
+                    f"Hook {defn.on_injection.__name__} failed for resource '{name}': {e}"
+                ) from e
+        return value
+
+    async def _resolve_uncached(
+        self,
+        *,
+        name: str,
+        defn: ResourceDef,
+        cache_key: tuple[Scope, str],
+    ) -> Any:
+        kwargs = {}
+        resolver_ctx = ResolverContext(consumer_name=name)
+        with resolver_context_scope(resolver_ctx):
+            for dep in defn.dependencies:
+                kwargs[dep] = await self.resolve(dep)
+
+        if defn.is_async_generator:
+            gen = defn.fn(**kwargs)
+            value = await gen.__anext__()
+            self._register_teardown(defn.scope, name, gen)
+        elif defn.is_generator:
+            gen = defn.fn(**kwargs)
+            value = next(gen)
+            self._register_teardown(defn.scope, name, gen)
+        elif defn.is_async:
+            value = await defn.fn(**kwargs)
+        else:
+            value = defn.fn(**kwargs)
+
+        if defn.on_resolve:
+            try:
+                value = defn.on_resolve(value)
+                if inspect.iscoroutine(value):
+                    value = await value
+            except Exception as e:
+                raise RuntimeError(
+                    f"Hook {defn.on_resolve.__name__} failed for resource '{name}': {e}"
+                ) from e
+
+        self._cache[cache_key] = value
+        if defn.scope in {Scope.SUITE, Scope.SESSION} and self._parent:
+            self._parent._cache[cache_key] = value
+        return value
+
+    def fork_for_case(self) -> "ResourceResolver":
+        """Create a child resolver for isolated CASE-scope execution."""
+        child = ResourceResolver(self._registry, parent=self)
+        for key, value in self._cache.items():
+            if key[0] in {Scope.SUITE, Scope.SESSION}:
+                child._cache[key] = value
+        return child
+
+    def _register_teardown(
+        self, scope: Scope, name: str, gen: Generator[Any, None, None] | AsyncGenerator[Any, None]
+    ) -> None:
+        if scope in {Scope.SUITE, Scope.SESSION} and self._parent:
+            self._parent._register_teardown(scope, name, gen)
+        else:
+            self._teardowns.append((scope, name, gen))
+
+    async def resolve(self, name: str) -> Any:
+        if name not in self._registry:
+            msg = f"Unknown resource: {name}"
+            raise ValueError(msg)
+
+        defn = self._registry[name]
+        cache_key = (defn.scope, name)
+        path = _RESOLUTION_PATH.get()
+        if cache_key in path:
+            cycle = " -> ".join(f"{scope.value}:{dep}" for scope, dep in (*path, cache_key))
+            raise RuntimeError(f"Circular resource dependency detected: {cycle}")
+
+        token = _RESOLUTION_PATH.set((*path, cache_key))
+        try:
+            owner = self._owner_resolver_for_scope(defn.scope)
+
+            if cache_key in owner._cache:
+                value = owner._cache[cache_key]
+            elif defn.scope in {Scope.SUITE, Scope.SESSION}:
+                lock = owner._shared_creation_locks.setdefault(cache_key, asyncio.Lock())
+                async with lock:
+                    if cache_key in owner._cache:
+                        value = owner._cache[cache_key]
+                    else:
+                        value = await owner._resolve_uncached(
+                            name=name,
+                            defn=defn,
+                            cache_key=cache_key,
+                        )
+            else:
+                value = await owner._resolve_uncached(name=name, defn=defn, cache_key=cache_key)
+
+            if owner is not self and cache_key in owner._cache:
+                self._cache[cache_key] = owner._cache[cache_key]
+
+            return await self._apply_on_injection(defn, name, value)
+        finally:
+            _RESOLUTION_PATH.reset(token)
+
+    async def resolve_many(self, names: list[str]) -> dict[str, Any]:
+        return {name: await self.resolve(name) for name in names}
+
+    async def teardown(self) -> None:
+        teardown_errors: list[Exception] = []
+
+        for s, name, gen in reversed(self._teardowns):
+            try:
+                if isinstance(gen, AsyncGenerator):
+                    try:
+                        await gen.__anext__()
+                    except StopAsyncIteration:
+                        pass
+                else:
+                    try:
+                        next(gen)
+                    except StopIteration:
+                        pass
+            except Exception as e:
+                teardown_errors.append(
+                    RuntimeError(f"Generator teardown failed for resource '{name}': {e}")
+                )
+
+            defn = self._registry.get(name)
+            if defn and defn.on_teardown:
+                cache_key = (s, name)
+                if cache_key in self._cache:
+                    try:
+                        result = defn.on_teardown(self._cache[cache_key])
+                        if inspect.iscoroutine(result):
+                            await result
+                    except Exception as e:
+                        teardown_errors.append(
+                            RuntimeError(
+                                f"Hook {defn.on_teardown.__name__} failed for resource '{name}': {e}"
+                            )
+                        )
+
+        self._teardowns.clear()
+
+        if teardown_errors:
+            if len(teardown_errors) == 1:
+                raise RuntimeError(teardown_errors[0])
+            raise ExceptionGroup("Teardown errors occurred", teardown_errors)
+
+    async def teardown_scope(self, scope: Scope) -> None:
+        remaining = []
+        teardown_errors: list[Exception] = []
+
+        for s, name, gen in reversed(self._teardowns):
+            if s == scope:
+                try:
+                    if isinstance(gen, AsyncGenerator):
+                        try:
+                            await gen.__anext__()
+                        except StopAsyncIteration:
+                            pass
+                    else:
+                        try:
+                            next(gen)
+                        except StopIteration:
+                            pass
+                except Exception as e:
+                    teardown_errors.append(
+                        RuntimeError(f"Generator teardown failed for resource '{name}': {e}")
+                    )
+
+                defn = self._registry.get(name)
+                if defn and defn.on_teardown:
+                    cache_key = (s, name)
+                    if cache_key in self._cache:
+                        try:
+                            result = defn.on_teardown(self._cache[cache_key])
+                            if inspect.iscoroutine(result):
+                                await result
+                        except Exception as e:
+                            teardown_errors.append(
+                                RuntimeError(
+                                    f"Hook {defn.on_teardown.__name__} failed for resource '{name}': {e}"
+                                )
+                            )
+            else:
+                remaining.append((s, name, gen))
+
+        self._teardowns = list(reversed(remaining))
+
+        keys_to_remove = [k for k in self._cache if k[0] == scope]
+        for key in keys_to_remove:
+            del self._cache[key]
+
+        if teardown_errors:
+            if len(teardown_errors) == 1:
+                raise RuntimeError(teardown_errors[0])
+            raise ExceptionGroup("Teardown errors occurred", teardown_errors)
+
+
+@resource(scope=Scope.CASE)
+def trace_context() -> Generator[TraceContext, None, None]:
+    """Provide access to trace data for the current test."""
+    collector = get_span_collector()
+    if collector is None:
+        raise RuntimeError("Tracing is not enabled; cannot resolve trace_context resource.")
+    ctx = TraceContext.from_current(collector)
+    yield ctx
+    if collector:
+        collector.clear(ctx.trace_id)
+
+
+_builtin_registry["trace_context"] = _registry["trace_context"]
+
+
+@resource(scope=Scope.CASE)
+def captured_output() -> Generator[OutputBuffer, None, None]:
+    """Provide access to captured stdout/stderr for the current test.
+
+    Usage:
+        def test_my_test(captured_output):
+            print("hello")
+            out, err = captured_output.readouterr()
+            assert out == "hello\\n"
+    """
+    capture = get_current_capture()
+    if capture is None:
+        raise RuntimeError("Output capture not enabled")
+    with capture.capture() as buf:
+        yield buf
+
+
+_builtin_registry["captured_output"] = _registry["captured_output"]

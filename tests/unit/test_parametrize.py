@@ -1,0 +1,146 @@
+import asyncio
+from pathlib import Path
+
+from rue.resources import clear_registry, resource
+from rue.testing import Runner
+from rue.testing.decorators import parametrize
+from rue.testing.models import ParameterSet, ParametrizeModifier, TestItem
+
+
+def test_parametrize_decorator_records_modifier():
+    @parametrize("value", [1, 2], ids=["one", "two"])
+    def sample(value):
+        return value
+
+    modifiers = getattr(sample, "__rue_modifiers__", [])
+    assert len(modifiers) == 1
+    assert isinstance(modifiers[0], ParametrizeModifier)
+    assert len(modifiers[0].parameter_sets) == 2
+    assert modifiers[0].parameter_sets[0].id_suffix == "one"
+    assert modifiers[0].parameter_sets[1].id_suffix == "two"
+
+
+def test_parametrize_stacking_creates_multiple_modifiers():
+    @parametrize("value", [1, 2])
+    @parametrize("flag", [True, False])
+    def sample(value, flag):
+        return value, flag
+
+    modifiers = getattr(sample, "__rue_modifiers__", [])
+    # Each decorator adds one modifier
+    assert len(modifiers) == 2
+    # First applied (inner): flag
+    assert modifiers[0].parameter_sets[0].values == {"flag": True}
+    # Second applied (outer): value
+    assert modifiers[1].parameter_sets[0].values == {"value": 1}
+
+
+def test_parametrize_invalid_inputs_are_deferred_to_execution():
+    @parametrize("value", [])
+    def sample(value):
+        return value
+
+    modifiers = getattr(sample, "__rue_modifiers__", [])
+    assert modifiers == []
+    assert getattr(sample, "__rue_definition_error__", None) == (
+        "parametrize() requires at least one value set"
+    )
+
+
+def test_runner_applies_parameter_values(null_reporter):
+    recorded = {}
+
+    def test_sample(param_a, resource_b):
+        recorded["param_a"] = param_a
+        recorded["resource_b"] = resource_b
+
+    @resource
+    def resource_b():
+        return "from_resource"
+
+    runner = Runner(reporters=[null_reporter])
+
+    # Create a parametrize modifier with one parameter set
+    modifier = ParametrizeModifier(
+        parameter_sets=(
+            ParameterSet(values={"param_a": "from_param"}, id_suffix="param_a=from_param"),
+        )
+    )
+
+    item = TestItem(
+        name="test_sample",
+        fn=test_sample,
+        module_path=Path("sample.py"),
+        is_async=False,
+        params=["param_a", "resource_b"],
+        modifiers=[modifier],
+    )
+
+    try:
+        run_result = asyncio.run(runner.run(items=[item]))
+    finally:
+        clear_registry()
+
+    # The result should have sub_executions for parametrize
+    assert run_result.result.executions[0].sub_executions is not None
+    assert len(run_result.result.executions[0].sub_executions) == 1
+    assert recorded["param_a"] == "from_param"
+    assert recorded["resource_b"] == "from_resource"
+    assert run_result.result.passed == 1
+
+
+def test_runner_runs_all_parameter_sets(null_reporter):
+    results = []
+
+    def test_collect(x):
+        results.append(x)
+
+    runner = Runner(reporters=[null_reporter])
+
+    modifier = ParametrizeModifier(
+        parameter_sets=(
+            ParameterSet(values={"x": 1}, id_suffix="x=1"),
+            ParameterSet(values={"x": 2}, id_suffix="x=2"),
+            ParameterSet(values={"x": 3}, id_suffix="x=3"),
+        )
+    )
+
+    item = TestItem(
+        name="test_collect",
+        fn=test_collect,
+        module_path=Path("sample.py"),
+        is_async=False,
+        params=["x"],
+        modifiers=[modifier],
+    )
+
+    run_result = asyncio.run(runner.run(items=[item]))
+
+    assert results == [1, 2, 3]
+    assert run_result.result.passed == 1
+    assert run_result.result.executions[0].sub_executions is not None
+    assert len(run_result.result.executions[0].sub_executions) == 3
+
+
+def test_runner_reports_invalid_parametrize_as_error(null_reporter):
+    @parametrize("value", [])
+    def test_invalid(value):
+        return value
+
+    modifiers = getattr(test_invalid, "__rue_modifiers__", [])
+    definition_error = getattr(test_invalid, "__rue_definition_error__", None)
+
+    item = TestItem(
+        name="test_invalid",
+        fn=test_invalid,
+        module_path=Path("sample.py"),
+        is_async=False,
+        params=["value"],
+        modifiers=modifiers,
+        definition_error=definition_error,
+    )
+
+    run_result = asyncio.run(Runner(reporters=[null_reporter]).run(items=[item]))
+
+    assert run_result.result.errors == 1
+    assert "requires at least one value set" in str(run_result.result.executions[0].result.error)

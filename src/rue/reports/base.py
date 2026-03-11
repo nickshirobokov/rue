@@ -1,0 +1,58 @@
+"""Base reporter ABC for rue test output."""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from rue.testing import TestDefinition
+    from rue.testing.models.result import TestExecution
+    from rue.testing.models.run import Run
+
+
+class Reporter(ABC):
+    """Abstract base class for test reporters.
+
+    All methods are async to support I/O-bound reporters (web dashboard, file output, etc.).
+    """
+
+    @abstractmethod
+    async def on_no_tests_found(self) -> None:
+        """Called when test collection finds no tests."""
+
+    @abstractmethod
+    async def on_collection_complete(self, items: list[TestDefinition]) -> None:
+        """Called after test collection completes."""
+
+    async def on_test_start(self, item: TestDefinition) -> None:
+        """Called before a test starts executing."""
+        _ = item
+        return None
+
+    async def on_subtest_complete(
+        self,
+        parent: TestDefinition,
+        sub_execution: TestExecution,
+    ) -> None:
+        """Called when a subtest execution completes."""
+        _ = parent, sub_execution
+        return None
+
+    @abstractmethod
+    async def on_test_complete(self, execution: TestExecution) -> None:
+        """Called after each test completes."""
+
+    @abstractmethod
+    async def on_run_complete(self, run: Run) -> None:
+        """Called after all tests complete."""
+
+    @abstractmethod
+    async def on_run_stopped_early(self, failure_count: int) -> None:
+        """Called when run stops early due to maxfail limit."""
+
+    @abstractmethod
+    async def on_tracing_enabled(self, output_path: Path) -> None:
+        """Called when tracing is enabled to report output location."""

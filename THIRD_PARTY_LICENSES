@@ -1,0 +1,107 @@
+This project includes files derived from software originally
+developed by Merit AI, Inc.
+
+The following files contain code derived from that project:
+
+- examples/rue_example_captured_output.py
+- examples/rue_example_concurrency.py
+- examples/rue_example_outcomes.py
+- examples/rue_example_parametrize_and_tags.py
+- examples/rue_example_run_inline.py
+- examples/rue_example_trace_context.py
+- examples/rue_example_tracing.py
+- src/rue/__init__.py
+- src/rue/cli/__init__.py
+- src/rue/config.py
+- src/rue/context/__init__.py
+- src/rue/context/context.py
+- src/rue/context/output_capture.py
+- src/rue/reports/__init__.py
+- src/rue/reports/base.py
+- src/rue/reports/console.py
+- src/rue/reports/registry.py
+- src/rue/resources/__init__.py
+- src/rue/resources/resolver.py
+- src/rue/storage/__init__.py
+- src/rue/storage/base.py
+- src/rue/storage/sqlite/__init__.py
+- src/rue/storage/sqlite/migrations/__init__.py
+- src/rue/storage/sqlite/migrations/errors.py
+- src/rue/storage/sqlite/migrations/runner.py
+- src/rue/storage/sqlite/migrations/versions/__init__.py
+- src/rue/storage/sqlite/migrations/versions/v001_initial.py
+- src/rue/storage/sqlite/schema.py
+- src/rue/storage/sqlite/store.py
+- src/rue/testing/__init__.py
+- src/rue/testing/decorators/__init__.py
+- src/rue/testing/decorators/iterate.py
+- src/rue/testing/decorators/parametrize.py
+- src/rue/testing/decorators/repeat.py
+- src/rue/testing/decorators/run_inline.py
+- src/rue/testing/decorators/tags.py
+- src/rue/testing/discovery/__init__.py
+- src/rue/testing/discovery/collector.py
+- src/rue/testing/environment.py
+- src/rue/testing/execution/__init__.py
+- src/rue/testing/execution/factory.py
+- src/rue/testing/execution/interfaces.py
+- src/rue/testing/execution/parametrized.py
+- src/rue/testing/execution/repeated.py
+- src/rue/testing/execution/result_builder.py
+- src/rue/testing/execution/single.py
+- src/rue/testing/execution/tracer.py
+- src/rue/testing/models/__init__.py
+- src/rue/testing/models/definition.py
+- src/rue/testing/models/modifiers.py
+- src/rue/testing/models/result.py
+- src/rue/testing/models/run.py
+- src/rue/testing/outcomes.py
+- src/rue/testing/runner.py
+- src/rue/tracing/__init__.py
+- src/rue/tracing/context.py
+- src/rue/tracing/exporters.py
+- src/rue/tracing/lifecycle.py
+- tests/unit/conftest.py
+- tests/unit/storage/sqlite/migrations/__init__.py
+- tests/unit/storage/sqlite/migrations/test_cli.py
+- tests/unit/storage/sqlite/migrations/test_runner.py
+- tests/unit/storage/sqlite/test_sqlite_store.py
+- tests/unit/test_config.py
+- tests/unit/test_console_reporter.py
+- tests/unit/test_context.py
+- tests/unit/test_outcomes.py
+- tests/unit/test_output_capture.py
+- tests/unit/test_parametrize.py
+- tests/unit/test_repeat.py
+- tests/unit/test_reporter_registry.py
+- tests/unit/test_resources.py
+- tests/unit/test_run_inline.py
+- tests/unit/test_runner.py
+- tests/unit/test_sut.py
+- tests/unit/test_tags.py
+- tests/unit/test_tracing.py
+- tests/unit/test_rue_cli.py
+
+Those portions are subject to the following license:
+
+MIT License
+
+Copyright (c) 2026 Merit AI, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
