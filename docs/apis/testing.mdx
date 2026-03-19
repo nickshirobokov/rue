@@ -1,0 +1,869 @@
+---
+title: "Rue Testing APIs"
+---
+
+## Decorators
+
+### @resource
+
+Register a function as a dependency injection resource.
+
+**Signature:**
+```python
+@resource(
+    fn: Callable | None = None,
+    *,
+    scope: Scope | str = Scope.CASE,
+    on_resolve: Callable[[Any], Any] | None = None,
+    on_injection: Callable[[Any], Any] | None = None,
+    on_teardown: Callable[[Any], Any] | None = None,
+)
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `fn` | `Callable \| None` | `None` | The resource factory function |
+| `scope` | `Scope \| str` | `Scope.CASE` | Lifecycle scope: `"case"`, `"suite"`, or `"session"` |
+| `on_resolve` | `Callable \| None` | `None` | Hook called once when resource is first created |
+| `on_injection` | `Callable \| None` | `None` | Hook called every time resource is injected |
+| `on_teardown` | `Callable \| None` | `None` | Hook called after generator teardown runs |
+
+**Returns:** Decorated function registered as a resource
+
+**Example:**
+```python
+import rue
+
+@rue.resource
+def api_client():
+    return APIClient()
+
+@rue.resource(scope="session")
+async def database():
+    conn = await connect()
+    yield conn
+    await conn.close()
+
+@rue.resource(
+    scope="suite",
+    on_injection=lambda client: client.refresh_token()
+)
+def authenticated_client():
+    client = APIClient()
+    client.login()
+    yield client
+    client.logout()
+
+def test_test(api_client, database, authenticated_client):
+    # All resources automatically injected
+    pass
+```
+
+---
+
+### @sut
+
+Register a function factory as a traced system-under-test resource.
+
+**Signature:**
+```python
+@sut(
+    fn: Callable | None = None,
+    *,
+    scope: Scope | str = Scope.CASE,
+    method: str = "__call__",
+    validate_cases: list[Case[Any]] | None = None,
+)
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `fn` | `Callable \| None` | `None` | The SUT factory function to register |
+| `scope` | `Scope \| str` | `Scope.CASE` | Resource lifecycle scope: `"case"`, `"suite"`, `"session"` |
+| `method` | `str` | `"__call__"` | Method to trace when the factory returns a non-callable instance |
+| `validate_cases` | `list[Case[Any]] \| None` | `None` | Cases to validate against the resolved SUT signature (raises on invalid input) |
+
+**Returns:** Decorated function registered as a traced resource
+
+**Example:**
+```python
+import rue
+
+from rag import retrieve
+from agents import Agent
+
+@rue.sut
+def rag():
+    return retrieve
+
+@rue.sut(method="run")
+def agent():
+    agent = Agent(tools="all")
+    return agent
+
+cases = [
+    rue.Case(sut_input_values={"query": "Privacy policy"}),
+    rue.Case(sut_input_values={"query": "How do you store data?"}),
+]
+
+@rue.sut(validate_cases=cases)
+def search_agent():
+    return retrieve
+
+def test_test(agent, rag):
+    # Resolved values behave like original callable/instance APIs
+    context = retrieve("Privacy policy")
+    output = agent.run("How do you store my data?", context=context)
+```
+
+---
+
+### @parametrize
+
+Run a test function with multiple parameter combinations.
+
+**Signature:**
+```python
+@parametrize(
+    argnames: str | Sequence[str],
+    argvalues: Iterable[Any],
+    *,
+    ids: Sequence[str] | None = None,
+)
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `argnames` | `str \| Sequence[str]` | - | Parameter name(s) as string or sequence |
+| `argvalues` | `Iterable[Any]` | - | List of value tuples for each parameter combination |
+| `ids` | `Sequence[str] \| None` | `None` | Optional custom IDs for each test case |
+
+**Returns:** Decorator that applies parametrization to the target function
+
+**Example:**
+```python
+import rue
+
+@rue.parametrize("city,state", [
+    ("Boston", "Massachusetts"),
+    ("Austin", "Texas"),
+    ("Miami", "Florida"),
+])
+def test_geography(city: str, state: str, bot):
+    result = bot.ask(f"What state is {city} in?")
+    assert state in result
+
+# Stacked parametrization (creates cartesian product)
+@rue.parametrize("model", ["gpt-4", "claude-3"])
+@rue.parametrize("temperature", [0.0, 0.7])
+def test_combinations(model: str, temperature: float):
+    # Runs 4 times: 2 models × 2 temperatures
+    pass
+
+# Custom IDs
+@rue.parametrize("value", [1, 2, 3], ids=["one", "two", "three"])
+def test_custom_ids(value: int):
+    assert value > 0
+```
+
+---
+
+### @repeat
+
+Run a test function multiple times to test consistency.
+
+**Signature:**
+```python
+@repeat(
+    count: int,
+    *,
+    min_passes: int | None = None,
+)
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `count` | `int` | - | Number of times to run the test |
+| `min_passes` | `int \| None` | `count` | Minimum passes required (defaults to all) |
+
+**Returns:** Decorator that applies repeat configuration to the target
+
+**Example:**
+```python
+import rue
+
+@rue.repeat(10)
+def test_consistent(llm):
+    # All 10 runs must pass
+    response = llm.generate("Say hello")
+    assert "hello" in response.lower()
+
+@rue.repeat(10, min_passes=8)
+def test_mostly_reliable(llm):
+    # At least 8 out of 10 must pass
+    response = llm.generate("Translate 'hello' to Spanish")
+    assert "hola" in response.lower()
+```
+
+---
+
+### @run_inline
+
+Run a synchronous test inline on the event-loop thread.
+
+By default, synchronous tests are offloaded to a worker thread via `asyncio.to_thread(...)`. Use `@run_inline` to opt out when thread affinity matters.
+
+**Signature:**
+```python
+@run_inline
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `fn` | `Callable[..., Any]` | Synchronous test function to mark for inline execution |
+
+**Returns:** Decorated sync function marked to run inline
+
+**Notes:**
+- Applies only to synchronous `def test_*` functions.
+- `async def test_*` functions already run on the event-loop thread.
+
+**Example:**
+```python
+import threading
+import rue
+
+def test_default_threaded():
+    # Default sync behavior: worker thread.
+    assert threading.current_thread() is not threading.main_thread()
+
+@rue.run_inline
+def test_main_thread_only():
+    # Opt-out: runs inline on main event-loop thread.
+    assert threading.current_thread() is threading.main_thread()
+```
+
+---
+
+### @tag
+
+Add tags to test functions or classes for filtering and organization.
+
+**Signature:**
+```python
+@tag(*names: str)
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `*names` | `str` | Tag names to apply |
+
+**Returns:** Decorator that adds tags to the target
+
+**Example:**
+```python
+import rue
+
+@rue.tag("smoke", "fast")
+def test_health_check(api):
+    assert api.health_check()
+
+@rue.tag("integration", "slow")
+def test_end_to_end(system):
+    pass
+
+# Tag entire classes
+@rue.tag("customer-support")
+class TestSupportBot:
+    @rue.tag("greeting")
+    def test_hello(self, bot):
+        pass
+
+    @rue.tag("farewell")
+    def test_goodbye(self, bot):
+        pass
+```
+
+**CLI Usage:**
+```bash
+rue test --tag smoke    # Only smoke tests
+rue test --tag slow     # Only slow tests
+```
+
+---
+
+### @tag.skip
+
+Skip a test function with an optional reason.
+
+**Signature:**
+```python
+@tag.skip(*, reason: str | None = None)
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `reason` | `str \| None` | `None` | Optional explanation for why test is skipped |
+
+**Returns:** Decorator that marks the target as skipped
+
+**Example:**
+```python
+import rue
+
+@rue.tag.skip(reason="Feature not implemented yet")
+def test_upcoming_feature():
+    pass
+
+@rue.tag.skip(reason="Requires API key")
+def test_external_api():
+    pass
+```
+
+---
+
+### @tag.xfail
+
+Mark a test as expected to fail.
+
+**Signature:**
+```python
+@tag.xfail(
+    *,
+    reason: str | None = None,
+    strict: bool = False,
+)
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `reason` | `str \| None` | `None` | Optional explanation for expected failure |
+| `strict` | `bool` | `False` | If `True`, passing is treated as a failure (unexpected pass) |
+
+**Returns:** Decorator that marks the target as expected to fail
+
+**Example:**
+```python
+import rue
+
+@rue.tag.xfail(reason="Known bug #123")
+def test_known_issue():
+    # This failure won't fail the test suite
+    assert False
+
+@rue.tag.xfail(reason="Model not accurate yet", strict=True)
+def test_strict_xfail():
+    # If this passes, it's an error (unexpected)
+    pass
+```
+
+---
+
+## Classes
+
+### Case
+
+Container for test case inputs and reference data.
+
+**Attributes:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `id` | `UUID` | Unique identifier (auto-generated) |
+| `tags` | `set[str]` | Tags for filtering or categorization |
+| `metadata` | `dict[str, str \| int \| float \| bool \| None]` | Arbitrary key-value pairs |
+| `references` | `RefsT` | Reference data for validation (typed or dict), defaults to `{}` |
+| `sut_input_values` | `dict[str, Any]` | Input arguments to pass to the SUT |
+
+**Example:**
+```python
+from rue import Case
+import json
+
+# Create cases programmatically
+cases = [
+    Case(
+        tags={"smoke"},
+        metadata={"category": "greeting"},
+        sut_input_values={"prompt": "Hello"},
+        references={"expected": "Hi there!"}
+    ),
+    Case(
+        sut_input_values={"prompt": "Goodbye"},
+        references={"expected": "See you later!"}
+    ),
+]
+
+# Load from JSON
+with open("cases.json") as f:
+    cases = [Case(**item) for item in json.load(f)]
+
+# Typed references
+from typing import TypedDict
+
+class MyRefs(TypedDict):
+    expected_label: str
+    confidence_threshold: float
+
+case = Case[MyRefs](
+    sut_input_values={"text": "Sample input"},
+    references={"expected_label": "positive", "confidence_threshold": 0.8}
+)
+```
+
+---
+
+### CaseGroup
+
+Container for grouping related cases with group-level references and a pass threshold.
+
+**Type Parameters:**
+
+| Name | Default | Description |
+|------|---------|-------------|
+| `RefsT` | `dict[str, Any]` | Type of each case's `references` |
+| `GroupRefsT` | `dict[str, Any]` | Type of the group's `references` |
+
+**Attributes:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `name` | `str` | Unique group identifier (used in reports and ID suffixes) |
+| `cases` | `list[Case[RefsT]]` | One or more cases in this group (min 1) |
+| `references` | `GroupRefsT` | Group-level reference data, defaults to `{}` |
+| `min_passes` | `int` | Minimum case passes required for the group to pass (default `1`, must be `≥ 1` and `≤ len(cases)`) |
+
+**Example:**
+```python
+from pydantic import BaseModel
+from rue import Case, CaseGroup
+
+
+class CaseRefs(BaseModel):
+    expected: str
+
+class GroupRefs(BaseModel):
+    stop_keywords: list[str]
+
+
+geography = CaseGroup[CaseRefs, GroupRefs](
+    name="geography",
+    references=GroupRefs(stop_keywords=["Lol"]),
+    cases=[
+        Case[CaseRefs](
+            sut_input_values={"prompt": "Capital of France?"},
+            references=CaseRefs(expected="Paris"),
+        ),
+        Case[CaseRefs](
+            sut_input_values={"prompt": "Capital of Germany?"},
+            references=CaseRefs(expected="Berlin"),
+        ),
+    ],
+    min_passes=2,
+)
+
+# Untyped (dict references)
+simple = CaseGroup(
+    name="simple",
+    cases=[Case(sut_input_values={"x": 1})],
+)
+```
+
+---
+
+### Scope
+
+Enum defining resource lifecycle scopes.
+
+**Values:**
+
+| Value | Description |
+|-------|-------------|
+| `Scope.CASE` | Fresh instance per parametrized test case |
+| `Scope.SUITE` | Shared within a single test file/module |
+| `Scope.SESSION` | Shared across entire test run |
+
+**Example:**
+```python
+from rue import resource
+from rue.resources import Scope
+
+@resource(scope=Scope.SESSION)
+def expensive_model():
+    return load_model()  # Loaded once
+
+@resource(scope=Scope.SUITE)
+def api_client():
+    return APIClient()  # Shared within file
+
+@resource(scope=Scope.CASE)
+def temp_dir():
+    import tempfile
+    tmpdir = tempfile.mkdtemp()
+    yield tmpdir
+    shutil.rmtree(tmpdir)  # Fresh per case
+```
+
+---
+
+### Runner
+
+Execute discovered tests and return a `Run`.
+
+**Signature:**
+```python
+class Runner:
+    def __init__(
+        self,
+        *,
+        reporters: list[Reporter],
+        maxfail: int | None = None,
+        fail_fast: bool = False,
+        verbosity: int = 0,
+        concurrency: int = 1,
+        timeout: float | None = None,
+        enable_tracing: bool = False,
+        trace_output: Path | str | None = None,
+        capture_output: bool = True,
+        save_to_db: bool = True,
+        db_path: Path | str | None = None,
+        run_id: UUID | str | None = None,
+    ) -> None: ...
+
+    async def run(
+        self,
+        items: list[TestDefinition] | None = None,
+        path: str | None = None,
+        run_id: UUID | str | None = None,
+    ) -> Run: ...
+
+    def run_id_exists(self, run_id: UUID | str) -> bool: ...
+```
+
+**Timeout behavior (`timeout`):**
+- `timeout` is a run-level limit (not per-test).
+- Cancellation is cooperative: on timeout, the run is marked `stopped_early` and no new tests are started.
+- In-flight work may not stop immediately, especially synchronous tests already executing in worker threads.
+
+**Run UUID behavior:**
+- `run_id` accepts either a `UUID` object or UUID string.
+- `run()` `run_id` overrides constructor `run_id`.
+- If neither is provided, Rue auto-generates a new UUID.
+- If `save_to_db=True` and the selected run UUID already exists, `run()` raises `ValueError`.
+- `run_id_exists()` can be used as a preflight check before execution.
+
+**Example:**
+```python
+from uuid import UUID
+
+from rue.reports import ConsoleReporter
+from rue.testing import Runner
+
+runner = Runner(
+    reporters=[ConsoleReporter()],
+    db_path=".rue/rue.db",
+    run_id=UUID("00000000-0000-0000-0000-000000000001"),
+)
+
+if runner.run_id_exists("00000000-0000-0000-0000-000000000001"):
+    raise ValueError("run_id already exists")
+
+# Uses constructor run_id
+result = await runner.run(path="tests/")
+
+# Overrides constructor run_id for this run only
+result = await runner.run(
+    path="tests/",
+    run_id="00000000-0000-0000-0000-000000000002",
+)
+```
+
+---
+
+## Functions
+
+### Imperative Outcome Control
+
+Rue provides imperative functions to control test outcomes at runtime. These are different from decorators and are used for conditional control flow within tests.
+
+#### skip
+
+Skip the current test imperatively.
+
+**Signature:**
+```python
+def skip(reason: str = "") -> NoReturn
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `reason` | `str` | `""` | Explanation for why the test is being skipped |
+
+**Returns:** Never returns (raises `SkipTest` exception)
+
+**Example:**
+```python
+import rue
+import os
+
+def test_requires_api_key():
+    """Skip test if API key is not configured."""
+    if "API_KEY" not in os.environ:
+        rue.skip("API_KEY not configured")
+
+    # Test continues only if API_KEY exists
+    api_client = APIClient(api_key=os.environ["API_KEY"])
+    assert api_client.health_check()
+
+def test_conditional_skip(database):
+    """Skip based on runtime conditions."""
+    if not database.is_available():
+        rue.skip("Database not available")
+
+    result = database.query("SELECT 1")
+    assert result
+```
+
+---
+
+#### fail
+
+Explicitly fail the current test.
+
+**Signature:**
+```python
+def fail(reason: str = "") -> NoReturn
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `reason` | `str` | `""` | Explanation for why the test is failing |
+
+**Returns:** Never returns (raises `FailTest` exception)
+
+**Example:**
+```python
+import rue
+
+def test_explicit_failure(api_client):
+    """Fail test when detecting invalid state."""
+    response = api_client.get("/status")
+
+    if response.status_code == 500:
+        rue.fail(f"Server returned 500 error: {response.text}")
+
+    assert response.status_code == 200
+
+def test_validation_failure(data_processor):
+    """Fail when preconditions aren't met."""
+    data = data_processor.load()
+
+    if len(data) == 0:
+        rue.fail("No data loaded - cannot run test")
+
+    result = data_processor.process(data)
+    assert result
+```
+
+---
+
+#### xfail
+
+Mark the current test as expected to fail and stop execution.
+
+**Signature:**
+```python
+def xfail(reason: str = "") -> NoReturn
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `reason` | `str` | `""` | Explanation for why the test is expected to fail |
+
+**Returns:** Never returns (raises `XFailTest` exception)
+
+**Example:**
+```python
+import rue
+import sys
+
+def test_known_bug():
+    """Mark test as expected failure for a known bug."""
+    rue.xfail("issue #42: division by zero not handled")
+
+    # This code won't execute
+    result = 1 / 0
+    assert result == 0
+
+def test_conditional_xfail():
+    """Conditionally mark as expected failure."""
+    if sys.version_info < (3, 12):
+        rue.xfail("feature requires Python 3.12+")
+
+    # Test continues on Python 3.12+
+    assert True
+```
+
+**Note:** These imperative functions are different from the decorators:
+- `rue.skip()` (function) vs `@rue.tag.skip()` (decorator)
+- `rue.fail()` (function) vs no decorator equivalent
+- `rue.xfail()` (function) vs `@rue.tag.xfail()` (decorator)
+
+Use decorators for unconditional outcomes known at definition time. Use functions for conditional outcomes determined at runtime.
+
+---
+
+### iter_cases
+
+Decorator to run a test function for each case.
+
+**Signature:**
+```python
+def iter_cases(
+    *cases: Case[RefsT],
+    min_passes: int | None = None,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `*cases` | `Case[RefsT]` | One or more test cases to iterate over |
+| `min_passes` | `int \| None` | Minimum number of passing case executions required for the parent test to pass. Defaults to all cases. |
+
+**Returns:** Decorator that applies parametrization using the cases
+
+**Validation:**
+- `min_passes` must be `>= 1`
+- `min_passes` cannot exceed the number of provided `cases`
+
+**Example:**
+```python
+from rue import Case, iter_cases
+import json
+
+# Load test cases
+with open("test_cases.json") as f:
+    cases = [Case(**item) for item in json.load(f)]
+
+@iter_cases(*cases)
+def test_from_dataset(case: Case, classifier):
+    result = classifier(**case.sut_input_values)
+
+    if case.references:
+        expected = case.references["expected_label"]
+        assert result == expected
+
+@iter_cases(*cases, min_passes=8)
+def test_from_dataset_pass_at_k(case: Case, classifier):
+    result = classifier(**case.sut_input_values)
+    assert result in {"positive", "negative", "neutral"}
+```
+
+---
+
+### iter_case_groups
+
+Decorator to run a test function for each case group, iterating cases within each group.
+
+**Signature:**
+```python
+def iter_case_groups(
+    *groups: CaseGroup[RefsT, GroupRefsT],
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `*groups` | `CaseGroup[RefsT, GroupRefsT]` | One or more case groups to iterate over |
+
+**Returns:** Decorator that applies group-level iteration to the target function
+
+**Injected parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `group` | `CaseGroup` | The current group being executed |
+| `case` | `Case` | The current case within the group |
+
+**Execution semantics:**
+- Each group produces a nested execution; within each group, cases are iterated using the group's `min_passes` threshold.
+- The parent test passes only if **all groups** pass (i.e. every group meets its own `min_passes`).
+
+**Validation:**
+- At least one group is required (empty call sets a deferred definition error)
+
+**Example:**
+```python
+import rue
+from rue import Case, CaseGroup
+
+geography = CaseGroup(
+    name="geography",
+    cases=[
+        Case(sut_input_values={"prompt": "Capital of France?"}, references={"expected": "Paris"}),
+        Case(sut_input_values={"prompt": "Capital of Germany?"}, references={"expected": "Berlin"}),
+    ],
+    min_passes=2,
+)
+
+music = CaseGroup(
+    name="music",
+    cases=[
+        Case(sut_input_values={"prompt": "Best rock band?"}, references={"expected": "Metallica"}),
+    ],
+    min_passes=1,
+)
+
+@rue.iter_case_groups(geography, music)
+def test_chatbot(group: CaseGroup, case: Case, chatbot):
+    response = chatbot(**case.sut_input_values)
+    assert case.references["expected"] in response
+```
+
+---
+
+### SUT case validation
+
+Validate case inputs by passing them to `@sut(validate_cases=...)`. Validation runs during SUT resolution and raises if any case does not match the resolved callable/method signature.
+
+```python
+import rue
+
+cases = [
+    rue.Case(sut_input_values={"prompt": "Hello", "temperature": 0.5}),
+    rue.Case(sut_input_values={"prompt": "Hi"}),
+]
+
+@rue.sut(validate_cases=cases)
+def my_agent():
+    def run(prompt: str, temperature: float = 0.7) -> str:
+        return f"{prompt} @ {temperature}"
+
+    return run
+```

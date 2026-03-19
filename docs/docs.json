@@ -1,0 +1,113 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Rue Documentation",
+  "colors": {
+    "primary": "#006B3E",
+    "light": "#0ADF35",
+    "dark": "#006B3E"
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/merit_logo_light.svg",
+    "dark": "/logo/merit_logo_dark.svg",
+    "height": 40
+  },
+  "topbar": {
+    "style": "default"
+  },
+  "feedback": {
+    "thumbsRating": true,
+    "suggestEdit": true,
+    "raiseIssue": true
+  },
+  "search": {
+    "prompt": "Search Rue documentation..."
+  },
+  "announcement": {
+    "title": "Start testing AI systems with Rue",
+    "href": "/get-started/quick-start"
+  },
+  "anchors": [
+    {
+      "name": "GitHub",
+      "icon": "github",
+      "url": "https://github.com/NickSherrow/rue"
+    },
+    {
+      "name": "Website",
+      "icon": "globe",
+      "url": "https://rue.com"
+    }
+  ],
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get Started",
+        "pages": [
+          "index",
+          "get-started/installation",
+          "get-started/quick-start"
+        ]
+      },
+      {
+        "group": "Usage",
+        "pages": ["usage/writing-tests", "usage/running-tests"]
+      },
+      {
+        "group": "Concepts",
+        "pages": [
+          "concepts/test",
+          "concepts/resource",
+          "concepts/sut",
+          "concepts/trace",
+          "concepts/case",
+          "concepts/metric",
+          "concepts/semantic-predicates"
+        ]
+      },
+      {
+        "group": "API Reference",
+        "pages": [
+          "apis/testing",
+          "apis/predicates",
+          "apis/metrics",
+          "apis/tracing"
+        ]
+      },
+      {
+        "group": "Examples",
+        "pages": ["examples/index"]
+      }
+    ]
+  },
+  "topbarCtaButton": {
+    "type": "github",
+    "url": "https://github.com/NickSherrow/rue"
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "chatgpt",
+      "claude",
+      "perplexity",
+      "cursor"
+    ]
+  },
+  "footerSocials": {
+    "github": "https://github.com/NickSherrow/rue"
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/NickSherrow/rue"
+    }
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/NickSherrow/rue"
+      }
+    ]
+  }
+}

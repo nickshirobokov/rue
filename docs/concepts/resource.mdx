@@ -1,0 +1,400 @@
+---
+title: "Resource"
+---
+
+`Resource` is Rue's dependency injection system that provides reusable components to test functions. It follows pytest's fixture pattern, matching function parameters by name to automatically inject dependencies.
+
+Using `@rue.resource` enables:
+- Injecting dependencies into test functions without explicit instantiation
+- Sharing expensive setup across multiple tests (database connections, API clients)
+- Automatic teardown and cleanup with generator syntax
+- Scoping lifecycles at case, suite, or session level
+- Stacking resources to build complex dependency hierarchies
+
+<Note>
+[`Metric`](/concepts/metric) and [`SUT`](/concepts/sut) also use the Resource API.
+</Note>
+
+## Basic Usage
+
+The most common pattern is to define a resource function and inject it into your rue tests by parameter name.
+
+```python
+import rue
+
+# Define a resource
+@rue.resource
+def api_client():
+    return APIClient(base_url="https://api.example.com")
+
+# Inject by parameter name
+def test_api_endpoint(api_client):
+    response = api_client.get("/health")
+    assert response.status_code == 200
+```
+
+Rue automatically detects the `api_client` parameter, calls the resource function, and injects the result. No explicit wiring needed.
+
+## Generator Pattern for Setup and Teardown
+
+Resources can use generator syntax to define setup and teardown logic, similar to pytest fixtures with `yield`.
+
+```python
+import rue
+
+@rue.resource
+def database():
+    # Setup: runs before tests
+    conn = connect_to_db()
+    conn.execute("BEGIN TRANSACTION")
+
+    yield conn  # Value injected into tests
+
+    # Teardown: runs after tests complete
+    conn.execute("ROLLBACK")
+    conn.close()
+
+def test_user_creation(database):
+    database.execute("INSERT INTO users (name) VALUES ('Alice')")
+    result = database.query("SELECT * FROM users WHERE name='Alice'")
+    assert result
+    # Transaction automatically rolls back after test
+```
+
+The code after `yield` runs automatically after the test completes, ensuring cleanup even if the test fails.
+
+## Async Resources
+
+Resources support async functions and async generators for asynchronous setup/teardown.
+
+```python
+import rue
+
+@rue.resource
+async def async_client():
+    # Async setup
+    client = await create_async_client()
+    yield client
+    # Async teardown
+    await client.close()
+
+async def test_async_endpoint(async_client):
+    response = await async_client.fetch("/data")
+    assert response.ok
+```
+
+Rue automatically detects async resources and awaits them appropriately.
+
+## Scopes: Case, Suite, Session
+
+Resources can be scoped to control their lifecycle and determine how instances are shared across tests.
+
+```python
+# Case scope: Fresh instance for each parametrized test case (default)
+@rue.resource(scope="case")
+def isolated_db():
+    conn = setup_db()
+    yield conn
+    cleanup_db(conn)
+
+# Suite scope: Shared within a single test file/module
+@rue.resource(scope="suite")
+def shared_api_client():
+    return APIClient()  # Reused across tests in same file
+
+# Session scope: Shared across the entire test run
+@rue.resource(scope="session")
+def ml_model():
+    # Expensive model loaded once for all tests
+    return load_model("model.pkl")
+
+@rue.parametrize("user_id", [1, 2, 3, 4, 5])
+def test_user_queries(user_id, isolated_db, shared_api_client, ml_model):
+    # isolated_db: new instance for each of 5 cases
+    # shared_api_client: same instance across all 5 cases in this file
+    # ml_model: same instance across entire test suite
+
+    user = isolated_db.get_user(user_id)
+    enriched = shared_api_client.enrich(user)
+    prediction = ml_model.predict(enriched)
+    assert prediction
+```
+
+Available scopes:
+- `"case"`: New instance per parametrized test case (default)
+- `"suite"`: One instance per test file/module
+- `"session"`: One instance for entire test run
+
+## Stacking Resources: Dependency Injection
+
+Resources can depend on other resources by declaring them as parameters. This enables building complex dependency graphs and composing reusable components.
+
+```python
+import rue
+
+# Base resource
+@rue.resource(scope="session")
+def config():
+    return {"api_url": "https://api.example.com", "timeout": 30}
+
+# Resource that depends on config
+@rue.resource(scope="suite")
+def http_client(config):
+    return HTTPClient(
+        base_url=config["api_url"],
+        timeout=config["timeout"]
+    )
+
+# Resource that depends on http_client
+@rue.resource(scope="case")
+def authenticated_client(http_client):
+    client = http_client.clone()
+    client.set_auth_token("eval-token-123")
+    yield client
+    client.logout()
+
+# Rue uses the fully composed resource
+def test_user_api(authenticated_client):
+    response = authenticated_client.get("/user/profile")
+    assert response.status_code == 200
+```
+
+This creates a dependency chain:
+```
+authenticated_client (case-level)
+└── http_client (suite-level)
+    └── config (session-level)
+```
+
+Rue resolves dependencies automatically, respecting scopes: `config` is created once per session, `http_client` once per suite, and `authenticated_client` fresh for each test case.
+
+## Lifecycle Hooks
+
+Resources support three optional hooks for advanced control:
+
+```python
+import rue
+
+@rue.resource(
+    scope="session",
+    on_resolve=lambda client: setup_monitoring(client),      # Runs once on creation
+    on_injection=lambda client: client.refresh_token(),       # Runs every injection
+    on_teardown=lambda client: save_metrics(client)           # Runs after teardown
+)
+def monitored_client():
+    client = APIClient()
+    yield client
+    client.close()
+```
+
+Hook execution order:
+1. **on_resolve**: Called once when resource is first created (after factory runs, before caching)
+2. **on_injection**: Called every time the resource is injected into a test (even from cache)
+3. **on_teardown**: Called after generator teardown code runs (post-yield)
+
+Hooks can be sync or async functions and can modify the resource value:
+
+```python
+@rue.resource(
+    on_injection=lambda db: db.start_transaction()  # Returns modified resource
+)
+def transactional_db():
+    return Database()
+```
+
+## Recommendations
+
+### 1. Use resources for expensive or stateful setup
+
+Resources shine when setup is costly or requires cleanup. For simple values, just use function parameters directly.
+
+**Don't do this:**
+```python
+import rue
+
+# Wrapping simple values in resources adds unnecessary complexity
+@rue.resource
+def user_id():
+    return 123
+
+def test_simple(user_id):
+    assert user_id == 123
+```
+
+**Do this:**
+```python
+import rue
+
+# Simple values can be parametrized or hardcoded
+@rue.parametrize("user_id", [123, 456, 789])
+def test_simple(user_id):
+    assert user_id > 0
+
+# Use resources for expensive or stateful setup
+@rue.resource(scope="session")
+def ml_model():
+    return load_expensive_model()  # Reuse across tests
+
+@rue.resource
+def temp_directory():
+    import tempfile
+    tmpdir = tempfile.mkdtemp()
+    yield tmpdir
+    shutil.rmtree(tmpdir)  # Automatic cleanup
+```
+
+### 2. Use generators for resources requiring cleanup
+
+Any resource that allocates external resources (files, connections, processes) should use the generator pattern to ensure cleanup.
+
+**Don't do this:**
+```python
+@rue.resource
+def database():
+    conn = connect_to_db()
+    return conn  # No cleanup - connection leaks!
+
+def test_query(database):
+    result = database.query("SELECT 1")
+    # Connection never closed
+```
+
+**Do this:**
+```python
+@rue.resource
+def database():
+    conn = connect_to_db()
+    yield conn  # Injected into tests
+    conn.close()  # Always runs, even on test failure
+
+def test_query(database):
+    result = database.query("SELECT 1")
+    assert result
+    # Connection automatically closed after test
+```
+
+### 3. Scope resources appropriately for performance and isolation
+
+Choose scope based on cost of creation and whether state should be shared. Wider scopes improve performance but reduce isolation.
+
+```python
+import rue
+
+# Session scope: Expensive to create, no state mutations
+@rue.resource(scope="session")
+def ml_model():
+    """Load once, share everywhere - model is immutable"""
+    return load_model("classifier.pkl")  # Expensive operation
+
+# Suite scope: Moderate cost, isolated per file
+@rue.resource(scope="suite")
+def api_client():
+    """Share within file, fresh per file - moderate state"""
+    return APIClient()  # May accumulate some state
+
+# Case scope: Cheap to create, must be isolated
+@rue.resource(scope="case")
+def temp_directory():
+    """Fresh for each test case - mutable state"""
+    import tempfile
+    tmpdir = tempfile.mkdtemp()
+    yield tmpdir
+    shutil.rmtree(tmpdir)  # Each case gets clean directory
+
+def test_classifier(temp_directory, api_client, ml_model):
+    # temp_directory: isolated per test
+    # api_client: shared across tests in this file
+    # ml_model: shared across entire test run
+    pass
+```
+
+### 4. Stack resources to build reusable components
+
+Break complex setup into smaller resources that depend on each other. This improves reusability and makes test code more maintainable.
+
+**Don't do this:**
+```python
+# Monolithic resource mixing concerns
+@rue.resource
+def test_environment():
+    # Everything in one giant function
+    config = load_config()
+    db = connect_db(config.db_url)
+    api = APIClient(config.api_url)
+    api.authenticate(config.api_key)
+    cache = RedisCache(config.redis_url)
+
+    return {
+        "db": db,
+        "api": api,
+        "cache": cache,
+        "config": config
+    }
+
+def test_complex(test_environment):
+    # Must unpack and use dictionary
+    result = test_environment["api"].get("/data")
+    test_environment["db"].save(result)
+```
+
+**Do this:**
+```python
+# Composable resources with clear dependencies
+@rue.resource(scope="session")
+def config():
+    return load_config()
+
+@rue.resource(scope="suite")
+def database(config):
+    db = connect_db(config.db_url)
+    yield db
+    db.close()
+
+@rue.resource(scope="suite")
+def cache(config):
+    cache = RedisCache(config.redis_url)
+    yield cache
+    cache.clear()
+
+@rue.resource
+def api_client(config):
+    client = APIClient(config.api_url)
+    client.authenticate(config.api_key)
+    return client
+
+def test_complex(api_client, database, cache):
+    # Clean, focused parameters with automatic DI
+    result = api_client.get("/data")
+    database.save(result)
+    cache.set("result", result)
+```
+
+### 5. Use hooks for cross-cutting concerns
+
+Lifecycle hooks enable instrumentation, monitoring, and side effects without cluttering test logic.
+
+```python
+import rue
+import logging
+
+# Track resource usage
+usage_stats = []
+
+@rue.resource(
+    scope="session",
+    on_resolve=lambda model: logging.info(f"Model loaded: {model.version}"),
+    on_injection=lambda model: usage_stats.append({"model": model.name, "time": time.time()}),
+    on_teardown=lambda model: logging.info(f"Model used {len(usage_stats)} times")
+)
+def ml_model():
+    model = load_model()
+    yield model
+    save_performance_metrics(model)
+
+# Tests remain clean - monitoring happens automatically
+def test_predictions(ml_model):
+    prediction = ml_model.predict([1, 2, 3])
+    assert prediction
+```
+
+Hooks are also useful for refreshing tokens, starting transactions, or resetting state between injections.
