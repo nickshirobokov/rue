@@ -1,0 +1,518 @@
+---
+title: "Test"
+---
+
+**Tests** are the core building blocks of your AI system evaluations. Like pytest, Rue discovers and runs `test_*` functions, each one checking how well your AI system performs.
+
+## Basic Usage
+
+The simplest test is a function whose name starts with `test_` inside a `rue_*.py` file. Rue automatically discovers and executes it.
+
+```python
+import rue
+from rue.predicates import has_unsupported_facts
+
+# Define your AI system (or import from your codebase)
+def chatbot(prompt: str) -> str:
+    return call_llm(prompt)
+
+# Test function: discovered and run automatically
+async def test_chatbot_no_hallucinations():
+    context = "Our store hours are 9 AM to 6 PM Monday-Saturday."
+    response = chatbot("When are you open?")
+
+    # Use semantic predicates to check output quality
+    assert not await has_unsupported_facts(response, context)
+```
+
+Run all test functions in your project:
+
+```bash
+uv run rue test
+```
+
+Rue discovers all `test_*` functions, executes them, and generates a report - just like pytest but for AI system evaluation.
+
+## Discovery
+
+Rue follows pytest's discovery patterns, finding tests in files, functions, and classes that follow naming conventions.
+
+### Files
+
+Rue discovers Python files matching `rue_*.py`:
+
+<Tree>
+  <Tree.Folder name="project" defaultOpen>
+    <Tree.File name="rue_chatbot.py ✓ Discovered" />
+    <Tree.File name="rue_agent.py ✓ Discovered" />
+    <Tree.Folder name="tests" defaultOpen>
+      <Tree.File name="rue_rag.py ✓ Discovered" />
+      <Tree.File name="helpers.py ✗ Not discovered" />
+    </Tree.Folder>
+    <Tree.Folder name="src" defaultOpen>
+      <Tree.File name="agent.py ✗ Not discovered" />
+    </Tree.Folder>
+  </Tree.Folder>
+</Tree>
+
+### Functions
+
+Within discovered files, Rue collects functions starting with `test_`:
+
+```python
+# rue_agents.py
+
+def test_weather_agent():     # ✓ Collected
+    pass
+
+def test_calculator():        # ✓ Collected
+    pass
+
+def helper_function():         # ✗ Not collected (no test_ prefix)
+    pass
+```
+
+### Classes
+
+Classes starting with `Test` are discovered, and their `test_*` methods become test cases:
+
+```python
+# rue_agents.py
+
+class TestCustomerSupport:    # ✓ Class discovered
+
+    def test_greeting(self):   # ✓ Method collected
+        pass
+
+    def test_farewell(self):   # ✓ Method collected
+        pass
+
+    def helper(self):           # ✗ Not collected
+        pass
+
+class SupportBotSuite:         # ✗ Not discovered (missing Test prefix)
+    pass
+```
+
+## Dependency Injection
+
+Rue automatically injects dependencies by matching parameter names to registered resources, SUTs, and metrics.
+
+```python
+import rue
+from rue import Metric, metrics
+
+# Define resources (dependencies)
+@rue.resource
+def chatbot():
+    return ChatBot(model="gpt-4")
+
+@rue.metric
+def accuracy():
+    metric = Metric()
+    yield metric
+    assert metric.mean > 0.8
+
+# Test function with injected dependencies
+def test_chatbot_accuracy(chatbot, accuracy: Metric):
+    # chatbot and accuracy automatically injected by name
+
+    test_cases = [
+        ("What's 2+2?", "4"),
+        ("Capital of France?", "Paris"),
+    ]
+
+    for question, expected in test_cases:
+        answer = chatbot.ask(question)
+        with metrics(accuracy):
+            assert expected.lower() in answer.lower()
+```
+
+## Async Support
+
+Rue automatically detects and runs async functions:
+
+```python
+from rue.predicates import follows_policy
+
+# Sync test function
+def test_sync_test(calculator):
+    result = calculator.add(2, 2)
+    assert result == 4
+
+# Async test function - automatically detected
+async def test_async_test(chatbot):
+    response = await chatbot.ask_async("Hello")
+
+    # Many predicates are async
+    policy = "Agent is friendly and professional"
+    assert await follows_policy(response, policy)
+```
+
+Resources can be async too:
+
+```python
+@rue.resource
+async def async_database():
+    conn = await connect_async()
+    yield conn
+    await conn.close()
+
+async def test_query(async_database):
+    result = await async_database.query("SELECT 1")
+    assert result
+```
+
+Rue handles the async execution automatically - no `asyncio.run()` needed.
+
+## Iterate Tests
+
+AI systems are inherently non-deterministic, making it essential to test them across multiple scenarios and runs. Rue provides three distinct approaches to iterate the same test definition, each optimized for different use cases: quick parametrization for a few variations, structured cases for large datasets, and repeated execution to assess consistency.
+
+### Iterate with different parameters
+
+When you need to run the same test with a small set of different inputs, `@rue.parametrize` offers the most concise syntax. It's ideal for testing a handful of variations without the overhead of defining structured case objects.
+
+```python
+import rue
+
+@rue.parametrize("city,state", [
+    ("Boston", "Massachusetts"),
+    ("Austin", "Texas"),
+])
+def test_geography_bot(city: str, state: str, geography_bot):
+    result = geography_bot.ask(f"What state is {city} in?")
+    assert state in result
+```
+
+This creates 2 test cases:
+- `test_geography_bot(city='Boston', state='Massachusetts')`
+- `test_geography_bot(city='Austin', state='Texas')`
+
+Multiple parameters can be stacked:
+
+```python
+@rue.parametrize("model", ["gpt-4", "claude-3"])
+@rue.parametrize("temperature", [0.0, 0.7, 1.0])
+def test_model_combinations(model: str, temperature: float):
+    # Runs 6 times: 2 models × 3 temperatures
+    pass
+```
+
+<Tip>
+Parametrization works best when you have a small number of input variations (typically fewer than 10) and don't require strict type definitions.
+</Tip>
+
+### Iterate with different cases
+
+When evaluating against tens or hundreds of examples, or when you need consistent typing and structure, use `@rue.iter_cases` with `Case` objects. This approach provides type safety through Pydantic validation and enables loading test cases from external sources like JSON files or databases.
+
+```python
+from rue import Case
+import json
+
+# Load test cases from file
+with open("test_cases.json") as f:
+    cases = [Case(**item) for item in json.load(f)]
+
+@rue.iter_cases(*cases)
+def test_from_dataset(case: Case, classifier):
+    result = classifier(**case.sut_input_values)
+
+    expected = case.references["expected_label"]
+    assert result == expected
+
+@rue.iter_cases(*cases, min_passes=8)
+def test_from_dataset_pass_at_k(case: Case, classifier):
+    result = classifier(**case.sut_input_values)
+
+    expected = case.references["expected_label"]
+    assert result == expected
+```
+
+`min_passes` on `iter_cases` works like `repeat`: by default all case executions must pass, but you can require a lower threshold when evaluating large or noisy datasets.
+
+### Iterate with grouped cases
+
+When your cases naturally fall into groups (e.g. topics, difficulty tiers, languages), use `@rue.iter_case_groups` with `CaseGroup` objects. Each group carries its own **group-level references** and a **`min_passes` threshold**, giving you hierarchical reporting (run → groups → cases) and per-group pass/fail semantics.
+
+```python
+import rue
+from rue import Case, CaseGroup
+
+geography = CaseGroup(
+    name="geography",
+    cases=[
+        Case(sut_input_values={"prompt": "Capital of France?"}, references={"expected": "Paris"}),
+        Case(sut_input_values={"prompt": "Capital of Germany?"}, references={"expected": "Berlin"}),
+    ],
+    min_passes=2,  # strict: both must pass
+)
+
+music = CaseGroup(
+    name="music",
+    cases=[
+        Case(sut_input_values={"prompt": "Best rock band?"}, references={"expected": "Metallica"}),
+        Case(sut_input_values={"prompt": "Best pop artist?"}, references={"expected": "Lady Gaga"}),
+    ],
+    min_passes=1,  # tolerant: at least one must pass
+)
+
+
+@rue.iter_case_groups(geography, music)
+def test_chatbot(group: CaseGroup, case: Case, chatbot):
+    response = chatbot(**case.sut_input_values)
+    assert case.references["expected"] in response
+```
+
+The test passes only if **every group** meets its own `min_passes`. Inside the test function, `group` and `case` are injected automatically — use `group.references` for group-level data and `case.references` for case-level data.
+
+<Tip>
+Use `CaseGroup` when you need per-group thresholds or group-level metadata. If all cases are flat and share the same threshold, stick with `@rue.iter_cases(*cases, min_passes=k)`.
+</Tip>
+
+### Repeat with same data
+
+AI systems can produce different outputs for identical inputs due to their non-deterministic nature. Use `@rue.repeat` to run the same test multiple times with the same data, measuring consistency and reliability of your AI component.
+
+```python
+import rue
+
+@rue.repeat(count=5)
+def test_chatbot_consistent_greeting(chatbot):
+    """Run 5 times - all must pass."""
+    response = chatbot.ask("Hello")
+    assert "hi" in response.lower() or "hello" in response.lower()
+
+@rue.repeat(count=10, min_passes=8)
+def test_sentiment_mostly_accurate(classifier):
+    """Run 10 times - at least 8 must pass."""
+    result = classifier("This product is amazing!")
+    assert result.sentiment == "positive"
+```
+
+<Tip>
+The `min_passes` parameter is sometimes referred to as "pass@k" in the AI evaluation community. For example, `@rue.repeat(count=10, min_passes=8)` checks if your system achieves the desired behavior in at least 8 out of 10 attempts (pass@8/10).
+</Tip>
+
+## Organizing Tests with Tags
+
+### Running only specific Tests
+
+Use `@rue.tag` to organize and filter tests:
+
+```python
+import rue
+
+@rue.tag("smoke", "fast")
+def test_health_check(api_client):
+    response = api_client.get("/health")
+    assert response.status_code == 200
+
+@rue.tag("integration", "slow")
+def test_end_to_end_workflow(system):
+    # Long-running integration test
+    pass
+
+# Tag entire classes
+@rue.tag("customer-support")
+class TestSupportBot:
+
+    @rue.tag("greeting")
+    def test_hello(self, support_bot):
+        pass
+
+    @rue.tag("farewell")
+    def test_goodbye(self, support_bot):
+        pass
+```
+
+Run specific tags from the CLI:
+
+```bash
+uv run rue test --tag smoke  # Only smoke tests
+uv run rue test --tag slow   # Only slow tests
+```
+
+### Skipping Tests unconditionally
+
+Skip tests with `@rue.tag.skip`:
+
+```python
+import rue
+
+@rue.tag.skip(reason="Feature not implemented yet")
+def test_upcoming_feature():
+    pass
+
+@rue.tag.skip(reason="Requires API key")
+def test_external_api():
+    pass
+```
+
+### Skipping Tests conditionally
+
+```python
+def test_conditional_skip():
+    if not os.getenv("API_KEY"):
+        rue.skip("API_KEY not configured")
+    # Test continues if condition not met
+    assert True
+```
+
+<Tip>
+You can also use `rue.skip()` inside resources to conditionally skip tests when dependencies aren't available. This centralizes skip logic where the resource is defined rather than in every test that uses it.
+</Tip>
+
+### Expected Failures
+
+Mark tests expected to fail with `@rue.tag.xfail`:
+
+```python
+@rue.tag.xfail(reason="Known bug #123")
+def test_known_issue():
+    # This failure won't fail the test suite
+    assert False
+
+@rue.tag.xfail(reason="Model not accurate yet", strict=True)
+def test_strict_xfail():
+    # If this passes, the test suite FAILS (unexpected pass)
+    pass
+```
+
+Use `strict=True` when the test passing would be surprising and worth investigating.
+
+## Recommendations
+
+### 1. Name functions descriptively
+
+Test function names become test case identifiers in reports. Use descriptive names that explain what's being evaluated.
+
+**Don't do this:**
+```python
+def test_test1():
+    pass
+
+def test_test2():
+    pass
+
+def test_chatbot():  # Too vague
+    pass
+```
+
+**Do this:**
+```python
+def test_chatbot_responds_to_greetings():
+    """Check that chatbot handles basic greetings appropriately."""
+    pass
+
+def test_chatbot_no_hallucinations_in_faq():
+    """Verify chatbot doesn't invent facts when answering FAQ questions."""
+    pass
+
+def test_chatbot_follows_brand_voice():
+    """Ensure chatbot responses match company's tone and style guidelines."""
+    pass
+```
+
+Descriptive names make reports self-documenting and help team members understand test failures.
+
+### 2. Use dependency injection over global imports
+
+Rue's dependency injection system enables better resource management and test isolation. Inject dependencies as parameters instead of importing globally.
+
+**Don't do this:**
+```python
+# rue_agent.py
+from app import agent  # Global import
+
+def test_weather_queries():
+    # Using global - can't control lifecycle or swap implementations
+    response = agent("What's the weather?")
+    assert response
+```
+
+**Do this:**
+```python
+# rue_agent.py
+import rue
+from app import agent as production_agent
+
+@rue.resource
+def agent():
+    """Evaluation instance of agent with controlled lifecycle."""
+    instance = production_agent.create(env="test")
+    yield instance
+    instance.cleanup()
+
+def test_weather_queries(agent):
+    # Injected - lifecycle is managed automatically and usage can be tracked
+    response = agent("What's the weather?")
+    assert response
+```
+
+This pattern enables:
+- Automatic setup and teardown
+- Resource scoping and reuse
+- Test isolation
+- Better reporting and analytics
+
+### 3. Organize related tests in classes
+
+Group related tests in classes for better organization and shared tags/setup:
+
+**Don't do this:**
+```python
+# rue_support.py - flat functions with repeated tags
+
+@rue.tag("customer-support", "greeting")
+def test_support_greeting_casual():
+    pass
+
+@rue.tag("customer-support", "greeting")
+def test_support_greeting_formal():
+    pass
+
+@rue.tag("customer-support", "farewell")
+def test_support_farewell_casual():
+    pass
+
+@rue.tag("customer-support", "farewell")
+def test_support_farewell_formal():
+    pass
+```
+
+**Do this:**
+```python
+# rue_support.py - organized in classes
+
+@rue.tag("customer-support")
+class TestSupportGreetings:
+    """Evaluate support bot greeting scenarios."""
+
+    @rue.tag("casual")
+    def test_greeting_casual(self, support_bot):
+        pass
+
+    @rue.tag("formal")
+    def test_greeting_formal(self, support_bot):
+        pass
+
+@rue.tag("customer-support")
+class TestSupportFarewells:
+    """Evaluate support bot farewell scenarios."""
+
+    @rue.tag("casual")
+    def test_farewell_casual(self, support_bot):
+        pass
+
+    @rue.tag("formal")
+    def test_farewell_formal(self, support_bot):
+        pass
+```
+
+Classes provide:
+- Logical grouping in reports
+- Shared tags that cascade to methods
+- Better code organization
+- Easier navigation in IDEs

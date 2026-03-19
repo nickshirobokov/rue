@@ -1,0 +1,595 @@
+---
+title: "Running Tests"
+---
+
+Rue provides a pytest-inspired CLI for running tests, filtering by tags or keywords, controlling concurrency, and reporting results.
+
+This page covers **how to run tests** and **how the reporting system works**, referencing where the behavior lives in the codebase.
+
+## Basic Usage
+
+Run all discovered tests in the current directory:
+
+```bash
+uv run rue test
+```
+
+After installation, the same entrypoint is also available as `rue test`.
+
+Run tests from specific paths:
+
+```bash
+uv run rue test tests/
+uv run rue test rue_chatbot.py rue_agent.py
+```
+
+## Filtering Tests
+
+### By Keyword Expression
+
+Use `-k` to filter tests by name with boolean expressions:
+
+```bash
+# Run tests with "chatbot" in the name
+uv run rue test -k chatbot
+
+# Boolean operators: and, or, not
+uv run rue test -k "chatbot and not slow"
+uv run rue test -k "gpt4 or claude"
+
+# Grouping with parentheses
+uv run rue test -k "(fast or smoke) and not flaky"
+```
+
+Keyword matching is substring-based: `-k agent` matches `test_agent_response`, `test_weather_agent`, etc.
+
+### By Tags
+
+Use `-t`/`--tag` to include tests with specific tags:
+
+```bash
+# Run tests tagged "smoke"
+uv run rue test --tag smoke
+
+# Multiple tags (OR logic)
+uv run rue test --tag smoke --tag fast
+```
+
+Use `--skip-tag` to exclude tests:
+
+```bash
+# Skip slow tests
+uv run rue test --skip-tag slow
+
+# Skip multiple tags
+uv run rue test --skip-tag slow --skip-tag flaky
+```
+
+**Combine filters**:
+
+```bash
+# Run fast smoke tests about chatbots
+uv run rue test --tag smoke --tag fast -k chatbot
+```
+
+## Controlling Execution
+
+### Stop on Failure
+
+**`--maxfail N`** - Stop after N failures:
+
+```bash
+uv run rue test --maxfail 3  # Stop after 3 failures
+```
+
+**`--fail-fast`** - Stop at the first failed assertion within a test:
+
+```bash
+uv run rue test --fail-fast
+```
+
+Without `--fail-fast`, Rue collects all assertion failures in a test. With it, the test stops at the first failure.
+
+### Concurrency
+
+Control parallel test execution with `--concurrency`:
+
+```bash
+# Sequential (default)
+uv run rue test --concurrency 1
+
+# 5 concurrent tests
+uv run rue test --concurrency 5
+
+# Unlimited (capped at 10)
+uv run rue test --concurrency 0
+```
+
+**When to use concurrency**:
+- **Sequential (1)**: Default. Predictable output, easier debugging.
+- **Concurrent (>1)**: Faster runs for independent tests. Use with stateless SUTs.
+- **Unlimited (0)**: Maximum parallelism for large test suites.
+
+For synchronous tests (`def test_*`), Rue runs test bodies in worker threads by default to keep the event loop responsive. Use `@rue.run_inline` on a sync test when it must run on the main event-loop thread.
+
+### Timeout
+
+Set a global timeout for the entire test run:
+
+```bash
+# Stop after 300 seconds (5 minutes)
+uv run rue test --timeout 300
+```
+
+The timeout applies to the entire test session, not individual tests.
+
+Timeout is cooperative: when the timeout is reached, Rue marks the run as stopped early and stops starting new tests, but in-flight work may not stop immediately (especially synchronous tests already running in worker threads).
+
+### Verbosity
+
+Control output detail with `-v` (verbose) or `-q` (quiet):
+
+```bash
+# Minimal output (only failures)
+uv run rue test -q
+
+# Very minimal
+uv run rue test -qq
+
+# Verbose output
+uv run rue test -v
+
+# Very verbose
+uv run rue test -vv
+```
+
+**Verbosity levels**:
+- `-qq` or lower: Only failed/errored tests shown
+- `-q`: Less output
+- Default (0): Standard output
+- `-v`, `-vv`: More detail
+
+### Output Capture
+
+By default, Rue captures stdout and stderr during test execution. Use `-s` to show output live:
+
+```bash
+# Show output in real-time (still captured for reports)
+uv run rue test -s
+
+# Or the long form
+uv run rue test --show-output
+```
+
+This is useful for debugging tests with print statements or logging output.
+
+## Tracing
+
+Enable OpenTelemetry tracing to capture spans from your SUT and tests:
+
+```bash
+# Enable tracing (writes to .rue/traces.jsonl)
+uv run rue test --trace
+
+# Custom output path
+uv run rue test --trace --trace-output my-traces.jsonl
+```
+
+**Use traces for**:
+- Asserting tool calls in agent tests
+- Debugging LLM request/response flows
+- Performance analysis
+
+See [SUT](/concepts/sut) for trace assertions.
+
+## Custom Run UUID
+
+By default, Rue generates a run UUID automatically. You can provide one explicitly when you
+need a stable external correlation ID (for example, linking CI jobs to Rue runs).
+
+### CLI
+
+Provide a UUID with `--run-id`:
+
+```bash
+uv run rue test --run-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
+```
+
+If that UUID already exists in the configured SQLite database, the command exits with code `2`
+and no tests are executed.
+
+### Python API
+
+You can set a default run UUID on the runner, and override it per `run()` call:
+
+```python
+from uuid import UUID
+from rue.reports import ConsoleReporter
+from rue.testing import Runner
+
+runner = Runner(
+    reporters=[ConsoleReporter()],
+    run_id=UUID("00000000-0000-0000-0000-000000000001"),
+)
+
+# Uses constructor run_id
+await runner.run(path="tests/")
+
+# Overrides constructor run_id for this run only
+await runner.run(
+    path="tests/",
+    run_id="00000000-0000-0000-0000-000000000002",
+)
+```
+
+Run IDs are currently configured only via CLI `--run-id` or Python API parameters. They are not
+read from `pyproject.toml`, `rue.toml`, or environment variables.
+
+If `save_to_db=True` and the selected run UUID already exists, `Runner.run()` raises
+`ValueError`.
+
+## Configuration Files
+
+Define default options in `pyproject.toml` or `rue.toml`:
+
+**pyproject.toml**:
+
+```toml
+[tool.rue]
+test-paths = ["tests", "integrations"]
+include-tags = ["smoke"]
+exclude-tags = ["slow", "flaky"]
+maxfail = 5
+verbosity = 1
+concurrency = 4
+addopts = ["--fail-fast"]
+```
+
+**rue.toml**:
+
+```toml
+test_paths = ["tests"]
+verbosity = 1
+concurrency = 4
+```
+
+**Precedence**: CLI args override config files. Config files are discovered by walking up the directory tree from the current working directory.
+
+## Understanding Test Output
+
+Rue reports test status as tests complete with a compact line per file by default:
+
+```
+===== RUE RUN STARTS =====
+platform macOS-14.6.1-arm64-arm-64bit -- python 3.12.2 -- rue 0.9.1
+rootdir: /Users/you/workspace/project
+run_id: 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
+git: main (abc12345) dirty
+
+Collected 12 tests
+
+tests/unit/test_chatbot.py ✓✓✗
+tests/unit/test_db.py !-
+tests/unit/test_known_issues.py x
+
+===== SUMMARY =====
+run_id: 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d | 6 passed, 1 failed, 1 errors, 1 skipped, 1 xfailed in 892ms
+==================
+```
+
+Use `-v` to show per-test lines with durations and detailed sub-results.
+
+**Status symbols**:
+- `✓` (green): PASSED - Test succeeded
+- `✗` (red): FAILED - Assertion failed
+- `!` (yellow): ERROR - Unexpected exception
+- `-` (yellow): SKIPPED - Test was skipped
+- `x` (blue): XFAILED - Expected failure occurred
+- `!` (magenta): XPASSED - Expected failure passed (usually bad)
+
+**Exit codes**:
+- `0`: All tests passed (or only skipped/xfailed)
+- `1`: At least one test failed or errored
+- `2`: Invalid CLI usage or configuration error (including duplicate `--run-id`)
+
+### Repeated Tests
+
+For tests with `@rue.repeat()`, verbose output shows aggregated results:
+
+```
+  ✓ test_llm_consistency (1234.5ms) PASSED
+  ✗ test_flaky_api (567.8ms) FAILED
+```
+
+The individual run results are attached to `execution.sub_executions`.
+
+## Reporter System
+
+Rue uses an async reporter architecture for flexible output handling.
+
+### The Reporter Interface
+
+All reporters implement the `Reporter` ABC from `src/rue/reports/base.py`:
+
+```python
+class Reporter(ABC):
+    @abstractmethod
+    async def on_no_tests_found(self) -> None:
+        """Called when test collection finds no tests."""
+
+    @abstractmethod
+    async def on_collection_complete(self, items: list[TestDefinition]) -> None:
+        """Called after test collection completes."""
+
+    async def on_test_start(self, item: TestDefinition) -> None:
+        """Called before a test starts executing (optional override)."""
+
+    async def on_subtest_complete(
+        self,
+        parent: TestDefinition,
+        sub_execution: TestExecution,
+    ) -> None:
+        """Called when a subtest completes (optional override)."""
+
+    @abstractmethod
+    async def on_test_complete(self, execution: TestExecution) -> None:
+        """Called after each test completes."""
+
+    @abstractmethod
+    async def on_run_complete(self, run: Run) -> None:
+        """Called after all tests complete."""
+
+    @abstractmethod
+    async def on_run_stopped_early(self, failure_count: int) -> None:
+        """Called when run stops early due to maxfail limit."""
+
+    @abstractmethod
+    async def on_tracing_enabled(self, output_path: Path) -> None:
+        """Called when tracing is enabled to report output location."""
+```
+
+### Built-in Reporters
+
+**ConsoleReporter** (default): Outputs to terminal with Rich formatting.
+
+```python
+from rue.reports import ConsoleReporter
+
+reporter = ConsoleReporter(verbosity=1)
+```
+
+### Creating Custom Reporters
+
+Create custom reporters by subclassing `Reporter` and implementing all abstract methods.
+Override `on_test_start` if you need live in-flight state:
+
+```python
+from pathlib import Path
+from rue.reports.base import Reporter
+from rue.testing import Run, TestDefinition, TestExecution
+import json
+
+class JsonFileReporter(Reporter):
+    """Custom reporter that writes results to JSON file."""
+
+    def __init__(self, output_path: str):
+        self.output_path = Path(output_path)
+        self.results = []
+
+    async def on_no_tests_found(self) -> None:
+        print("No tests found")
+
+    async def on_collection_complete(self, items: list[TestDefinition]) -> None:
+        print(f"Collected {len(items)} tests")
+
+    async def on_test_start(self, item: TestDefinition) -> None:
+        # Optional lifecycle hook for live/in-flight reporting
+        pass
+
+    async def on_test_complete(self, execution: TestExecution) -> None:
+        # Record each test result
+        self.results.append({
+            "name": execution.item.full_name,
+            "status": execution.status.value,
+            "duration_ms": execution.result.duration_ms,
+            "passed": execution.status.value == "passed"
+        })
+
+    async def on_run_complete(self, run: Run) -> None:
+        # Write all results to JSON file
+        output = {
+            "run_id": str(run.run_id),
+            "total": run.result.total,
+            "passed": run.result.passed,
+            "failed": run.result.failed,
+            "duration_ms": run.result.total_duration_ms,
+            "tests": self.results
+        }
+
+        self.output_path.write_text(json.dumps(output, indent=2))
+        print(f"Results written to {self.output_path}")
+
+    async def on_run_stopped_early(self, failure_count: int) -> None:
+        print(f"Run stopped after {failure_count} failures")
+
+    async def on_tracing_enabled(self, output_path: Path) -> None:
+        print(f"Tracing enabled: {output_path}")
+```
+
+### Using Multiple Reporters
+
+Use multiple reporters simultaneously with the programmatic API:
+
+```python
+import asyncio
+from rue.testing import Runner
+from rue.reports import ConsoleReporter
+from my_reporters import JsonFileReporter, SlackReporter
+
+async def main():
+    # Create multiple reporters
+    console = ConsoleReporter(verbosity=1)
+    json_reporter = JsonFileReporter("results.json")
+    slack = SlackReporter(webhook_url="https://...")
+
+    # Pass all reporters to runner
+    runner = Runner(reporters=[console, json_reporter, slack])
+
+    # Run tests - all reporters receive events
+    result = await runner.run(path="tests/")
+
+    print(f"Results: {result.result.passed}/{result.result.total} passed")
+
+asyncio.run(main())
+```
+
+**Note:** Currently, only `ConsoleReporter` is built-in. Create custom reporters for JSON, HTML, database, or external service integration.
+
+## Examples
+
+**Run smoke tests concurrently**:
+```bash
+uv run rue test --tag smoke --concurrency 5
+```
+
+**Debug a specific test with tracing**:
+```bash
+uv run rue test -k "agent_tool_call" --trace -vv
+```
+
+**Run fast tests, stop on first failure**:
+```bash
+uv run rue test --tag fast --fail-fast
+```
+
+**CI configuration** (pyproject.toml):
+```toml
+[tool.rue]
+test-paths = ["tests"]
+exclude-tags = ["manual", "slow"]
+maxfail = 10
+concurrency = 4
+addopts = ["--fail-fast"]
+```
+
+## Database Persistence
+
+Rue automatically persists test run data to a SQLite database for historical tracking and analysis.
+
+### Database Location
+
+By default, Rue stores the database at the project root:
+
+```
+<project-root>/.rue/rue.db
+```
+
+The database location is determined by walking up from the current directory to find the first directory containing `pyproject.toml`.
+
+### Disabling Database Persistence
+
+To disable database writes (e.g., for CI environments or quick local runs):
+
+```bash
+rue test --no-db
+```
+
+### Custom Database Path
+
+Specify a custom database location:
+
+```bash
+rue test --db-path /path/to/custom/rue.db
+```
+
+Or configure in `pyproject.toml`:
+
+```toml
+[tool.rue]
+db-path = "/path/to/custom/rue.db"
+```
+
+### Database Management Commands
+
+Rue provides CLI commands to manage the database:
+
+#### Check Database Status
+
+View current schema version and pending migrations:
+
+```bash
+uv run rue db status
+```
+
+**Output:**
+```
+Database: /Users/you/project/.rue/rue.db
+Current version: 1
+Target version: 1
+Status: Up to date
+```
+
+#### Run Migrations
+
+Apply pending schema migrations:
+
+```bash
+uv run rue db migrate
+```
+
+**Dry run** (preview without applying):
+
+```bash
+uv run rue db migrate --dry-run
+```
+
+#### Backup Database
+
+Create a timestamped backup:
+
+```bash
+uv run rue db backup
+```
+
+Creates: `.rue/rue.db.backup.YYYYMMDD_HHMMSS`
+
+#### Reset Database
+
+Delete and recreate the database (destructive):
+
+```bash
+uv run rue db reset --yes
+```
+
+Without `--yes`, Rue prints a warning and exits without resetting the database.
+
+### What's Stored
+
+The database stores:
+- Test run metadata (timestamp, environment, git info)
+- Individual test executions and results
+- Assertion results and predicate outcomes
+- Metric results and statistical data
+- Trace references (if tracing enabled)
+- Error tracebacks for failed tests
+
+### Database Schema
+
+The schema is versioned and managed through migrations. Current tables include:
+- `runs` - Test run sessions
+- `test_executions` - Individual test results
+- `metrics` - Aggregated metrics
+- `assertions` - Assertion outcomes
+- `predicates` - Predicate results linked to assertions
+- `trace_spans` - Trace spans linked to executions
+
+Schema version is stored in SQLite `PRAGMA user_version` (shown by `uv run rue db status` as "Current version").
+
+<CardGroup cols={2}>
+  <Card title="Writing Tests" icon="code" href="/usage/writing-tests">
+    Learn how to write test functions and use decorators
+  </Card>
+  <Card title="Rue Concept" icon="book" href="/concepts/rue-tests">
+    Deep dive into discovery, parametrization, and execution
+  </Card>
+</CardGroup>

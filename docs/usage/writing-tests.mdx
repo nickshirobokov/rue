@@ -1,0 +1,343 @@
+---
+title: "Writing Tests"
+---
+
+Rue is intentionally “pytest-shaped”: you write plain Python, Rue discovers `test_*` cases, injects dependencies by parameter name (like pytest fixtures), runs them, and reports results.
+
+This page focuses on **how to write tests** and (importantly) **where the behavior lives in the codebase**, so you can trust what’s happening.
+
+## TLDR - If you know pytest, you already know 80%
+
+| pytest | rue |
+| --- | --- |
+| `def test_*(): ...` | `def test_*(): ...` |
+| `@pytest.fixture` | `@rue.resource` |
+| `@pytest.mark.parametrize(...)` | `@rue.parametrize(...)` |
+| `@pytest.mark.skip(...)` | `@rue.tag.skip(...)` |
+| `@pytest.mark.xfail(...)` | `@rue.tag.xfail(...)` |
+| `@pytest.mark.repeat(3)` | `@rue.repeat(3)` |
+
+## Test Discovery
+
+Rue follows pytest-style discovery patterns to find test functions in your codebase:
+
+<Info>
+  **Related docs**: [Rue Tests (Concept)](/concepts/rue-tests), [Testing (API)](/apis/testing)
+</Info>
+
+**Files**: Rue discovers Python files matching `rue_*.py`:
+- `rue_chatbot.py` ✓
+- `rue_agent.py` ✓
+- `helpers.py` ✗
+
+**Functions**: Inside discovered files, Rue collects functions starting with `test_`:
+
+```python
+def test_weather_agent():  # ✓ Discovered
+    pass
+
+def helper_function():      # ✗ Not discovered
+    pass
+```
+
+**Classes**: Classes starting with `Test` are discovered, and their `test_*` methods become test cases:
+
+```python
+class TestCustomerSupport:     # ✓ Discovered
+    def test_greeting(self):    # ✓ Collected
+        pass
+
+    def helper(self):            # ✗ Not collected
+        pass
+```
+
+## Modifiers
+
+Modifiers are **decorators** that change how a test is *collected* and/or *executed*. Some modifiers expand a single test into many cases (like parametrization or dataset iteration), while others change execution semantics (like repeating a case, or marking it as skipped/xfail). Apply them to `test_*` functions or `Test*` classes.
+
+<Info>
+  **Related docs**: [Testing (API)](/apis/testing), [Case (Concept)](/concepts/case)
+</Info>
+
+**`@rue.parametrize(names, values)`** - Run the same test with different inputs
+
+```python
+@rue.parametrize("model,temp", [("gpt-4", 0.7), ("claude-3", 0.5)])
+def test_model_response(model: str, temp: float, chatbot):
+    response = chatbot.generate(model=model, temperature=temp)
+    assert response
+```
+
+**`@rue.iter_cases(*cases, min_passes=len(cases))`** - Iterate over `Case` objects from external sources, optionally allowing pass thresholds
+
+```python
+import json
+from rue import Case
+
+cases = [Case(**item) for item in json.load(open("cases.json"))]
+
+@rue.iter_cases(*cases)
+def test_from_dataset(case: Case, classifier):
+    result = classifier(**case.sut_input_values)
+    if case.references:
+        assert result == case.references["some_ref_value"]
+
+@rue.iter_cases(*cases, min_passes=8)  # Requires at least 8 case passes
+def test_from_dataset_threshold(case: Case, classifier):
+    result = classifier(**case.sut_input_values)
+    assert result == case.references["some_ref_value"]
+```
+
+**`@rue.iter_case_groups(*groups)`** - Iterate over `CaseGroup` objects with per-group thresholds and group-level references
+
+```python
+from rue import Case, CaseGroup
+
+geography = CaseGroup(
+    name="geography",
+    cases=[
+        Case(sut_input_values={"prompt": "Capital of France?"}, references={"expected": "Paris"}),
+        Case(sut_input_values={"prompt": "Capital of Germany?"}, references={"expected": "Berlin"}),
+    ],
+    min_passes=2,
+)
+
+music = CaseGroup(
+    name="music",
+    cases=[Case(sut_input_values={"prompt": "Best rock band?"}, references={"expected": "Metallica"})],
+    min_passes=1,
+)
+
+@rue.iter_case_groups(geography, music)
+def test_chatbot(group: CaseGroup, case: Case, chatbot):
+    response = chatbot(**case.sut_input_values)
+    assert case.references["expected"] in response
+```
+
+**`@rue.tag(*tags)`** - Organize and filter tests by tags
+
+```python
+@rue.tag("smoke", "fast")
+def test_health_check(api):
+    assert api.health_check()
+
+# Run: uv run rue test --tag smoke
+```
+
+**`@rue.tag.skip(reason=...)`** - Skip tests unconditionally
+
+```python
+@rue.tag.skip(reason="Feature not implemented")
+def test_upcoming():
+    pass
+
+@rue.tag.skip(reason="Requires API key")
+def test_external_api():
+    pass
+```
+
+**`@rue.tag.xfail(reason=..., strict=False)`** - Mark tests expected to fail
+
+```python
+@rue.tag.xfail(reason="Known bug #123")
+def test_known_issue():
+    assert False  # Won't fail the suite
+
+@rue.tag.xfail(reason="Should still fail", strict=True)
+def test_strict():
+    pass  # If this passes, suite FAILS
+```
+
+**`@rue.repeat(n, min_passes=n)`** - Run tests multiple times to see if AI behavior is consistent
+
+```python
+@rue.repeat(10)  # All 10 must pass
+def test_consistent(llm):
+    assert "hello" in llm.generate("Say hello")
+
+@rue.repeat(10, min_passes=8)  # 8 out of 10
+def test_mostly_correct(llm):
+    assert "hola" in llm.generate("Say hello in Spanish")
+```
+
+**`@rue.run_inline`** - Opt out of default threaded execution for sync tests
+
+By default, synchronous tests (`def test_*`) run in a worker thread via `asyncio.to_thread(...)` so the event loop stays responsive. Use `@rue.run_inline` when a sync test must run on the main event-loop thread (for example, thread-sensitive libraries).
+
+```python
+import threading
+
+def test_default_threaded():
+    # Runs in a worker thread by default.
+    assert threading.current_thread() is not threading.main_thread()
+
+@rue.run_inline
+def test_main_thread_only():
+    # Runs inline on the event-loop thread.
+    assert threading.current_thread() is threading.main_thread()
+```
+
+## Resources
+
+Resources are the Rue equivalent of pytest fixtures: named, injectable dependencies that Rue resolves by parameter name.
+
+<Info>
+  **Related docs**: [Resource (Concept)](/concepts/resource), [Metric (Concept)](/concepts/metric), [SUT (Concept)](/concepts/sut), [Tracing (API)](/apis/tracing)
+</Info>
+
+**`@rue.resource(scope="case")`** - Define injectable dependencies with lifecycle management
+
+```python
+@rue.resource
+def database():
+    conn = connect_db()
+    yield conn  # Injected into tests
+    conn.close()  # Automatic cleanup
+
+@rue.resource(scope="session")
+def ml_model():
+    return load_model()  # Shared across entire run
+
+def test_query(database, ml_model):
+    # Both injected automatically
+    result = database.query("SELECT 1")
+    prediction = ml_model.predict(result)
+    assert prediction
+```
+
+Scopes: `"case"` (default), `"suite"`, `"session"`.
+
+**`@rue.metric(scope="session")`** - Define a metric as a scoped, injectable measurement object
+
+Metrics behave like resources, but they’re intended to accumulate measurements across many cases and then assert on aggregates at the end of their scope.
+
+The most common pattern is to inject a `Metric` into your tests and use the `metrics(...)` context manager to record assertion outcomes into that metric.
+
+```python
+from rue import Metric, metrics
+
+@rue.metric
+def accuracy():
+    metric = Metric()
+    yield metric
+    assert metric.mean > 0.8  # Check after all data collected
+
+@rue.parametrize("input,expected", [("a", 1), ("b", 2)])
+def test_classifier(input, expected, classifier, accuracy: Metric):
+    result = classifier(input)
+
+    # Assertions inside metrics() are recorded as True/False
+    with metrics(accuracy):
+        assert result == expected
+```
+
+Scopes: `"session"` (default), `"suite"`, `"case"`.
+
+**`@rue.sut`** - Register a System Under Test (SUT) as an injectable callable
+
+A SUT is the thing you’re actually evaluating (an agent function, a pipeline, a classifier, a client wrapper, etc.). Declaring it with `@rue.sut` makes it injectable and traceable, so you can assert not only on the output, but also on how it behaved internally (for example: tool calls).
+
+<Note>
+  A SUT must be **callable**. Rue will inject it into your test function and you will call it like a normal function (or callable object).
+</Note>
+
+```python
+from demo_app import agent
+
+@rue.sut
+def weather_agent(prompt: str):
+    return agent(prompt, tools=["get_weather"])
+
+def test_agent_uses_tools(weather_agent, trace_context):
+    result = weather_agent("What's the weather?")
+
+    # Access trace spans for assertions
+    sut_spans = trace_context.get_sut_spans(name="weather_agent")
+    assert sut_spans
+
+    # If you want to assert on tool calls, query LLM spans explicitly.
+    # Note: attribute keys come from OpenTelemetry LLM instrumentations.
+    tool_names = [
+        s.attributes.get("llm.request.functions.0.name")
+        for s in trace_context.get_llm_calls()
+        if s.attributes
+    ]
+    assert "get_weather" in tool_names
+```
+
+## Custom Assert
+
+Rue transforms Python's `assert` keyword to provide richer testing capabilities for AI systems. When you run test files through Rue's runner, assertions behave differently than standard Python.
+
+### Continue on failure (default behavior)
+
+By default, Rue **continues running remaining assertions** even after one fails. This is different from standard Python, where the first failed assertion stops execution immediately.
+
+```python
+def test_multiple_checks(classifier):
+    result = classifier("test input")
+
+    assert result.confidence > 0.8  # Fails
+    assert result.label != ""        # Still runs
+    assert result.valid              # Still runs
+```
+
+All three assertions will be evaluated and reported, even if the first one fails. This behavior lets you see all test failures in a single run rather than fixing them one at a time.
+
+To stop on the first failure, use the `--fail-fast` CLI flag:
+
+```bash
+uv run rue test --fail-fast
+```
+
+### Integration with metrics
+
+When assertions are evaluated inside a `metrics()` context manager, Rue automatically records whether each assertion passed or failed to the specified metrics:
+
+```python
+from rue import Metric, metrics
+
+@rue.metric
+def accuracy():
+    metric = Metric()
+    yield metric
+    assert metric.mean > 0.8
+
+@rue.parametrize("input,expected", [("a", 1), ("b", 2), ("c", 3)])
+def test_classifier(input, expected, classifier, accuracy: Metric):
+    result = classifier(input)
+
+    # Assertions inside metrics() are recorded as 1 (pass) or 0 (fail)
+    with metrics(accuracy):
+        assert result == expected
+```
+
+### Only works through Rue's runner
+
+**Important:** Rue's assertion transformation only applies when you run files through Rue's test runner:
+
+```bash
+uv run rue test rue_my_tests.py  # ✓ Transformed assertions
+python rue_my_tests.py           # ✗ Standard Python behavior
+uv run rue_my_tests.py           # ✗ Standard Python behavior
+```
+
+### Assert messages
+
+Assert messages work as expected and are captured in the `AssertionResult`:
+
+```python
+def test_validation(response):
+    assert response.status == 200, f"Expected 200, got {response.status}"
+    assert "error" not in response.body, "Response contains error"
+```
+
+
+<CardGroup cols={2}>
+  <Card title="Rue Functions (Concept)" icon="code" href="/concepts/rue-tests">
+    Discovery rules, organization, and patterns
+  </Card>
+  <Card title="Quick Start" icon="rocket" href="/get-started/quick-start">
+    End-to-end example with SUTs, predicates, metrics, and traces
+  </Card>
+</CardGroup>

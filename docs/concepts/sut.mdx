@@ -1,0 +1,185 @@
+---
+title: "SUT"
+---
+
+<Note>SUT stands for *System Under Test*.</Note>
+<Note>`@rue.sut` is optional. It exists to make your agent/workflow callable injectable and traceable.</Note>
+
+`@rue.sut` registers a **SUT factory function** as an injectable **resource** and wraps each resolved invocation in an OpenTelemetry span. This gives you two things:
+- A clean dependency injection (DI) boundary in your tests (you call the injected parameter, not a global).
+- Trace spans you can query inside a test via `trace_context` (when tracing is enabled).
+
+```python
+import rue
+
+from demo_app.chatbot import chatbot as prod_chatbot
+
+@rue.sut
+def chatbot():
+    return prod_chatbot
+
+def test_chatbot_works(chatbot):
+    out = chatbot("hello")
+    assert "hello" in out
+```
+
+## Basic Usage
+The most common use case for `@rue.sut` is asserting on the SUT call span(s).
+
+<Note>
+`trace_context` is only available when tracing is enabled. From the CLI, run `rue test --trace`.
+</Note>
+
+<Steps>
+<Step title="Decorate the system under test">
+
+```python
+# tests/rue_agent.py
+import rue
+
+from demo_app.weather import weather_agent as prod_weather_agent
+
+@rue.sut
+def weather_agent():
+    return prod_weather_agent
+```
+</Step>
+<Step title="Inject into a `test` and assert on the trace">
+
+```python
+# tests/rue_agent.py
+
+def test_weather_agent_calls_tools(weather_agent, trace_context):
+    out = weather_agent("What's the weather in SF?")
+
+    # Retrieve spans for this SUT by name (defaults to the function name)
+    spans = trace_context.get_sut_spans(name="weather_agent")
+
+    # Assert on SUT span attributes emitted by Rue
+    assert spans
+    assert spans[0].attributes.get("rue.sut.name") == "weather_agent"
+```
+</Step>
+</Steps>
+
+## What `@rue.sut` actually does
+
+### Injection semantics
+`@rue.sut` registers a resource factory so the Rue runner can inject it into tests by parameter name (by default, a **case-scoped** resource).
+
+If constructing your SUT is expensive, you can widen its lifecycle using `scope` (the same values as `@rue.resource`):
+
+```python
+import rue
+from demo_app.weather import weather_agent as prod_weather_agent
+
+@rue.sut(scope="session")
+def weather_agent():
+    return prod_weather_agent
+```
+
+That’s why you should call the injected `chatbot` parameter inside `test_chatbot_works(chatbot)`, not the decorated global name.
+
+### Naming rules (important for DI and `get_sut_spans`)
+- **SUT name**: the factory function name (`def weather_agent(): ...` → `"weather_agent"`).
+  - Pick your factory name intentionally, since it’s used for dependency injection *and* the `sut.<sut_name>` span name.
+
+### Instance-based SUTs (trace a method)
+If your factory returns a **non-callable instance**, Rue will trace a method on that instance. By default it traces `__call__`, but you can set `method="run"` (or any method name your object provides):
+
+```python
+import rue
+
+from demo_app.agents import WeatherAgent
+
+@rue.sut(method="run")
+def weather_agent():
+    return WeatherAgent()
+
+def test_custom_method(weather_agent):
+    out = weather_agent.run("task")
+    assert out
+```
+
+## SUT span attributes
+Each SUT call creates a span named `sut.<sut_name>` and sets:
+- `rue.sut=true`
+- `rue.sut.name=<sut_name>`
+
+If `RUE_TRACE_CONTENT=true` (default), Rue also records:
+- `sut.input.args` / `sut.input.kwargs` (truncated repr)
+- `sut.output` (truncated repr)
+
+If `RUE_TRACE_CONTENT=false`, Rue records only coarse metadata:
+- `sut.input.count`
+- `sut.output.type`
+
+## Recommendations
+
+### 1. Create isolated helpers; don't touch your production code
+
+Many evaluation frameworks require developers to modify their production codebase to instrument traces. Rue avoids this pattern. The best way to introduce SUTs to your suite is to create isolated wrapper functions within your `rue_*.py` files.
+
+**Don't do this:**
+```python
+# src/app/agent.py
+import rue
+from typing import Literal
+
+@rue.sut
+def agent():
+    # Don't decorate production entrypoints; wrap them in your tests layer instead.
+    ...
+```
+
+**Do this:**
+```python
+# tests/rue_agent.py
+import rue
+
+from functools import partial
+from app import agent as prod_agent
+
+@rue.sut
+def marketing_agent():
+    """Q&A system that answers questions about marketing concepts."""
+    return partial(prod_agent, domain="marketing")
+
+def test_marketing_agent_invokes(marketing_agent):
+    out = marketing_agent("What's CAC?")
+    assert out
+```
+
+### 2. Pass using Dependency Injection; don't call directly
+
+`@rue.sut` registers a resource factory for injection. Calling the decorated global directly is the wrong pattern (and may not work the way you expect). Always call the injected parameter.
+
+**Don't do this:**
+```python
+import rue
+from demo_app.chatbot import chatbot as prod_chatbot
+
+@rue.sut
+def chatbot():
+    return prod_chatbot
+
+def test_chatbot_runs():
+    # This is the resource factory, not the injected callable
+    sut = chatbot()
+    out = sut("Hello!")
+    assert out
+```
+
+**Do this:**
+```python
+import rue
+from demo_app.chatbot import chatbot as prod_chatbot
+
+@rue.sut
+def chatbot():
+    return prod_chatbot
+
+def test_chatbot_runs(chatbot):
+    out = chatbot("Hello!")
+    assert out
+```
