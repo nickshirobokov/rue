@@ -16,10 +16,6 @@ from rue.context import (
 )
 from rue.context.output_capture import sys_output_capture
 from rue.metrics_.base import MetricResult
-from rue.predicates import (
-    close_predicate_api_client,
-    create_predicate_api_client,
-)
 from rue.reports.base import Reporter
 from rue.resources import ResourceResolver, get_registry
 from rue.storage import SQLiteStore
@@ -207,8 +203,6 @@ class Runner:
         else:
             self.current_run = Run(environment=environment, run_id=selected_run_id)
 
-        create_predicate_api_client()
-
         if self.enable_tracing:
             init_tracing(output_path=self.trace_output)
             clear_traces()
@@ -256,8 +250,6 @@ class Runner:
             except TimeoutError:
                 self.current_run.result.stopped_early = True
                 self.stop_flag = True
-
-        await close_predicate_api_client()
 
         self.current_run.result.total_duration_ms = (time.perf_counter() - start) * 1000
         self.current_run.result.metric_results = metric_results.copy()

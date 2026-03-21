@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from rue.assertions.base import AssertionRepr, AssertionResult
 from rue.metrics_.base import MetricMetadata, MetricResult
-from rue.predicates.base import PredicateResult
+from rue.predicates.models import PredicateResult
 from rue.resources import Scope
 from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.store import MAX_STORED_RUNS

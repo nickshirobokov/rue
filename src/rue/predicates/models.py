@@ -19,7 +19,7 @@ class SyncPredicate(Protocol):
 
     A `Predicate` compares an ``actual`` value to a ``reference`` value, optionally
     using configuration flags, and returns a
-    :class:`~rue.predicates.base.PredicateResult`.
+    :class:`~rue.predicates.models.PredicateResult`.
 
     Parameters
     ----------
@@ -50,7 +50,7 @@ class AsyncPredicate(Protocol):
 
     A `Predicate` compares an ``actual`` value to a ``reference`` value, optionally
     using configuration flags, and returns a
-    :class:`~rue.predicates.base.PredicateResult`.
+    :class:`~rue.predicates.models.PredicateResult`.
 
     Parameters
     ----------

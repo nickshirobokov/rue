@@ -1,12 +1,10 @@
-import os
-
 import dotenv
 import pytest
 
 
 dotenv.load_dotenv()
 
-from rue.predicates.ai_predicates import (
+from rue.predicates import (
     follows_policy,
     has_conflicting_facts,
     has_facts,
@@ -16,24 +14,6 @@ from rue.predicates.ai_predicates import (
     matches_writing_layout,
     matches_writing_style,
 )
-from rue.predicates.client import close_predicate_api_client
-
-
-# Skip tests if API credentials are not provided
-pytestmark = pytest.mark.skipif(
-    not (os.getenv("RUE_API_BASE_URL") and os.getenv("RUE_API_KEY")),
-    reason="RUE_API_BASE_URL and RUE_API_KEY must be set for integration tests",
-)
-
-
-@pytest.fixture(autouse=True)
-async def setup_predicate_client():
-    """Ensure the global predicate client is initialized and closed."""
-    from rue.predicates.client import create_predicate_api_client
-
-    create_predicate_api_client()
-    yield
-    await close_predicate_api_client()
 
 
 @pytest.mark.asyncio

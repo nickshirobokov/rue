@@ -178,6 +178,7 @@ class TestResolveReporters:
             save_to_db=DEFAULT_CONFIG.save_to_db,
             reporters=kwargs.get("reporters", []),
             reporter_options=kwargs.get("reporter_options", {}),
+            predicates=kwargs.get("predicates", DEFAULT_CONFIG.predicates),
         )
 
     def test_default_console_reporter(self):
@@ -236,6 +237,7 @@ def _make_cli_config() -> Config:
         save_to_db=DEFAULT_CONFIG.save_to_db,
         reporters=list(DEFAULT_CONFIG.reporters),
         reporter_options=dict(DEFAULT_CONFIG.reporter_options),
+        predicates=DEFAULT_CONFIG.predicates,
     )
 
 

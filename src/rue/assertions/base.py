@@ -7,7 +7,7 @@ from rue.context import ASSERTION_RESULTS_COLLECTOR, METRIC_CONTEXT, TEST_CONTEX
 
 
 if TYPE_CHECKING:
-    from rue.predicates.base import PredicateResult
+    from rue.predicates.models import PredicateResult
 
 
 @dataclass

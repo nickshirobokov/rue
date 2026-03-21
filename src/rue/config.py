@@ -9,7 +9,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, ConfigDict, computed_field
 from pydantic_ai.models import KnownModelName
 from pydantic_ai.settings import ModelSettings
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,7 +18,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class PredicateConfig(BaseModel):
     """Config for a single predicate — model name plus optional ModelSettings fields."""
 
-    model_config = {"protected_namespaces": ()}
+    model_config = ConfigDict(protected_namespaces=(), arbitrary_types_allowed=True)
 
     model: KnownModelName
     temperature: float | None = None

@@ -15,7 +15,7 @@ from rue.context import (
     test_context_scope as context_scope,
 )
 from rue.metrics_.base import Metric, metric
-from rue.predicates.base import PredicateResult
+from rue.predicates.models import PredicateResult
 from rue.resources import ResourceResolver, Scope, clear_registry
 from rue.testing.discovery import TestItem
 

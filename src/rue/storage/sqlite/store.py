@@ -11,7 +11,7 @@ from uuid import UUID
 
 from rue.assertions.base import AssertionResult
 from rue.metrics_.base import CalculatedValue, MetricMetadata, MetricResult
-from rue.predicates.base import PredicateResult
+from rue.predicates.models import PredicateResult
 from rue.resources import Scope
 from rue.storage.base import Store
 from rue.storage.sqlite.migrations import MigrationError, MigrationRunner
