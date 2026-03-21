@@ -1,5 +1,6 @@
+# THIS SHIT IS STALE AND WILL BE DELETED SOON
+
 from rue.predicates.base import PredicateResult
-from rue.predicates.client import PredicateAPIRequest, PredicateType, get_predicate_api_client
 
 
 async def has_conflicting_facts(

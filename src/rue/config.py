@@ -5,8 +5,76 @@ from __future__ import annotations
 import os
 import tomllib
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, computed_field
+from pydantic_ai.models import KnownModelName
+from pydantic_ai.settings import ModelSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class PredicateConfig(BaseModel):
+    """Config for a single predicate — model name plus optional ModelSettings fields."""
+
+    model_config = {"protected_namespaces": ()}
+
+    model: KnownModelName
+    temperature: float | None = None
+    max_tokens: int | None = None
+    top_p: float | None = None
+    timeout: float | None = None
+    seed: int | None = None
+    presence_penalty: float | None = None
+    frequency_penalty: float | None = None
+    stop_sequences: list[str] | None = None
+    parallel_tool_calls: bool | None = None
+
+    @computed_field
+    @cached_property
+    def model_settings(self) -> ModelSettings:
+        model_settings: ModelSettings = {}
+
+        if self.temperature is not None:
+            model_settings["temperature"] = self.temperature
+        if self.max_tokens is not None:
+            model_settings["max_tokens"] = self.max_tokens
+        if self.top_p is not None:
+            model_settings["top_p"] = self.top_p
+        if self.timeout is not None:
+            model_settings["timeout"] = self.timeout
+        if self.seed is not None:
+            model_settings["seed"] = self.seed
+        if self.presence_penalty is not None:
+            model_settings["presence_penalty"] = self.presence_penalty
+        if self.frequency_penalty is not None:
+            model_settings["frequency_penalty"] = self.frequency_penalty
+        if self.stop_sequences is not None:
+            model_settings["stop_sequences"] = self.stop_sequences
+        if self.parallel_tool_calls is not None:
+            model_settings["parallel_tool_calls"] = self.parallel_tool_calls
+
+        return model_settings
+
+
+class PredicateSettings(BaseSettings):
+    """All built-in predicate config loaded from `[tool.rue.predicates]`."""
+
+    model_config = SettingsConfigDict(
+        extra="forbid",
+        pyproject_toml_table_header=("tool", "rue", "predicates"),
+    )
+
+    all_predicates: PredicateConfig | None = None
+    follows_policy: PredicateConfig | None = None
+    has_conflicting_facts: PredicateConfig | None = None
+    has_facts: PredicateConfig | None = None
+    has_topics: PredicateConfig | None = None
+    has_unsupported_facts: PredicateConfig | None = None
+    matches_facts: PredicateConfig | None = None
+    matches_writing_layout: PredicateConfig | None = None
+    matches_writing_style: PredicateConfig | None = None
 
 
 @dataclass
@@ -26,6 +94,7 @@ class Config:
     save_to_db: bool
     reporters: list[str]
     reporter_options: dict[str, dict[str, Any]]
+    predicates: PredicateSettings
 
 
 DEFAULT_CONFIG = Config(
@@ -42,6 +111,7 @@ DEFAULT_CONFIG = Config(
     save_to_db=True,
     reporters=[],
     reporter_options={},
+    predicates=PredicateSettings(),
 )
 
 
@@ -62,6 +132,7 @@ def load_config(start_path: str | Path | None = None) -> Config:
         save_to_db=DEFAULT_CONFIG.save_to_db,
         reporters=list(DEFAULT_CONFIG.reporters),
         reporter_options=dict(DEFAULT_CONFIG.reporter_options),
+        predicates=DEFAULT_CONFIG.predicates,
     )
 
     pyproject = _find_file(base, "pyproject.toml")
@@ -164,8 +235,13 @@ def _apply_section(config: Config, section: dict[str, Any]) -> None:
             if isinstance(value, bool):
                 config.save_to_db = value
 
+    predicates_raw = section.get("predicates")
+    if isinstance(predicates_raw, dict):
+        normalized = {k.replace("-", "_"): v for k, v in predicates_raw.items()}
+        config.predicates = PredicateSettings.model_validate(normalized)
+
 
 RueConfig = Config
 
 
-__all__ = ["Config", "DEFAULT_CONFIG", "RueConfig", "load_config"]
+__all__ = ["Config", "DEFAULT_CONFIG", "PredicateConfig", "RueConfig", "load_config"]

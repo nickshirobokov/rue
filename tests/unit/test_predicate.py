@@ -3,6 +3,8 @@ import json
 import httpx
 import pytest
 
+# THIS SHIT IS STALE AND NEEDS TO BE UPDATED ACCODRING TO NEW DESIGN
+
 from rue.predicates.ai_predicates import (
     follows_policy,
     has_conflicting_facts,
@@ -177,7 +179,7 @@ async def test_ai_predicates_call_api_correctly(monkeypatch) -> None:
         client = PredicateAPIClient(http=http, settings=settings)
 
         # Use monkeypatch to return our mocked client
-        import rue.predicates.ai_predicates as ai_p
+        import rue.predicates._depr_predicates as ai_p
 
         async def mock_get_client():
             return client
