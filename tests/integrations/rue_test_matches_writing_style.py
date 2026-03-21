@@ -8,7 +8,7 @@ from rue.predicates import matches_writing_style
 MATCHES_WRITING_STYLE_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000801"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Friday?"
             ),
@@ -26,7 +26,7 @@ MATCHES_WRITING_STYLE_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000802"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Hey team, the ferry photos are in. I tagged the heritage-wrap shots, "
                 "parked the duplicates, and flagged the two frames where the color "
@@ -49,7 +49,7 @@ MATCHES_WRITING_STYLE_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000803"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Hi Sam, did the clinic desk ever send the corrected estimate? I have "
                 "the photos and ticket, but I do not want to close the file if the "
@@ -71,7 +71,7 @@ MATCHES_WRITING_STYLE_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000804"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Hey Priya, I found the ledger page and put it in the supervised bay. "
                 "If you want the shipping receipt too, say the word and I will pull it "
@@ -96,13 +96,13 @@ MATCHES_WRITING_STYLE_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*MATCHES_WRITING_STYLE_NORMAL_MODE_EXPECTED_TRUE_CASES)
 @rue.repeat(2)
 async def test_matches_writing_style_normal_mode_expected_true(case: Case) -> None:
-    assert await matches_writing_style(**case.sut_input_values)
+    assert await matches_writing_style(**case.input_kwargs)
 
 
 MATCHES_WRITING_STYLE_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000805"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Pursuant to Section 7.4 of the distribution agreement, the seller "
                 "hereby notifies the purchaser that all representations concerning "
@@ -122,7 +122,7 @@ MATCHES_WRITING_STYLE_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000806"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Field log, 04:18. Relay cabinet warm to the touch. Condensation on "
                 "inner shield. Amber indicator observed during boot cycle. Terminal "
@@ -142,7 +142,7 @@ MATCHES_WRITING_STYLE_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000807"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The procurement memorandum recommends awarding the accessibility "
                 "testing contract to the lowest responsive bidder that met the screen-"
@@ -162,7 +162,7 @@ MATCHES_WRITING_STYLE_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000808"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Incident summary: power loss traced to transfer-switch failure in "
                 "basement panel room. Corridor lighting restored on floors two through "
@@ -185,13 +185,13 @@ MATCHES_WRITING_STYLE_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*MATCHES_WRITING_STYLE_NORMAL_MODE_EXPECTED_FALSE_CASES)
 @rue.repeat(2)
 async def test_matches_writing_style_normal_mode_expected_false(case: Case) -> None:
-    assert not await matches_writing_style(**case.sut_input_values)
+    assert not await matches_writing_style(**case.input_kwargs)
 
 
 MATCHES_WRITING_STYLE_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000809"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Twenty minutes?"
             ),
@@ -207,7 +207,7 @@ MATCHES_WRITING_STYLE_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000810"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Hey Lena, the crate sheet is signed. Same cradle, same silica packs, "
                 "papers under the right handle, and I would rather send it tonight "
@@ -229,7 +229,7 @@ MATCHES_WRITING_STYLE_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000811"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Hey crew, the weather mast is back online. New cups are in, the "
                 "ground tested clean, and the top beacon only looks different because "
@@ -251,7 +251,7 @@ MATCHES_WRITING_STYLE_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000812"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Hi Priya, I can move the site walk to Friday and keep the same "
                 "engineer on it. That should give the geotech team enough time to "
@@ -276,13 +276,13 @@ MATCHES_WRITING_STYLE_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*MATCHES_WRITING_STYLE_STRICT_MODE_EXPECTED_TRUE_CASES)
 @rue.repeat(2)
 async def test_matches_writing_style_strict_mode_expected_true(case: Case) -> None:
-    assert await matches_writing_style(**case.sut_input_values)
+    assert await matches_writing_style(**case.input_kwargs)
 
 
 MATCHES_WRITING_STYLE_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000813"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Section 4.2 requires the buyer to preserve all inspection rights "
                 "pending warehouse audit, and no interim acceptance of goods shall be "
@@ -301,7 +301,7 @@ MATCHES_WRITING_STYLE_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000814"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Lab notebook entry: sample tray warped at 62.4 degrees Celsius. "
                 "Operator repeated the measurement after recalibrating the probe and "
@@ -320,7 +320,7 @@ MATCHES_WRITING_STYLE_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000815"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The policy memo recommends holding the rent increase below the "
                 "insurance delta, sequencing elevator replacements before facade work, "
@@ -338,7 +338,7 @@ MATCHES_WRITING_STYLE_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000816"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Incident note: transfer switch failed in basement panel room. "
                 "Temporary cooling active. Elevator service suspended. Additional lobby "
@@ -361,4 +361,4 @@ MATCHES_WRITING_STYLE_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*MATCHES_WRITING_STYLE_STRICT_MODE_EXPECTED_FALSE_CASES)
 @rue.repeat(2)
 async def test_matches_writing_style_strict_mode_expected_false(case: Case) -> None:
-    assert not await matches_writing_style(**case.sut_input_values)
+    assert not await matches_writing_style(**case.input_kwargs)

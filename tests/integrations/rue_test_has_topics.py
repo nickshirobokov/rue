@@ -8,7 +8,7 @@ from rue.predicates import has_topics
 HAS_TOPICS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000401"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The outage is electrical."
             ),
@@ -29,7 +29,7 @@ HAS_TOPICS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000402"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Respiratory drug trial."
             ),
@@ -54,7 +54,7 @@ HAS_TOPICS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000403"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Archive relocation."
             ),
@@ -78,7 +78,7 @@ HAS_TOPICS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000404"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Semiconductor industrial policy."
             ),
@@ -106,13 +106,13 @@ HAS_TOPICS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_TOPICS_NORMAL_MODE_EXPECTED_TRUE_CASES)
 @rue.repeat(2)
 async def test_has_topics_normal_mode_expected_true(case: Case) -> None:
-    assert await has_topics(**case.sut_input_values)
+    assert await has_topics(**case.input_kwargs)
 
 
 HAS_TOPICS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000405"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Public Works sent council members a weekend bridge status packet "
                 "after a freight truck strike damaged two gusset plates and forced "
@@ -135,7 +135,7 @@ HAS_TOPICS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000406"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The housing authority board packet focuses on elevator outages, "
                 "insurance premiums after kitchen fires, multilingual tenant notices, "
@@ -155,7 +155,7 @@ HAS_TOPICS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000407"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The museum donor memo is about roof leaks, preservation rebates, "
                 "maritime-art loan schedules, school tours shifting to the sculpture "
@@ -174,7 +174,7 @@ HAS_TOPICS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000408"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The creamery recall briefing talks about listeria, a floor drain near "
                 "the fresh-curd line, supermarket demands for a single withdrawal "
@@ -198,13 +198,13 @@ HAS_TOPICS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_TOPICS_NORMAL_MODE_EXPECTED_FALSE_CASES)
 @rue.repeat(2)
 async def test_has_topics_normal_mode_expected_false(case: Case) -> None:
-    assert not await has_topics(**case.sut_input_values)
+    assert not await has_topics(**case.input_kwargs)
 
 
 HAS_TOPICS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000409"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Terminal modernization."
             ),
@@ -226,7 +226,7 @@ HAS_TOPICS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000410"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Housing affordability policy."
             ),
@@ -248,7 +248,7 @@ HAS_TOPICS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000411"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Food safety."
             ),
@@ -268,7 +268,7 @@ HAS_TOPICS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000412"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Historic-building preservation."
             ),
@@ -292,13 +292,13 @@ HAS_TOPICS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_TOPICS_STRICT_MODE_EXPECTED_TRUE_CASES)
 @rue.repeat(2)
 async def test_has_topics_strict_mode_expected_true(case: Case) -> None:
-    assert await has_topics(**case.sut_input_values)
+    assert await has_topics(**case.input_kwargs)
 
 
 HAS_TOPICS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000413"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The semiconductor memo moves through power demand, specialty-gas "
                 "sourcing, export controls, subsidy exposure, airport cargo "
@@ -318,7 +318,7 @@ HAS_TOPICS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000414"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The archive relocation brief covers downtown real estate, utilities, "
                 "family-paper shelf space, freight-elevator access, public "
@@ -336,7 +336,7 @@ HAS_TOPICS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000415"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The airport packet is about gates, conveyor systems, customs routing, "
                 "restroom accessibility, construction phasing, and preservation of an "
@@ -354,7 +354,7 @@ HAS_TOPICS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000416"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The investor update stays with enrollment, endpoints, adult versus "
                 "pediatric filing strategy, manufacturing validation, travel freezes, "
@@ -376,4 +376,4 @@ HAS_TOPICS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_TOPICS_STRICT_MODE_EXPECTED_FALSE_CASES)
 @rue.repeat(2)
 async def test_has_topics_strict_mode_expected_false(case: Case) -> None:
-    assert not await has_topics(**case.sut_input_values)
+    assert not await has_topics(**case.input_kwargs)

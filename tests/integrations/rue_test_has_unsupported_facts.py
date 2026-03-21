@@ -8,7 +8,7 @@ from rue.predicates import has_unsupported_facts
 HAS_UNSUPPORTED_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000201"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The regional insurer circulated a settlement memorandum after a "
                 "judge ordered another mediation session in the long-running wildfire "
@@ -66,7 +66,7 @@ HAS_UNSUPPORTED_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000202"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The harbor authority issued a grant briefing after federal reviewers "
                 "asked for another clarification round on the port modernization "
@@ -126,7 +126,7 @@ HAS_UNSUPPORTED_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000203"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The biotechnology company drafted a long investor update after "
                 "completing the second interim look at its respiratory-drug trial. The "
@@ -186,7 +186,7 @@ HAS_UNSUPPORTED_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000204"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The museum foundation prepared a restoration memorandum for donors "
                 "after water infiltrated the north gallery during January storms and "
@@ -248,13 +248,13 @@ HAS_UNSUPPORTED_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_UNSUPPORTED_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES)
 @rue.repeat(2)
 async def test_has_unsupported_facts_normal_mode_expected_true(case: Case) -> None:
-    assert await has_unsupported_facts(**case.sut_input_values)
+    assert await has_unsupported_facts(**case.input_kwargs)
 
 
 HAS_UNSUPPORTED_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000205"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The recap portrays the archive as taxpayer-backed, streetcar-depot "
                 "based, founder-family accommodating, shelf-space protective, and "
@@ -290,7 +290,7 @@ HAS_UNSUPPORTED_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000206"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The summary portrays the creamery as farmer-owned, recall-shadowed, "
                 "fresh-curd centered, regulator-scrutinized, and tourism-exposed. It "
@@ -327,7 +327,7 @@ HAS_UNSUPPORTED_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000207"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The overview describes the proposed supplier campus as airport-"
                 "adjacent, power-hungry, specialty-gas dependent, and exposed to "
@@ -366,7 +366,7 @@ HAS_UNSUPPORTED_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000208"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The summary portrays the terminal as late-1980s, undersized-belted, "
                 "accessibility-deficient, corridor-dependent, and ceramic-panel "
@@ -406,13 +406,13 @@ HAS_UNSUPPORTED_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_UNSUPPORTED_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES)
 @rue.repeat(2)
 async def test_has_unsupported_facts_normal_mode_expected_false(case: Case) -> None:
-    assert not await has_unsupported_facts(**case.sut_input_values)
+    assert not await has_unsupported_facts(**case.input_kwargs)
 
 
 HAS_UNSUPPORTED_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000209"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The housing authority board packet for April combines a rent "
                 "recommendation memo, a capital-maintenance forecast, and a "
@@ -470,7 +470,7 @@ HAS_UNSUPPORTED_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000210"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The airport authority circulated a renovation brief before the March "
                 "finance committee meeting because airlines were arguing over gate "
@@ -527,7 +527,7 @@ HAS_UNSUPPORTED_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000211"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The museum foundation prepared a restoration memorandum for donors "
                 "after water infiltrated the north gallery during January storms and "
@@ -584,7 +584,7 @@ HAS_UNSUPPORTED_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000212"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The harbor authority issued a grant briefing after federal reviewers "
                 "asked for another clarification round on the port modernization "
@@ -646,13 +646,13 @@ HAS_UNSUPPORTED_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_UNSUPPORTED_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES)
 @rue.repeat(2)
 async def test_has_unsupported_facts_strict_mode_expected_true(case: Case) -> None:
-    assert await has_unsupported_facts(**case.sut_input_values)
+    assert await has_unsupported_facts(**case.input_kwargs)
 
 
 HAS_UNSUPPORTED_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000213"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The recap portrays the archive as taxpayer-backed, streetcar-depot "
                 "based, founder-family accommodating, shelf-space protective, and "
@@ -688,7 +688,7 @@ HAS_UNSUPPORTED_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000214"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The recap describes the drug program as inhaled, winter-endpoint "
                 "driven, plant-tethered, analyst-confused, and device-manufacturer "
@@ -722,7 +722,7 @@ HAS_UNSUPPORTED_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000215"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The recap describes the senior campus as deed-restricted and the "
                 "authority as multilingual in tenant communication because notices "
@@ -761,7 +761,7 @@ HAS_UNSUPPORTED_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000216"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The summary portrays the terminal as late-1980s, undersized-belted, "
                 "accessibility-deficient, corridor-dependent, and ceramic-panel "
@@ -801,4 +801,4 @@ HAS_UNSUPPORTED_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_UNSUPPORTED_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES)
 @rue.repeat(2)
 async def test_has_unsupported_facts_strict_mode_expected_false(case: Case) -> None:
-    assert not await has_unsupported_facts(**case.sut_input_values)
+    assert not await has_unsupported_facts(**case.input_kwargs)

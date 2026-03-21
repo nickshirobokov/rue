@@ -8,7 +8,7 @@ from rue.predicates import has_facts
 HAS_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000301"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The recap says the city now carries the utility load for the downtown "
                 "collection in the renovated tram depot, and it notes that curators "
@@ -34,7 +34,7 @@ HAS_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000302"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The summary says that when two wide-body flights overlap, arriving "
                 "international passengers still get pushed through a stopgap corridor "
@@ -59,7 +59,7 @@ HAS_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000303"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The recap says milk from member farms still feeds the Monroe curd "
                 "line at the cooperative creamery that chose a broad voluntary recall "
@@ -83,7 +83,7 @@ HAS_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000304"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The recap says voting control at Orion Marine Systems still sits with "
                 "the founder, two siblings, and the family trust, while the company "
@@ -110,13 +110,13 @@ HAS_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES)
 @rue.repeat(2)
 async def test_has_facts_normal_mode_expected_true(case: Case) -> None:
-    assert await has_facts(**case.sut_input_values)
+    assert await has_facts(**case.input_kwargs)
 
 
 HAS_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000305"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Public Works sent council members a weekend bridge status packet "
                 "after a freight truck strike damaged two gusset plates and forced "
@@ -160,7 +160,7 @@ HAS_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000306"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The short recap of the housing packet focuses on elevator outages, "
                 "insurance pressure after kitchen fires, and the reopening of the "
@@ -193,7 +193,7 @@ HAS_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000307"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The harbor summary talks about neighborhood worries over truck noise, "
                 "light spill from nighttime pile work, and questions about the "
@@ -222,7 +222,7 @@ HAS_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000308"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The investor recap says the annual meeting will move online, travel "
                 "remains frozen except for clinical-site visits, and one floor of the "
@@ -255,13 +255,13 @@ HAS_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES)
 @rue.repeat(2)
 async def test_has_facts_normal_mode_expected_false(case: Case) -> None:
-    assert not await has_facts(**case.sut_input_values)
+    assert not await has_facts(**case.input_kwargs)
 
 
 HAS_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000309"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The recap says city payroll still keeps the river picture house open "
                 "while volunteers handle repertory nights and hand-letter the "
@@ -283,7 +283,7 @@ HAS_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000310"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The recap says the founder and her children still hold the votes at "
                 "the brick mill by the canal, and it notes that rooftop solar now "
@@ -304,7 +304,7 @@ HAS_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000311"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The recap says the Swiss parent finished the buyout and left the "
                 "Basel site doing analytical chemistry mostly for device makers."
@@ -324,7 +324,7 @@ HAS_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000312"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The recap says recurring memberships and small gifts keep the estuary "
                 "preserve running beneath a mature live-oak canopy that shades the "
@@ -349,13 +349,13 @@ HAS_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES)
 @rue.repeat(2)
 async def test_has_facts_strict_mode_expected_true(case: Case) -> None:
-    assert await has_facts(**case.sut_input_values)
+    assert await has_facts(**case.input_kwargs)
 
 
 HAS_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000313"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The donor recap says the museum is still juggling school tours, a "
                 "reduced café menu, postponed gift-shop inventory work, and climate-"
@@ -384,7 +384,7 @@ HAS_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000314"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The memo recap says the archive still needs volunteer parking, "
                 "oversize-map delivery access, a usable freight elevator, and a side "
@@ -412,7 +412,7 @@ HAS_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000315"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The industry memo recap says replacement parts need airport cargo "
                 "apron access, rural lawmakers are protective of bridge money, and "
@@ -442,7 +442,7 @@ HAS_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000316"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The memo recap says plaintiff forums fueled confusion, call-center "
                 "staff extended hours after the leak, and outside counsel still "
@@ -474,4 +474,4 @@ HAS_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES)
 @rue.repeat(2)
 async def test_has_facts_strict_mode_expected_false(case: Case) -> None:
-    assert not await has_facts(**case.sut_input_values)
+    assert not await has_facts(**case.input_kwargs)

@@ -4,11 +4,13 @@ from typing_extensions import TypeVar
 from rue.testing.models import Case, CaseGroup, CaseGroupIterateModifier, CaseIterateModifier
 
 
+InputsT = TypeVar("InputsT", default=dict[str, Any])
 RefsT = TypeVar("RefsT", default=dict[str, Any])
+GroupRefsT = TypeVar("GroupRefsT", default=dict[str, Any])
 
 
 def iter_cases(
-    *cases: Case[RefsT],
+    *cases: Case[InputsT, RefsT],
     min_passes: int | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator to run a test function for each case in the provided sequence.
@@ -69,7 +71,7 @@ def iter_cases(
 
 
 def iter_case_groups(
-    *groups: CaseGroup[Any, Any],
+    *groups: CaseGroup[InputsT, RefsT, GroupRefsT],
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator to run a test function for each case group."""
     groups_list = list(groups)

@@ -37,31 +37,35 @@ class ExampleReferences(BaseModel):
     min_len: int
 
 
+class ExampleInputs(BaseModel):
+    prompt: str
+
+
 # Define all cases
 all_cases = [
-    Case[ExampleReferences](
+    Case[ExampleInputs, ExampleReferences](
         tags={"geography"},
         metadata={"verbose": False},
         references=ExampleReferences(expected="Paris", max_len=10, min_len=1),
-        sut_input_values={"prompt": "What is the capital of France? Be concise."},
+        inputs=ExampleInputs(prompt="What is the capital of France? Be concise."),
     ),
-    Case[ExampleReferences](
+    Case[ExampleInputs, ExampleReferences](
         tags={"geography"},
         metadata={"verbose": True},
         references=ExampleReferences(expected="Berlin", max_len=10000, min_len=20),
-        sut_input_values={"prompt": "What is the capital of Germany? Be verbose."},
+        inputs=ExampleInputs(prompt="What is the capital of Germany? Be verbose."),
     ),
-    Case[ExampleReferences](
+    Case[ExampleInputs, ExampleReferences](
         tags={"music"},
         metadata={"verbose": True},
         references=ExampleReferences(expected="Metallica", max_len=10000, min_len=20),
-        sut_input_values={"prompt": "What is the best rock band? Be verbose."},
+        inputs=ExampleInputs(prompt="What is the best rock band? Be verbose."),
     ),
-    Case[ExampleReferences](
+    Case[ExampleInputs, ExampleReferences](
         tags={"music"},
         metadata={"verbose": False},
         references=ExampleReferences(expected="Lady Gaga", max_len=10, min_len=1),
-        sut_input_values={"prompt": "What is the best pop band? Be concise."},
+        inputs=ExampleInputs(prompt="What is the best pop band? Be concise."),
     ),
 ]
 
@@ -71,8 +75,8 @@ all_cases = [
 
 # Get output for each case input and assert against references
 @rue.iter_cases(*all_cases)
-def test_iter_cases_basic_usage(case: Case[ExampleReferences]):
-    response = simple_chatbot(**case.sut_input_values)
+def test_iter_cases_basic_usage(case: Case[ExampleInputs, ExampleReferences]):
+    response = simple_chatbot(**case.input_kwargs)
 
     assert case.references.expected in response
     assert len(response) <= case.references.max_len
@@ -81,8 +85,8 @@ def test_iter_cases_basic_usage(case: Case[ExampleReferences]):
 
 # Filter cases in code
 @rue.iter_cases(*[c for c in all_cases if "geography" in c.tags])
-def test_iter_cases_only_geography(case: Case[ExampleReferences]):
-    response = simple_chatbot(**case.sut_input_values)
+def test_iter_cases_only_geography(case: Case[ExampleInputs, ExampleReferences]):
+    response = simple_chatbot(**case.input_kwargs)
 
     assert case.references.expected in response
     assert len(response) <= case.references.max_len
@@ -96,8 +100,8 @@ def chatbot():
 
 
 @rue.iter_cases(*all_cases)
-def test_iter_cases_with_validation(case: Case[ExampleReferences], chatbot):
-    response = chatbot(**case.sut_input_values)
+def test_iter_cases_with_validation(case: Case[ExampleInputs, ExampleReferences], chatbot):
+    response = chatbot(**case.input_kwargs)
 
     assert case.references.expected in response
     assert len(response) <= case.references.max_len

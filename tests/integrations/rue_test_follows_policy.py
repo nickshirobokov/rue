@@ -8,7 +8,7 @@ from rue.predicates import follows_policy
 FOLLOWS_POLICY_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000601"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Agent: Thank you for reporting the outage in Building Four. I pulled "
                 "the incident notes before replying, and the current information is "
@@ -36,7 +36,7 @@ FOLLOWS_POLICY_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000602"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Advisor: I appreciate you sending the photos of the bumper damage and "
                 "the parking-garage ticket. I logged both attachments under your claim "
@@ -60,7 +60,7 @@ FOLLOWS_POLICY_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000603"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Nurse: Please call emergency services if the chest pressure returns, "
                 "if your breathing becomes worse, or if the numbness spreads into your "
@@ -82,7 +82,7 @@ FOLLOWS_POLICY_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000604"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Specialist: I can offer a monthly payment arrangement instead of a "
                 "single withdrawal this week. The draft schedule I prepared would keep "
@@ -108,13 +108,13 @@ FOLLOWS_POLICY_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*FOLLOWS_POLICY_NORMAL_MODE_EXPECTED_TRUE_CASES)
 @rue.repeat(2)
 async def test_follows_policy_normal_mode_expected_true(case: Case) -> None:
-    assert await follows_policy(**case.sut_input_values)
+    assert await follows_policy(**case.input_kwargs)
 
 
 FOLLOWS_POLICY_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000605"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "CompetitorX is unreliable, understaffed, and probably the reason your "
                 "team keeps reopening tickets. Our platform is the best option in the "
@@ -135,7 +135,7 @@ FOLLOWS_POLICY_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000606"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Internal severity SEV-1 remains active because the database failover "
                 "missed one billing shard and the overnight retry job is now four "
@@ -156,7 +156,7 @@ FOLLOWS_POLICY_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000607"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Here is the employee's full record: Maya Chen, born April 9, 1987, "
                 "lives at 1187 Park Meridian Lane and used account number 442781 to "
@@ -176,7 +176,7 @@ FOLLOWS_POLICY_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000608"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Refund approved. You will definitely have the money back tomorrow no "
                 "matter what your bank does, because our payments vendor promised they "
@@ -199,13 +199,13 @@ FOLLOWS_POLICY_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*FOLLOWS_POLICY_NORMAL_MODE_EXPECTED_FALSE_CASES)
 @rue.repeat(2)
 async def test_follows_policy_normal_mode_expected_false(case: Case) -> None:
-    assert not await follows_policy(**case.sut_input_values)
+    assert not await follows_policy(**case.input_kwargs)
 
 
 FOLLOWS_POLICY_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000609"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Coordinator: I confirm that your hearing request is now on the docket "
                 "for next Thursday and that the exhibits you uploaded this morning were "
@@ -226,7 +226,7 @@ FOLLOWS_POLICY_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000610"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Dispatcher: I have already sent a tow unit to your location and noted "
                 "that the vehicle is in the right shoulder with flashers on. The driver "
@@ -247,7 +247,7 @@ FOLLOWS_POLICY_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000611"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Archivist: I found the ledger entry you asked about and confirmed that "
                 "the signature on the 1912 donation form matches the copy held in the "
@@ -267,7 +267,7 @@ FOLLOWS_POLICY_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000612"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Planner: I can move the site walk from Tuesday to Friday and keep the "
                 "same stormwater engineer on the visit. That change will give the "
@@ -291,13 +291,13 @@ FOLLOWS_POLICY_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*FOLLOWS_POLICY_STRICT_MODE_EXPECTED_TRUE_CASES)
 @rue.repeat(2)
 async def test_follows_policy_strict_mode_expected_true(case: Case) -> None:
-    assert await follows_policy(**case.sut_input_values)
+    assert await follows_policy(**case.input_kwargs)
 
 
 FOLLOWS_POLICY_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000613"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "This is absolutely the easiest fix you will ever make. Just delete "
                 "their old integration, copy our private beta key into production, and "
@@ -316,7 +316,7 @@ FOLLOWS_POLICY_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000614"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The claimant lives at 44 Harbor Trace, was born on January 3, 1979, "
                 "and uses account ending 882194 for reimbursements. We denied the "
@@ -335,7 +335,7 @@ FOLLOWS_POLICY_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000615"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "I guarantee the replacement inverter will arrive before noon "
                 "tomorrow, because our freight partner always honors my requests and "
@@ -354,7 +354,7 @@ FOLLOWS_POLICY_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000616"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Severity code RED-9 remains active, the failover script is still "
                 "dropping ledger writes, and we suspect the vendor patch introduced a "
@@ -378,4 +378,4 @@ FOLLOWS_POLICY_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*FOLLOWS_POLICY_STRICT_MODE_EXPECTED_FALSE_CASES)
 @rue.repeat(2)
 async def test_follows_policy_strict_mode_expected_false(case: Case) -> None:
-    assert not await follows_policy(**case.sut_input_values)
+    assert not await follows_policy(**case.input_kwargs)

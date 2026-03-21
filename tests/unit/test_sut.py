@@ -5,6 +5,7 @@ import inspect
 import json
 
 import pytest
+from pydantic import BaseModel
 from pydantic_core import ValidationError
 
 from rue.resources import ResourceResolver, Scope, clear_registry, get_registry, resource
@@ -153,7 +154,7 @@ class TestSutResolution:
 
     @pytest.mark.asyncio
     async def test_validate_cases_applies_to_resolved_callable_signature(self):
-        cases = [Case(sut_input_values={"x": 1, "y": 2})]
+        cases = [Case(inputs={"x": 1, "y": 2})]
 
         @sut(validate_cases=cases)
         def adder():
@@ -168,8 +169,48 @@ class TestSutResolution:
         assert resolved(2, 3) == 5
 
     @pytest.mark.asyncio
+    async def test_validate_cases_applies_to_typed_inputs(self):
+        class AdderInputs(BaseModel):
+            x: int
+            y: int
+
+        cases = [Case[AdderInputs, dict[str, int]](inputs=AdderInputs(x=1, y=2))]
+
+        @sut(validate_cases=cases)
+        def adder():
+            def run(x: int, y: int) -> int:
+                return x + y
+
+            return run
+
+        resolver = ResourceResolver(get_registry())
+        resolved = await resolver.resolve("adder")
+
+        assert resolved(**cases[0].input_kwargs) == 3
+
+    @pytest.mark.asyncio
     async def test_validate_cases_raises_on_invalid_case(self):
-        cases = [Case(sut_input_values={"x": "not-an-int"})]
+        cases = [Case(inputs={"x": "not-an-int"})]
+
+        @sut(validate_cases=cases)
+        def increment():
+            def run(x: int) -> int:
+                return x + 1
+
+            return run
+
+        resolver = ResourceResolver(get_registry())
+        with pytest.raises(RuntimeError, match="Hook on_resolve failed") as exc:
+            await resolver.resolve("increment")
+
+        assert isinstance(exc.value.__cause__, ValidationError)
+
+    @pytest.mark.asyncio
+    async def test_validate_cases_raises_on_invalid_typed_case(self):
+        class IncrementInputs(BaseModel):
+            x: str
+
+        cases = [Case[IncrementInputs, dict[str, int]](inputs=IncrementInputs(x="not-an-int"))]
 
         @sut(validate_cases=cases)
         def increment():
@@ -190,7 +231,7 @@ class TestSutResolution:
             def run(self, x: int) -> int:
                 return x * 2
 
-        cases = [Case(sut_input_values={"x": 7})]
+        cases = [Case(inputs={"x": 7})]
 
         @sut(method="run", validate_cases=cases)
         def pipeline():

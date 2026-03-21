@@ -7,7 +7,7 @@ title: "Case"
 Using `Case` enables:
 - Iterating one test function over many scenarios with `@rue.iter_cases(...)`
 - Grouping related cases with `CaseGroup` and iterating with `@rue.iter_case_groups(...)`
-- Keeping inputs in `sut_input_values` (to call `sut(**case.sut_input_values)`)
+- Keeping inputs in `inputs` and calling SUTs with `sut(**case.input_kwargs)`
 - Storing reference data in `references` (typed or untyped)
 - Tagging and filtering with `tags`, and attaching context with `metadata`
 
@@ -23,13 +23,13 @@ def classifier(text: str) -> str:
 
 
 case1 = Case(
-    sut_input_values={"text": "I love this"},
+    inputs={"text": "I love this"},
     references={"expected_label": "positive"},
     tags={"smoke"},
 )
 
 case2 = Case(
-    sut_input_values={"text": "This is bad"},
+    inputs={"text": "This is bad"},
     references={"expected_label": "negative"},
     tags={"regression"},
 )
@@ -37,7 +37,7 @@ case2 = Case(
 
 @rue.iter_cases(*[c for c in (case1, case2) if "smoke" in c.tags])
 def test_classifier(case: Case):
-    label = classifier(**case.sut_input_values)
+    label = classifier(**case.input_kwargs)
     assert label == case.references["expected_label"]
 ```
 
@@ -45,19 +45,53 @@ def test_classifier(case: Case):
 
 ### Adding input values
 
-`sut_input_values` is a dictionary of keyword arguments that will be passed to your SUT:
+`inputs` stores the keyword arguments for your SUT. `sut_input_values` was renamed to `inputs`.
 
 ```python
 from rue import Case
 
-case = Case(sut_input_values={"prompt": "Hello"})
+case = Case(inputs={"prompt": "Hello"})
+```
+
+Use `case.input_kwargs` whenever you need a plain kwargs dict for `**...` expansion:
+
+```python
+reply = chatbot(**case.input_kwargs)
+```
+
+### Typed inputs
+
+Use `Case[InputsT, RefsT]` when you want runtime validation and IDE support for both inputs and references.
+
+```python
+from pydantic import BaseModel
+from rue import Case
+
+
+class AgentReference(BaseModel):
+    expected_keywords: list[str]
+
+
+class AgentInputs(BaseModel):
+    prompt: str
+
+
+case = Case[AgentInputs, AgentReference](
+    inputs=AgentInputs(prompt="Say hello"),
+    references=AgentReference(expected_keywords=["hello"]),
+)
+
+assert case.inputs.prompt == "Say hello"
+assert case.input_kwargs == {"prompt": "Say hello"}
 ```
 
 ### Typed references
 
-Use `Case[YourModel]` to get IDE autocomplete and runtime validation of `references`.
+Use `Case[dict[str, Any], YourModel]` when you want typed references but plain dict inputs.
 
 ```python
+from typing import Any
+
 from pydantic import BaseModel
 from rue import Case
 
@@ -67,8 +101,8 @@ class AgentReference(BaseModel):
     min_response_length: int = 10
 
 
-case = Case[AgentReference](
-    sut_input_values={"prompt": "Say hello"},
+case = Case[dict[str, Any], AgentReference](
+    inputs={"prompt": "Say hello"},
     references=AgentReference(
         expected_keywords=["hello"],
         min_response_length=5
@@ -86,7 +120,7 @@ The default `Case` uses untyped references (a dict) and `references` defaults to
 from rue import Case
 
 case = Case(
-    sut_input_values={"x": 2},
+    inputs={"x": 2},
     references={"expected": 4},
 )
 
@@ -107,7 +141,7 @@ from rue import Case
 
 case = Case(
     id=UUID("00000000-0000-0000-0000-000000000001"),
-    sut_input_values={"x": 1},
+    inputs={"x": 1},
 )
 ```
 
@@ -119,7 +153,7 @@ Use `metadata` for extra context and reporting. Values must be JSON-like primiti
 from rue import Case
 
 case = Case(
-    sut_input_values={"prompt": "Hello"},
+    inputs={"prompt": "Hello"},
     metadata={"priority": "high", "latency_budget_ms": 200},
 )
 ```
@@ -132,8 +166,8 @@ Use `tags` to label cases and then select subsets with normal Python:
 from rue import Case
 
 cases = [
-    Case(sut_input_values={"x": 1}, tags={"smoke"}),
-    Case(sut_input_values={"x": 2}, tags={"regression"}),
+    Case(inputs={"x": 1}, tags={"smoke"}),
+    Case(inputs={"x": 2}, tags={"regression"}),
 ]
 
 smoke_cases = [c for c in cases if "smoke" in c.tags]
@@ -149,8 +183,8 @@ from rue import Case
 
 
 cases = [
-    Case(sut_input_values={"prompt": "Hello", "temperature": 0.5}),
-    Case(sut_input_values={"prompt": "Hi"}),
+    Case(inputs={"prompt": "Hello", "temperature": 0.5}),
+    Case(inputs={"prompt": "Hi"}),
 ]
 
 
@@ -164,7 +198,7 @@ def my_agent():
 
 @rue.iter_cases(*cases)
 def test_my_agent(case: Case, my_agent):
-    my_agent(**case.sut_input_values)
+    my_agent(**case.input_kwargs)
 ```
 
 ## CaseGroup
@@ -185,8 +219,8 @@ from rue import Case, CaseGroup
 geography = CaseGroup(
     name="geography",
     cases=[
-        Case(sut_input_values={"prompt": "Capital of France?"}, references={"expected": "Paris"}),
-        Case(sut_input_values={"prompt": "Capital of Germany?"}, references={"expected": "Berlin"}),
+        Case(inputs={"prompt": "Capital of France?"}, references={"expected": "Paris"}),
+        Case(inputs={"prompt": "Capital of Germany?"}, references={"expected": "Berlin"}),
     ],
     min_passes=2,  # strict: both must pass
 )
@@ -194,8 +228,8 @@ geography = CaseGroup(
 music = CaseGroup(
     name="music",
     cases=[
-        Case(sut_input_values={"prompt": "Best rock band?"}, references={"expected": "Metallica"}),
-        Case(sut_input_values={"prompt": "Best pop artist?"}, references={"expected": "Lady Gaga"}),
+        Case(inputs={"prompt": "Best rock band?"}, references={"expected": "Metallica"}),
+        Case(inputs={"prompt": "Best pop artist?"}, references={"expected": "Lady Gaga"}),
     ],
     min_passes=1,  # tolerant: at least one must pass
 )
@@ -203,7 +237,7 @@ music = CaseGroup(
 
 @rue.iter_case_groups(geography, music)
 def test_chatbot(group: CaseGroup, case: Case, chatbot):
-    response = chatbot(**case.sut_input_values)
+    response = chatbot(**case.input_kwargs)
     assert case.references["expected"] in response
 ```
 
@@ -215,7 +249,7 @@ The test passes only if **every group** meets its own `min_passes` threshold.
 
 ### Typed group references
 
-Just like `Case[RefsT]`, `CaseGroup` accepts two type parameters: one for case-level references and one for group-level references.
+`CaseGroup` accepts three type parameters: case-level inputs, case-level references, and group-level references.
 
 ```python
 from pydantic import BaseModel
@@ -230,12 +264,16 @@ class GroupRefs(BaseModel):
     stop_keywords: list[str]
 
 
-group = CaseGroup[CaseRefs, GroupRefs](
+class CaseInputs(BaseModel):
+    prompt: str
+
+
+group = CaseGroup[CaseInputs, CaseRefs, GroupRefs](
     name="geography",
     references=GroupRefs(stop_keywords=["Lol", "Kek"]),
     cases=[
-        Case[CaseRefs](
-            sut_input_values={"prompt": "Capital of France?"},
+        Case[CaseInputs, CaseRefs](
+            inputs=CaseInputs(prompt="Capital of France?"),
             references=CaseRefs(expected="Paris"),
         ),
     ],
@@ -287,11 +325,11 @@ If you're hardcoding inputs directly in your test functions, you probably don't 
 from rue import Case, iter_cases
 
 # Hardcoding simple data in Case objects is unnecessary
-cases = [Case(sut_input_values={"x": 1}), Case(sut_input_values={"x": 2})]
+cases = [Case(inputs={"x": 1}), Case(inputs={"x": 2})]
 
 @iter_cases(*cases)
 def test_simple(case, add_one):
-    result = add_one(**case.sut_input_values)
+    result = add_one(**case.input_kwargs)
     assert result
 ```
 
@@ -306,7 +344,7 @@ def test_simple(x, add_one):
     assert result
 ```
 
-When loading cases from JSON/APIs, prefer `Case[YourModel]` (typed `references`) and validate inputs up-front with `@rue.sut(validate_cases=...)`.
+When loading cases from JSON/APIs, prefer typed cases such as `Case[YourInputs, YourRefs]` when structure matters, and validate inputs up-front with `@rue.sut(validate_cases=...)`.
 
 ### 2. Use tags and metadata for dynamic case selection
 
@@ -319,12 +357,12 @@ import os
 
 cases = [
     Case(
-        sut_input_values={"text": "short"},
+        inputs={"text": "short"},
         tags={"smoke", "fast"},
         metadata={"execution_time_ms": 50}
     ),
     Case(
-        sut_input_values={"text": "very long input" * 100},
+        inputs={"text": "very long input" * 100},
         tags={"regression", "slow"},
         metadata={"execution_time_ms": 5000}
     ),
@@ -340,5 +378,5 @@ else:
 
 @rue.iter_cases(*test_cases)
 def test_text_processor(case: Case, processor):
-    processor(**case.sut_input_values)
+    processor(**case.input_kwargs)
 ```

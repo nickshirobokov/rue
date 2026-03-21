@@ -8,7 +8,7 @@ from rue.predicates import has_conflicting_facts
 HAS_CONFLICTING_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000101"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The airport authority circulated a renovation brief before the March "
                 "finance committee meeting because airlines were arguing over gate "
@@ -66,7 +66,7 @@ HAS_CONFLICTING_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000102"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "Public Works sent council members a weekend bridge status packet "
                 "after a freight truck strike damaged two gusset plates and forced "
@@ -123,7 +123,7 @@ HAS_CONFLICTING_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000103"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The biotechnology company drafted a long investor update after "
                 "completing the second interim look at its respiratory-drug trial. The "
@@ -183,7 +183,7 @@ HAS_CONFLICTING_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000104"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The housing authority board packet for April combines a rent "
                 "recommendation memo, a capital-maintenance forecast, and a "
@@ -247,13 +247,13 @@ HAS_CONFLICTING_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_CONFLICTING_FACTS_NORMAL_MODE_EXPECTED_TRUE_CASES)
 @rue.repeat(2)
 async def test_has_conflicting_facts_normal_mode_expected_true(case: Case) -> None:
-    assert await has_conflicting_facts(**case.sut_input_values)
+    assert await has_conflicting_facts(**case.input_kwargs)
 
 
 HAS_CONFLICTING_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000105"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The rail maintenance manual for the harbor spur includes a "
                 "troubleshooting note about the old signal relay cabinet at Junction "
@@ -309,7 +309,7 @@ HAS_CONFLICTING_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000106"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The repertory theater's wardrobe report explains why the lead actor's "
                 "parade coat appears to have different colors across rehearsal photos, "
@@ -364,7 +364,7 @@ HAS_CONFLICTING_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000107"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The commuter rail operator sent photographers and museum volunteers a "
                 "note about Car 412 because the train spent one week carrying a "
@@ -417,7 +417,7 @@ HAS_CONFLICTING_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000108"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The coast guard station's buoy handbook contains a short briefing on "
                 "the outer harbor beacon because apprentice coxswains kept submitting "
@@ -472,13 +472,13 @@ HAS_CONFLICTING_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_CONFLICTING_FACTS_NORMAL_MODE_EXPECTED_FALSE_CASES)
 @rue.repeat(2)
 async def test_has_conflicting_facts_normal_mode_expected_false(case: Case) -> None:
-    assert not await has_conflicting_facts(**case.sut_input_values)
+    assert not await has_conflicting_facts(**case.input_kwargs)
 
 
 HAS_CONFLICTING_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000109"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The museum foundation prepared a restoration memorandum for donors "
                 "after water infiltrated the north gallery during January storms and "
@@ -538,7 +538,7 @@ HAS_CONFLICTING_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000110"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The harbor authority issued a grant briefing after federal reviewers "
                 "asked for another clarification round on the port modernization "
@@ -597,7 +597,7 @@ HAS_CONFLICTING_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000111"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "A regional history archive assembled a relocation brief after its "
                 "volunteer board agreed to leave a crumbling lodge on the edge of the "
@@ -657,7 +657,7 @@ HAS_CONFLICTING_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000112"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The governor's office commissioned a strategy memo on semiconductor "
                 "expansion because two equipment suppliers are considering sites near "
@@ -721,13 +721,13 @@ HAS_CONFLICTING_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_CONFLICTING_FACTS_STRICT_MODE_EXPECTED_TRUE_CASES)
 @rue.repeat(2)
 async def test_has_conflicting_facts_strict_mode_expected_true(case: Case) -> None:
-    assert await has_conflicting_facts(**case.sut_input_values)
+    assert await has_conflicting_facts(**case.input_kwargs)
 
 
 HAS_CONFLICTING_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     Case(
         id=UUID("00000000-0000-0000-0000-000000000113"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The rail maintenance manual for the harbor spur includes a "
                 "troubleshooting note about the old signal relay cabinet at Junction "
@@ -783,7 +783,7 @@ HAS_CONFLICTING_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000114"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The repertory theater's wardrobe report explains why the lead actor's "
                 "parade coat appears to have different colors across rehearsal photos, "
@@ -838,7 +838,7 @@ HAS_CONFLICTING_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000115"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The commuter rail operator sent photographers and museum volunteers a "
                 "note about Car 412 because the train spent one week carrying a "
@@ -892,7 +892,7 @@ HAS_CONFLICTING_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
     ),
     Case(
         id=UUID("00000000-0000-0000-0000-000000000116"),
-        sut_input_values={
+        inputs={
             "actual": (
                 "The coast guard station's buoy handbook contains a short briefing on "
                 "the outer harbor beacon because apprentice coxswains kept submitting "
@@ -948,4 +948,4 @@ HAS_CONFLICTING_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES: tuple[Case, ...] = (
 @rue.iter_cases(*HAS_CONFLICTING_FACTS_STRICT_MODE_EXPECTED_FALSE_CASES)
 @rue.repeat(2)
 async def test_has_conflicting_facts_strict_mode_expected_false(case: Case) -> None:
-    assert not await has_conflicting_facts(**case.sut_input_values)
+    assert not await has_conflicting_facts(**case.input_kwargs)

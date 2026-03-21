@@ -35,7 +35,7 @@ class ParametrizeModifier:
 class CaseIterateModifier:
     """Run the inner execution for each case."""
 
-    cases: tuple[Case[Any], ...]
+    cases: tuple[Case[Any, Any], ...]
     min_passes: int
 
 
@@ -43,7 +43,7 @@ class CaseIterateModifier:
 class CaseGroupIterateModifier:
     """Run the inner execution for each case group."""
 
-    groups: tuple[CaseGroup[Any, Any], ...]
+    groups: tuple[CaseGroup[Any, Any, Any], ...]
 
 
 Modifier = RepeatModifier | ParametrizeModifier | CaseIterateModifier | CaseGroupIterateModifier

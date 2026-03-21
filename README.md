@@ -60,20 +60,20 @@ class Refs(BaseModel):
     expected_tool: str | None = None
 
 cases = [
-    Case(sut_input_values={"prompt": "When are you open?"}, references=Refs(kb="Store hours: 9 AM - 6 PM, Monday-Saturday. Closed Sundays.")),
-    Case(sut_input_values={"prompt": "Return policy?"}, references=Refs(kb="30-day returns with receipt.")),
-    Case(sut_input_values={"prompt": "How much for the Nike Air Max?"}, references=Refs(kb="Nike Air Max: $129.99", expected_tool="offer_product")),
+    Case(inputs={"prompt": "When are you open?"}, references=Refs(kb="Store hours: 9 AM - 6 PM, Monday-Saturday. Closed Sundays.")),
+    Case(inputs={"prompt": "Return policy?"}, references=Refs(kb="30-day returns with receipt.")),
+    Case(inputs={"prompt": "How much for the Nike Air Max?"}, references=Refs(kb="Nike Air Max: $129.99", expected_tool="offer_product")),
 ]
 
 @rue.iter_cases(cases)
 @rue.repeat(3)
 async def test_chatbot_no_hallucinations(
-    case: Case[Refs],
+    case: Case[dict[str, str], Refs],
     store_chatbot,
     accuracy: Metric,
     trace_context):
     """AI agent relies on knowledge base and tool calls for transactional questions"""
-    response = store_chatbot(**case.sut_input_values)
+    response = store_chatbot(**case.input_kwargs)
 
     # Verify the answer don't have any unsupported facts
     with metrics(accuracy):

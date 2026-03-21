@@ -4,6 +4,7 @@ import asyncio
 import os
 import time
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -470,11 +471,11 @@ class TestConcurrency:
     def _make_case_iterated_item(
         *,
         name: str,
-        cases: tuple[Case[dict[str, float]], ...],
+        cases: tuple[Case[dict[str, float], dict[str, Any]], ...],
         min_passes: int,
     ) -> TestItem:
         async def case_iterated_test(case) -> None:
-            await asyncio.sleep(case.sut_input_values["delay"])
+            await asyncio.sleep(case.input_kwargs["delay"])
 
         return TestItem(
             fn=case_iterated_test,
@@ -491,11 +492,11 @@ class TestConcurrency:
     def _make_case_group_iterated_item(
         *,
         name: str,
-        groups: tuple[CaseGroup[dict[str, float], dict[str, float]], ...],
+        groups: tuple[CaseGroup[dict[str, float], dict[str, Any], dict[str, Any]], ...],
     ) -> TestItem:
         async def case_group_iterated_test(group, case) -> None:
             _ = group
-            await asyncio.sleep(case.sut_input_values["delay"])
+            await asyncio.sleep(case.input_kwargs["delay"])
 
         return TestItem(
             fn=case_group_iterated_test,
@@ -657,15 +658,15 @@ class TestConcurrency:
         cases = (
             Case(
                 id=UUID("00000000-0000-0000-0000-000000000001"),
-                sut_input_values={"delay": 0.15},
+                inputs={"delay": 0.15},
             ),
             Case(
                 id=UUID("00000000-0000-0000-0000-000000000002"),
-                sut_input_values={"delay": 0.01},
+                inputs={"delay": 0.01},
             ),
             Case(
                 id=UUID("00000000-0000-0000-0000-000000000003"),
-                sut_input_values={"delay": 0.05},
+                inputs={"delay": 0.05},
             ),
         )
         item = self._make_case_iterated_item(
@@ -701,7 +702,7 @@ class TestConcurrency:
                 cases=[
                     Case(
                         id=UUID("00000000-0000-0000-0000-000000000011"),
-                        sut_input_values={"delay": 0.15},
+                        inputs={"delay": 0.15},
                     )
                 ],
                 min_passes=1,
@@ -711,7 +712,7 @@ class TestConcurrency:
                 cases=[
                     Case(
                         id=UUID("00000000-0000-0000-0000-000000000012"),
-                        sut_input_values={"delay": 0.01},
+                        inputs={"delay": 0.01},
                     )
                 ],
                 min_passes=1,
@@ -721,7 +722,7 @@ class TestConcurrency:
                 cases=[
                     Case(
                         id=UUID("00000000-0000-0000-0000-000000000013"),
-                        sut_input_values={"delay": 0.05},
+                        inputs={"delay": 0.05},
                     )
                 ],
                 min_passes=1,

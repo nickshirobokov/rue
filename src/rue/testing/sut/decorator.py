@@ -29,7 +29,7 @@ def sut(
     *,
     scope: Scope | str = Scope.CASE,
     method: str = "__call__",
-    validate_cases: list[Case[Any]] | None = None,
+    validate_cases: list[Case[Any, Any]] | None = None,
 ) -> Any:
     """Register a callable as a traced system-under-test resource.
 
@@ -99,7 +99,7 @@ def sut(
     )
 
 
-def _validate_cases(cases: Sequence[Case[Any]], sut: Callable[..., Any]):
+def _validate_cases(cases: Sequence[Case[Any, Any]], sut: Callable[..., Any]):
     schema = generate_arguments_schema(
         sut,
         parameters_callback=(
@@ -108,7 +108,7 @@ def _validate_cases(cases: Sequence[Case[Any]], sut: Callable[..., Any]):
     )
     validator = SchemaValidator(schema)
     for case in cases:
-        input_values = case.sut_input_values or {}
+        input_values = case.input_kwargs
         parsed_args = ArgsKwargs(args=(), kwargs=input_values)
         validator.validate_python(parsed_args)
 
