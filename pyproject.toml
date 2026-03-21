@@ -112,3 +112,6 @@ convention = "google"
 plugins = ["pydantic.mypy"]
 strict = true
 enable_error_code = "deprecated"
+
+[tool.rue.predicates.all_predicates]
+model = "openai:gpt-4o-mini"

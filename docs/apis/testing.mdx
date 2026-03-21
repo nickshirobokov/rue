@@ -541,7 +541,7 @@ class Runner:
         enable_tracing: bool = False,
         trace_output: Path | str | None = None,
         capture_output: bool = True,
-        save_to_db: bool = True,
+        db_enabled: bool = True,
         db_path: Path | str | None = None,
         run_id: UUID | str | None = None,
     ) -> None: ...
@@ -565,7 +565,7 @@ class Runner:
 - `run_id` accepts either a `UUID` object or UUID string.
 - `run()` `run_id` overrides constructor `run_id`.
 - If neither is provided, Rue auto-generates a new UUID.
-- If `save_to_db=True` and the selected run UUID already exists, `run()` raises `ValueError`.
+- If `db_enabled=True` and the selected run UUID already exists, `run()` raises `ValueError`.
 - `run_id_exists()` can be used as a preflight check before execution.
 
 **Example:**

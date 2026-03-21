@@ -225,7 +225,7 @@ await runner.run(
 Run IDs are currently configured only via CLI `--run-id` or Python API parameters. They are not
 read from `pyproject.toml`, `rue.toml`, or environment variables.
 
-If `save_to_db=True` and the selected run UUID already exists, `Runner.run()` raises
+If `db_enabled=True` and the selected run UUID already exists, `Runner.run()` raises
 `ValueError`.
 
 ## Configuration Files

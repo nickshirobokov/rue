@@ -2,12 +2,19 @@ from pathlib import Path
 
 import pytest
 
-from rue.config import load_config
+from rue.config import load_config, reset_load_config_cache
 
 
-def test_load_config_prefers_rue_toml(tmp_path: Path):
-    project = tmp_path
-    pyproject = project / "pyproject.toml"
+@pytest.fixture(autouse=True)
+def _reset_load_config_cache() -> None:
+    reset_load_config_cache()
+    yield
+    reset_load_config_cache()
+
+
+def test_load_config_prefers_rue_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+    pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
         """
 [tool.rue]
@@ -18,7 +25,7 @@ verbosity = 1
 addopts = ["-q"]
 """.strip()
     )
-    test_file = project / "rue.toml"
+    test_file = tmp_path / "rue.toml"
     test_file.write_text(
         """
 test-paths = ["examples"]
@@ -26,11 +33,11 @@ include-tags = ["smoke"]
 exclude-tags = ["slow"]
 keyword = "chatbot"
 db-path = ".rue/custom.db"
-save-to-db = false
+db-enabled = false
 """.strip()
     )
 
-    config = load_config(project)
+    config = load_config()
 
     assert config.test_paths == ["examples"]
     assert config.include_tags == ["smoke"]
@@ -40,12 +47,12 @@ save-to-db = false
     assert config.verbosity == 1
     assert config.addopts == ["-q"]
     assert config.db_path == ".rue/custom.db"
-    assert config.save_to_db is False
+    assert config.db_enabled is False
 
 
-def test_load_config_defaults_when_missing(tmp_path: Path):
-    project = tmp_path
-    config = load_config(project)
+def test_load_config_defaults_when_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+    config = load_config()
     assert config.test_paths == ["."]
     assert config.include_tags == []
     assert config.exclude_tags == []
@@ -54,11 +61,11 @@ def test_load_config_defaults_when_missing(tmp_path: Path):
     assert config.verbosity == 0
     assert config.addopts == []
     assert config.db_path is None
-    assert config.save_to_db is True
+    assert config.db_enabled is True
 
 
 @pytest.mark.parametrize(
-    "field,expected",
+    ("field", "expected"),
     [
         ("test_paths", ["."]),
         ("include_tags", []),
@@ -68,9 +75,12 @@ def test_load_config_defaults_when_missing(tmp_path: Path):
         ("verbosity", 0),
         ("addopts", []),
         ("db_path", None),
-        ("save_to_db", True),
+        ("db_enabled", True),
     ],
 )
-def test_config_default_values(tmp_path: Path, field: str, expected):
-    config = load_config(tmp_path)
+def test_config_default_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, expected: object
+):
+    monkeypatch.chdir(tmp_path)
+    config = load_config()
     assert getattr(config, field) == expected

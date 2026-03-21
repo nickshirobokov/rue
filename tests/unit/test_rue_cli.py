@@ -13,7 +13,7 @@ from rue.cli import (
     _resolve_reporters,
     _run_tests,
 )
-from rue.config import Config, DEFAULT_CONFIG
+from rue.config import Config
 from rue.reports import ConsoleReporter
 from rue.storage.sqlite import SQLiteStore
 from rue.testing.discovery import TestItem, collect_static
@@ -164,22 +164,7 @@ class TestResolveReporters:
         return Namespace(**defaults)
 
     def _make_config(self, **kwargs) -> Config:
-        return Config(
-            test_paths=list(DEFAULT_CONFIG.test_paths),
-            include_tags=list(DEFAULT_CONFIG.include_tags),
-            exclude_tags=list(DEFAULT_CONFIG.exclude_tags),
-            keyword=DEFAULT_CONFIG.keyword,
-            maxfail=DEFAULT_CONFIG.maxfail,
-            verbosity=DEFAULT_CONFIG.verbosity,
-            addopts=list(DEFAULT_CONFIG.addopts),
-            concurrency=DEFAULT_CONFIG.concurrency,
-            timeout=DEFAULT_CONFIG.timeout,
-            db_path=DEFAULT_CONFIG.db_path,
-            save_to_db=DEFAULT_CONFIG.save_to_db,
-            reporters=kwargs.get("reporters", []),
-            reporter_options=kwargs.get("reporter_options", {}),
-            predicates=kwargs.get("predicates", DEFAULT_CONFIG.predicates),
-        )
+        return Config(**kwargs)
 
     def test_default_console_reporter(self):
         args = self._make_args()
@@ -223,22 +208,7 @@ class TestResolveReporters:
 
 
 def _make_cli_config() -> Config:
-    return Config(
-        test_paths=list(DEFAULT_CONFIG.test_paths),
-        include_tags=list(DEFAULT_CONFIG.include_tags),
-        exclude_tags=list(DEFAULT_CONFIG.exclude_tags),
-        keyword=DEFAULT_CONFIG.keyword,
-        maxfail=DEFAULT_CONFIG.maxfail,
-        verbosity=DEFAULT_CONFIG.verbosity,
-        addopts=list(DEFAULT_CONFIG.addopts),
-        concurrency=DEFAULT_CONFIG.concurrency,
-        timeout=DEFAULT_CONFIG.timeout,
-        db_path=DEFAULT_CONFIG.db_path,
-        save_to_db=DEFAULT_CONFIG.save_to_db,
-        reporters=list(DEFAULT_CONFIG.reporters),
-        reporter_options=dict(DEFAULT_CONFIG.reporter_options),
-        predicates=DEFAULT_CONFIG.predicates,
-    )
+    return Config()
 
 
 def test_parser_accepts_valid_run_id():

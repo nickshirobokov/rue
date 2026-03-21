@@ -303,7 +303,7 @@ class TestRunId:
     @pytest.mark.asyncio
     async def test_constructor_run_id_used_when_run_id_not_passed(self, null_reporter):
         run_id = uuid4()
-        runner = Runner(reporters=[null_reporter], run_id=run_id, save_to_db=False)
+        runner = Runner(reporters=[null_reporter], run_id=run_id, db_enabled=False)
 
         result = await runner.run(items=[make_item(lambda: None)])
 
@@ -313,7 +313,7 @@ class TestRunId:
     async def test_run_run_id_overrides_constructor_run_id(self, null_reporter):
         constructor_run_id = uuid4()
         run_level_run_id = uuid4()
-        runner = Runner(reporters=[null_reporter], run_id=constructor_run_id, save_to_db=False)
+        runner = Runner(reporters=[null_reporter], run_id=constructor_run_id, db_enabled=False)
 
         result = await runner.run(items=[make_item(lambda: None)], run_id=run_level_run_id)
 
@@ -322,7 +322,7 @@ class TestRunId:
     @pytest.mark.asyncio
     async def test_run_id_string_is_accepted_and_normalized(self, null_reporter):
         run_id = uuid4()
-        runner = Runner(reporters=[null_reporter], run_id=str(run_id), save_to_db=False)
+        runner = Runner(reporters=[null_reporter], run_id=str(run_id), db_enabled=False)
 
         result = await runner.run(items=[make_item(lambda: None)])
 
@@ -331,11 +331,11 @@ class TestRunId:
 
     def test_invalid_constructor_run_id_raises_value_error(self, null_reporter):
         with pytest.raises(ValueError, match="Invalid run_id"):
-            Runner(reporters=[null_reporter], run_id="not-a-uuid", save_to_db=False)
+            Runner(reporters=[null_reporter], run_id="not-a-uuid", db_enabled=False)
 
     @pytest.mark.asyncio
     async def test_invalid_run_level_run_id_raises_value_error(self, null_reporter):
-        runner = Runner(reporters=[null_reporter], save_to_db=False)
+        runner = Runner(reporters=[null_reporter], db_enabled=False)
 
         with pytest.raises(ValueError, match="Invalid run_id"):
             await runner.run(items=[make_item(lambda: None)], run_id="not-a-uuid")
@@ -356,7 +356,7 @@ class TestRunId:
     @pytest.mark.asyncio
     async def test_reused_constructor_run_id_allowed_when_db_disabled(self, null_reporter):
         run_id = uuid4()
-        runner = Runner(reporters=[null_reporter], run_id=run_id, save_to_db=False)
+        runner = Runner(reporters=[null_reporter], run_id=run_id, db_enabled=False)
 
         first_result = await runner.run(items=[make_item(lambda: None)])
         second_result = await runner.run(items=[make_item(lambda: None)])
@@ -536,7 +536,7 @@ class TestConcurrency:
             items.append(make_item(test_fn, name=f"test_{idx}", is_async=True))
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, save_to_db=False)
+        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
         await runner.run(items=items)
 
         complete_times = [
@@ -558,7 +558,7 @@ class TestConcurrency:
             items.append(make_item(test_fn, name=f"test_{idx}", is_async=True))
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, save_to_db=False)
+        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
         await runner.run(items=items)
 
         started = {name for kind, name in reporter.event_order if kind == "start"}
@@ -582,7 +582,7 @@ class TestConcurrency:
         runner = Runner(
             reporters=[StartFailureReporter()],
             concurrency=2,
-            save_to_db=False,
+            db_enabled=False,
         )
         with pytest.raises(RuntimeError, match="start callback failed"):
             await runner.run(items=[make_item(test_fn, name="test_start", is_async=True)])
@@ -599,7 +599,7 @@ class TestConcurrency:
         runner = Runner(
             reporters=[CompleteFailureReporter()],
             concurrency=2,
-            save_to_db=False,
+            db_enabled=False,
         )
         with pytest.raises(RuntimeError, match="complete callback failed"):
             await runner.run(items=[make_item(test_fn, name="test_complete", is_async=True)])
@@ -616,7 +616,7 @@ class TestConcurrency:
         )
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, save_to_db=False)
+        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
         await runner.run(items=[item])
 
         assert len(reporter.subtest_event_times) == 3
@@ -641,7 +641,7 @@ class TestConcurrency:
         )
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, save_to_db=False)
+        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
         test_run = await runner.run(items=[item])
 
         assert len(reporter.subtest_event_times) == len(parameter_sets)
@@ -675,7 +675,7 @@ class TestConcurrency:
         )
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, save_to_db=False)
+        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
         test_run = await runner.run(items=[item])
 
         assert len(reporter.subtest_event_times) == len(cases)
@@ -733,7 +733,7 @@ class TestConcurrency:
         )
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, save_to_db=False)
+        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
         test_run = await runner.run(items=[item])
 
         group_names = {group.name for group in groups}
