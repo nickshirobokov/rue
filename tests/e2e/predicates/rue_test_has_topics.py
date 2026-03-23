@@ -114,6 +114,50 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         ),
         references=Refs(expected=True),
     ),
+    Case[Inputs, Refs](
+        id=uuid5(NAMESPACE_URL, f"{__name__}:auth_code_topic_medium"),
+        metadata={"slug": "auth_code_topic_medium", "difficulty": "medium"},
+        inputs=Inputs(
+            actual="""
+        # auth/session_manager.py
+        # bridge copy, comments still rough
+
+        def verify_access_token(token: str) -> Claims:
+            claims = jwt.decode(token, key=PUBLIC_KEY, algorithms=["RS256"])
+            if claims["exp"] < now_utc():
+                raise ExpiredToken()
+            return claims
+
+
+        def rotate_refresh_token(session_id: str, presented_token: str) -> SessionState:
+            stored = repo.load_refresh_token(session_id)
+            if not hash_matches(presented_token, stored.token_hash):
+                repo.revoke_session_family(session_id)
+                audit.log("refresh reuse for %s" % session_id)
+                raise RefreshReuseDetected()
+
+            new_token = token_factory.issue_refresh(session_id)
+            repo.store_refresh_token(session_id, hash_token(new_token))
+            return SessionState(refresh_token=new_token, rotated=True)
+
+
+        # ops scraps:
+        # - access tokens expire after 15 min.
+        # - refresh-token reuse revokes the whole family, so a stolen token
+        #   cannot keep extending the session.
+        # - one support ticket asked whether copying an old browser cookie could
+        #   survive reuse detection. it could not.
+        # - Q4 laptop budgeting is still open for the platform team.
+        """,
+            reference="""
+        Authentication and session security in a web API, including JWT
+        validation, expiration handling, refresh-token rotation, reuse detection,
+        session revocation, and protection against stolen credentials.
+        """,
+            strict=True,
+        ),
+        references=Refs(expected=True),
+    ),
     # expected=False, strict=False
     Case[Inputs, Refs](
         id=uuid5(
@@ -161,6 +205,41 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         routine Postgres index rebuild on the analytics cluster next week, but the
         larger discussion in this memo is headcount, pipeline coverage, and cash
         runway through the first half of next year.
+        """,
+            reference="""
+        Database performance tuning in Postgres, especially query latency, indexing
+        strategy, planner behavior, and optimization of slow analytical workloads.
+        """,
+            strict=False,
+        ),
+        references=Refs(expected=False),
+    ),
+    Case[Inputs, Refs](
+        id=uuid5(
+            NAMESPACE_URL,
+            f"{__name__}:fleeting_postgres_mention_not_topic_medium",
+        ),
+        metadata={
+            "slug": "fleeting_postgres_mention_not_topic_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        Draft for Monday's board packet:
+
+        Pipeline coverage in the Southeast is still light, so sales wants two more
+        account executives and a higher travel budget before kickoff season.
+        Finance pushed back on the warehouse lease amendment, marketing wants to
+        move another $240,000 into partner events, and people ops is delaying the
+        recruiter search until the comp bands settle.
+
+        Appendix: operating items
+        the analytics team will run a routine Postgres index rebuild next week,
+        refresh planner stats, and vacuum two reporting tables after the month-end
+        load.
+
+        The remaining pages cover churn by segment, renewal assumptions, channel
+        mix, and the revised Midwest ramp model for the second half.
         """,
             reference="""
         Database performance tuning in Postgres, especially query latency, indexing
@@ -231,6 +310,39 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         ),
         references=Refs(expected=True),
     ),
+    Case[Inputs, Refs](
+        id=uuid5(
+            NAMESPACE_URL,
+            f"{__name__}:remote_work_topic_even_when_opposed_medium",
+        ),
+        metadata={
+            "slug": "remote_work_topic_even_when_opposed_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        Leadership blog draft v3:
+
+        I still do not buy the claim that every company improves the moment it
+        goes fully remote. People can do focused work at home; the harder question
+        is what happens to onboarding, shared context, and decision speed when
+        most collaboration moves to scheduled calls and chat threads across time
+        zones.
+
+        Hybrid setups add their own mess. Teams end up negotiating who has to be
+        in-person for planning, who gets left out of hallway decisions, and how
+        managers are supposed to coach new hires they rarely see. Those tradeoffs
+        are why I think a remote-first model is wrong for our next stage.
+        """,
+            reference="""
+        Remote work policy and distributed collaboration, including arguments for
+        or against remote teams, hybrid arrangements, and the way distance changes
+        communication and coordination.
+        """,
+            strict=False,
+        ),
+        references=Refs(expected=True),
+    ),
     # expected=False, strict=True
     Case[Inputs, Refs](
         id=uuid5(
@@ -280,6 +392,40 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         leasing office can provide a list of nearby groomers and veterinarians. The
         brochure is about amenities for current tenants with pets, not about shelter
         operations, foster placement, or finding permanent homes for adoptable dogs.
+        """,
+            reference="""
+        Pet adoption and shelter intake operations for dogs, including foster
+        placement, adoption screening, and management of dogs entering or leaving a
+        rescue organization.
+        """,
+            strict=True,
+        ),
+        references=Refs(expected=False),
+    ),
+    Case[Inputs, Refs](
+        id=uuid5(
+            NAMESPACE_URL,
+            f"{__name__}:dog_friendly_lease_not_adoption_topic_medium",
+        ),
+        metadata={
+            "slug": "dog_friendly_lease_not_adoption_topic_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        Harbor Yards leasing FAQ:
+
+        Dogs are welcome in up to two-pet households, pending vaccination records
+        and the usual weight-limit form. Residents can use the wash station on
+        level one, the fenced relief run by the east garage, and the after-hours
+        hose bib behind building C. The office keeps a handout of nearby groomers,
+        emergency vets, dog walkers, and the weekend vaccination clinic at the
+        shopping center.
+
+        A few applicants have asked whether exceptions exist for dogs coming out of
+        foster homes or informal rescues. Leasing handles that the same way it
+        handles any other pet application: records, deposit, leash rules, waste
+        disposal, and building access after move-in.
         """,
             reference="""
         Pet adoption and shelter intake operations for dogs, including foster

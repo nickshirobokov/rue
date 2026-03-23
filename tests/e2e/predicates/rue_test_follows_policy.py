@@ -120,6 +120,51 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         ),
         references=Refs(expected=True),
     ),
+    Case[Inputs, Refs](
+        id=uuid5(NAMESPACE_URL, f"{__name__}:incident_json_policy_medium"),
+        metadata={"slug": "incident_json_policy_medium", "difficulty": "medium"},
+        inputs=Inputs(
+            actual="""
+        {
+          "incident": "checkout-outage-apr14",
+          "severity": "high",
+          "customer_impact": "checkout returned 502 errors for seven minutes, cart conversion dipped during the spike, and support saw a short burst of worried chats right after 09:17 UTC",
+          "timeline": [
+            {
+              "time": "09:14 UTC",
+              "event": "alerts fired for elevated payment gateway latency"
+            },
+            {
+              "time": "09:17 UTC",
+              "event": "incident bridge opened; deploys were frozen",
+              "owner": "platform-oncall"
+            },
+            {
+              "time": "09:21 UTC",
+              "event": "upstream firewall rollback began after the provider confirmed the bad rule push"
+            },
+            {
+              "time": "09:24 UTC",
+              "event": "success rate recovered and checkout tests stopped failing"
+            }
+          ],
+          "next_steps": [
+            "add synthetic checkout probes from two regions",
+            "review retry-worker limits before the next traffic campaign",
+            "tighten the bridge checklist so upstream dependency changes are called out faster"
+          ]
+        }
+        """,
+            reference="""
+        Return valid JSON with exactly these top-level keys: incident, severity,
+        customer_impact, timeline, and next_steps. The severity value must be
+        lowercase text. The timeline field must be an array of objects, and every
+        object in that array must contain both time and event keys.
+        """,
+            strict=True,
+        ),
+        references=Refs(expected=True),
+    ),
     # expected=False, strict=False
     Case[Inputs, Refs](
         id=uuid5(
@@ -177,6 +222,50 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
               "time": "09:17 UTC",
               "detail": "incident bridge opened and deploys were frozen"
             }
+          ]
+        }
+        """,
+            reference="""
+        Return valid JSON with exactly these top-level keys: incident, severity,
+        customer_impact, timeline, and next_steps. The severity value must be
+        lowercase text. The timeline field must be an array of objects, and every
+        object in that array must contain both time and event keys.
+        """,
+            strict=False,
+        ),
+        references=Refs(expected=False),
+    ),
+    Case[Inputs, Refs](
+        id=uuid5(
+            NAMESPACE_URL, f"{__name__}:incident_json_policy_violation_medium"
+        ),
+        metadata={
+            "slug": "incident_json_policy_violation_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        {
+          "incident": "checkout-outage-apr14",
+          "severity": "high",
+          "customer_impact": "checkout returned 502 errors for seven minutes and support saw a burst of chat complaints",
+          "timeline": [
+            {
+              "time": "09:14 UTC",
+              "event": "alerts fired for elevated payment gateway latency"
+            },
+            {
+              "time": "09:17 UTC",
+              "event": "incident bridge opened and deploys were frozen"
+            },
+            {
+              "time": "09:24 UTC",
+              "event": "success rate recovered after the upstream firewall rollback"
+            }
+          ],
+          "nextSteps": [
+            "add synthetic checkout probes from two regions",
+            "review retry-worker limits before the next traffic campaign"
           ]
         }
         """,
@@ -252,6 +341,44 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         ),
         references=Refs(expected=True),
     ),
+    Case[Inputs, Refs](
+        id=uuid5(NAMESPACE_URL, f"{__name__}:markdown_sections_policy_medium"),
+        metadata={
+            "slug": "markdown_sections_policy_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        ## Summary
+
+        The migration window for Beacon 2.1 opened at 09:00 UTC and closed at
+        09:15 UTC on Tuesday morning. The rollout stayed inside that window even
+        though the backlog monitor looked a little weird for the first couple of
+        minutes.
+
+        ## Risks
+
+        Export jobs are still draining in smaller batches, and step 2 in the bridge
+        checklist still points responders to the older dashboard. No billing data
+        moved during the release, which keeps the remaining risk operational rather
+        than financial.
+
+        ## Next Steps
+
+        - Keep an eye on export-related tickets through Friday.
+        - Review backlog drain metrics in tomorrow's standup.
+        - Clean up the bridge notes because the timestamp typo is already confusing
+          people.
+        """,
+            reference="""
+        Produce Markdown with exactly three section headings titled Summary, Risks,
+        and Next Steps, in that order. Do not use numbered lists anywhere in the
+        document. The text must explicitly mention the migration window.
+        """,
+            strict=False,
+        ),
+        references=Refs(expected=True),
+    ),
     # expected=False, strict=True
     Case[Inputs, Refs](
         id=uuid5(
@@ -290,6 +417,29 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
           "name": "roger hale",
           "email": "roger.hale@example.com",
           "role": "support"
+        }
+        """,
+            reference="""
+        Return valid JSON with exactly two top-level keys: name and email. No extra
+        top-level keys are allowed, even if the additional fields are harmless.
+        """,
+            strict=True,
+        ),
+        references=Refs(expected=False),
+    ),
+    Case[Inputs, Refs](
+        id=uuid5(
+            NAMESPACE_URL, f"{__name__}:exact_json_keys_policy_violation_medium"
+        ),
+        metadata={
+            "slug": "exact_json_keys_policy_violation_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        {
+          "Name": "roger hale",
+          "email": "roger.hale@example.com"
         }
         """,
             reference="""

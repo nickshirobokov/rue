@@ -105,6 +105,33 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         ),
         references=Refs(expected=True),
     ),
+    Case[Inputs, Refs](
+        id=uuid5(
+            NAMESPACE_URL, f"{__name__}:orientation_note_extra_events_medium"
+        ),
+        metadata={
+            "slug": "orientation_note_extra_events_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        Onboarding recap from the support manager:
+
+        During Monday's orientation, the new support hire introduced himself as
+        Roger Hale and said his first two shifts would be on the returns queue
+        alongside refund escalations before he took live chats on his own. He
+        added that he had already cleared the knowledge-base certification over
+        the weekend and had transferred from the Phoenix office three weeks
+        earlier.
+        """,
+            reference="""
+        The new support hire's name is Roger Hale. He will be working on the returns
+        queue.
+        """,
+            strict=True,
+        ),
+        references=Refs(expected=True),
+    ),
     # expected=False, strict=False
     Case[Inputs, Refs](
         id=uuid5(
@@ -154,6 +181,33 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         downtown and the mood was better than it had been all week. People were
         laughing again and the whole evening felt like a proper celebration instead
         of another incident bridge.
+        """,
+            reference="""
+        Thanks for staying out after the migration last night. Dinner downtown ran
+        long, everyone was laughing by the second round of appetizers, and it was
+        the first time all week that the team looked relaxed.
+        """,
+            strict=False,
+        ),
+        references=Refs(expected=False),
+    ),
+    Case[Inputs, Refs](
+        id=uuid5(
+            NAMESPACE_URL,
+            f"{__name__}:migration_note_supported_in_open_world_medium",
+        ),
+        metadata={
+            "slug": "migration_note_supported_in_open_world_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        Team channel note:
+
+        Last night finally felt like the migration was over. The team wound up
+        downtown around one long dinner, the second round hit the table before
+        anybody stood up, and by then people were laughing instead of replaying
+        the cutover. For the first time all week, everyone looked relaxed.
         """,
             reference="""
         Thanks for staying out after the migration last night. Dinner downtown ran
@@ -225,6 +279,39 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         ),
         references=Refs(expected=True),
     ),
+    Case[Inputs, Refs](
+        id=uuid5(
+            NAMESPACE_URL,
+            f"{__name__}:fundraising_precision_not_supported_medium",
+        ),
+        metadata={
+            "slug": "fundraising_precision_not_supported_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        Founder note to senior staff:
+
+        River Lantern closed a $6.8 million extension financing on June 27, with
+        North Ridge Capital as the sole lead. Most of the proceeds will go to
+        hiring 24 additional operations staff in Dallas while the company
+        continues the warehouse automation pilot through year-end. Leadership is
+        still framing the raise as bridge financing ahead of a larger Series B
+        process.
+        """,
+            reference="""
+        Board update from River Lantern:
+
+        The company closed a mid-seven-figure extension round late in Q2, and the
+        memo describes the financing as a bridge from existing investors while the
+        team lines up a larger Series B next spring. Management says most of the
+        proceeds will go toward expanding the Dallas operations team and continuing
+        the warehouse automation pilot.
+        """,
+            strict=False,
+        ),
+        references=Refs(expected=True),
+    ),
     # expected=False, strict=True
     Case[Inputs, Refs](
         id=uuid5(
@@ -268,6 +355,41 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         The service is configured to retry failed requests three times, waits 250
         milliseconds between attempts, and sends alert emails to
         platform-alerts@harborpath.example.
+        """,
+            reference="""
+        {
+          "service": "harbor-path-api",
+          "retries": {
+            "max_attempts": 3,
+            "backoff_ms": 250
+          },
+          "notifications": {
+            "alert_email": "platform-alerts@harborpath.example",
+            "pagerduty_service": "platform-core"
+          },
+          "owner": "api-infra"
+        }
+        """,
+            strict=True,
+        ),
+        references=Refs(expected=False),
+    ),
+    Case[Inputs, Refs](
+        id=uuid5(
+            NAMESPACE_URL, f"{__name__}:config_summary_supported_by_json_medium"
+        ),
+        metadata={
+            "slug": "config_summary_supported_by_json_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        Harbor Path API runtime summary:
+
+        The service will retry failed requests up to three times, waiting a
+        quarter second between attempts. Failure email is routed to
+        platform-alerts@harborpath.example, the PagerDuty service stays
+        platform-core, and ownership remains with api-infra.
         """,
             reference="""
         {

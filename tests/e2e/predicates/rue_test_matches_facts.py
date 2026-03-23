@@ -118,6 +118,33 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         ),
         references=Refs(expected=True),
     ),
+    Case[Inputs, Refs](
+        id=uuid5(NAMESPACE_URL, f"{__name__}:redis_migration_equivalent_medium"),
+        metadata={
+            "slug": "redis_migration_equivalent_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        change: migrate Redis session storage to cluster-b
+        client: Northwind Clinics
+        owner: Priya Nair
+        window_start: 2025-06-18 23:00 PT
+        window_end: 2025-06-19 00:30 PT
+        expected_impact: brief logout for users with active browser sessions
+        rollback: point applications back to cluster-a
+        """,
+            reference="""
+        Priya Nair is running a change for Northwind Clinics to migrate Redis-backed
+        session storage onto cluster-b. The maintenance window starts at 11:00 p.m.
+        Pacific on June 18, 2025 and ends at 12:30 a.m. on June 19. The team expects
+        a brief logout for users who already have browser sessions open, and the
+        rollback plan is to point the applications back to cluster-a.
+        """,
+            strict=True,
+        ),
+        references=Refs(expected=True),
+    ),
     # expected=False, strict=False
     Case[Inputs, Refs](
         id=uuid5(
@@ -165,6 +192,35 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         """,
             reference="""
         The new support hire's name is Roger Hale.
+        """,
+            strict=False,
+        ),
+        references=Refs(expected=False),
+    ),
+    Case[Inputs, Refs](
+        id=uuid5(
+            NAMESPACE_URL, f"{__name__}:self_introduction_not_equivalent_medium"
+        ),
+        metadata={
+            "slug": "self_introduction_not_equivalent_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        Orientation transcript excerpt:
+
+        Roger Hale introduced himself during Monday's orientation, said he had
+        transferred from the Phoenix office three weeks earlier, and noted that
+        his first two shifts would be on the returns queue. He also said he had
+        already completed the knowledge-base certification over the weekend.
+        """,
+            reference="""
+        Orientation transcript excerpt:
+
+        Roger Hale introduced himself during Monday's orientation, said he had
+        transferred from the Phoenix office three weeks earlier, and noted that
+        his first two shifts would be on the returns queue. He also said he still
+        needed to complete the knowledge-base certification this week.
         """,
             strict=False,
         ),
@@ -224,6 +280,31 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         ),
         references=Refs(expected=True),
     ),
+    Case[Inputs, Refs](
+        id=uuid5(
+            NAMESPACE_URL, f"{__name__}:titan_losses_equivalent_open_world_medium"
+        ),
+        metadata={
+            "slug": "titan_losses_equivalent_open_world_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        Quarterly review transcript:
+
+        Return rates on the Titan premium handset spiked after early camera
+        failures and a speaker defect surfaced in the same recovery cycle. What
+        had looked like a product-quality issue turned into a serious financial
+        drag on the company before the quarter closed.
+        """,
+            reference="""
+        Poor returns on the Titan premium phone were driven by camera problems and
+        speaker defects, and the issue hit the company hard financially.
+        """,
+            strict=False,
+        ),
+        references=Refs(expected=True),
+    ),
     # expected=False, strict=True
     Case[Inputs, Refs](
         id=uuid5(
@@ -268,6 +349,35 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         smaller hardware issues that inflated return rates and warranty credits,
         especially in the premium model. They did not break out every smaller defect
         on the call.
+        """,
+            reference="""
+        Speaker defects and camera failures in the Titan premium model drove poor
+        returns, leading the company to lose $1 billion.
+        """,
+            strict=True,
+        ),
+        references=Refs(expected=False),
+    ),
+    Case[Inputs, Refs](
+        id=uuid5(
+            NAMESPACE_URL,
+            f"{__name__}:titan_losses_not_equivalent_closed_world_medium",
+        ),
+        metadata={
+            "slug": "titan_losses_not_equivalent_closed_world_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        Earnings prep draft:
+
+        The Titan recovery program produced about a billion dollars in losses,
+        mostly in the premium model. Executives singled out the early camera
+        failure, then collapsed the rest into several secondary hardware issues
+        that raised returns and warranty credits.
+
+        The briefing notes stayed at that grouped level and did not identify the
+        remaining defects individually.
         """,
             reference="""
         Speaker defects and camera failures in the Titan premium model drove poor

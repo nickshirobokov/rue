@@ -117,6 +117,37 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         ),
         references=Refs(expected=True),
     ),
+    Case[Inputs, Refs](
+        id=uuid5(NAMESPACE_URL, f"{__name__}:terse_engineering_voice_medium"),
+        metadata={
+            "slug": "terse_engineering_voice_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        DNS cutover notes
+
+        1. Freeze edits at 20:55.
+        2. Lower TTL before moving traffic.
+        3. If health checks wobble, send traffic back before debating root cause.
+
+        Status updates should be plain and short. Lead with the metric, then the
+        affected region, then the next command. If the cause is unclear, say
+        unclear. One precise sentence beats three reassuring ones.
+        """,
+            reference="""
+        Pager handoff for Saturday
+
+        Cache flush is already done. API pods are stable. If login latency crosses
+        400 milliseconds, revert the image and reopen the bridge. Send one update
+        with the metric, the suspected change, and the rollback state. Skip
+        commentary until the graph settles. Precision matters more than reassurance
+        during the first ten minutes of an incident.
+        """,
+            strict=True,
+        ),
+        references=Refs(expected=True),
+    ),
     # expected=False, strict=False
     Case[Inputs, Refs](
         id=uuid5(
@@ -169,6 +200,38 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         Riders were guessing destinations, shouting over the speaker static, and
         treating every rumor from the far end of the track like breaking news.
         Calling this a service disruption almost flatters it.
+        """,
+            reference="""
+        Between 17:00 and 19:00, the agency observed repeated signal faults on the
+        northbound line. Riders should expect residual delays while crews validate
+        platform annunciators and restore normal dispatch spacing. Station staff were
+        instructed to issue manual boarding guidance where digital signage was
+        unavailable. The agency will publish a root-cause summary after maintenance
+        review is complete.
+        """,
+            strict=False,
+        ),
+        references=Refs(expected=False),
+    ),
+    Case[Inputs, Refs](
+        id=uuid5(NAMESPACE_URL, f"{__name__}:tabloid_vs_regulatory_style_medium"),
+        metadata={
+            "slug": "tabloid_vs_regulatory_style_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        Evening service bulletin, if that is what we are calling this circus:
+
+        Between 17:00 and 19:00 riders experienced "residual delays" while the
+        northbound platform turned into a pressure cooker of elbows, dying phone
+        batteries, and rumors moving faster than the trains. The signs blinked
+        nonsense, every tunnel squeal sounded like a false alarm, and people were
+        treating scraps of overheard conversation like emergency dispatches.
+
+        Station staff did issue manual boarding guidance where digital signage was
+        unavailable. It mostly looked like exhausted employees trying to direct a
+        crowd that had already stopped believing anything on the loudspeaker.
         """,
             reference="""
         Between 17:00 and 19:00, the agency observed repeated signal faults on the
@@ -245,6 +308,33 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         ),
         references=Refs(expected=True),
     ),
+    Case[Inputs, Refs](
+        id=uuid5(NAMESPACE_URL, f"{__name__}:chatty_forum_style_medium"),
+        metadata={"slug": "chatty_forum_style_medium", "difficulty": "medium"},
+        inputs=Inputs(
+            actual="""
+        My tomato seedlings looked doomed right up until I stopped trying to solve
+        them with twelve different internet tricks at once. I gave them more
+        light, watered on an actual schedule, and quit swapping fertilizers every
+        time somebody online promised a miracle. The fix ended up being annoyingly
+        boring, which is usually how gardening goes for me.
+
+        If yours are sulking, I would pick one routine and give it a few days
+        before shopping for another gadget. I am still embarrassingly easy to
+        convince that the clever hack will save me, and it almost never does.
+        """,
+            reference="""
+        My compost bin stopped smelling like a swamp once I quit trying every clever
+        internet trick in the same weekend. I picked one spot with shade, started
+        turning it on a schedule, and kept the browns-to-greens mix boring and
+        consistent for a few days. That was enough to settle it down. If the pile is
+        weird, I would try fewer experiments and more routine before buying another
+        gadget.
+        """,
+            strict=False,
+        ),
+        references=Refs(expected=True),
+    ),
     # expected=False, strict=True
     Case[Inputs, Refs](
         id=uuid5(
@@ -292,6 +382,40 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         active term. Any approved change in seat volume shall be documented by
         amendment, and failure to use the full allotment shall not reduce fees owed
         during the renewal period.
+        """,
+            reference="""
+        Renew with us and keep the momentum going. Your team can roll straight into
+        the next year without setup headaches, surprise downtime, or a messy
+        migration project. If you need more seats, we can grow with you fast, and if
+        your plans change later, our account team will help you sort out the right
+        package without the usual procurement drama.
+        """,
+            strict=True,
+        ),
+        references=Refs(expected=False),
+    ),
+    Case[Inputs, Refs](
+        id=uuid5(
+            NAMESPACE_URL, f"{__name__}:legalistic_vs_marketing_style_medium"
+        ),
+        metadata={
+            "slug": "legalistic_vs_marketing_style_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        Service-order renewal provision:
+
+        Upon expiration of the initial term, the agreement shall renew
+        automatically for successive one-year periods unless either party delivers
+        written notice of non-renewal no fewer than thirty days before the end of
+        the then-current term. Any increase in seat volume shall require an
+        executed amendment or other written authorization accepted by both parties.
+
+        For the avoidance of doubt, unused capacity or delayed rollout shall not
+        reduce fees otherwise due during a renewal term. For convenience only, the
+        account team may send a plain-language reminder before renewal, but the
+        controlling terms remain those stated here.
         """,
             reference="""
         Renew with us and keep the momentum going. Your team can roll straight into

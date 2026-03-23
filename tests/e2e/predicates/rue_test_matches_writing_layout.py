@@ -127,6 +127,57 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         ),
         references=Refs(expected=True),
     ),
+    Case[Inputs, Refs](
+        id=uuid5(
+            NAMESPACE_URL, f"{__name__}:incident_markdown_template_medium"
+        ),
+        metadata={
+            "slug": "incident_markdown_template_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        # Incident Summary
+
+        ## Impact
+        - Checkout requests returned 502 errors for seven minutes.
+        - Cart conversion dipped during the spike.
+        - Support saw a short burst of payment-related complaints
+          from merchants retrying checkout during the bridge.
+
+        ## Timeline
+        - 09:14 UTC: alerts fired for elevated gateway latency.
+        - 09:17 UTC: incident bridge opened and deploys were frozen.
+        - 09:21 UTC: upstream firewall rollback began after provider confirmation.
+        - 09:24 UTC: success rate recovered above baseline.
+
+        ## Follow-up
+        - Add synthetic checkout probes from two regions.
+        - Review retry-worker limits before the next traffic campaign.
+        - Clean up the bridge template so the provider escalation step is easier to
+          find at 2 a.m.
+        """,
+            reference="""
+        # Incident Summary
+
+        ## Impact
+        - Mobile logins failed for about eleven minutes.
+        - Support volume increased because users could not refresh sessions.
+
+        ## Timeline
+        - 22:03 PT: certificate rotation began.
+        - 22:08 PT: login smoke tests failed on one ingress pool.
+        - 22:14 PT: pods were recycled with the renewed certificate.
+        - 22:19 PT: successful login checks confirmed recovery.
+
+        ## Follow-up
+        - Add a thirty-day expiry alert for production certificates.
+        - Document the recovery command in the change template.
+        """,
+            strict=True,
+        ),
+        references=Refs(expected=True),
+    ),
     # expected=False, strict=False
     Case[Inputs, Refs](
         id=uuid5(
@@ -172,6 +223,30 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
 
         Q: Where will reception sit during the work?
         A: Reception moves to conference room A.
+        """,
+            reference="""
+        The contractor will start replacing the lobby flooring at 7:00 a.m.
+        Wednesday. During the morning work window, employees should use the
+        loading-dock entrance because the front desk area will be blocked. Reception
+        will operate out of conference room A until the flooring crew clears the
+        main entrance around noon.
+        """,
+            strict=False,
+        ),
+        references=Refs(expected=False),
+    ),
+    Case[Inputs, Refs](
+        id=uuid5(NAMESPACE_URL, f"{__name__}:faq_vs_narrative_layout_medium"),
+        metadata={"slug": "faq_vs_narrative_layout_medium", "difficulty": "medium"},
+        inputs=Inputs(
+            actual="""
+        Access note for Wednesday morning
+
+        1. Flooring work starts at 7:00 a.m. Wednesday.
+        2. Use the loading-dock entrance until noon.
+        3. Reception works from conference room A while the front desk is blocked.
+        4. Couriers can still deliver, but they should follow the temporary side
+           path.
         """,
             reference="""
         The contractor will start replacing the lobby flooring at 7:00 a.m.
@@ -241,6 +316,39 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         ),
         references=Refs(expected=True),
     ),
+    Case[Inputs, Refs](
+        id=uuid5(NAMESPACE_URL, f"{__name__}:numbered_contract_layout_medium"),
+        metadata={
+            "slug": "numbered_contract_layout_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        1. Term. The initial service period begins on July 1, 2025 and ends on June
+        30, 2026.
+           Renewal mechanics: any extension beyond that date is governed by the
+           notice provision below.
+
+        2. Fees. Customer will pay $18,000 annually in monthly installments.
+           Invoice cadence: monthly.
+           Late payment: does not change the installment structure.
+
+        3. Notice. Either party may decline renewal by giving thirty days' written
+        notice before the current term expires.
+        """,
+            reference="""
+        1. Term. The consulting period starts on October 15, 2025 and closes on
+        October 14, 2026.
+
+        2. Fees. Client will pay $42,000 over the term in quarterly installments.
+
+        3. Notice. A party that does not wish to renew must provide written notice
+        at least thirty days before expiration.
+        """,
+            strict=False,
+        ),
+        references=Refs(expected=True),
+    ),
     # expected=False, strict=True
     Case[Inputs, Refs](
         id=uuid5(NAMESPACE_URL, f"{__name__}:paragraph_vs_checklist_very_easy"),
@@ -287,6 +395,51 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
 
         ## Next Steps
         Support will monitor export-related tickets for the rest of the week.
+        """,
+            reference="""
+        # Release Note
+
+        ## Summary
+        Beacon 2.1 shipped Tuesday morning after a short maintenance window.
+
+        ## Timeline
+        Deployment started at 09:00 UTC and user traffic resumed at 09:15 UTC.
+
+        ## Impact
+        Saved filters were unaffected and no billing migration ran.
+
+        ## Next Steps
+        Support will monitor export-related tickets for the rest of the week.
+        """,
+            strict=True,
+        ),
+        references=Refs(expected=False),
+    ),
+    Case[Inputs, Refs](
+        id=uuid5(NAMESPACE_URL, f"{__name__}:pseudo_heading_layout_difference_medium"),
+        metadata={
+            "slug": "pseudo_heading_layout_difference_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        # Release Note
+
+        ## Summary
+        Beacon 2.1 shipped Tuesday morning after a short maintenance window and the
+        bridge closed without extending downtime.
+
+        **Timeline**
+        Deployment started at 09:00 UTC and user traffic resumed at 09:15 UTC.
+
+        ## Impact
+        Saved filters were unaffected, no billing migration ran, and support only
+        expects minor export follow-up.
+
+        ## Next Steps
+        Support will monitor export-related tickets for the rest of the week, and
+        engineering will clean up the backlog dashboard wording because the labels
+        are still weird.
         """,
             reference="""
         # Release Note

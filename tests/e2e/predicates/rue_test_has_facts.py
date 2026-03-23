@@ -116,6 +116,48 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         ),
         references=Refs(expected=True),
     ),
+    Case[Inputs, Refs](
+        id=uuid5(NAMESPACE_URL, f"{__name__}:certificate_rotation_medium"),
+        metadata={"slug": "certificate_rotation_medium", "difficulty": "medium"},
+        inputs=Inputs(
+            actual="""
+        Change ticket CHG-8471
+
+        approved window: Saturday, May 4, 2025, 22:00-23:30 PT
+        customer: Harbor Path Dental
+        service: api.harborpath.example
+        scheduled by: Mira Salgado
+
+        Reason:
+        api.harborpath.example needed the TLS chain replaced before the Monday
+        morning expiry.
+
+        Dry run:
+        Mobile sign-ins kept failing whenever ingress continued presenting the old
+        certificate chain. Browser checks recovered sooner, which is why the
+        rehearsal notes singled out the mobile path.
+
+        Cutover:
+        22:03 renewed bundle loaded on the edge
+        22:11 ingress pods recycled across both production pools
+        22:19 login smoke tests rerun from mobile and browser flows
+        22:27 auth checks green again
+
+        Closeout:
+        Access was back before 23:30 PT. No customer data was lost.
+        """,
+            reference="""
+        For Harbor Path Dental, Mira Salgado scheduled a certificate rotation for
+        api.harborpath.example on Saturday, May 4, 2025 from 10:00 to 11:30 p.m.
+        Pacific. The rehearsal showed that mobile users could not log in while the
+        ingress layer still served the old certificate. During the window, the team
+        installed the renewed certificate, restarted the ingress pods, and verified
+        that login access was back before the change closed. No data was lost.
+        """,
+            strict=True,
+        ),
+        references=Refs(expected=True),
+    ),
     # expected=False, strict=False
     Case[Inputs, Refs](
         id=uuid5(
@@ -159,6 +201,35 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         proceeds will go toward expanding the Dallas operations team and continuing
         the warehouse automation pilot. The same note says churn improved during the
         quarter and that the extra cash should carry the business into next year.
+        """,
+            reference="""
+        River Lantern closed a $6.8 million extension financing on June 27 that was
+        led solely by North Ridge Capital. The company will use the proceeds
+        primarily to hire 24 operations staff in Dallas and to continue the
+        warehouse automation pilot.
+        """,
+            strict=False,
+        ),
+        references=Refs(expected=False),
+    ),
+    Case[Inputs, Refs](
+        id=uuid5(NAMESPACE_URL, f"{__name__}:bridge_round_too_vague_medium"),
+        metadata={"slug": "bridge_round_too_vague_medium", "difficulty": "medium"},
+        inputs=Inputs(
+            actual="""
+        Board follow-up, messy notes:
+
+        River Lantern closed a mid-seven-figure extension round right at the end of
+        Q2. The money came from returning investors, with North Ridge
+        participating again, and management keeps calling it bridge capital while
+        they line up a bigger Series B for spring.
+
+        Where funds go:
+        mostly Dallas operations hiring, more work on the warehouse automation
+        pilot, and enough buffer to get through next year if churn stays flat. The
+        draft deck had several different hiring counts floating around, so the memo
+        intentionally leaves the exact headcount out for now. Same with the final
+        closing date; finance just says late June.
         """,
             reference="""
         River Lantern closed a $6.8 million extension financing on June 27 that was
@@ -221,6 +292,29 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         ),
         references=Refs(expected=True),
     ),
+    Case[Inputs, Refs](
+        id=uuid5(NAMESPACE_URL, f"{__name__}:titan_losses_open_world_medium"),
+        metadata={"slug": "titan_losses_open_world_medium", "difficulty": "medium"},
+        inputs=Inputs(
+            actual="""
+        Quarterly review transcript, cleaned up from notes:
+
+        Most of the damage in the Titan recovery program sat in the premium phone
+        line. Finance tied the return spike first to the early camera-module
+        failure and then to a speaker defect that surfaced in the same production
+        wave, with a few lesser hardware issues adding repair credits on top.
+
+        By quarter-end the recovery program had turned into a major financial drag
+        on the company.
+        """,
+            reference="""
+        Poor returns on the Titan premium phone were driven by camera problems and
+        speaker defects, and the issue hit the company hard financially.
+        """,
+            strict=False,
+        ),
+        references=Refs(expected=True),
+    ),
     # expected=False, strict=True
     Case[Inputs, Refs](
         id=uuid5(
@@ -263,6 +357,32 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         smaller hardware issues that inflated return rates and warranty credits,
         especially in the premium model. They did not break out every smaller defect
         on the call.
+        """,
+            reference="""
+        Speaker defects and camera failures in the Titan premium model drove poor
+        returns, leading the company to lose $1 billion.
+        """,
+            strict=True,
+        ),
+        references=Refs(expected=False),
+    ),
+    Case[Inputs, Refs](
+        id=uuid5(NAMESPACE_URL, f"{__name__}:titan_losses_closed_world_medium"),
+        metadata={
+            "slug": "titan_losses_closed_world_medium",
+            "difficulty": "medium",
+        },
+        inputs=Inputs(
+            actual="""
+        Earnings prep draft:
+
+        The Titan recovery program produced about a billion dollars in losses,
+        concentrated in the premium model. Executives singled out the early camera
+        module failure, then grouped the rest under several secondary hardware
+        issues that pushed return rates and warranty credits higher.
+
+        When analysts asked for a fuller parts breakdown, leadership stayed with
+        the grouped summary and did not name the remaining defects individually.
         """,
             reference="""
         Speaker defects and camera failures in the Titan premium model drove poor
