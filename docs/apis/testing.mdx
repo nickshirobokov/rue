@@ -461,7 +461,7 @@ Container for grouping related cases with group-level references and a pass thre
 
 | Name | Type | Description |
 |------|------|-------------|
-| `name` | `str` | Unique group identifier (used in reports and ID suffixes) |
+| `name` | `str` | Unique group identifier (used in reports and derived subtest suffixes) |
 | `cases` | `list[Case[InputsT, RefsT]]` | One or more cases in this group (min 1) |
 | `references` | `GroupRefsT` | Group-level reference data, defaults to `{}` |
 | `min_passes` | `int` | Minimum case passes required for the group to pass (default `1`, must be `≥ 1` and `≤ len(cases)`) |

@@ -126,7 +126,7 @@ def test_iter_cases_empty_is_deferred_to_execution():
     )
 
 
-def test_runner_iter_cases_injects_case_and_sets_suffix(null_reporter):
+def test_runner_iter_cases_injects_case_and_sets_case_id(null_reporter):
     seen_cases: list[Case[Any, Any]] = []
     cases = [Case(inputs={"x": 1}), Case(inputs={"x": 2})]
 
@@ -148,9 +148,38 @@ def test_runner_iter_cases_injects_case_and_sets_suffix(null_reporter):
     assert run_result.result.passed == 1
     assert seen_cases == cases
     assert len(parent_execution.sub_executions) == 2
-    assert [sub.definition.id_suffix for sub in parent_execution.sub_executions] == [
-        str(cases[0].id),
-        str(cases[1].id),
+    assert [sub.definition.suffix for sub in parent_execution.sub_executions] == [None, None]
+    assert [sub.definition.case_id for sub in parent_execution.sub_executions] == [
+        cases[0].id,
+        cases[1].id,
+    ]
+
+
+def test_runner_iter_cases_maps_case_metadata_to_suffix(null_reporter):
+    cases = [
+        Case(inputs={"x": 1}, metadata={"slug": "one"}),
+        Case(inputs={"x": 2}, metadata={"slug": "two", "difficulty": "easy"}),
+    ]
+
+    item = TestItem(
+        name="test_case_metadata",
+        fn=lambda case: None,
+        module_path=Path("sample.py"),
+        is_async=False,
+        params=["case"],
+        modifiers=[CaseIterateModifier(cases=tuple(cases), min_passes=2)],
+    )
+
+    run_result = asyncio.run(Runner(reporters=[null_reporter]).run(items=[item]))
+    parent_execution = run_result.result.executions[0]
+
+    assert [sub.definition.suffix for sub in parent_execution.sub_executions] == [
+        repr(cases[0].metadata),
+        repr(cases[1].metadata),
+    ]
+    assert [sub.definition.case_id for sub in parent_execution.sub_executions] == [
+        cases[0].id,
+        cases[1].id,
     ]
 
 
@@ -316,18 +345,25 @@ def test_runner_iter_case_groups_injects_group_and_case_and_nests(null_reporter)
     assert run_result.result.passed == 1
     assert len(seen_pairs) == 3
     assert len(parent_execution.sub_executions) == 2
-    assert [sub.definition.id_suffix for sub in parent_execution.sub_executions] == [
+    assert [sub.definition.suffix for sub in parent_execution.sub_executions] == [
         "alpha",
         "beta",
     ]
     assert len(parent_execution.sub_executions[0].sub_executions) == 2
     assert len(parent_execution.sub_executions[1].sub_executions) == 1
-    assert [
-        sub.definition.id_suffix for sub in parent_execution.sub_executions[0].sub_executions
-    ] == [str(case.id) for case in g1_cases]
-    assert [
-        sub.definition.id_suffix for sub in parent_execution.sub_executions[1].sub_executions
-    ] == [str(case.id) for case in g2_cases]
+    assert [sub.definition.suffix for sub in parent_execution.sub_executions[0].sub_executions] == [
+        None,
+        None,
+    ]
+    assert [sub.definition.case_id for sub in parent_execution.sub_executions[0].sub_executions] == [
+        case.id for case in g1_cases
+    ]
+    assert [sub.definition.suffix for sub in parent_execution.sub_executions[1].sub_executions] == [
+        None
+    ]
+    assert [sub.definition.case_id for sub in parent_execution.sub_executions[1].sub_executions] == [
+        case.id for case in g2_cases
+    ]
 
 
 def test_runner_iter_case_groups_uses_group_min_passes_and_all_groups_must_pass(

@@ -46,7 +46,8 @@ def make_item(
     skip_reason: str | None = None,
     xfail_reason: str | None = None,
     xfail_strict: bool = False,
-    id_suffix: str | None = None,
+    suffix: str | None = None,
+    case_id: UUID | None = None,
 ) -> TestItem:
     """Helper to create TestItem for testing."""
     return TestItem(
@@ -61,7 +62,8 @@ def make_item(
         skip_reason=skip_reason,
         xfail_reason=xfail_reason,
         xfail_strict=xfail_strict,
-        id_suffix=id_suffix,
+        suffix=suffix,
+        case_id=case_id,
     )
 
 
@@ -93,8 +95,10 @@ class EventReporter(Reporter):
 
     async def on_subtest_complete(self, parent: TestItem, sub_execution: TestExecution) -> None:
         elapsed = time.perf_counter() - self.start_time
-        suffix = sub_execution.item.id_suffix or ""
-        self.subtest_event_times.append((parent.name, suffix, elapsed))
+        label = sub_execution.item.suffix or (
+            str(sub_execution.item.case_id) if sub_execution.item.case_id else ""
+        )
+        self.subtest_event_times.append((parent.name, label, elapsed))
 
     async def on_run_complete(self, _rue_run) -> None:
         self.run_complete_elapsed = time.perf_counter() - self.start_time
@@ -647,7 +651,7 @@ class TestConcurrency:
 
         assert len(reporter.subtest_event_times) == len(parameter_sets)
         execution = test_run.result.executions[0]
-        assert [sub.item.id_suffix for sub in execution.sub_executions] == [
+        assert [sub.item.suffix for sub in execution.sub_executions] == [
             "first",
             "second",
             "third",
@@ -690,9 +694,8 @@ class TestConcurrency:
         )
 
         execution = test_run.result.executions[0]
-        assert [sub.item.id_suffix for sub in execution.sub_executions] == [
-            str(case.id) for case in cases
-        ]
+        assert [sub.item.suffix for sub in execution.sub_executions] == [None, None, None]
+        assert [sub.item.case_id for sub in execution.sub_executions] == [case.id for case in cases]
 
     @pytest.mark.asyncio
     async def test_case_group_iterated_callbacks_stream_and_order_is_deterministic(self):
@@ -750,7 +753,7 @@ class TestConcurrency:
         )
 
         execution = test_run.result.executions[0]
-        assert [sub.item.id_suffix for sub in execution.sub_executions] == [
+        assert [sub.item.suffix for sub in execution.sub_executions] == [
             group.name for group in groups
         ]
 

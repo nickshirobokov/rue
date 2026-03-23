@@ -46,7 +46,8 @@ class CaseIteratedTest(Test):
             child_def = replace(
                 self.definition,
                 modifiers=self.definition.modifiers[1:],
-                id_suffix=str(case.id),
+                suffix=repr(case.metadata) if case.metadata else None,
+                case_id=case.id,
             )
             child_params = {**self.params, "case": case}
             child = self.factory.build(child_def, child_params)
@@ -118,7 +119,7 @@ class CaseGroupIteratedTest(Test):
                     CaseIterateModifier(cases=tuple(group.cases), min_passes=group.min_passes),
                     *self.definition.modifiers[1:],
                 ],
-                id_suffix=group.name,
+                suffix=group.name,
             )
             child_params = {**self.params, "group": group}
             child = self.factory.build(child_def, child_params)

@@ -138,13 +138,31 @@ class ConsoleReporter(Reporter):
         duration = f"[dim]({result.duration_ms:.1f}ms)[/dim]"
         self.console.print(f"{prefix}{name} {duration} {extra}[{color}]{label}[/{color}]")
 
+    def _get_definition_label(self, item: TestDefinition) -> str | None:
+        if item.suffix:
+            return item.suffix
+        if item.case_id:
+            return str(item.case_id)
+        return None
+
+    def _format_label(self, label: str) -> str:
+        return escape(f"[{label}]")
+
+    def _get_execution_label(self, execution: TestExecution) -> str:
+        label = self._get_definition_label(execution.definition)
+        if label:
+            return label
+        if execution.execution_id:
+            return str(execution.execution_id)[:8]
+        return "case"
+
     def _print_sub_execution_line(self, sub: TestExecution, indent: int) -> None:
-        suffix = f"\\[{escape(sub.definition.id_suffix)}]" if sub.definition.id_suffix else ""
         color = self._status_color(sub.result.status)
         label = self._status_label(sub.result.status)
         prefix = " " * indent + "• "
         duration = f"[dim]({sub.result.duration_ms:.1f}ms)[/dim]"
-        self.console.print(f"{prefix}{suffix} {duration} [{color}]{label}[/{color}]")
+        sub_label = self._format_label(self._get_execution_label(sub))
+        self.console.print(f"{prefix}{sub_label} {duration} [{color}]{label}[/{color}]")
 
     def _format_assertion_repr(self, assertion: AssertionResult) -> list[str]:
         lines = []
@@ -202,11 +220,12 @@ class ConsoleReporter(Reporter):
         )
 
     def _get_failure_title(self, execution: TestExecution) -> str:
-        if execution.definition.id_suffix:
-            return escape(f"[{execution.definition.id_suffix}]")
+        label = self._get_definition_label(execution.definition)
+        if label:
+            return self._format_label(label)
         if execution.execution_id:
-            return escape(f"[{str(execution.execution_id)[:8]}]")
-        return execution.item.full_name
+            return self._format_label(str(execution.execution_id)[:8])
+        return self._format_label("case")
 
     def _build_failure_renderable(
         self, execution: TestExecution, *, title: str | None = None
@@ -426,17 +445,11 @@ class ConsoleReporter(Reporter):
         for sub in sub_executions:
             node = parent
             if sub.result.status in {TestStatus.PASSED, TestStatus.FAILED, TestStatus.ERROR}:
-                if sub.definition.id_suffix:
-                    suffix = escape(f"[{sub.definition.id_suffix}]")
-                elif sub.execution_id:
-                    suffix = escape(f"[{str(sub.execution_id)[:8]}]")
-                else:
-                    suffix = escape("[case]")
-
                 color = self._status_color(sub.result.status)
                 label = self._status_label(sub.result.status)
                 duration = f"[dim]({sub.result.duration_ms:.1f}ms)[/dim]"
-                node = parent.add(f"{suffix} {duration} [{color}]{label}[/{color}]")
+                sub_label = self._format_label(self._get_execution_label(sub))
+                node = parent.add(f"{sub_label} {duration} [{color}]{label}[/{color}]")
 
             if sub.sub_executions:
                 self._add_live_sub_executions(node, sub.sub_executions)
@@ -660,7 +673,7 @@ class ConsoleReporter(Reporter):
             case_suffix = ""
             if metric.metadata.collected_from_cases:
                 cases = sorted(metric.metadata.collected_from_cases)
-                case_suffix = escape(f"[{cases[0]}]")
+                case_suffix = self._format_label(cases[0])
             name = f"{name}::{tests[0]}{case_suffix}"
         return name
 
@@ -669,7 +682,7 @@ class ConsoleReporter(Reporter):
         for metric_name in sorted(grouped):
             self.console.print(f" • {metric_name}")
             for metric in grouped[metric_name]:
-                case_label = escape(f"[{self._get_case_label(metric)}]")
+                case_label = self._format_label(self._get_case_label(metric))
                 stats = self._format_metric_value(metric)
                 self._print_metric_row(case_label, stats, indent=4)
 

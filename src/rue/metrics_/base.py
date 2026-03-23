@@ -176,8 +176,10 @@ class Metric:
             if test_ctx is not None:
                 if test_ctx.item.name:
                     self.metadata.collected_from_tests.add(test_ctx.item.name)
-                if test_ctx.item.id_suffix:
-                    self.metadata.collected_from_cases.add(test_ctx.item.id_suffix)
+                if test_ctx.item.case_id:
+                    self.metadata.collected_from_cases.add(str(test_ctx.item.case_id))
+                elif test_ctx.item.suffix:
+                    self.metadata.collected_from_cases.add(test_ctx.item.suffix)
 
             if self.metadata.first_item_recorded_at is None:
                 self.metadata.first_item_recorded_at = datetime.now(UTC)

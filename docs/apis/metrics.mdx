@@ -164,7 +164,7 @@ Metadata tracking metric lifecycle and contributors.
 | `scope` | `Scope` | Lifecycle scope (SESSION, SUITE, CASE) |
 | `collected_from_merits` | `set[str]` | Names of test functions that contributed |
 | `collected_from_resources` | `set[str]` | Names of resources that contributed |
-| `collected_from_cases` | `set[str]` | Case IDs that contributed |
+| `collected_from_cases` | `set[str]` | Case IDs that contributed, falling back to case labels when IDs are unavailable |
 
 **Example:**
 ```python

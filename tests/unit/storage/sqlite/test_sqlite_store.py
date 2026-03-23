@@ -18,6 +18,7 @@ def test_sqlite_store_save_and_get_run(tmp_path: Path) -> None:
     db_path = tmp_path / "rue.db"
     store = SQLiteStore(db_path)
 
+    case_id = uuid4()
     execution_id = uuid4()
     sub_execution_id = uuid4()
     start_time = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
@@ -29,7 +30,8 @@ def test_sqlite_store_save_and_get_run(tmp_path: Path) -> None:
         module_path=Path("tests/test_sample.py"),
         is_async=False,
         tags={"smoke"},
-        id_suffix=str(uuid4()),
+        suffix="{'slug': 'sample'}",
+        case_id=case_id,
     )
     sub_definition = TestDefinition(
         name="test_sub",
@@ -110,6 +112,8 @@ def test_sqlite_store_save_and_get_run(tmp_path: Path) -> None:
     assert loaded.result.total == 1
     assert len(loaded.result.executions) == 1
     assert loaded.result.executions[0].trace_id == "trace-1"
+    assert loaded.result.executions[0].definition.suffix == "{'slug': 'sample'}"
+    assert loaded.result.executions[0].definition.case_id == case_id
     assert len(loaded.result.executions[0].sub_executions) == 1
     assert len(loaded.result.metric_results) == 1
     assert loaded.result.metric_results[0].name == "latency_ms"

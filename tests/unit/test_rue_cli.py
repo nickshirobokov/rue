@@ -24,7 +24,7 @@ def dummy() -> None:  # Helper for TestItem.fn
     return None
 
 
-def make_item(name: str, tags: set[str], id_suffix: str | None = None) -> TestItem:
+def make_item(name: str, tags: set[str], suffix: str | None = None) -> TestItem:
     return TestItem(
         name=name,
         fn=dummy,
@@ -32,7 +32,7 @@ def make_item(name: str, tags: set[str], id_suffix: str | None = None) -> TestIt
         is_async=False,
         params=[],
         tags=tags,
-        id_suffix=id_suffix,
+        suffix=suffix,
     )
 
 
