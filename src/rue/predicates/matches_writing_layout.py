@@ -49,6 +49,8 @@ Structural posture:
 - Layout matching should be structural, not byte-for-byte.
 - Schema-like matching is valid.
 - Materially different templates should not match.
+- Extra wrapped lines, continuation lines, or subordinate sentences inside an existing section do
+  not by themselves create a different layout if the same section skeleton and ordering remain.
 - Examples of layout differences that should break the match:
   email format versus JSON
   Markdown checklist versus freeform paragraph
@@ -78,6 +80,8 @@ Decision criteria:
 - Compare heading patterns, section ordering, list structure, wrappers, delimiters, and field
   arrangement where relevant.
 - Ignore content-slot values unless they themselves alter the structure.
+- Treat elaboration within an already-matching section as content, not as a layout change, unless
+  it introduces a new structural layer the reference template does not have.
 - Return False when the structural template is materially different even if the topic or style is
   similar.
 

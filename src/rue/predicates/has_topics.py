@@ -35,6 +35,10 @@ Topic model:
 Incidental mention boundary:
 - A fleeting mention does not count as topic presence.
 - Incidental mention without substantive discussion should return False.
+- A brief appendix item, footnote, sidebar, changelog entry, or one-line operating note about the
+  topic does not by itself make the whole document substantively about that topic.
+- Several related keywords inside one minor aside still do not count if the topic remains a
+  subordinate operational detail rather than a developed subject of the document.
 - Example:
   actual: "Please send the contract. Also, I drove a car to the office."
   reference: "cars"
@@ -81,6 +85,8 @@ Decision criteria:
 - Prefer semantic substance over token coincidence.
 - For long or mixed documents, evaluate the document-level subject matter rather than isolated
   keywords.
+- Consider prominence as well as presence: how much of the document's attention, framing, and
+  explanatory effort is actually spent on the topic.
 - Topic may be one of several topics and still count as present if it is substantively discussed.
 - Return False if the topic appears only as a passing mention or incidental aside.
 

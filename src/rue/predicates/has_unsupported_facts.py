@@ -54,6 +54,10 @@ Support rules for open-world evaluation:
   content.
 - Support may come from summarization, abstraction, or reasonable completion under
   underspecification when the compared fact is strongly grounded and contradiction-free.
+- A more specific reference fact can support a shorter or broader actual summary when the summary
+  only drops detail rather than adding a new commitment.
+- Same-event reflective or evaluative summaries may be supported by a more concrete narrative when
+  they are clearly grounded in that event and introduce no incompatible detail.
 - Open-world mode is permissive but must remain text-anchored. Do not guess ungrounded facts.
 - Bounded transfer matters. "Bob likes apples" plus "I like same fruits as Bob" may support
   "I like apples", but it does not support "I like pears" because pears are not grounded in the
@@ -86,6 +90,15 @@ Required open-world examples:
   reference: "thanks for the dinner yesterday, that was amazing"
   open-world verdict: False because the event may reasonably align and the actual fact need not be
   treated as unsupported
+- actual: "The apartment includes one covered parking stall."
+  reference: "The apartment includes one covered parking stall in the south garage."
+  open-world verdict: False because the broader summary is supported by the more specific
+  reference fact
+- actual: "The team finally relaxed after the migration."
+  reference: "After the migration, the team stayed out for a long dinner, kept laughing, and
+  looked relaxed for the first time all week."
+  open-world verdict: False because the actual sentence is a grounded same-event summary of the
+  reference
 - actual: "Apple lost $1B because iPhone 17 Pro has bad camera and some other factors"
   reference: "Bad iPhone camera and bad speaker led to poor Apple returns"
   open-world verdict: False because the actual content can be supported by a permissive grounded
@@ -101,6 +114,8 @@ Common mistakes to avoid:
   enough for True.
 - Do not confuse unsupported with conflicting. Unsupported facts may be compatible additions.
 - Do not require lexical overlap when testing support.
+- Do not treat extra detail present only in reference as a reason to mark a shorter actual summary
+  unsupported.
 
 Decision procedure:
 1. Interpret both inputs as documents.
@@ -108,10 +123,12 @@ Decision procedure:
 3. Extract or derive the fact graph of reference.
 4. Normalize entities, aliases, coreference, paraphrases, quantities, and dates across both fact
    graphs before comparison.
-5. Internally enumerate every actual fact and ask whether reference supports it under open-world
+5. Before declaring an actual fact unsupported, check whether it is just a shorter summary of a
+   more specific reference fact grounded in the same entities, event, time, or attribute.
+6. Internally enumerate every actual fact and ask whether reference supports it under open-world
    rules.
-6. Return True as soon as one actual fact is unsupported.
-7. Return False only if every actual fact is supported or actual contains no facts.
+7. Return True as soon as one actual fact is unsupported.
+8. Return False only if every actual fact is supported or actual contains no facts.
 
 Final reminder:
 - Return True as soon as any one actual fact lacks support in reference, even if all other actual
@@ -171,6 +188,8 @@ Allowed support in closed world:
 - Clear coreference.
 - Short explicit compositional transfer.
 - Identity conveyed by discourse acts such as self-introduction.
+- A more specific reference fact may support a broader actual summary when the summary stays
+  tightly anchored and only omits detail rather than adding new unsupported specifics.
 - Bounded transfer matters. "Bob likes apples. I like same fruits as Bob." may support
   "I like apples", but it does not support "I like pears" because pears are not grounded anywhere
   in the text.
@@ -197,6 +216,10 @@ Required closed-world examples:
   reference: "Agent's name is Roger"
   closed-world verdict: True because reference supports the name fact, but actual also asserts an
   introduction event that reference does not support. A single unsupported fact is sufficient.
+- actual: "Ava will start on the billing queue this week."
+  reference: "Ava said her first two shifts this week would be shadowing the billing queue."
+  closed-world verdict: False because the broader start-on-queue-this-week summary is strongly
+  anchored by the more specific reference statement
 
 Empty-fact behavior:
 - If actual contains no extractable facts, return False.
@@ -207,6 +230,11 @@ Common mistakes to avoid:
 - Do not return False just because some actual facts are supported.
 - Do not confuse lack of support with contradiction.
 - Do not invent support for ungrounded details.
+- Do not mark an actual summary as unsupported merely because reference states the same fact with
+  more detail.
+- Do not mistake a more specific onboarding, scheduling, assignment, or location detail in
+  reference for a contradiction of a broader actual summary that stays within that same anchored
+  fact.
 
 Decision procedure:
 1. Interpret both inputs as documents.
@@ -214,10 +242,13 @@ Decision procedure:
 3. Extract or derive the fact graph of reference.
 4. Normalize entities, aliases, coreference, paraphrases, quantities, and dates across both fact
    graphs before comparison.
-5. Internally enumerate each actual fact and compare it against reference using closed-world
+5. Before declaring an actual fact unsupported, check whether it is merely a broader summary of a
+   more specific reference fact about the same anchored event, role, assignment, time, or
+   attribute.
+6. Internally enumerate each actual fact and compare it against reference using closed-world
    support rules.
-6. Return True as soon as one actual fact is unsupported.
-7. Return False only if every actual fact is supported or actual contains no facts.
+7. Return True as soon as one actual fact is unsupported.
+8. Return False only if every actual fact is supported or actual contains no facts.
 
 Final reminder:
 - Return True as soon as one actual fact is not supported by reference, even if many other actual

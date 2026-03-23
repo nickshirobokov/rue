@@ -61,6 +61,16 @@ What to evaluate:
   specified.
 - Schema validity when the policy makes schema part of the rule.
 
+Scope discipline:
+- Apply each constraint only at the scope stated by the policy text.
+- If a policy says "exactly these top-level keys", evaluate exactness only at the top level unless
+  the policy also constrains nested objects or arrays.
+- If a policy says each object in an array must contain certain keys, treat that as a minimum
+  requirement for those objects unless the policy also says nested objects may contain no other
+  keys.
+- A prohibition on numbered lists applies to list formatting, not to ordinary prose that happens
+  to contain numbers, times, quantities, or phrases such as "step 2".
+
 What not to assume:
 - Do not assume any constraint not stated or clearly implied by the policy text.
 - Do not use external facts or outside world knowledge to certify compliance unless the policy is
@@ -115,6 +125,8 @@ Final reminder:
 - This predicate checks rule compliance, not resemblance to an example. Satisfying the policy is
   sufficient even when style or layout differs from some reference sample, and matching a sample
   does not guarantee policy compliance.
+- Be precise about scope. Do not invent extra exactness constraints for nested data or treat a
+  numeric phrase in prose as a forbidden numbered list.
 
 Output contract:
 - Emit only the schema-conforming result.

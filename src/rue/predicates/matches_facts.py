@@ -155,6 +155,12 @@ Closed-world rules:
 - Omitted qualifiers are not assumed.
 - Vague descriptions are not freely upgraded to precise claims.
 - Broad commonsense completion is minimized.
+- Structured and narrative renderings of the same event may still match when the correspondence is
+  explicit and detail-preserving.
+- Normalize equivalent date and time notations such as 24-hour versus 12-hour clocks when they
+  denote the same window.
+- Normalize strongly anchored operational paraphrases such as restart versus recycle or check
+  versus smoke test when they describe the same concrete action.
 - Bounded transfer matters. "Bob likes apples. I like same fruits as Bob." may support
   "I like apples", but it does not support "I like pears" because pears are not grounded anywhere
   in the text.
@@ -175,6 +181,8 @@ Fact model:
 Format-aware extraction examples:
 - Craigslist listings, recipe steps, and declarative code constants must be interpreted as sources
   of structured factual claims before equivalence is judged.
+- A fielded ticket, incident form, or change record may be factually equivalent to a prose summary
+  if the entities, times, actions, and outcomes line up with no extra or missing claims.
 
 Required strict examples:
 - actual: "Agent's name is Roger."
@@ -205,6 +213,12 @@ Required strict examples:
 - actual: "Agent introduced himself as Roger"
   reference: "Agent's name is Roger"
   closed-world verdict: False because the introduction event is not supported in reverse
+- actual: "Window: 22:00-23:30 PT. Action: restarted workers and reran health checks. Outcome:
+  service recovered before close with no data loss."
+  reference: "From 10:00 to 11:30 p.m. Pacific, the team restarted the workers, reran health
+  checks, restored service before the window closed, and confirmed no data loss."
+  closed-world verdict: True because the ticket-style record and prose summary express the same
+  anchored facts
 
 Conflict rules:
 - Conflict exists when two facts cannot both hold under a coherent interpretation of the same
@@ -225,12 +239,20 @@ Decision procedure:
 6. Evaluate support from actual to reference using closed-world rules.
 7. Evaluate support from reference to actual using closed-world rules.
 8. Evaluate cross-document conflict conservatively.
-9. Return True only if both support directions succeed and no conflict exists.
-10. Otherwise return False.
+9. Before returning False, identify at least one concrete missing reference fact, one concrete
+   unsupported actual fact, or one concrete conflict after normalization.
+10. If you cannot identify a concrete unmatched or conflicting fact and the remaining differences
+    are only format, phrasing, or level-of-detail differences, return True.
+11. Return True only if both support directions succeed and no conflict exists.
+12. Otherwise return False.
 
 Final reminder:
 - This predicate requires two-way support and zero conflict. Extra actual content that reference
   does not support is enough to make the verdict False.
+- Format differences alone do not block equivalence when the same anchored facts are preserved in
+  both directions.
+- Do not return False based on a vague impression that the documents are different. A False verdict
+  requires a concrete unmatched or conflicting fact.
 
 Output contract:
 - Emit only the schema-conforming result.
