@@ -186,12 +186,12 @@ class ConsoleReporter(Reporter):
             return lines
         return self._format_error(result.error)
 
-    def _build_failure_panel(self, title: str, lines: list[str] | Traceback, color: str) -> Panel:
-        content: str | Traceback = (
-            lines
-            if isinstance(lines, Traceback)
-            else "\n".join(escape(line) for line in lines) or " "
-        )
+    def _render_failure_lines(self, lines: list[str] | Traceback) -> RenderableType:
+        if isinstance(lines, Traceback):
+            return lines
+        return "\n".join(escape(line) for line in lines) or " "
+
+    def _build_failure_panel(self, title: str, content: RenderableType, color: str) -> Panel:
         return Panel(
             content,
             title=title,
@@ -199,6 +199,41 @@ class ConsoleReporter(Reporter):
             border_style=color,
             expand=True,
             padding=(1, 1),
+        )
+
+    def _get_failure_title(self, execution: TestExecution) -> str:
+        if execution.definition.id_suffix:
+            return escape(f"[{execution.definition.id_suffix}]")
+        if execution.execution_id:
+            return escape(f"[{str(execution.execution_id)[:8]}]")
+        return execution.item.full_name
+
+    def _build_failure_renderable(
+        self, execution: TestExecution, *, title: str | None = None
+    ) -> Panel:
+        result = execution.result
+        color = self._status_color(result.status)
+        sub_failures = [sub for sub in execution.sub_executions if sub.result.status.is_failure]
+        renderables: list[RenderableType] = []
+        lines = self._build_failure_lines(result)
+
+        if isinstance(lines, Traceback) or lines:
+            renderables.append(self._render_failure_lines(lines))
+
+        renderables.extend(self._build_failure_renderable(sub) for sub in sub_failures)
+
+        content: RenderableType
+        if not renderables:
+            content = " "
+        elif len(renderables) == 1:
+            content = renderables[0]
+        else:
+            content = Group(*renderables)
+
+        return self._build_failure_panel(
+            title or self._get_failure_title(execution),
+            content,
+            color,
         )
 
     def _format_metric_value(self, metric: MetricResult) -> tuple[str, int, int, bool]:
@@ -549,39 +584,9 @@ class ConsoleReporter(Reporter):
             if index:
                 self.console.print()
 
-            item = failure.item
-            failure_result = failure.result
-            color = self._status_color(failure_result.status)
-
-            sub_failures = [sub for sub in failure.sub_executions if sub.result.status.is_failure]
-
-            if sub_failures:
-                nested_panels = []
-                for sub in sub_failures:
-                    sub_color = self._status_color(sub.result.status)
-                    if sub.definition.id_suffix:
-                        title = escape(f"[{sub.definition.id_suffix}]")
-                    elif sub.execution_id:
-                        title = escape(f"[{str(sub.execution_id)[:8]}]")
-                    else:
-                        title = self._status_label(sub.result.status)
-
-                    lines = self._build_failure_lines(sub.result)
-                    nested_panels.append(self._build_failure_panel(title, lines, sub_color))
-
-                self.console.print(
-                    Panel(
-                        Group(*nested_panels),
-                        title=item.full_name,
-                        title_align="left",
-                        border_style=color,
-                        expand=True,
-                        padding=(1, 1),
-                    )
-                )
-            else:
-                lines = self._build_failure_lines(failure_result)
-                self.console.print(self._build_failure_panel(item.full_name, lines, color))
+            self.console.print(
+                self._build_failure_renderable(failure, title=failure.item.full_name)
+            )
 
         self.console.print()
 

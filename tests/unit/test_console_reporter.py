@@ -7,6 +7,7 @@ import pytest
 from rich.console import Console, Group
 from rich.table import Table
 
+from rue.assertions.base import AssertionRepr, AssertionResult
 from rue.reports.console import ConsoleReporter
 from rue.testing.models import Run, TestExecution, TestItem, TestResult, TestStatus
 
@@ -74,11 +75,17 @@ def make_execution(
     duration_ms: float,
     *,
     error: Exception | None = None,
+    assertion_results: list[AssertionResult] | None = None,
     sub_executions: list[TestExecution] | None = None,
 ) -> TestExecution:
     return TestExecution(
         definition=item,
-        result=TestResult(status=status, duration_ms=duration_ms, error=error),
+        result=TestResult(
+            status=status,
+            duration_ms=duration_ms,
+            error=error,
+            assertion_results=assertion_results or [],
+        ),
         sub_executions=sub_executions or [],
     )
 
@@ -260,6 +267,60 @@ async def test_failures_collected_and_rendered_on_run_complete():
     text = output.getvalue()
     assert "FAILURES" in text
     assert "expected failure" in text
+
+
+@pytest.mark.asyncio
+async def test_nested_failures_render_leaf_assertion_repr():
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=False, color_system=None, width=120)
+    reporter = ConsoleReporter(console=console, verbosity=1)
+
+    parent = make_item("test_nested", "tests/test_nested.py")
+    repeated = make_item("test_nested", "tests/test_nested.py", id_suffix="repeat=0")
+    leaf = make_item("test_nested", "tests/test_nested.py", id_suffix="case=1")
+    assertion = AssertionResult(
+        expression_repr=AssertionRepr(
+            expr="left == right",
+            lines_above="",
+            lines_below="",
+            resolved_args={"left": "1", "right": "2"},
+        ),
+        passed=False,
+        error_message="values differ",
+    )
+    leaf_execution = make_execution(
+        leaf,
+        TestStatus.FAILED,
+        8.0,
+        assertion_results=[assertion],
+    )
+    repeated_execution = make_execution(
+        repeated,
+        TestStatus.FAILED,
+        12.0,
+        sub_executions=[leaf_execution],
+    )
+    execution = make_execution(
+        parent,
+        TestStatus.FAILED,
+        20.0,
+        sub_executions=[repeated_execution],
+    )
+
+    await reporter.on_collection_complete([parent])
+    await reporter.on_test_complete(execution)
+
+    test_run = Run()
+    test_run.result.executions = [execution]
+    await reporter.on_run_complete(test_run)
+
+    text = output.getvalue()
+    assert "FAILURES" in text
+    assert "repeat=0" in text
+    assert "case=1" in text
+    assert "left == right" in text
+    assert "values differ" in text
+    assert "'left': '1'" in text
 
 
 @pytest.mark.asyncio
