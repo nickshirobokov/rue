@@ -9,7 +9,7 @@ title: "AI Predicates"
 <Callout icon="key" color="#FFC107" iconType="regular">This is a premium feature that requires a Rue API key.</Callout>
 
 Using AI Predicates enables:
-- Asserting on semantic properties like factual consistency and topic coverage
+- Asserting on semantic properties like factual consistency and topic presence
 - Asserting on formatting properties like style and layout matching
 - Asserting on behavioral properties like policy following
 
@@ -168,16 +168,16 @@ async def test_translation_preserves_meaning(translator):
     assert await matches_facts(back_translated, original)
 ```
 
-### Topic Coverage
+### Topic Presence
 
-#### has_topics
+#### has_topic
 
-Verifies output covers required subjects. Useful for content generation where specific themes must be addressed.
+Verifies output is substantively about a topic. Useful when a response must actually concern a subject, not just mention related words.
 
 ```python
-from rue.predicates import has_topics
+from rue.predicates import has_topic
 
-async def test_onboarding_covers_topics(onboarding_bot):
+async def test_onboarding_is_about_benefits(onboarding_bot):
     # New employee asks about benefits
     response = onboarding_bot.chat(
         "What benefits do I get?"
@@ -189,12 +189,9 @@ async def test_onboarding_covers_topics(onboarding_bot):
     # You're also eligible for our annual bonus
     # program."
 
-    # Response must cover these key topics
-    topics = """
-    health insurance, retirement plan,
-    paid time off
-    """
-    assert await has_topics(response, topics)
+    # Response should be about employee benefits
+    topic = "employee benefits"
+    assert await has_topic(response, topic)
 ```
 
 ### Policy Compliance
@@ -459,7 +456,7 @@ Layer semantic checks to validate different aspects of LLM outputs. This provide
 from rue.predicates import (
     has_unsupported_facts,
     has_conflicting_facts,
-    has_topics,
+    has_topic,
     follows_policy
 )
 
@@ -494,10 +491,10 @@ async def test_product_description(product_copilot):
         product_data
     )
 
-    # Layer 3: Must mention key selling points
-    assert await has_topics(
+    # Layer 3: Description should be about smart home temperature monitoring
+    assert await has_topic(
         description,
-        "WiFi, mobile app, warranty"
+        "smart home temperature monitoring"
     )
 
     # Layer 4: Follow marketing guidelines

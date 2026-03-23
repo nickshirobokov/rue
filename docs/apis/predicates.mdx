@@ -252,13 +252,13 @@ async def test_translation(translator):
 
 ---
 
-### has_topics
+### has_topic
 
-Check if actual text covers all topics from reference text.
+Check whether actual text is substantively about the topic described by reference.
 
 **Signature:**
 ```python
-async def has_topics(
+async def has_topic(
     actual: str,
     reference: str,
     strict: bool = False,
@@ -270,20 +270,20 @@ async def has_topics(
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `actual` | `str` | - | Text produced by the system under test |
-| `reference` | `str` | - | Required topics (comma-separated or description) |
-| `strict` | `bool` | `False` | Whether to require exact topic match |
+| `reference` | `str` | - | A single topic specification string |
+| `strict` | `bool` | `False` | Whether to use the strict evaluation mode; topic semantics stay the same |
 
-**Returns:** `PredicateResult` - `value` is `True` if all topics covered
+**Returns:** `PredicateResult` - `value` is `True` if the topic is substantively present
 
 **Example:**
 ```python
-from rue.predicates import has_topics
+from rue.predicates import has_topic
 
-async def test_coverage(content_bot):
+async def test_topic_presence(content_bot):
     response = content_bot.generate("Write about AI safety")
 
-    # Must cover these themes
-    assert await has_topics(response, "alignment, interpretability, robustness")
+    # Response should be about AI safety
+    assert await has_topic(response, "AI safety")
 ```
 
 ---
@@ -424,7 +424,7 @@ async def test_report_structure(report_bot):
 from rue.predicates import (
     has_unsupported_facts,
     has_conflicting_facts,
-    has_topics,
+    has_topic,
     follows_policy,
 )
 
@@ -435,7 +435,7 @@ async def test_comprehensive_check(product_bot):
     # Layer multiple checks
     assert not await has_unsupported_facts(description, product_data)
     assert not await has_conflicting_facts(description, product_data)
-    assert await has_topics(description, "WiFi, warranty")
+    assert await has_topic(description, "smart home temperature monitoring")
     assert await follows_policy(description, "No superlatives like 'best'")
 ```
 

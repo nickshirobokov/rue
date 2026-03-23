@@ -1,9 +1,9 @@
-"""LLM predicate for topic coverage."""
+"""LLM predicate for topic presence."""
 
 from .clients import LLMPredicate
 
 
-HAS_TOPICS_NORMAL_PROMPT = """You are executing the boolean predicate has_topics(actual, reference).
+HAS_TOPIC_NORMAL_PROMPT = """You are executing the boolean predicate has_topic(actual, reference).
 
 This prompt is a program specification, not a conversation. Evaluate whether the document named
 actual is substantively about the topic described by reference. The output must follow the
@@ -15,8 +15,6 @@ The strict flag, if present, does not change the semantics of this predicate.
 Semantic target:
 - Return True if and only if actual is substantively about the topic described by reference.
 - Reference is a topic specification string, not a reference document.
-- This predicate is the topic-presence predicate described in the RFC as has_topic(actual,
-  reference). The implementation name here is has_topics, but the semantics are the same.
 - This predicate asks whether the topic is a meaningful subject of the document.
 - This predicate does not ask whether the document is factually correct about that topic.
 - This predicate does not ask whether the topic is approved, denied, praised, criticized, or
@@ -109,9 +107,9 @@ Output contract:
   present.
 """
 
-HAS_TOPICS_STRICT_PROMPT = HAS_TOPICS_NORMAL_PROMPT
+HAS_TOPIC_STRICT_PROMPT = HAS_TOPIC_NORMAL_PROMPT
 
-HAS_TOPICS_TASK_TEMPLATE = """Evaluate the predicate has_topics for the input below.
+HAS_TOPIC_TASK_TEMPLATE = """Evaluate the predicate has_topic for the input below.
 
 Actual document:
 <actual>
@@ -125,11 +123,11 @@ Topic specification:
 """
 
 
-has_topics = LLMPredicate(
-    predicate_name="has_topics",
-    normal_prompt=HAS_TOPICS_NORMAL_PROMPT,
-    strict_prompt=HAS_TOPICS_STRICT_PROMPT,
-    task_template=HAS_TOPICS_TASK_TEMPLATE,
+has_topic = LLMPredicate(
+    predicate_name="has_topic",
+    normal_prompt=HAS_TOPIC_NORMAL_PROMPT,
+    strict_prompt=HAS_TOPIC_STRICT_PROMPT,
+    task_template=HAS_TOPIC_TASK_TEMPLATE,
 )
 
-__all__ = ["has_topics"]
+__all__ = ["has_topic"]

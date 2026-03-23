@@ -5,7 +5,15 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Annotated, Any, Self
 
-from pydantic import AliasGenerator, BaseModel, ConfigDict, Field, computed_field, model_validator
+from pydantic import (
+    AliasChoices,
+    AliasGenerator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    model_validator,
+)
 from pydantic_ai.models import KnownModelName
 from pydantic_ai.settings import ModelSettings
 from pydantic_settings import (
@@ -57,7 +65,10 @@ class PredicateSettings(BaseSettings):
     follows_policy: PredicateConfig | None = None
     has_conflicting_facts: PredicateConfig | None = None
     has_facts: PredicateConfig | None = None
-    has_topics: PredicateConfig | None = None
+    has_topic: PredicateConfig | None = Field(
+        default=None,
+        validation_alias=AliasChoices("has_topic", "has-topic", "has_topics", "has-topics"),
+    )
     has_unsupported_facts: PredicateConfig | None = None
     matches_facts: PredicateConfig | None = None
     matches_writing_layout: PredicateConfig | None = None
