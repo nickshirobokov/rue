@@ -479,7 +479,7 @@ class TestConcurrency:
         min_passes: int,
     ) -> TestItem:
         async def case_iterated_test(case) -> None:
-            await asyncio.sleep(case.input_kwargs["delay"])
+            await asyncio.sleep(case.inputs["delay"])
 
         return TestItem(
             fn=case_iterated_test,
@@ -500,7 +500,7 @@ class TestConcurrency:
     ) -> TestItem:
         async def case_group_iterated_test(group, case) -> None:
             _ = group
-            await asyncio.sleep(case.input_kwargs["delay"])
+            await asyncio.sleep(case.inputs["delay"])
 
         return TestItem(
             fn=case_group_iterated_test,

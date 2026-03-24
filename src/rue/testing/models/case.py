@@ -42,15 +42,6 @@ class Case(BaseModel, Generic[InputsT, RefsT]):
     inputs: InputsT = Field(default_factory=dict)  # type: ignore[assignment]
     references: RefsT = Field(default_factory=dict)  # type: ignore[assignment]
 
-    @property
-    def input_kwargs(self) -> dict[str, Any]:
-        """Return case inputs as plain kwargs for SUT calls."""
-        if isinstance(self.inputs, dict):
-            return self.inputs
-        if isinstance(self.inputs, BaseModel):
-            return self.inputs.model_dump()
-        return dict(self.inputs)
-
 
 class CaseGroup(BaseModel, Generic[InputsT, RefsT, GroupRefsT]):
     """Named collection of related cases with a group-level pass threshold.

@@ -217,14 +217,14 @@ with open("test_cases.json") as f:
 
 @rue.iter_cases(*cases)
 def test_from_dataset(case: Case, classifier):
-    result = classifier(**case.input_kwargs)
+    result = classifier(**case.inputs)
 
     expected = case.references["expected_label"]
     assert result == expected
 
 @rue.iter_cases(*cases, min_passes=8)
 def test_from_dataset_pass_at_k(case: Case, classifier):
-    result = classifier(**case.input_kwargs)
+    result = classifier(**case.inputs)
 
     expected = case.references["expected_label"]
     assert result == expected
@@ -261,7 +261,7 @@ music = CaseGroup(
 
 @rue.iter_case_groups(geography, music)
 def test_chatbot(group: CaseGroup, case: Case, chatbot):
-    response = chatbot(**case.input_kwargs)
+    response = chatbot(**case.inputs)
     assert case.references["expected"] in response
 ```
 

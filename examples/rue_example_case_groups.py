@@ -108,7 +108,7 @@ def test_iter_case_groups_with_validation(
     case: Case[ExampleInputs, ExampleCaseReferences],
     chatbot,
 ):
-    response = chatbot(**case.input_kwargs)
+    response = chatbot(**case.inputs.model_dump())
 
     # case-level references
     assert case.references.expected in response

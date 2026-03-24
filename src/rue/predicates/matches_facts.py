@@ -1,6 +1,6 @@
 """LLM predicate for full fact matching."""
 
-from .clients import LLMPredicate
+from rue.predicates.clients import LLMPredicate
 
 
 MATCHES_FACTS_NORMAL_PROMPT = """You are executing the boolean predicate matches_facts(actual, reference, strict=False).

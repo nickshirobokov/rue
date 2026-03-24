@@ -442,7 +442,7 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
 async def test_matches_writing_style_strict_false_expected_true(
     case: Case[Inputs, Refs],
 ):
-    assert await matches_writing_style(**case.input_kwargs)
+    assert await matches_writing_style(**case.inputs.model_dump())
 
 
 @rue.iter_cases(
@@ -456,7 +456,7 @@ async def test_matches_writing_style_strict_false_expected_true(
 async def test_matches_writing_style_strict_false_expected_false(
     case: Case[Inputs, Refs],
 ):
-    assert not await matches_writing_style(**case.input_kwargs)
+    assert not await matches_writing_style(**case.inputs.model_dump())
 
 
 @rue.iter_cases(
@@ -470,7 +470,7 @@ async def test_matches_writing_style_strict_false_expected_false(
 async def test_matches_writing_style_strict_true_expected_true(
     case: Case[Inputs, Refs],
 ):
-    assert await matches_writing_style(**case.input_kwargs)
+    assert await matches_writing_style(**case.inputs.model_dump())
 
 
 @rue.iter_cases(
@@ -484,4 +484,4 @@ async def test_matches_writing_style_strict_true_expected_true(
 async def test_matches_writing_style_strict_true_expected_false(
     case: Case[Inputs, Refs],
 ):
-    assert not await matches_writing_style(**case.input_kwargs)
+    assert not await matches_writing_style(**case.inputs.model_dump())

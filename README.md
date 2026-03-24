@@ -73,7 +73,7 @@ async def test_chatbot_no_hallucinations(
     accuracy: Metric,
     trace_context):
     """AI agent relies on knowledge base and tool calls for transactional questions"""
-    response = store_chatbot(**case.input_kwargs)
+    response = store_chatbot(**case.inputs)
 
     # Verify the answer don't have any unsupported facts
     with metrics(accuracy):

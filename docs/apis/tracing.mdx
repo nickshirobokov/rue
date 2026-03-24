@@ -23,7 +23,7 @@ def init_tracing(
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `service_name` | `str` | `"test"` | Service name in trace metadata |
-| `trace_content` | `bool \| None` | `None` | Content capture toggle. **Note:** today Rue uses `RUE_TRACE_CONTENT` to control SUT span input/output attributes; `trace_content` is **not currently applied** to OpenAI/Anthropic client instrumentation. |
+| `trace_content` | `bool \| None` | `None` | Content capture toggle. **Note:** today Rue uses `RUE_TRACE_CONTENT` to control SUT and predicate content attributes; `trace_content` is **not currently applied** to OpenAI/Anthropic client instrumentation. |
 | `output_path` | `Path \| str` | `".rue/traces.jsonl"` | File path for trace export |
 
 **Returns:** `None`
@@ -57,7 +57,10 @@ claude = Anthropic()  # All calls traced
 ```
 
 **Environment Variables:**
-- `RUE_TRACE_CONTENT`: Set to `"false"` to avoid recording SUT input/output content (`sut.input.*`, `sut.output`). This does **not** currently guarantee LLM client instrumentation content is redacted.
+- `RUE_TRACE_CONTENT`: Set to `"false"` to avoid recording SUT and predicate
+  content attributes (`sut.input.*`, `sut.output`, `predicate.input.*`,
+  `predicate.message`). This does **not** currently guarantee LLM client
+  instrumentation content is redacted.
 
 ---
 
@@ -145,6 +148,9 @@ Provides access to trace data for the current test execution.
 | `get_sut_spans(name=None)` | `list[ReadableSpan]` | Get spans from `@rue.sut` decorated functions, optionally filtered by name |
 | `set_attribute(key, value)` | `None` | Set a custom attribute on the test span |
 
+Predicate spans from `@predicate` are available via `get_child_spans()` and
+filtering on `rue.predicate` or `rue.predicate.name`.
+
 **Example:**
 
 ```python
@@ -173,6 +179,13 @@ def test_agent_workflow(my_agent, trace_context):
     sut_spans = trace_context.get_sut_spans(name="my_agent")
     assert len(sut_spans) == 1
     assert sut_spans[0].name == "sut.my_agent"
+
+    # If the test evaluates any @predicate functions
+    predicate_spans = [
+        span
+        for span in all_spans
+        if (span.attributes or {}).get("rue.predicate")
+    ]
 
     # Get LLM calls (if any)
     llm_calls = trace_context.get_llm_calls()
@@ -578,6 +591,7 @@ init_tracing()
 # - Parameter counts
 # But NOT:
 # - SUT input/output values (`sut.input.*`, `sut.output`)
+# - Predicate inputs/details (`predicate.input.*`, `predicate.message`)
 #
 # Note: Rue does not currently guarantee LLM client instrumentation content is redacted.
 ```
@@ -614,8 +628,11 @@ Because the exact shape can vary by OpenTelemetry version and installed instrume
 
 **Rue-added attributes to look for (may be absent when `RUE_TRACE_CONTENT=false`):**
 - `rue.sut` / `rue.sut.name`
+- `rue.predicate` / `rue.predicate.name`
 - `sut.input.args` / `sut.input.kwargs` / `sut.input.count`
 - `sut.output` / `sut.output.type`
+- `predicate.value` / `predicate.strict` / `predicate.confidence`
+- `predicate.input.actual` / `predicate.input.reference` / `predicate.message`
 
 ```json
 {

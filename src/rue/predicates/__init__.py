@@ -1,3 +1,4 @@
+from .decorator import predicate
 from .has_facts import has_facts
 from .has_unsupported_facts import has_unsupported_facts
 from .has_conflicting_facts import has_conflicting_facts
@@ -9,7 +10,7 @@ from .matches_writing_style import matches_writing_style
 
 from .follows_policy import follows_policy
 
-from .models import PredicateResult, predicate, Predicate
+from .models import Predicate, PredicateResult
 
 __all__ = [
     "PredicateResult",

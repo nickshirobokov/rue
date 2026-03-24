@@ -42,6 +42,7 @@ class PredicateConfig(BaseModel):
     parallel_tool_calls: bool | None = None
 
     @computed_field
+    @property
     def model_settings(self) -> ModelSettings:
         """OpenAI-style model kwargs derived from optional predicate fields."""
         return self.model_dump(

@@ -6,6 +6,7 @@ import pytest
 
 from rue.assertions.base import AssertionRepr, AssertionResult
 from rue.context import (
+    PREDICATE_RESULTS_COLLECTOR,
     ResolverContext,
     TestContext as Ctx,
     assertions_collector,
@@ -74,17 +75,16 @@ def test_assertionresult_appends_to_test_context():
     assert ar2 not in assertion_results
 
 
-def test_assertion_context_collects_predicate_results():
+def test_assertion_context_collects_recorded_predicate_results():
     test_ctx = Ctx(item=_make_item("test_name"))
 
     # Collect predicate results into a list
-    predicate_results_list = []
+    predicate_results_list: list[PredicateResult] = []
 
     with (
         context_scope(test_ctx),
         predicate_results_collector(predicate_results_list),
     ):
-        # PredicateResult should attach itself to the collector
         pr = PredicateResult(
             actual="a",
             reference="b",
@@ -93,6 +93,11 @@ def test_assertion_context_collects_predicate_results():
             value=True,
         )
         assert pr
+        assert predicate_results_list == []
+
+        c = PREDICATE_RESULTS_COLLECTOR.get()
+        assert c is not None
+        c.append(pr)
 
     # Build AssertionResult with collected data
     ar = AssertionResult(
@@ -108,6 +113,18 @@ def test_assertion_context_collects_predicate_results():
 
     assert len(ar.predicate_results) == 1
     assert ar.predicate_results[0] == pr
+
+
+def test_predicate_result_bool_without_collector():
+    pr = PredicateResult(
+        actual="a",
+        reference="b",
+        name="manual_predicate",
+        strict=True,
+        value=False,
+    )
+
+    assert bool(pr) is False
 
 
 def test_metrics_records_assertion_passed_and_reads_test_context_for_metadata():

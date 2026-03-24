@@ -22,7 +22,7 @@ def test_rewritten_assert_collects_predicate_results(tmp_path):
     mod_path.write_text(
         """
 from rue.metrics_.base import Metric
-from rue.predicates.models import predicate
+from rue.predicates import predicate
 
 @predicate
 def equals(actual, reference):
@@ -59,7 +59,7 @@ def test_rewritten_assert_failure_sets_error_message_and_raises(tmp_path):
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(
         """
-from rue.predicates.models import predicate
+from rue.predicates import predicate
 
 @predicate
 def equals(actual, reference):
@@ -91,7 +91,7 @@ def test_rewritten_multiple_asserts_record_multiple_metric_values(tmp_path):
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(
         """
-from rue.predicates.models import predicate
+from rue.predicates import predicate
 
 @predicate
 def equals(actual, reference):

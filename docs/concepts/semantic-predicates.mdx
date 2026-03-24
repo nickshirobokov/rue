@@ -15,7 +15,7 @@ Using AI Predicates enables:
 
 ## Basic Usage
 
-Rue provides 8 built-in AI predicates for common LLM evaluation scenarios. All predicates are async functions that return `PredicateResult` objects with boolean values, confidence scores, and explanatory messages.
+Rue provides 8 built-in AI predicates for common LLM evaluation scenarios. All predicates are async functions that return `bool`. When they run inside Rue-transformed `assert` statements, Rue also records a `PredicateResult` internally with confidence and explanation metadata for reporting and storage.
 
 ```python
 import rue
@@ -305,7 +305,7 @@ async def test_follows_report_structure(report_generator):
 
 When you run tests with database persistence enabled (default behavior), all AI predicate evaluations used inside `assert` statements are automatically saved to the Rue database. This enables post-run analysis, debugging, and quality monitoring.
 
-Every `PredicateResult` evaluated in an assertion is stored with full context. After the run completes, you can investigate these evaluations even if all tests passed.
+Every predicate evaluation inside an assertion is stored as a `PredicateResult` with full context. After the run completes, you can investigate these evaluations even if all tests passed.
 
 ### Available Data for Analysis
 

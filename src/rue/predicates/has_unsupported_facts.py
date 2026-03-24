@@ -1,6 +1,6 @@
 """LLM predicate for unsupported facts."""
 
-from .clients import LLMPredicate
+from rue.predicates.clients import LLMPredicate
 
 
 HAS_UNSUPPORTED_FACTS_NORMAL_PROMPT = """You are executing the boolean predicate has_unsupported_facts(actual, reference, strict=False).

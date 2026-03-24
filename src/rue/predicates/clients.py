@@ -10,8 +10,11 @@ from pydantic_ai.models import KnownModelName, ModelRequestParameters, infer_mod
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import RunUsage
 
-from .models import PredicateResult
-from ..config import PredicateConfig, load_config
+from rue.context import PREDICATE_RESULTS_COLLECTOR
+from rue.config import PredicateConfig, load_config
+from rue.predicates.models import PredicateResult
+
+from .decorator import predicate
 
 
 load_dotenv()
@@ -63,7 +66,7 @@ class LLMPredicate:
         reference: str,
         strict: bool = False,  # noqa: FBT001, FBT002
         with_explanation: bool = False,  # noqa: FBT001, FBT002
-    ) -> PredicateResult:
+    ) -> bool:
         """Get the bool value of the predicate from the LLM."""
         model, model_settings = self.get_model_config()
 
@@ -98,7 +101,7 @@ class LLMPredicate:
                 usage=RunUsage(),
             ),
         )
-        return PredicateResult(
+        result = PredicateResult(
             actual=actual,
             reference=reference,
             name=self.predicate_name,
@@ -107,6 +110,10 @@ class LLMPredicate:
             confidence=1.0,
             message=None if isinstance(parsed_output, bool) else parsed_output.explanation,
         )
+        collector = PREDICATE_RESULTS_COLLECTOR.get()
+        if collector is not None:
+            collector.append(result)
+        return result.value
 
     def get_model_config(self) -> tuple[KnownModelName, ModelSettings]:
         """Resolve the configured model and settings for a built-in predicate."""

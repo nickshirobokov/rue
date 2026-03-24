@@ -1,6 +1,6 @@
 """LLM predicate for writing style matching."""
 
-from .clients import LLMPredicate
+from rue.predicates.clients import LLMPredicate
 
 
 MATCHES_WRITING_STYLE_NORMAL_PROMPT = """You are executing the boolean predicate matches_writing_style(actual, reference).

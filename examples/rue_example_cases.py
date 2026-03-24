@@ -76,7 +76,7 @@ all_cases = [
 # Get output for each case input and assert against references
 @rue.iter_cases(*all_cases)
 def test_iter_cases_basic_usage(case: Case[ExampleInputs, ExampleReferences]):
-    response = simple_chatbot(**case.input_kwargs)
+    response = simple_chatbot(**case.inputs.model_dump())
 
     assert case.references.expected in response
     assert len(response) <= case.references.max_len
@@ -86,7 +86,7 @@ def test_iter_cases_basic_usage(case: Case[ExampleInputs, ExampleReferences]):
 # Filter cases in code
 @rue.iter_cases(*[c for c in all_cases if "geography" in c.tags])
 def test_iter_cases_only_geography(case: Case[ExampleInputs, ExampleReferences]):
-    response = simple_chatbot(**case.input_kwargs)
+    response = simple_chatbot(**case.inputs.model_dump())
 
     assert case.references.expected in response
     assert len(response) <= case.references.max_len
@@ -101,7 +101,7 @@ def chatbot():
 
 @rue.iter_cases(*all_cases)
 def test_iter_cases_with_validation(case: Case[ExampleInputs, ExampleReferences], chatbot):
-    response = chatbot(**case.input_kwargs)
+    response = chatbot(**case.inputs.model_dump())
 
     assert case.references.expected in response
     assert len(response) <= case.references.max_len

@@ -1,6 +1,6 @@
 """LLM predicate for required facts."""
 
-from .clients import LLMPredicate
+from rue.predicates.clients import LLMPredicate
 
 
 HAS_FACTS_NORMAL_PROMPT = """You are executing the boolean predicate has_facts(actual, reference, strict=False).

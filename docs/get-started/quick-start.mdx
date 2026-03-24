@@ -67,7 +67,7 @@ cases = [
 
 @rue.iter_cases(*cases)
 async def test_chatbot_no_hallucinations(case: Case, store_chatbot):
-    response = store_chatbot(**case.input_kwargs)
+    response = store_chatbot(**case.inputs)
 
     assert not await has_unsupported_facts(response, case.references["context"])
 
@@ -120,7 +120,7 @@ async def test_chatbot_no_hallucinations(
     store_chatbot,
     accuracy: Metric,
 ):
-    response = store_chatbot(**case.input_kwargs)
+    response = store_chatbot(**case.inputs)
 
     with metrics(accuracy):
         assert not await has_unsupported_facts(
@@ -181,7 +181,7 @@ async def test_chatbot_no_hallucinations(
     accuracy: Metric,
     trace_context,
 ):
-    response = store_chatbot(**case.input_kwargs)
+    response = store_chatbot(**case.inputs)
 
     with metrics(accuracy):
         assert not await has_unsupported_facts(

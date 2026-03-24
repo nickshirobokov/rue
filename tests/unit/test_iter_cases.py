@@ -21,7 +21,6 @@ def test_case_defaults():
 
     assert case.references == {}
     assert case.inputs == {}
-    assert case.input_kwargs == {}
 
 
 def test_case_generic_dict():
@@ -31,7 +30,6 @@ def test_case_generic_dict():
     )
     assert case.references == {"expected": "value"}
     assert case.inputs == {"input": "data"}
-    assert case.input_kwargs == {"input": "data"}
 
 
 def test_case_generic_basemodel():
@@ -62,7 +60,7 @@ def test_case_generic_basemodel_inputs():
     )
     assert isinstance(case.inputs, MyInputs)
     assert case.inputs.input == "data"
-    assert case.input_kwargs == {"input": "data"}
+    assert case.inputs.model_dump() == {"input": "data"}
 
 
 def test_iter_cases_decorator():
@@ -187,7 +185,7 @@ def test_runner_iter_cases_partial_pass_meets_min_passes(null_reporter):
     cases = [Case(inputs={"x": i}) for i in range(1, 6)]
 
     def test_partial_pass(case):
-        if case.input_kwargs["x"] >= 4:
+        if case.inputs["x"] >= 4:
             raise AssertionError("fail")
 
     item = TestItem(
@@ -215,7 +213,7 @@ def test_runner_iter_cases_insufficient_passes(null_reporter):
     cases = [Case(inputs={"x": i}) for i in range(1, 6)]
 
     def test_mostly_fail(case):
-        if case.input_kwargs["x"] > 2:
+        if case.inputs["x"] > 2:
             raise AssertionError("fail")
 
     item = TestItem(
@@ -243,7 +241,7 @@ def test_runner_iter_cases_default_requires_all_passes(null_reporter):
     cases = [Case(inputs={"x": i}) for i in range(1, 4)]
 
     def test_one_fails(case):
-        if case.input_kwargs["x"] == 2:
+        if case.inputs["x"] == 2:
             raise AssertionError("fail")
 
     item = TestItem(
@@ -387,9 +385,9 @@ def test_runner_iter_case_groups_uses_group_min_passes_and_all_groups_must_pass(
     ]
 
     def test_group_threshold(group, case):
-        if group.name == "alpha" and case.input_kwargs["x"] == 3:
+        if group.name == "alpha" and case.inputs["x"] == 3:
             raise AssertionError("alpha fail")
-        if group.name == "beta" and case.input_kwargs["x"] == 2:
+        if group.name == "beta" and case.inputs["x"] == 2:
             raise AssertionError("beta fail")
 
     item = TestItem(

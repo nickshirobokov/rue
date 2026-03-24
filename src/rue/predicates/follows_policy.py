@@ -1,6 +1,6 @@
 """LLM predicate for policy compliance."""
 
-from .clients import LLMPredicate
+from rue.predicates.clients import LLMPredicate
 
 
 FOLLOWS_POLICY_NORMAL_PROMPT = """You are executing the boolean predicate follows_policy(actual, reference).

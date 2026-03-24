@@ -7,7 +7,7 @@ title: "Case"
 Using `Case` enables:
 - Iterating one test function over many scenarios with `@rue.iter_cases(...)`
 - Grouping related cases with `CaseGroup` and iterating with `@rue.iter_case_groups(...)`
-- Keeping inputs in `inputs` and calling SUTs with `sut(**case.input_kwargs)`
+- Keeping inputs in `inputs` and calling SUTs with `sut(**case.inputs)` or `sut(**case.inputs.model_dump())` for typed inputs
 - Storing reference data in `references` (typed or untyped)
 - Tagging and filtering with `tags`, and attaching context with `metadata`
 
@@ -37,7 +37,7 @@ case2 = Case(
 
 @rue.iter_cases(*[c for c in (case1, case2) if "smoke" in c.tags])
 def test_classifier(case: Case):
-    label = classifier(**case.input_kwargs)
+    label = classifier(**case.inputs)
     assert label == case.references["expected_label"]
 ```
 
@@ -53,10 +53,10 @@ from rue import Case
 case = Case(inputs={"prompt": "Hello"})
 ```
 
-Use `case.input_kwargs` whenever you need a plain kwargs dict for `**...` expansion:
+Use `**case.inputs` for dict inputs. If `inputs` is a `BaseModel`, expand `case.inputs.model_dump()` instead:
 
 ```python
-reply = chatbot(**case.input_kwargs)
+reply = chatbot(**case.inputs)
 ```
 
 ### Typed inputs
@@ -82,7 +82,7 @@ case = Case[AgentInputs, AgentReference](
 )
 
 assert case.inputs.prompt == "Say hello"
-assert case.input_kwargs == {"prompt": "Say hello"}
+assert case.inputs.model_dump() == {"prompt": "Say hello"}
 ```
 
 ### Typed references
@@ -198,7 +198,7 @@ def my_agent():
 
 @rue.iter_cases(*cases)
 def test_my_agent(case: Case, my_agent):
-    my_agent(**case.input_kwargs)
+    my_agent(**case.inputs)
 ```
 
 ## CaseGroup
@@ -237,7 +237,7 @@ music = CaseGroup(
 
 @rue.iter_case_groups(geography, music)
 def test_chatbot(group: CaseGroup, case: Case, chatbot):
-    response = chatbot(**case.input_kwargs)
+    response = chatbot(**case.inputs)
     assert case.references["expected"] in response
 ```
 
@@ -329,7 +329,7 @@ cases = [Case(inputs={"x": 1}), Case(inputs={"x": 2})]
 
 @iter_cases(*cases)
 def test_simple(case, add_one):
-    result = add_one(**case.input_kwargs)
+    result = add_one(**case.inputs)
     assert result
 ```
 
@@ -378,5 +378,5 @@ else:
 
 @rue.iter_cases(*test_cases)
 def test_text_processor(case: Case, processor):
-    processor(**case.input_kwargs)
+    processor(**case.inputs)
 ```

@@ -404,7 +404,7 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
 )
 @rue.repeat(2)
 async def test_has_facts_strict_false_expected_true(case: Case[Inputs, Refs]):
-    assert await has_facts(**case.input_kwargs)
+    assert await has_facts(**case.inputs.model_dump())
 
 
 @rue.iter_cases(
@@ -416,7 +416,7 @@ async def test_has_facts_strict_false_expected_true(case: Case[Inputs, Refs]):
 )
 @rue.repeat(2)
 async def test_has_facts_strict_false_expected_false(case: Case[Inputs, Refs]):
-    assert not await has_facts(**case.input_kwargs)
+    assert not await has_facts(**case.inputs.model_dump())
 
 
 @rue.iter_cases(
@@ -428,7 +428,7 @@ async def test_has_facts_strict_false_expected_false(case: Case[Inputs, Refs]):
 )
 @rue.repeat(2)
 async def test_has_facts_strict_true_expected_true(case: Case[Inputs, Refs]):
-    assert await has_facts(**case.input_kwargs)
+    assert await has_facts(**case.inputs.model_dump())
 
 
 @rue.iter_cases(
@@ -440,4 +440,4 @@ async def test_has_facts_strict_true_expected_true(case: Case[Inputs, Refs]):
 )
 @rue.repeat(2)
 async def test_has_facts_strict_true_expected_false(case: Case[Inputs, Refs]):
-    assert not await has_facts(**case.input_kwargs)
+    assert not await has_facts(**case.inputs.model_dump())

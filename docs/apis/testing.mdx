@@ -397,9 +397,8 @@ Container for test case inputs and reference data.
 | `metadata` | `dict[str, str \| int \| float \| bool \| None]` | Arbitrary key-value pairs |
 | `references` | `RefsT` | Reference data for validation (typed or dict), defaults to `{}` |
 | `inputs` | `InputsT` | Input arguments to pass to the SUT, defaults to `{}` |
-| `input_kwargs` | `dict[str, Any]` | Read-only plain-dict view of `inputs`, used for `**...` SUT calls |
 
-`sut_input_values` was renamed to `inputs`. When `inputs` is typed, use `case.input_kwargs` when expanding kwargs into a callable.
+`sut_input_values` was renamed to `inputs`. Use `**case.inputs` for dict inputs, or `**case.inputs.model_dump()` when `inputs` is a `BaseModel`.
 
 **Example:**
 ```python
@@ -440,7 +439,7 @@ case = Case[MyInputs, MyRefs](
     references={"expected_label": "positive", "confidence_threshold": 0.8}
 )
 
-assert case.input_kwargs == {"text": "Sample input"}
+assert case.inputs.model_dump() == {"text": "Sample input"}
 ```
 
 ---
@@ -788,7 +787,7 @@ with open("test_cases.json") as f:
 
 @iter_cases(*cases)
 def test_from_dataset(case: Case, classifier):
-    result = classifier(**case.input_kwargs)
+    result = classifier(**case.inputs)
 
     if case.references:
         expected = case.references["expected_label"]
@@ -796,7 +795,7 @@ def test_from_dataset(case: Case, classifier):
 
 @iter_cases(*cases, min_passes=8)
 def test_from_dataset_pass_at_k(case: Case, classifier):
-    result = classifier(**case.input_kwargs)
+    result = classifier(**case.inputs)
     assert result in {"positive", "negative", "neutral"}
 ```
 
@@ -859,7 +858,7 @@ music = CaseGroup(
 
 @rue.iter_case_groups(geography, music)
 def test_chatbot(group: CaseGroup, case: Case, chatbot):
-    response = chatbot(**case.input_kwargs)
+    response = chatbot(**case.inputs)
     assert case.references["expected"] in response
 ```
 

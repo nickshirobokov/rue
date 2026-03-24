@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 import json
+from dataclasses import dataclass
 
 import pytest
 from pydantic import BaseModel
@@ -174,6 +175,29 @@ class TestSutResolution:
             x: int
             y: int
 
+        cases = [
+            Case[AdderInputs, dict[str, int]](inputs=AdderInputs(x=1, y=2)),
+        ]
+
+        @sut(validate_cases=cases)
+        def adder():
+            def run(x: int, y: int) -> int:
+                return x + y
+
+            return run
+
+        resolver = ResourceResolver(get_registry())
+        resolved = await resolver.resolve("adder")
+
+        assert resolved(**cases[0].inputs.model_dump()) == 3
+
+    @pytest.mark.asyncio
+    async def test_validate_cases_applies_to_dataclass_inputs(self):
+        @dataclass
+        class AdderInputs:
+            x: int
+            y: int
+
         cases = [Case[AdderInputs, dict[str, int]](inputs=AdderInputs(x=1, y=2))]
 
         @sut(validate_cases=cases)
@@ -186,11 +210,34 @@ class TestSutResolution:
         resolver = ResourceResolver(get_registry())
         resolved = await resolver.resolve("adder")
 
-        assert resolved(**cases[0].input_kwargs) == 3
+        assert resolved(x=cases[0].inputs.x, y=cases[0].inputs.y) == 3
 
     @pytest.mark.asyncio
     async def test_validate_cases_raises_on_invalid_case(self):
         cases = [Case(inputs={"x": "not-an-int"})]
+
+        @sut(validate_cases=cases)
+        def increment():
+            def run(x: int) -> int:
+                return x + 1
+
+            return run
+
+        resolver = ResourceResolver(get_registry())
+        with pytest.raises(RuntimeError, match="Hook on_resolve failed") as exc:
+            await resolver.resolve("increment")
+
+        assert isinstance(exc.value.__cause__, ValidationError)
+
+    @pytest.mark.asyncio
+    async def test_validate_cases_raises_on_invalid_dataclass_case(self):
+        @dataclass
+        class IncrementInputs:
+            x: int
+
+        cases = [
+            Case[IncrementInputs, dict[str, int]](inputs=IncrementInputs(x="bad")),
+        ]
 
         @sut(validate_cases=cases)
         def increment():

@@ -1,6 +1,6 @@
 """LLM predicate for topic presence."""
 
-from .clients import LLMPredicate
+from rue.predicates.clients import LLMPredicate
 
 
 HAS_TOPIC_NORMAL_PROMPT = """You are executing the boolean predicate has_topic(actual, reference).
