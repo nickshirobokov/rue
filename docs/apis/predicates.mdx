@@ -1,293 +1,241 @@
 ---
-title: "Rue Predicates APIs"
+title: "Predicate APIs"
+description: "Reference documentation for Rue's predicate decorator, PredicateResult, and built-in predicates."
 ---
 
-## Decorator
+## `predicate`
 
-### @predicate
+Decorate a sync or async comparison function so Rue records predicate metadata for assertions and traces.
 
-Convert a comparison function into a Rue predicate with automatic metadata recording.
-
-**Signature:**
 ```python
-@predicate(
-    func: Callable[..., bool | PredicateResult]
-    | Callable[..., Awaitable[bool | PredicateResult]]
-)
-```
-
-**Parameters:**
-
-| Name | Type | Description |
-|------|------|-------------|
-| `func` | `Callable` | Function that returns `bool` or `PredicateResult` and declares `actual` and `reference` as named positional parameters |
-
-**Returns:** `Predicate` - A wrapped callable that returns `bool`
-
-When a predicate returns `bool`, Rue builds the recorded `PredicateResult` from
-the bound call. If the predicate declares `strict`, `confidence`, or `message`,
-their recorded defaults come from the predicate signature itself.
-
-**Example:**
-```python
-import re
-
-from rue.predicates import predicate
-
-@predicate
-def mentions_price(actual: str, reference: str) -> bool:
-    """Check if actual mentions the expected price."""
-    prices = re.findall(r"\$[\d,]+(?:\.\d{2})?", actual)
-    return reference in prices
-
-@predicate
-async def custom_semantic_check(actual: str, reference: str) -> bool:
-    """Custom async predicate using LLM."""
-    return await llm.evaluate(actual, reference)
-
-@predicate
-def within_tolerance(
-    actual: float,
-    reference: float,
-    *,
-    strict: bool = False,
-    confidence: float = 0.8,
-    message: str | None = "outside tolerance",
-) -> bool:
-    return abs(actual - reference) <= 0.1
-
-def test_test():
-    summary = "The product costs $299.99"
-    assert mentions_price(summary, "$299.99")
-    assert within_tolerance(10.05, 10.0)
-```
-
----
-
-## Result Classes
-
-### PredicateResult
-
-Metadata for a predicate evaluation. Rue records these objects internally for
-assertion reporting and database persistence, and you can construct them
-manually when you need explicit collection behavior.
-
-**Attributes:**
-
-| Name | Type | Description |
-|------|------|-------------|
-| `actual` | `str` | String representation of observed value |
-| `reference` | `str` | String representation of expected value |
-| `name` | `str` | Name of the predicate function |
-| `strict` | `bool` | Strictness flag used in evaluation |
-| `confidence` | `float` | Confidence score in `[0, 1]` |
-| `value` | `bool` | Boolean outcome of the check |
-| `message` | `str \| None` | Optional explanation or reasoning |
-
-**Methods:**
-
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `record()` | `None` | Appends the result to the current collector (if any) |
-| `__bool__()` | `bool` | Returns `value` without side effects |
-| `__repr__()` | `str` | JSON representation (Pydantic `model_dump_json`) |
-
-**Example:**
-```python
-from rue.context import predicate_results_collector
+from rue import predicate
 from rue.predicates import PredicateResult
 
-def test_manual_collection():
-    results = []
 
-    with predicate_results_collector(results):
-        result = PredicateResult(
-            actual="Paris is the capital of France",
-            reference="capital of France",
-            name="has_facts",
-            value=True,
-            confidence=1.0,
-            message="All facts present",
-        )
-        result.record()
+@predicate
+def my_predicate(actual: str, reference: str, ...) -> bool | PredicateResult:
+    ...
 
-    assert results == [result]
-    assert bool(result) is True
+
+@predicate(name="custom_name")
+def my_predicate(actual: str, reference: str, ...) -> bool | PredicateResult:
+    ...
 ```
 
----
+### Parameters
 
-## Built-in Semantic Predicates
+| Name | Type | Description |
+| --- | --- | --- |
+| `func` | `Callable` | Sync or async function returning `bool` or `PredicateResult` |
+| `name` | `str \| None` | Optional display name for reports and traces |
 
-All built-in predicates are async functions that return `bool`.
+### Rules
 
-### has_conflicting_facts
+- The function must declare named `actual` and `reference` parameters.
+- Those parameters may be positional-or-keyword or keyword-only.
+- Positional-only `actual` and `reference` are rejected.
+- The wrapped call returns `bool` to the caller.
 
-Check if actual text contradicts facts in reference text.
+### Recording behavior
 
-**Signature:**
+If the wrapped function returns `bool`, Rue creates a `PredicateResult` from the bound call.
+
+- `strict` defaults to `False` if your function does not declare it.
+- `confidence` defaults to `1.0` if your function does not declare it.
+- `message` defaults to `None` if your function does not declare it.
+
+If the wrapped function returns `PredicateResult`, Rue uses that object as-is.
+
+## `PredicateResult`
+
+Structured metadata for a predicate evaluation.
+
 ```python
-async def has_conflicting_facts(
-    actual: str,
-    reference: str,
-    strict: bool = False,
-) -> bool
+from rue.predicates import PredicateResult
 ```
 
-**Returns:** `bool` - `True` if contradictions were found
+### Fields
 
-### has_unsupported_facts
+| Name | Type | Description |
+| --- | --- | --- |
+| `actual` | `str` | Recorded observed value |
+| `reference` | `str` | Recorded comparison value |
+| `name` | `str` | Predicate name |
+| `strict` | `bool` | Recorded strictness flag |
+| `confidence` | `float` | Confidence in `[0, 1]` |
+| `value` | `bool` | Boolean verdict |
+| `message` | `str \| None` | Optional explanation |
 
-Check if actual text contains facts not found in reference text (hallucinations).
+`PredicateResult` is a Pydantic model. It is commonly produced internally by Rue, and you can also return it directly from a decorated predicate.
 
-**Signature:**
-```python
-async def has_unsupported_facts(
-    actual: str,
-    reference: str,
-    strict: bool = False,
-) -> bool
-```
+## Built-in predicates
 
-**Returns:** `bool` - `True` if unsupported facts were found
+All built-in predicates are async callables imported from `rue.predicates`. They always return `bool`.
 
-### has_facts
+### Shared parameters
 
-Check if actual text contains all facts from reference text.
+| Name | Type | Description |
+| --- | --- | --- |
+| `actual` | `str` | Document being evaluated |
+| `reference` | `str` | Comparison document, topic string, policy string, or sample depending on the predicate |
+| `strict` | `bool` | Changes semantics for the factual family; accepted but semantically ignored for the non-factual family |
+| `with_explanation` | `bool` | When `True`, ask the built-in predicate to record an explanation in `PredicateResult.message`; the awaited return value is still `bool` |
 
-**Signature:**
+### Factual family
+
+#### `has_facts`
+
+Returns whether every fact in `reference` is supported by `actual`.
+
 ```python
 async def has_facts(
     actual: str,
     reference: str,
     strict: bool = False,
+    with_explanation: bool = False,
 ) -> bool
 ```
 
-**Returns:** `bool` - `True` if all required facts are present
+- `reference` is a reference document whose facts must be covered.
+- `strict=False` uses open-world evaluation.
+- `strict=True` uses closed-world evaluation.
 
-### matches_facts
+#### `has_unsupported_facts`
 
-Check if actual and reference texts convey the same set of facts.
+Returns whether `actual` contains at least one fact not supported by `reference`.
 
-**Signature:**
+```python
+async def has_unsupported_facts(
+    actual: str,
+    reference: str,
+    strict: bool = False,
+    with_explanation: bool = False,
+) -> bool
+```
+
+- `reference` is the grounding document.
+- `True` means `actual` added unbacked factual content.
+
+#### `has_conflicting_facts`
+
+Returns whether any fact in `actual` conflicts with any fact in `reference`.
+
+```python
+async def has_conflicting_facts(
+    actual: str,
+    reference: str,
+    strict: bool = False,
+    with_explanation: bool = False,
+) -> bool
+```
+
+- `reference` is the document to compare against for contradiction.
+- A single conflict is enough for `True`.
+
+#### `matches_facts`
+
+Returns whether `actual` and `reference` are factually equivalent.
+
 ```python
 async def matches_facts(
     actual: str,
     reference: str,
     strict: bool = False,
+    with_explanation: bool = False,
 ) -> bool
 ```
 
-**Returns:** `bool` - `True` if texts are factually equivalent
+- `reference` is the comparison document.
+- This is the strongest factual predicate: two-way support and no conflict.
 
-### has_topic
+### Non-factual family
 
-Check whether actual text is substantively about the topic described by reference.
+#### `matches_writing_style`
 
-**Signature:**
-```python
-async def has_topic(
-    actual: str,
-    reference: str,
-    strict: bool = False,
-) -> bool
-```
+Returns whether `actual` and `reference` are written in materially the same style.
 
-**Returns:** `bool` - `True` if the topic is substantively present
-
-### follows_policy
-
-Check if actual text adheres to rules or policies in reference text.
-
-**Signature:**
-```python
-async def follows_policy(
-    actual: str,
-    reference: str,
-    strict: bool = False,
-) -> bool
-```
-
-**Returns:** `bool` - `True` if compliant with policy
-
-### matches_writing_style
-
-Check if actual text has the same writing style as reference text.
-
-**Signature:**
 ```python
 async def matches_writing_style(
     actual: str,
     reference: str,
     strict: bool = False,
+    with_explanation: bool = False,
 ) -> bool
 ```
 
-**Returns:** `bool` - `True` if style matches
+- `reference` is a writing sample whose style is the target style.
+- `strict` is accepted today but does not change the predicate's meaning.
 
-### matches_writing_layout
+#### `matches_writing_layout`
 
-Check if actual text follows the same structure as a reference template.
+Returns whether `actual` and `reference` use materially the same structural layout or template.
 
-**Signature:**
 ```python
 async def matches_writing_layout(
     actual: str,
     reference: str,
     strict: bool = False,
+    with_explanation: bool = False,
 ) -> bool
 ```
 
-**Returns:** `bool` - `True` if layout matches
+- `reference` is a reference document, schema instance, or template sample.
+- `strict` is accepted today but does not change the predicate's meaning.
 
----
+#### `has_topic`
 
-## Usage Patterns
-
-### Combining Multiple Predicates
+Returns whether `actual` is substantively about the topic described by `reference`.
 
 ```python
+async def has_topic(
+    actual: str,
+    reference: str,
+    strict: bool = False,
+    with_explanation: bool = False,
+) -> bool
+```
+
+- `reference` is a topic specification string such as `"refund policy"` or `"database performance"`.
+- `strict` is accepted today but does not change the predicate's meaning.
+
+#### `follows_policy`
+
+Returns whether `actual` satisfies the rule or constraints described by `reference`.
+
+```python
+async def follows_policy(
+    actual: str,
+    reference: str,
+    strict: bool = False,
+    with_explanation: bool = False,
+) -> bool
+```
+
+- `reference` is a policy specification string such as `"must be valid JSON"` or `"must not mention pricing"`.
+- `strict` is accepted today but does not change the predicate's meaning.
+
+## Example
+
+```python
+from rue import predicate
 from rue.predicates import (
     follows_policy,
     has_conflicting_facts,
-    has_topic,
     has_unsupported_facts,
 )
 
-async def test_comprehensive_check(product_bot):
-    product_data = "ThermoPro X500, $299, WiFi enabled, 2-year warranty"
-    description = product_bot.generate(product_data)
 
-    assert not await has_unsupported_facts(description, product_data)
-    assert not await has_conflicting_facts(description, product_data)
-    assert await has_topic(description, "smart home temperature monitoring")
-    assert await follows_policy(description, "No superlatives like 'best'")
-```
+@predicate
+def contains_order_id(actual: str, reference: str) -> bool:
+    return reference in actual
 
-### Using Strict Mode
 
-```python
-from rue.predicates import has_facts
+async def test_order_reply():
+    source = "Order ORD-2041 has shipped and should arrive by Friday."
+    reply = "Hi Sam,\n\nOrder ORD-2041 has shipped and should arrive by Friday.\n\nBest,\nSupport"
 
-async def test_precision(report_bot):
-    data = "Q3 revenue: $4.2M, margins: 23.5%"
-    report = report_bot.summarize(data)
-
-    assert await has_facts(report, "$4.2M revenue", strict=False)
-    assert await has_facts(report, "23.5%", strict=True)
-```
-
-### Automatic Result Collection
-
-When a predicate runs inside a Rue-transformed `assert`, Rue still records a
-`PredicateResult` internally for reporting and database persistence. The
-predicate call itself returns only `bool`.
-
-```python
-from rue.predicates import has_facts
-
-async def test_detailed_analysis(bot):
-    assert await has_facts("Text", "Reference")
-    # Rue stores PredicateResult metadata for this assertion automatically.
+    assert contains_order_id(reply, "ORD-2041")
+    assert not await has_unsupported_facts(reply, source, with_explanation=True)
+    assert not await has_conflicting_facts(reply, source)
+    assert await follows_policy(reply, "must include a signoff")
 ```

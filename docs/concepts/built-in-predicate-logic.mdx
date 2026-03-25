@@ -1,0 +1,135 @@
+---
+title: "Built-In Predicate Logic"
+description: "How the built-in predicate suite is defined by the predicate spec."
+---
+
+This page summarizes the logic defined in
+[src/rue/predicates/SPEC.md](https://github.com/NickSherrow/rue/blob/main/src/rue/predicates/SPEC.md).
+It is about meaning, not just Python signatures.
+
+<Note>
+All built-in predicates operate on arbitrary strings treated as documents. Those documents may be prose, Markdown, JSON, YAML, XML, code, logs, configs, email, chat transcripts, or mixed text.
+</Note>
+
+## Shared model
+
+Built-in predicates are designed around one rule: different semantic dimensions must stay separate.
+
+- Facts: what propositions are supported or contradicted
+- Style: how the writing is expressed
+- Layout: how the document is organized
+- Topic: what the document is about
+- Policy: whether the document satisfies a rule
+
+Do not collapse those dimensions into one another. A pair of documents can have the same facts but a different style, the same layout but different facts, or be policy-compliant without matching a layout sample.
+
+## Factual family
+
+The factual predicates compare the fact graph of `actual` against the fact graph of `reference`.
+
+| Predicate | Returns `True` when | Direction |
+| --- | --- | --- |
+| `has_facts` | Every fact in `reference` is supported by `actual` | `reference -> actual` |
+| `has_unsupported_facts` | `actual` contains at least one fact that `reference` does not support | `actual -> reference` |
+| `has_conflicting_facts` | At least one fact in `actual` conflicts with a fact in `reference` | symmetric contradiction check |
+| `matches_facts` | The documents are factually equivalent | two-way support with no conflict |
+
+### `strict` only changes factual semantics
+
+For factual predicates, `strict` is normative:
+
+- `strict=False`: open-world evaluation
+- `strict=True`: closed-world evaluation
+
+Open-world evaluation is more permissive. It allows broader grounded completion when the text strongly supports it.
+
+Closed-world evaluation is more conservative. It stays closer to explicit content and near-paraphrase, even though bounded text-anchored reasoning is still allowed.
+
+### Factual invariants
+
+These relationships come directly from the spec:
+
+- If `matches_facts(...)` is `True`, then `has_facts(...)` must be `True`.
+- If `matches_facts(...)` is `True`, then `has_unsupported_facts(...)` must be `False`.
+- If `matches_facts(...)` is `True`, then `has_conflicting_facts(...)` must be `False`.
+- If `has_conflicting_facts(...)` is `True`, then `matches_facts(...)` must be `False`.
+- `has_facts(...)` and `has_conflicting_facts(...)` can both be `True`.
+- `has_unsupported_facts(...)` can be `True` without any conflict.
+
+### Empty-fact behavior
+
+The spec defines a few important edge cases:
+
+- If `reference` has no extractable facts, `has_facts(...)` must be `True`.
+- If `actual` has no extractable facts, `has_unsupported_facts(...)` must be `False`.
+- If both documents have no extractable facts:
+  - `has_facts = True`
+  - `has_unsupported_facts = False`
+  - `has_conflicting_facts = False`
+  - `matches_facts = True`
+- If `actual` is empty and `reference` is not:
+  - `has_facts = False`
+  - `matches_facts = False`
+- If `reference` is empty and `actual` is not:
+  - `has_facts = True`
+  - `has_unsupported_facts = True`
+  - `matches_facts = False`
+
+## Non-factual family
+
+The non-factual predicates do not use `strict` semantically. They each give `reference` a different role.
+
+| Predicate | `reference` means | Returns `True` when |
+| --- | --- | --- |
+| `matches_writing_style` | A reference writing sample | `actual` and `reference` have materially the same style |
+| `matches_writing_layout` | A reference document, schema instance, or template sample | `actual` and `reference` have materially the same layout |
+| `has_topic` | A topic specification string | `actual` is substantively about that topic |
+| `follows_policy` | A policy specification string | `actual` satisfies the stated rule or constraints |
+
+<Note>
+The current Python callables still accept `strict=False` for these predicates. That keeps the callable shape uniform, but it does not change the non-factual semantics.
+</Note>
+
+### Style
+
+`matches_writing_style` is about expression, not subject matter.
+
+- It should care about voice, register, directness, verbosity, punctuation habits, grammatical profile, and rhetorical manner.
+- It should ignore facts, topic, stance, and layout.
+
+### Layout
+
+`matches_writing_layout` is about structural organization, not meaning.
+
+- It should care about schema shape, section ordering, heading hierarchy, list structure, wrappers, and template skeleton.
+- It should ignore content-slot values, topic, tone, and factual content.
+
+### Topic
+
+`has_topic` is about substantive subject matter.
+
+- Topic presence is semantic, not just lexical.
+- Direct mention can count, but incidental mention does not.
+- A topic can be present even when it is criticized, denied, or discussed hypothetically.
+
+### Policy
+
+`follows_policy` is about rule compliance.
+
+- `reference` is a rule, not an example document.
+- Policies can constrain content, forbidden content, structure, formatting, casing, style, length, ordering, or schema validity.
+- If a policy is materially ambiguous or not assessable from `actual` alone, the spec recommends conservative behavior.
+
+## Cross-family non-implications
+
+The spec explicitly rejects these shortcuts:
+
+- `matches_facts` does not imply `matches_writing_style`
+- `matches_facts` does not imply `matches_writing_layout`
+- `matches_writing_style` does not imply `matches_facts`
+- `matches_writing_layout` does not imply `matches_facts`
+- `has_topic` does not imply `has_facts`
+- `follows_policy` does not imply `matches_writing_style`
+- `follows_policy` does not imply `matches_writing_layout`
+
+If you need more than one of those properties, assert more than one predicate.

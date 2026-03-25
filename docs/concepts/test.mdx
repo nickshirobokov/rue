@@ -21,7 +21,7 @@ async def test_chatbot_no_hallucinations():
     context = "Our store hours are 9 AM to 6 PM Monday-Saturday."
     response = chatbot("When are you open?")
 
-    # Use semantic predicates to check output quality
+    # Use built-in predicates to check output quality
     assert not await has_unsupported_facts(response, context)
 ```
 

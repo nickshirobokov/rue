@@ -52,7 +52,12 @@
       },
       {
         "group": "Usage",
-        "pages": ["usage/writing-tests", "usage/running-tests"]
+        "pages": [
+          "usage/writing-tests",
+          "usage/running-tests",
+          "usage/built-in-predicates",
+          "usage/decorated-predicates"
+        ]
       },
       {
         "group": "Concepts",
@@ -63,7 +68,8 @@
           "concepts/trace",
           "concepts/case",
           "concepts/metric",
-          "concepts/semantic-predicates"
+          "concepts/semantic-predicates",
+          "concepts/built-in-predicate-logic"
         ]
       },
       {
