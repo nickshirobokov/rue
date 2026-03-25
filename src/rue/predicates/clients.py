@@ -6,15 +6,17 @@ from pydantic_ai import RunContext
 from pydantic_ai._output import OutputSchema
 from pydantic_ai.direct import model_request
 from pydantic_ai.messages import ModelRequest, SystemPromptPart, UserPromptPart
-from pydantic_ai.models import KnownModelName, ModelRequestParameters, infer_model
+from pydantic_ai.models import (
+    KnownModelName,
+    ModelRequestParameters,
+    infer_model,
+)
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import RunUsage
 
-from rue.context import PREDICATE_RESULTS_COLLECTOR
 from rue.config import PredicateConfig, load_config
 from rue.predicates.models import PredicateResult
-
-from .decorator import predicate
+from rue.predicates.decorator import predicate
 
 
 load_dotenv()
@@ -31,9 +33,9 @@ class LLMPredicate:
     """An engine to call an LLM as a predicate."""
 
     bool_output_schema = OutputSchema[bool].build(output_spec=bool)
-    bool_with_explanation_output_schema = OutputSchema[WithExplanationOutput].build(
-        output_spec=WithExplanationOutput
-    )
+    bool_with_explanation_output_schema = OutputSchema[
+        WithExplanationOutput
+    ].build(output_spec=WithExplanationOutput)
 
     bool_request_parameters = ModelRequestParameters(
         allow_text_output=False,
@@ -60,24 +62,28 @@ class LLMPredicate:
         self.task_template = task_template
         self.predicate_config = predicate_config
 
-    async def __call__(
+    async def generate_predicate_result(
         self,
         actual: str,
         reference: str,
         strict: bool = False,  # noqa: FBT001, FBT002
         with_explanation: bool = False,  # noqa: FBT001, FBT002
-    ) -> bool:
+    ) -> PredicateResult:
         """Get the bool value of the predicate from the LLM."""
         model, model_settings = self.get_model_config()
 
         if with_explanation:
-            output_processor = self.bool_with_explanation_output_schema.text_processor
+            output_processor = (
+                self.bool_with_explanation_output_schema.text_processor
+            )
             request_parameters = self.bool_with_explanation_request_parameters
         else:
             output_processor = self.bool_output_schema.text_processor
             request_parameters = self.bool_request_parameters
 
-        task_prompt = self.task_template.format(actual=actual, reference=reference)
+        task_prompt = self.task_template.format(
+            actual=actual, reference=reference
+        )
         system_prompt = self.strict_prompt if strict else self.normal_prompt
         messages = ModelRequest(
             parts=[
@@ -106,25 +112,39 @@ class LLMPredicate:
             reference=reference,
             name=self.predicate_name,
             strict=strict,
-            value=parsed_output if isinstance(parsed_output, bool) else parsed_output.verdict,
+            value=parsed_output
+            if isinstance(parsed_output, bool)
+            else parsed_output.verdict,
             confidence=1.0,
-            message=None if isinstance(parsed_output, bool) else parsed_output.explanation,
+            message=None
+            if isinstance(parsed_output, bool)
+            else parsed_output.explanation,
         )
-        collector = PREDICATE_RESULTS_COLLECTOR.get()
-        if collector is not None:
-            collector.append(result)
-        return result.value
+        return result
 
     def get_model_config(self) -> tuple[KnownModelName, ModelSettings]:
         """Resolve the configured model and settings for a built-in predicate."""
         if self.predicate_config:
-            return self.predicate_config.model, self.predicate_config.model_settings
+            return (
+                self.predicate_config.model,
+                self.predicate_config.model_settings,
+            )
 
         global_config = load_config()
-        cfg = getattr(global_config.predicates, self.predicate_name, None) or global_config.predicates.all_predicates
+        cfg = (
+            getattr(global_config.predicates, self.predicate_name, None)
+            or global_config.predicates.all_predicates
+        )
 
         if not cfg:
-            raise RuntimeError(f"Missing predicate config for '{self.predicate_name}'")
+            raise RuntimeError(
+                f"Missing predicate config for '{self.predicate_name}'"
+            )
 
         self.predicate_config = cfg
         return cfg.model, cfg.model_settings
+
+    def build_predicate(self):
+        return predicate(
+            self.generate_predicate_result, name=self.predicate_name
+        )

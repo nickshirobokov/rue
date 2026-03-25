@@ -2,6 +2,7 @@
 
 from rue.predicates.clients import LLMPredicate
 
+# Prompts
 
 HAS_TOPIC_NORMAL_PROMPT = """You are executing the boolean predicate has_topic(actual, reference).
 
@@ -123,11 +124,15 @@ Topic specification:
 """
 
 
-has_topic = LLMPredicate(
+# Predicate
+
+predicate_instance = LLMPredicate(
     predicate_name="has_topic",
     normal_prompt=HAS_TOPIC_NORMAL_PROMPT,
     strict_prompt=HAS_TOPIC_STRICT_PROMPT,
     task_template=HAS_TOPIC_TASK_TEMPLATE,
 )
+
+has_topic = predicate_instance.build_predicate()
 
 __all__ = ["has_topic"]

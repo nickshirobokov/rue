@@ -2,6 +2,7 @@
 
 from rue.predicates.clients import LLMPredicate
 
+# Prompts
 
 FOLLOWS_POLICY_NORMAL_PROMPT = """You are executing the boolean predicate follows_policy(actual, reference).
 
@@ -150,11 +151,15 @@ Policy specification:
 """
 
 
-follows_policy = LLMPredicate(
+# Predicate
+
+predicate_instance = LLMPredicate(
     predicate_name="follows_policy",
     normal_prompt=FOLLOWS_POLICY_NORMAL_PROMPT,
     strict_prompt=FOLLOWS_POLICY_STRICT_PROMPT,
     task_template=FOLLOWS_POLICY_TASK_TEMPLATE,
 )
+
+follows_policy = predicate_instance.build_predicate()
 
 __all__ = ["follows_policy"]

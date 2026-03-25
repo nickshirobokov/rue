@@ -116,11 +116,15 @@ Reference style sample:
 """
 
 
-matches_writing_style = LLMPredicate(
+# Predicate
+
+predicate_instance = LLMPredicate(
     predicate_name="matches_writing_style",
     normal_prompt=MATCHES_WRITING_STYLE_NORMAL_PROMPT,
     strict_prompt=MATCHES_WRITING_STYLE_STRICT_PROMPT,
     task_template=MATCHES_WRITING_STYLE_TASK_TEMPLATE,
 )
+
+matches_writing_style = predicate_instance.build_predicate()
 
 __all__ = ["matches_writing_style"]

@@ -251,11 +251,15 @@ Reference document:
 """
 
 
-has_facts = LLMPredicate(
+# Predicate
+
+predicate_instance = LLMPredicate(
     predicate_name="has_facts",
     normal_prompt=HAS_FACTS_NORMAL_PROMPT,
     strict_prompt=HAS_FACTS_STRICT_PROMPT,
     task_template=HAS_FACTS_TASK_TEMPLATE,
 )
+
+has_facts = predicate_instance.build_predicate()
 
 __all__ = ["has_facts"]

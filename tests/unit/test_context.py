@@ -92,7 +92,7 @@ def test_assertion_context_collects_recorded_predicate_results():
             strict=True,
             value=True,
         )
-        assert pr
+        assert pr.value is True
         assert predicate_results_list == []
 
         c = PREDICATE_RESULTS_COLLECTOR.get()
@@ -113,18 +113,6 @@ def test_assertion_context_collects_recorded_predicate_results():
 
     assert len(ar.predicate_results) == 1
     assert ar.predicate_results[0] == pr
-
-
-def test_predicate_result_bool_without_collector():
-    pr = PredicateResult(
-        actual="a",
-        reference="b",
-        name="manual_predicate",
-        strict=True,
-        value=False,
-    )
-
-    assert bool(pr) is False
 
 
 def test_metrics_records_assertion_passed_and_reads_test_context_for_metadata():

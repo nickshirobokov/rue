@@ -2,6 +2,7 @@
 
 from rue.predicates.clients import LLMPredicate
 
+# Prompts
 
 HAS_UNSUPPORTED_FACTS_NORMAL_PROMPT = """You are executing the boolean predicate has_unsupported_facts(actual, reference, strict=False).
 
@@ -274,11 +275,15 @@ Reference document:
 """
 
 
-has_unsupported_facts = LLMPredicate(
+# Predicate
+
+predicate_instance = LLMPredicate(
     predicate_name="has_unsupported_facts",
     normal_prompt=HAS_UNSUPPORTED_FACTS_NORMAL_PROMPT,
     strict_prompt=HAS_UNSUPPORTED_FACTS_STRICT_PROMPT,
     task_template=HAS_UNSUPPORTED_FACTS_TASK_TEMPLATE,
 )
+
+has_unsupported_facts = predicate_instance.build_predicate()
 
 __all__ = ["has_unsupported_facts"]

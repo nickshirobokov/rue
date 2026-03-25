@@ -2,7 +2,7 @@
 
 from .context import metrics
 from .metrics_ import Metric, metric
-from .predicates import Predicate, PredicateResult, predicate
+from .predicates import PredicateResult, predicate
 from .reports import Reporter, reporter
 from .testing import (
     Case,
@@ -40,7 +40,6 @@ __all__ = [
     # Predicates
     "predicate",
     "PredicateResult",
-    "Predicate",
     # Metrics
     "Metric",
     "metric",

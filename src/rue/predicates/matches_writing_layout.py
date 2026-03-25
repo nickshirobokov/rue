@@ -118,11 +118,15 @@ Reference layout sample:
 """
 
 
-matches_writing_layout = LLMPredicate(
+# Predicate
+
+predicate_instance = LLMPredicate(
     predicate_name="matches_writing_layout",
     normal_prompt=MATCHES_WRITING_LAYOUT_NORMAL_PROMPT,
     strict_prompt=MATCHES_WRITING_LAYOUT_STRICT_PROMPT,
     task_template=MATCHES_WRITING_LAYOUT_TASK_TEMPLATE,
 )
+
+matches_writing_layout = predicate_instance.build_predicate()
 
 __all__ = ["matches_writing_layout"]

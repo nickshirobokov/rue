@@ -2,6 +2,7 @@
 
 from rue.predicates.clients import LLMPredicate
 
+# Prompts
 
 HAS_CONFLICTING_FACTS_NORMAL_PROMPT = """You are executing the boolean predicate has_conflicting_facts(actual, reference, strict=False).
 
@@ -214,11 +215,15 @@ Reference document:
 """
 
 
-has_conflicting_facts = LLMPredicate(
+# Predicate
+
+predicate_instance = LLMPredicate(
     predicate_name="has_conflicting_facts",
     normal_prompt=HAS_CONFLICTING_FACTS_NORMAL_PROMPT,
     strict_prompt=HAS_CONFLICTING_FACTS_STRICT_PROMPT,
     task_template=HAS_CONFLICTING_FACTS_TASK_TEMPLATE,
 )
+
+has_conflicting_facts = predicate_instance.build_predicate()
 
 __all__ = ["has_conflicting_facts"]

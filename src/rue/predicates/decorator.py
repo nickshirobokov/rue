@@ -4,62 +4,89 @@ from asyncio import iscoroutinefunction
 from collections.abc import Awaitable, Callable
 from functools import wraps
 from inspect import BoundArguments, Parameter, signature
-from typing import Any, Protocol, TypeVar, overload
+from typing import Any, Protocol, TypeVar, overload, ParamSpec, Concatenate
 
 from rue.context import PREDICATE_RESULTS_COLLECTOR
 from rue.predicates.models import PredicateResult
 from rue.tracing import get_tracer
 from rue.tracing.attributes import is_trace_content_enabled, truncate_repr
 
+P = ParamSpec("P")
+ACTUAL = TypeVar("ACTUAL", contravariant=True)
+REFERENCE = TypeVar("REFERENCE", contravariant=True)
+
 
 # Protocols for static type checking
 
-class _SyncPredicateFn(Protocol):
+
+class _SyncPredicateFn(Protocol[ACTUAL, REFERENCE, P]):
     """Sync callable requiring positional-or-keyword ``actual`` and ``reference``."""
 
-    def __call__(self, actual: Any, reference: Any) -> bool | PredicateResult: ...
+    def __call__(
+        self,
+        actual: ACTUAL,
+        reference: REFERENCE,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> bool | PredicateResult: ...
 
 
-class _AsyncPredicateFn(Protocol):
+class _AsyncPredicateFn(Protocol[ACTUAL, REFERENCE, P]):
     """Async callable requiring positional-or-keyword ``actual`` and ``reference``."""
 
-    def __call__(self, actual: Any, reference: Any) -> Awaitable[bool | PredicateResult]: ...
-
-
-_SyncF = TypeVar("_SyncF", bound=_SyncPredicateFn)
-_AsyncF = TypeVar("_AsyncF", bound=_AsyncPredicateFn)
+    def __call__(
+        self,
+        actual: ACTUAL,
+        reference: REFERENCE,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Awaitable[bool | PredicateResult]: ...
 
 
 # Decorator implementation
 
+
 @overload
-def predicate(func: _AsyncF) -> _AsyncF: ...
+def predicate(
+    func: _AsyncPredicateFn[ACTUAL, REFERENCE, P], *, name: str | None = None
+) -> Callable[Concatenate[ACTUAL, REFERENCE, P], Awaitable[bool]]: ...
 
 
 @overload
-def predicate(func: _SyncF) -> _SyncF: ...
+def predicate(
+    func: _SyncPredicateFn[ACTUAL, REFERENCE, P], *, name: str | None = None
+) -> Callable[Concatenate[ACTUAL, REFERENCE, P], bool]: ...
+
+
+@overload
+def predicate(
+    *, name: str | None = None
+) -> Callable[
+    [
+        _AsyncPredicateFn[ACTUAL, REFERENCE, P]
+        | _SyncPredicateFn[ACTUAL, REFERENCE, P]
+    ],
+    Callable[Concatenate[ACTUAL, REFERENCE, P], bool | Awaitable[bool]],
+]: ...
 
 
 def predicate(
-    func: Callable[..., Any],
-) -> Callable[..., Any]:
-    """Decorate a predicate function so it records a :class:`PredicateResult`.
+    func: Callable[..., Any] | None = None,
+    *,
+    name: str | None = None,
+) -> Any:
+    """Decorate a predicate function to record each outcome for test reports and 
+    for tracing. The wrapped function still returns a plain ``bool`` (or ``bool`` 
+    from an async function).
 
-    In Rue, predicate evaluations inside ``assert`` statements can record
-    :class:`~rue.predicates.models.PredicateResult` metadata into
-    :class:`~rue.assertions.base.AssertionResult`. The decorated function still
-    returns a boolean verdict. When tracing is enabled, each invocation also
-    creates a ``predicate.<predicate_name>`` span with Rue predicate metadata.
+    The parameters must be named ``actual`` and ``reference`` (not positional-only;
+    you may pass them positionally or as keywords). The return type must be ``bool`` or
+    :class:`~rue.predicates.models.PredicateResult`.
 
-    The decorated function must return a boolean or :class:`PredicateResult`,
-    and must declare ``actual`` and ``reference`` as positional-or-keyword
-    parameters. This constraint is enforced both statically (via the
-    :class:`_SyncPredicateFn` / :class:`_AsyncPredicateFn` Protocol bounds)
-    and at runtime. For boolean-returning predicates, Rue derives ``strict``,
-    ``confidence``, and ``message`` metadata from the bound call, including
-    the defaults declared on the predicate signature.
+    Use ``name=`` to choose the label shown in reports and traces instead of the
+    function's ``__name__``.
 
-    Examples:
+    Examples
     --------
     >>> @predicate
     ... def is_even(actual: int, reference: int) -> bool:
@@ -86,52 +113,64 @@ def predicate(
     ...     confidence=0.65,
     ... )
     """
-    predicate_name = getattr(func, "__name__", "<predicate>")
-    sig = signature(func)
-    for name in ("actual", "reference"):
-        param = sig.parameters.get(name)
-        if param is None or param.kind is Parameter.POSITIONAL_ONLY:
-            raise TypeError(
-                f"@predicate function '{predicate_name}' must declare named "
-                f"'actual' and 'reference' parameters. Got signature: {sig}"
-            )            
-    span_name = f"predicate.{predicate_name}"
 
-    if iscoroutinefunction(func):
+    def decorate(f: Callable[..., Any]) -> Callable[..., Any]:
+        predicate_name = (
+            name if name is not None else getattr(f, "__name__", "<predicate>")
+        )
+        sig = signature(f)
+        for param_name in ("actual", "reference"):
+            param = sig.parameters.get(param_name)
+            if param is None or param.kind is Parameter.POSITIONAL_ONLY:
+                raise TypeError(
+                    f"@predicate function '{predicate_name}' must declare named "
+                    f"'actual' and 'reference' parameters. Got signature: {sig}"
+                )
+        span_name = f"predicate.{predicate_name}"
 
-        @wraps(func)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> bool:
+        if iscoroutinefunction(f):
+
+            @wraps(f)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> bool:
+                bound = sig.bind(*args, **kwargs)
+                bound.apply_defaults()
+                tracer = get_tracer()
+                with tracer.start_as_current_span(span_name) as span:
+                    predicate_result = _normalize_result(
+                        await f(*args, **kwargs),
+                        predicate_name,
+                        bound,
+                    )
+                    _record_result(predicate_result)
+                    _set_trace_attributes(
+                        span, predicate_name, predicate_result, bound
+                    )
+                    return predicate_result.value
+
+            return async_wrapper
+
+        @wraps(f)
+        def sync_wrapper(*args: Any, **kwargs: Any) -> bool:
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
             tracer = get_tracer()
             with tracer.start_as_current_span(span_name) as span:
                 predicate_result = _normalize_result(
-                    await func(*args, **kwargs),
+                    f(*args, **kwargs),
                     predicate_name,
                     bound,
                 )
                 _record_result(predicate_result)
-                _set_trace_attributes(span, predicate_name, predicate_result, bound)
+                _set_trace_attributes(
+                    span, predicate_name, predicate_result, bound
+                )
                 return predicate_result.value
 
-        return async_wrapper
+        return sync_wrapper
 
-    @wraps(func)
-    def sync_wrapper(*args: Any, **kwargs: Any) -> bool:
-        bound = sig.bind(*args, **kwargs)
-        bound.apply_defaults()
-        tracer = get_tracer()
-        with tracer.start_as_current_span(span_name) as span:
-            predicate_result = _normalize_result(
-                func(*args, **kwargs),
-                predicate_name,
-                bound,
-            )
-            _record_result(predicate_result)
-            _set_trace_attributes(span, predicate_name, predicate_result, bound)
-            return predicate_result.value
-
-    return sync_wrapper
+    if func is None:
+        return decorate
+    return decorate(func)
 
 
 # Helpers
@@ -184,7 +223,9 @@ def _set_trace_attributes(
     if not is_trace_content_enabled():
         return
 
-    span.set_attribute("predicate.input.actual", truncate_repr(bound.arguments["actual"]))
+    span.set_attribute(
+        "predicate.input.actual", truncate_repr(bound.arguments["actual"])
+    )
     span.set_attribute(
         "predicate.input.reference",
         truncate_repr(bound.arguments["reference"]),

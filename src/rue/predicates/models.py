@@ -1,16 +1,13 @@
 """Base predicate classes and result types."""
 
-from collections.abc import Awaitable, Callable
-from typing import ParamSpec, TypeAlias
+from typing import ParamSpec
 
 from pydantic import BaseModel, Field
 
-Predicate: TypeAlias = Callable[..., bool] | Callable[..., Awaitable[bool]]
-
 P = ParamSpec("P")
 
-# Data model for predicate results
 
+# Data model for predicate results
 
 class PredicateResult(BaseModel):
     """Result of a single predicate evaluation.
@@ -55,5 +52,3 @@ class PredicateResult(BaseModel):
     def __repr__(self) -> str:
         return self.model_dump_json(indent=2)
 
-    def __bool__(self) -> bool:
-        return self.value

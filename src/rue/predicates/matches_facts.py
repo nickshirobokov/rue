@@ -274,11 +274,15 @@ Reference document:
 """
 
 
-matches_facts = LLMPredicate(
+# Predicate
+
+predicate_instance = LLMPredicate(
     predicate_name="matches_facts",
     normal_prompt=MATCHES_FACTS_NORMAL_PROMPT,
     strict_prompt=MATCHES_FACTS_STRICT_PROMPT,
     task_template=MATCHES_FACTS_TASK_TEMPLATE,
 )
+
+matches_facts = predicate_instance.build_predicate()
 
 __all__ = ["matches_facts"]

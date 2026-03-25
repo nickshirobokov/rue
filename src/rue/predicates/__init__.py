@@ -10,12 +10,11 @@ from .matches_writing_style import matches_writing_style
 
 from .follows_policy import follows_policy
 
-from .models import Predicate, PredicateResult
+from .models import PredicateResult
 
 __all__ = [
     "PredicateResult",
     "predicate",
-    "Predicate",
     "has_facts",
     "has_unsupported_facts",
     "matches_facts",
