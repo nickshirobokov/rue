@@ -5,19 +5,21 @@ injected into Rue tests. All invocations are wrapped in OpenTelemetry spans,
 and any LLM calls made within are automatically captured as child spans.
 """
 
-import types
 import functools
 import inspect
-import os
-from collections.abc import Callable, Sequence
+import types
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import fields, is_dataclass
 from typing import Any, ParamSpec, TypeVar
 
+from pydantic import BaseModel
+from pydantic.experimental.arguments_schema import generate_arguments_schema
+from pydantic_core import ArgsKwargs, SchemaValidator
 
 from rue.resources import Scope, resource
 from rue.testing.models.case import Case
 from rue.tracing import get_tracer
-from pydantic.experimental.arguments_schema import generate_arguments_schema
-from pydantic_core import ArgsKwargs, SchemaValidator
+from rue.tracing.attributes import is_trace_content_enabled, truncate_repr
 
 
 P = ParamSpec("P")
@@ -29,7 +31,7 @@ def sut(
     *,
     scope: Scope | str = Scope.CASE,
     method: str = "__call__",
-    validate_cases: list[Case[Any]] | None = None,
+    validate_cases: list[Case[Any, Any]] | None = None,
 ) -> Any:
     """Register a callable as a traced system-under-test resource.
 
@@ -99,7 +101,7 @@ def sut(
     )
 
 
-def _validate_cases(cases: Sequence[Case[Any]], sut: Callable[..., Any]):
+def _validate_cases(cases: Sequence[Case[Any, Any]], sut: Callable[..., Any]):
     schema = generate_arguments_schema(
         sut,
         parameters_callback=(
@@ -108,7 +110,21 @@ def _validate_cases(cases: Sequence[Case[Any]], sut: Callable[..., Any]):
     )
     validator = SchemaValidator(schema)
     for case in cases:
-        input_values = case.sut_input_values or {}
+        match case.inputs:
+            case dict() as input_values:
+                pass
+            case BaseModel() as model:
+                input_values = dict(model)
+            case Mapping() as mapping:
+                input_values = dict(mapping)
+            case value if is_dataclass(value) and not isinstance(value, type):
+                input_values = {field.name: getattr(value, field.name) for field in fields(value)}
+            case value:
+                msg = (
+                    "Case inputs must be a dict, mapping, BaseModel, or dataclass instance. "
+                    f"Got: {type(value).__name__}"
+                )
+                raise TypeError(msg)
         parsed_args = ArgsKwargs(args=(), kwargs=input_values)
         validator.validate_python(parsed_args)
 
@@ -182,31 +198,20 @@ def _trace_instance_method(instance: Any, *, sut_name: str, method: str) -> Any:
 
 def _set_input_attrs(span: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
     """Set input attributes on span, respecting trace content settings."""
-    if os.environ.get("RUE_TRACE_CONTENT", "true").lower() != "true":
+    if not is_trace_content_enabled():
         span.set_attribute("sut.input.count", len(args) + len(kwargs))
         return
 
     if args:
-        span.set_attribute("sut.input.args", _truncate_repr(args))
+        span.set_attribute("sut.input.args", truncate_repr(args))
     if kwargs:
-        span.set_attribute("sut.input.kwargs", _truncate_repr(kwargs))
+        span.set_attribute("sut.input.kwargs", truncate_repr(kwargs))
 
 
 def _set_output_attrs(span: Any, result: Any) -> None:
     """Set output attributes on span, respecting trace content settings."""
-    if os.environ.get("RUE_TRACE_CONTENT", "true").lower() != "true":
+    if not is_trace_content_enabled():
         span.set_attribute("sut.output.type", type(result).__name__)
         return
 
-    span.set_attribute("sut.output", _truncate_repr(result))
-
-
-def _truncate_repr(value: Any, max_len: int = 1000) -> str:
-    """Truncate a repr string if too long."""
-    try:
-        s = repr(value)
-        if len(s) <= max_len:
-            return s
-        return s[: max_len - 3] + "..."
-    except Exception:
-        return "<repr-failed>"
+    span.set_attribute("sut.output", truncate_repr(result))

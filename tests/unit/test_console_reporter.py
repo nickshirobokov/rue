@@ -2,11 +2,13 @@
 
 import io
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from rich.console import Console, Group
 from rich.table import Table
 
+from rue.assertions.base import AssertionRepr, AssertionResult
 from rue.reports.console import ConsoleReporter
 from rue.testing.models import Run, TestExecution, TestItem, TestResult, TestStatus
 
@@ -53,7 +55,8 @@ def make_item(
     name: str,
     module_path: str,
     *,
-    id_suffix: str | None = None,
+    suffix: str | None = None,
+    case_id: UUID | None = None,
 ) -> TestItem:
     return TestItem(
         name=name,
@@ -64,7 +67,8 @@ def make_item(
         class_name=None,
         modifiers=[],
         tags=set(),
-        id_suffix=id_suffix,
+        suffix=suffix,
+        case_id=case_id,
     )
 
 
@@ -74,11 +78,17 @@ def make_execution(
     duration_ms: float,
     *,
     error: Exception | None = None,
+    assertion_results: list[AssertionResult] | None = None,
     sub_executions: list[TestExecution] | None = None,
 ) -> TestExecution:
     return TestExecution(
         definition=item,
-        result=TestResult(status=status, duration_ms=duration_ms, error=error),
+        result=TestResult(
+            status=status,
+            duration_ms=duration_ms,
+            error=error,
+            assertion_results=assertion_results or [],
+        ),
         sub_executions=sub_executions or [],
     )
 
@@ -263,6 +273,60 @@ async def test_failures_collected_and_rendered_on_run_complete():
 
 
 @pytest.mark.asyncio
+async def test_nested_failures_render_leaf_assertion_repr():
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=False, color_system=None, width=120)
+    reporter = ConsoleReporter(console=console, verbosity=1)
+
+    parent = make_item("test_nested", "tests/test_nested.py")
+    repeated = make_item("test_nested", "tests/test_nested.py", suffix="repeat=0")
+    leaf = make_item("test_nested", "tests/test_nested.py", suffix="case=1")
+    assertion = AssertionResult(
+        expression_repr=AssertionRepr(
+            expr="left == right",
+            lines_above="",
+            lines_below="",
+            resolved_args={"left": "1", "right": "2"},
+        ),
+        passed=False,
+        error_message="values differ",
+    )
+    leaf_execution = make_execution(
+        leaf,
+        TestStatus.FAILED,
+        8.0,
+        assertion_results=[assertion],
+    )
+    repeated_execution = make_execution(
+        repeated,
+        TestStatus.FAILED,
+        12.0,
+        sub_executions=[leaf_execution],
+    )
+    execution = make_execution(
+        parent,
+        TestStatus.FAILED,
+        20.0,
+        sub_executions=[repeated_execution],
+    )
+
+    await reporter.on_collection_complete([parent])
+    await reporter.on_test_complete(execution)
+
+    test_run = Run()
+    test_run.result.executions = [execution]
+    await reporter.on_run_complete(test_run)
+
+    text = output.getvalue()
+    assert "FAILURES" in text
+    assert "repeat=0" in text
+    assert "case=1" in text
+    assert "left == right" in text
+    assert "values differ" in text
+    assert "'left': '1'" in text
+
+
+@pytest.mark.asyncio
 async def test_verbose_live_renders_sub_executions(monkeypatch):
     monkeypatch.setattr("rue.reports.console.Live", FakeLive)
     FakeLive.instances.clear()
@@ -272,8 +336,8 @@ async def test_verbose_live_renders_sub_executions(monkeypatch):
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     parent = make_item("test_matrix", "tests/test_matrix.py")
-    case_one = make_item("test_matrix", "tests/test_matrix.py", id_suffix="case=1")
-    case_two = make_item("test_matrix", "tests/test_matrix.py", id_suffix="case=2")
+    case_one = make_item("test_matrix", "tests/test_matrix.py", suffix="case=1")
+    case_two = make_item("test_matrix", "tests/test_matrix.py", suffix="case=2")
 
     sub_executions = [
         make_execution(case_one, TestStatus.PASSED, 8.0),
@@ -299,6 +363,27 @@ async def test_verbose_live_renders_sub_executions(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_verbose_live_renders_case_id_when_suffix_missing(monkeypatch):
+    monkeypatch.setattr("rue.reports.console.Live", FakeLive)
+    FakeLive.instances.clear()
+
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=True, color_system=None, width=120)
+    reporter = ConsoleReporter(console=console, verbosity=1)
+
+    case_id = UUID("00000000-0000-0000-0000-000000000001")
+    parent = make_item("test_matrix", "tests/test_matrix.py")
+    case_one = make_item("test_matrix", "tests/test_matrix.py", case_id=case_id)
+
+    await reporter.on_collection_complete([parent])
+    await reporter.on_test_start(parent)
+    await reporter.on_subtest_complete(parent, make_execution(case_one, TestStatus.PASSED, 8.0))
+
+    text = render_to_text(FakeLive.instances[-1].renderables[-1])
+    assert str(case_id) in text
+
+
+@pytest.mark.asyncio
 async def test_verbose_live_streams_subtests_before_parent_completion(monkeypatch):
     monkeypatch.setattr("rue.reports.console.Live", FakeLive)
     FakeLive.instances.clear()
@@ -308,7 +393,7 @@ async def test_verbose_live_streams_subtests_before_parent_completion(monkeypatc
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     parent = make_item("test_matrix", "tests/test_matrix.py")
-    case_one = make_item("test_matrix", "tests/test_matrix.py", id_suffix="case=1")
+    case_one = make_item("test_matrix", "tests/test_matrix.py", suffix="case=1")
     sub_execution = make_execution(case_one, TestStatus.PASSED, 8.0)
 
     await reporter.on_collection_complete([parent])
@@ -332,8 +417,8 @@ async def test_verbose_live_does_not_create_orphan_state_from_derived_parent(mon
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     parent = make_item("test_matrix", "tests/test_matrix.py")
-    derived_parent = make_item("test_matrix", "tests/test_matrix.py", id_suffix="group=alpha")
-    case_one = make_item("test_matrix", "tests/test_matrix.py", id_suffix="case=1")
+    derived_parent = make_item("test_matrix", "tests/test_matrix.py", suffix="group=alpha")
+    case_one = make_item("test_matrix", "tests/test_matrix.py", suffix="case=1")
     sub_execution = make_execution(case_one, TestStatus.PASSED, 8.0)
 
     await reporter.on_collection_complete([parent])
@@ -358,8 +443,8 @@ async def test_verbose_non_terminal_subexecutions_have_no_arrow():
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     parent = make_item("test_matrix", "tests/test_matrix.py")
-    case_one = make_item("test_matrix", "tests/test_matrix.py", id_suffix="case=1")
-    case_two = make_item("test_matrix", "tests/test_matrix.py", id_suffix="case=2")
+    case_one = make_item("test_matrix", "tests/test_matrix.py", suffix="case=1")
+    case_two = make_item("test_matrix", "tests/test_matrix.py", suffix="case=2")
     execution = make_execution(
         parent,
         TestStatus.FAILED,
@@ -375,3 +460,59 @@ async def test_verbose_non_terminal_subexecutions_have_no_arrow():
     text = output.getvalue()
     assert "↳" not in text
     assert "2/2 passed" not in text
+
+
+@pytest.mark.asyncio
+async def test_verbose_non_terminal_subexecutions_render_case_id_when_suffix_missing():
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=False, color_system=None, width=120)
+    reporter = ConsoleReporter(console=console, verbosity=1)
+
+    case_id = UUID("00000000-0000-0000-0000-000000000001")
+    parent = make_item("test_matrix", "tests/test_matrix.py")
+    case_one = make_item("test_matrix", "tests/test_matrix.py", case_id=case_id)
+    execution = make_execution(
+        parent,
+        TestStatus.FAILED,
+        20.0,
+        sub_executions=[make_execution(case_one, TestStatus.PASSED, 8.0)],
+    )
+
+    await reporter.on_collection_complete([parent])
+    await reporter.on_test_complete(execution)
+
+    text = output.getvalue()
+    assert str(case_id) in text
+
+
+@pytest.mark.asyncio
+async def test_nested_failures_render_case_id_when_suffix_missing():
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=False, color_system=None, width=120)
+    reporter = ConsoleReporter(console=console, verbosity=1)
+
+    case_id = UUID("00000000-0000-0000-0000-0000000000aa")
+    parent = make_item("test_nested", "tests/test_nested.py")
+    leaf = make_item("test_nested", "tests/test_nested.py", case_id=case_id)
+    leaf_execution = make_execution(
+        leaf,
+        TestStatus.FAILED,
+        8.0,
+        error=AssertionError("boom"),
+    )
+    execution = make_execution(
+        parent,
+        TestStatus.FAILED,
+        20.0,
+        sub_executions=[leaf_execution],
+    )
+
+    await reporter.on_collection_complete([parent])
+    await reporter.on_test_complete(execution)
+
+    test_run = Run()
+    test_run.result.executions = [execution]
+    await reporter.on_run_complete(test_run)
+
+    text = output.getvalue()
+    assert str(case_id) in text

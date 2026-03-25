@@ -21,14 +21,19 @@ from rue.resources import (
 from rue.testing.discovery import TestItem
 
 
-def _make_item(name: str = "test_fn", id_suffix: str | None = None) -> TestItem:
+def _make_item(
+    name: str = "test_fn",
+    suffix: str | None = None,
+    case_id=None,
+) -> TestItem:
     """Create a minimal TestItem for testing."""
     return TestItem(
         name=name,
         fn=lambda: None,
         module_path=Path("test.py"),
         is_async=False,
-        id_suffix=id_suffix,
+        suffix=suffix,
+        case_id=case_id,
     )
 
 

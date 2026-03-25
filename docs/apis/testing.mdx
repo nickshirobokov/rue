@@ -74,7 +74,7 @@ Register a function factory as a traced system-under-test resource.
     *,
     scope: Scope | str = Scope.CASE,
     method: str = "__call__",
-    validate_cases: list[Case[Any]] | None = None,
+    validate_cases: list[Case[Any, Any]] | None = None,
 )
 ```
 
@@ -85,7 +85,7 @@ Register a function factory as a traced system-under-test resource.
 | `fn` | `Callable \| None` | `None` | The SUT factory function to register |
 | `scope` | `Scope \| str` | `Scope.CASE` | Resource lifecycle scope: `"case"`, `"suite"`, `"session"` |
 | `method` | `str` | `"__call__"` | Method to trace when the factory returns a non-callable instance |
-| `validate_cases` | `list[Case[Any]] \| None` | `None` | Cases to validate against the resolved SUT signature (raises on invalid input) |
+| `validate_cases` | `list[Case[Any, Any]] \| None` | `None` | Cases to validate against the resolved SUT signature (raises on invalid input) |
 
 **Returns:** Decorated function registered as a traced resource
 
@@ -106,8 +106,8 @@ def agent():
     return agent
 
 cases = [
-    rue.Case(sut_input_values={"query": "Privacy policy"}),
-    rue.Case(sut_input_values={"query": "How do you store data?"}),
+    rue.Case(inputs={"query": "Privacy policy"}),
+    rue.Case(inputs={"query": "How do you store data?"}),
 ]
 
 @rue.sut(validate_cases=cases)
@@ -381,6 +381,13 @@ def test_strict_xfail():
 
 Container for test case inputs and reference data.
 
+**Type Parameters:**
+
+| Name | Default | Description |
+|------|---------|-------------|
+| `InputsT` | `dict[str, Any]` | Type of `inputs` |
+| `RefsT` | `dict[str, Any]` | Type of `references` |
+
 **Attributes:**
 
 | Name | Type | Description |
@@ -389,7 +396,9 @@ Container for test case inputs and reference data.
 | `tags` | `set[str]` | Tags for filtering or categorization |
 | `metadata` | `dict[str, str \| int \| float \| bool \| None]` | Arbitrary key-value pairs |
 | `references` | `RefsT` | Reference data for validation (typed or dict), defaults to `{}` |
-| `sut_input_values` | `dict[str, Any]` | Input arguments to pass to the SUT |
+| `inputs` | `InputsT` | Input arguments to pass to the SUT, defaults to `{}` |
+
+`sut_input_values` was renamed to `inputs`. Use `**case.inputs` for dict inputs, or `**case.inputs.model_dump()` when `inputs` is a `BaseModel`.
 
 **Example:**
 ```python
@@ -401,11 +410,11 @@ cases = [
     Case(
         tags={"smoke"},
         metadata={"category": "greeting"},
-        sut_input_values={"prompt": "Hello"},
+        inputs={"prompt": "Hello"},
         references={"expected": "Hi there!"}
     ),
     Case(
-        sut_input_values={"prompt": "Goodbye"},
+        inputs={"prompt": "Goodbye"},
         references={"expected": "See you later!"}
     ),
 ]
@@ -414,17 +423,23 @@ cases = [
 with open("cases.json") as f:
     cases = [Case(**item) for item in json.load(f)]
 
-# Typed references
+# Typed references and typed inputs
+from pydantic import BaseModel
 from typing import TypedDict
 
 class MyRefs(TypedDict):
     expected_label: str
     confidence_threshold: float
 
-case = Case[MyRefs](
-    sut_input_values={"text": "Sample input"},
+class MyInputs(BaseModel):
+    text: str
+
+case = Case[MyInputs, MyRefs](
+    inputs=MyInputs(text="Sample input"),
     references={"expected_label": "positive", "confidence_threshold": 0.8}
 )
+
+assert case.inputs.model_dump() == {"text": "Sample input"}
 ```
 
 ---
@@ -437,6 +452,7 @@ Container for grouping related cases with group-level references and a pass thre
 
 | Name | Default | Description |
 |------|---------|-------------|
+| `InputsT` | `dict[str, Any]` | Type of each case's `inputs` |
 | `RefsT` | `dict[str, Any]` | Type of each case's `references` |
 | `GroupRefsT` | `dict[str, Any]` | Type of the group's `references` |
 
@@ -444,8 +460,8 @@ Container for grouping related cases with group-level references and a pass thre
 
 | Name | Type | Description |
 |------|------|-------------|
-| `name` | `str` | Unique group identifier (used in reports and ID suffixes) |
-| `cases` | `list[Case[RefsT]]` | One or more cases in this group (min 1) |
+| `name` | `str` | Unique group identifier (used in reports and derived subtest suffixes) |
+| `cases` | `list[Case[InputsT, RefsT]]` | One or more cases in this group (min 1) |
 | `references` | `GroupRefsT` | Group-level reference data, defaults to `{}` |
 | `min_passes` | `int` | Minimum case passes required for the group to pass (default `1`, must be `≥ 1` and `≤ len(cases)`) |
 
@@ -462,16 +478,16 @@ class GroupRefs(BaseModel):
     stop_keywords: list[str]
 
 
-geography = CaseGroup[CaseRefs, GroupRefs](
+geography = CaseGroup[dict[str, str], CaseRefs, GroupRefs](
     name="geography",
     references=GroupRefs(stop_keywords=["Lol"]),
     cases=[
-        Case[CaseRefs](
-            sut_input_values={"prompt": "Capital of France?"},
+        Case[dict[str, str], CaseRefs](
+            inputs={"prompt": "Capital of France?"},
             references=CaseRefs(expected="Paris"),
         ),
-        Case[CaseRefs](
-            sut_input_values={"prompt": "Capital of Germany?"},
+        Case[dict[str, str], CaseRefs](
+            inputs={"prompt": "Capital of Germany?"},
             references=CaseRefs(expected="Berlin"),
         ),
     ],
@@ -481,7 +497,7 @@ geography = CaseGroup[CaseRefs, GroupRefs](
 # Untyped (dict references)
 simple = CaseGroup(
     name="simple",
-    cases=[Case(sut_input_values={"x": 1})],
+    cases=[Case(inputs={"x": 1})],
 )
 ```
 
@@ -541,7 +557,7 @@ class Runner:
         enable_tracing: bool = False,
         trace_output: Path | str | None = None,
         capture_output: bool = True,
-        save_to_db: bool = True,
+        db_enabled: bool = True,
         db_path: Path | str | None = None,
         run_id: UUID | str | None = None,
     ) -> None: ...
@@ -565,7 +581,7 @@ class Runner:
 - `run_id` accepts either a `UUID` object or UUID string.
 - `run()` `run_id` overrides constructor `run_id`.
 - If neither is provided, Rue auto-generates a new UUID.
-- If `save_to_db=True` and the selected run UUID already exists, `run()` raises `ValueError`.
+- If `db_enabled=True` and the selected run UUID already exists, `run()` raises `ValueError`.
 - `run_id_exists()` can be used as a preflight check before execution.
 
 **Example:**
@@ -742,7 +758,7 @@ Decorator to run a test function for each case.
 **Signature:**
 ```python
 def iter_cases(
-    *cases: Case[RefsT],
+    *cases: Case[InputsT, RefsT],
     min_passes: int | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]
 ```
@@ -751,7 +767,7 @@ def iter_cases(
 
 | Name | Type | Description |
 |------|------|-------------|
-| `*cases` | `Case[RefsT]` | One or more test cases to iterate over |
+| `*cases` | `Case[InputsT, RefsT]` | One or more test cases to iterate over |
 | `min_passes` | `int \| None` | Minimum number of passing case executions required for the parent test to pass. Defaults to all cases. |
 
 **Returns:** Decorator that applies parametrization using the cases
@@ -771,7 +787,7 @@ with open("test_cases.json") as f:
 
 @iter_cases(*cases)
 def test_from_dataset(case: Case, classifier):
-    result = classifier(**case.sut_input_values)
+    result = classifier(**case.inputs)
 
     if case.references:
         expected = case.references["expected_label"]
@@ -779,7 +795,7 @@ def test_from_dataset(case: Case, classifier):
 
 @iter_cases(*cases, min_passes=8)
 def test_from_dataset_pass_at_k(case: Case, classifier):
-    result = classifier(**case.sut_input_values)
+    result = classifier(**case.inputs)
     assert result in {"positive", "negative", "neutral"}
 ```
 
@@ -792,7 +808,7 @@ Decorator to run a test function for each case group, iterating cases within eac
 **Signature:**
 ```python
 def iter_case_groups(
-    *groups: CaseGroup[RefsT, GroupRefsT],
+    *groups: CaseGroup[InputsT, RefsT, GroupRefsT],
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]
 ```
 
@@ -800,7 +816,7 @@ def iter_case_groups(
 
 | Name | Type | Description |
 |------|------|-------------|
-| `*groups` | `CaseGroup[RefsT, GroupRefsT]` | One or more case groups to iterate over |
+| `*groups` | `CaseGroup[InputsT, RefsT, GroupRefsT]` | One or more case groups to iterate over |
 
 **Returns:** Decorator that applies group-level iteration to the target function
 
@@ -826,8 +842,8 @@ from rue import Case, CaseGroup
 geography = CaseGroup(
     name="geography",
     cases=[
-        Case(sut_input_values={"prompt": "Capital of France?"}, references={"expected": "Paris"}),
-        Case(sut_input_values={"prompt": "Capital of Germany?"}, references={"expected": "Berlin"}),
+        Case(inputs={"prompt": "Capital of France?"}, references={"expected": "Paris"}),
+        Case(inputs={"prompt": "Capital of Germany?"}, references={"expected": "Berlin"}),
     ],
     min_passes=2,
 )
@@ -835,14 +851,14 @@ geography = CaseGroup(
 music = CaseGroup(
     name="music",
     cases=[
-        Case(sut_input_values={"prompt": "Best rock band?"}, references={"expected": "Metallica"}),
+        Case(inputs={"prompt": "Best rock band?"}, references={"expected": "Metallica"}),
     ],
     min_passes=1,
 )
 
 @rue.iter_case_groups(geography, music)
 def test_chatbot(group: CaseGroup, case: Case, chatbot):
-    response = chatbot(**case.sut_input_values)
+    response = chatbot(**case.inputs)
     assert case.references["expected"] in response
 ```
 
@@ -856,8 +872,8 @@ Validate case inputs by passing them to `@sut(validate_cases=...)`. Validation r
 import rue
 
 cases = [
-    rue.Case(sut_input_values={"prompt": "Hello", "temperature": 0.5}),
-    rue.Case(sut_input_values={"prompt": "Hi"}),
+    rue.Case(inputs={"prompt": "Hello", "temperature": 0.5}),
+    rue.Case(inputs={"prompt": "Hi"}),
 ]
 
 @rue.sut(validate_cases=cases)

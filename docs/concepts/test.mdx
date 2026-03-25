@@ -21,7 +21,7 @@ async def test_chatbot_no_hallucinations():
     context = "Our store hours are 9 AM to 6 PM Monday-Saturday."
     response = chatbot("When are you open?")
 
-    # Use semantic predicates to check output quality
+    # Use built-in predicates to check output quality
     assert not await has_unsupported_facts(response, context)
 ```
 
@@ -217,14 +217,14 @@ with open("test_cases.json") as f:
 
 @rue.iter_cases(*cases)
 def test_from_dataset(case: Case, classifier):
-    result = classifier(**case.sut_input_values)
+    result = classifier(**case.inputs)
 
     expected = case.references["expected_label"]
     assert result == expected
 
 @rue.iter_cases(*cases, min_passes=8)
 def test_from_dataset_pass_at_k(case: Case, classifier):
-    result = classifier(**case.sut_input_values)
+    result = classifier(**case.inputs)
 
     expected = case.references["expected_label"]
     assert result == expected
@@ -243,8 +243,8 @@ from rue import Case, CaseGroup
 geography = CaseGroup(
     name="geography",
     cases=[
-        Case(sut_input_values={"prompt": "Capital of France?"}, references={"expected": "Paris"}),
-        Case(sut_input_values={"prompt": "Capital of Germany?"}, references={"expected": "Berlin"}),
+        Case(inputs={"prompt": "Capital of France?"}, references={"expected": "Paris"}),
+        Case(inputs={"prompt": "Capital of Germany?"}, references={"expected": "Berlin"}),
     ],
     min_passes=2,  # strict: both must pass
 )
@@ -252,8 +252,8 @@ geography = CaseGroup(
 music = CaseGroup(
     name="music",
     cases=[
-        Case(sut_input_values={"prompt": "Best rock band?"}, references={"expected": "Metallica"}),
-        Case(sut_input_values={"prompt": "Best pop artist?"}, references={"expected": "Lady Gaga"}),
+        Case(inputs={"prompt": "Best rock band?"}, references={"expected": "Metallica"}),
+        Case(inputs={"prompt": "Best pop artist?"}, references={"expected": "Lady Gaga"}),
     ],
     min_passes=1,  # tolerant: at least one must pass
 )
@@ -261,7 +261,7 @@ music = CaseGroup(
 
 @rue.iter_case_groups(geography, music)
 def test_chatbot(group: CaseGroup, case: Case, chatbot):
-    response = chatbot(**case.sut_input_values)
+    response = chatbot(**case.inputs)
     assert case.references["expected"] in response
 ```
 

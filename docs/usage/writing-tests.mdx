@@ -78,13 +78,13 @@ cases = [Case(**item) for item in json.load(open("cases.json"))]
 
 @rue.iter_cases(*cases)
 def test_from_dataset(case: Case, classifier):
-    result = classifier(**case.sut_input_values)
+    result = classifier(**case.inputs)
     if case.references:
         assert result == case.references["some_ref_value"]
 
 @rue.iter_cases(*cases, min_passes=8)  # Requires at least 8 case passes
 def test_from_dataset_threshold(case: Case, classifier):
-    result = classifier(**case.sut_input_values)
+    result = classifier(**case.inputs)
     assert result == case.references["some_ref_value"]
 ```
 
@@ -96,21 +96,21 @@ from rue import Case, CaseGroup
 geography = CaseGroup(
     name="geography",
     cases=[
-        Case(sut_input_values={"prompt": "Capital of France?"}, references={"expected": "Paris"}),
-        Case(sut_input_values={"prompt": "Capital of Germany?"}, references={"expected": "Berlin"}),
+        Case(inputs={"prompt": "Capital of France?"}, references={"expected": "Paris"}),
+        Case(inputs={"prompt": "Capital of Germany?"}, references={"expected": "Berlin"}),
     ],
     min_passes=2,
 )
 
 music = CaseGroup(
     name="music",
-    cases=[Case(sut_input_values={"prompt": "Best rock band?"}, references={"expected": "Metallica"})],
+    cases=[Case(inputs={"prompt": "Best rock band?"}, references={"expected": "Metallica"})],
     min_passes=1,
 )
 
 @rue.iter_case_groups(geography, music)
 def test_chatbot(group: CaseGroup, case: Case, chatbot):
-    response = chatbot(**case.sut_input_values)
+    response = chatbot(**case.inputs)
     assert case.references["expected"] in response
 ```
 

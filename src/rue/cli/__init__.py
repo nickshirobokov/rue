@@ -409,9 +409,9 @@ async def _run_tests(args: argparse.Namespace, config: Config) -> int:
     concurrency = _resolve_concurrency(args, config)
     timeout = _resolve_timeout(args, config)
     db_path = args.db_path or config.db_path
-    save_to_db = config.save_to_db
+    db_enabled = config.db_enabled
     if args.no_db:
-        save_to_db = False
+        db_enabled = False
 
     reporters = _resolve_reporters(args, config, verbosity)
     runner = Runner(
@@ -424,11 +424,11 @@ async def _run_tests(args: argparse.Namespace, config: Config) -> int:
         trace_output=args.trace_output,
         fail_fast=args.fail_fast,
         capture_output=not args.show_output,
-        save_to_db=save_to_db,
+        db_enabled=db_enabled,
         db_path=db_path,
     )
 
-    if save_to_db and args.run_id and runner.run_id_exists(args.run_id):
+    if db_enabled and args.run_id and runner.run_id_exists(args.run_id):
         Console().print(f"[red]run_id '{args.run_id}' already exists[/red]")
         return 2
 

@@ -16,13 +16,20 @@ from rue.testing.models import (
 )
 
 
+def test_case_defaults():
+    case = Case()
+
+    assert case.references == {}
+    assert case.inputs == {}
+
+
 def test_case_generic_dict():
     """Test Case with dict as references."""
     case = Case[dict[str, Any]](
-        references={"expected": "value"}, sut_input_values={"input": "data"}
+        references={"expected": "value"}, inputs={"input": "data"}
     )
     assert case.references == {"expected": "value"}
-    assert case.sut_input_values == {"input": "data"}
+    assert case.inputs == {"input": "data"}
 
 
 def test_case_generic_basemodel():
@@ -32,17 +39,33 @@ def test_case_generic_basemodel():
         expected: str
         score: float
 
-    case = Case[MyRefs](
-        references=MyRefs(expected="value", score=1.0), sut_input_values={"input": "data"}
+    case = Case[dict[str, Any], MyRefs](
+        references=MyRefs(expected="value", score=1.0), inputs={"input": "data"}
     )
     assert isinstance(case.references, MyRefs)
     assert case.references.expected == "value"
     assert case.references.score == 1.0
 
 
+def test_case_generic_basemodel_inputs():
+    class MyRefs(BaseModel):
+        expected: str
+
+    class MyInputs(BaseModel):
+        input: str
+
+    case = Case[MyInputs, MyRefs](
+        references=MyRefs(expected="value"),
+        inputs=MyInputs(input="data"),
+    )
+    assert isinstance(case.inputs, MyInputs)
+    assert case.inputs.input == "data"
+    assert case.inputs.model_dump() == {"input": "data"}
+
+
 def test_iter_cases_decorator():
     """Test iter_cases decorator attaches cases correctly."""
-    cases = [Case(sut_input_values={"x": 1}), Case(sut_input_values={"x": 2})]
+    cases = [Case(inputs={"x": 1}), Case(inputs={"x": 2})]
 
     @iter_cases(*cases)
     def my_test(case):
@@ -56,7 +79,7 @@ def test_iter_cases_decorator():
 
 
 def test_iter_cases_decorator_with_min_passes():
-    cases = [Case(sut_input_values={"x": 1}), Case(sut_input_values={"x": 2})]
+    cases = [Case(inputs={"x": 1}), Case(inputs={"x": 2})]
 
     @iter_cases(*cases, min_passes=1)
     def my_test(case):
@@ -71,9 +94,9 @@ def test_iter_cases_decorator_with_min_passes():
 
 def test_iter_cases_decorator_validation():
     cases = [
-        Case(sut_input_values={"x": 1}),
-        Case(sut_input_values={"x": 2}),
-        Case(sut_input_values={"x": 3}),
+        Case(inputs={"x": 1}),
+        Case(inputs={"x": 2}),
+        Case(inputs={"x": 3}),
     ]
 
     with pytest.raises(ValueError, match="min_passes must be >= 1"):
@@ -101,9 +124,9 @@ def test_iter_cases_empty_is_deferred_to_execution():
     )
 
 
-def test_runner_iter_cases_injects_case_and_sets_suffix(null_reporter):
-    seen_cases: list[Case[Any]] = []
-    cases = [Case(sut_input_values={"x": 1}), Case(sut_input_values={"x": 2})]
+def test_runner_iter_cases_injects_case_and_sets_case_id(null_reporter):
+    seen_cases: list[Case[Any, Any]] = []
+    cases = [Case(inputs={"x": 1}), Case(inputs={"x": 2})]
 
     def test_collect_case(case):
         seen_cases.append(case)
@@ -123,17 +146,46 @@ def test_runner_iter_cases_injects_case_and_sets_suffix(null_reporter):
     assert run_result.result.passed == 1
     assert seen_cases == cases
     assert len(parent_execution.sub_executions) == 2
-    assert [sub.definition.id_suffix for sub in parent_execution.sub_executions] == [
-        str(cases[0].id),
-        str(cases[1].id),
+    assert [sub.definition.suffix for sub in parent_execution.sub_executions] == [None, None]
+    assert [sub.definition.case_id for sub in parent_execution.sub_executions] == [
+        cases[0].id,
+        cases[1].id,
+    ]
+
+
+def test_runner_iter_cases_maps_case_metadata_to_suffix(null_reporter):
+    cases = [
+        Case(inputs={"x": 1}, metadata={"slug": "one"}),
+        Case(inputs={"x": 2}, metadata={"slug": "two", "difficulty": "easy"}),
+    ]
+
+    item = TestItem(
+        name="test_case_metadata",
+        fn=lambda case: None,
+        module_path=Path("sample.py"),
+        is_async=False,
+        params=["case"],
+        modifiers=[CaseIterateModifier(cases=tuple(cases), min_passes=2)],
+    )
+
+    run_result = asyncio.run(Runner(reporters=[null_reporter]).run(items=[item]))
+    parent_execution = run_result.result.executions[0]
+
+    assert [sub.definition.suffix for sub in parent_execution.sub_executions] == [
+        repr(cases[0].metadata),
+        repr(cases[1].metadata),
+    ]
+    assert [sub.definition.case_id for sub in parent_execution.sub_executions] == [
+        cases[0].id,
+        cases[1].id,
     ]
 
 
 def test_runner_iter_cases_partial_pass_meets_min_passes(null_reporter):
-    cases = [Case(sut_input_values={"x": i}) for i in range(1, 6)]
+    cases = [Case(inputs={"x": i}) for i in range(1, 6)]
 
     def test_partial_pass(case):
-        if case.sut_input_values["x"] >= 4:
+        if case.inputs["x"] >= 4:
             raise AssertionError("fail")
 
     item = TestItem(
@@ -158,10 +210,10 @@ def test_runner_iter_cases_partial_pass_meets_min_passes(null_reporter):
 
 
 def test_runner_iter_cases_insufficient_passes(null_reporter):
-    cases = [Case(sut_input_values={"x": i}) for i in range(1, 6)]
+    cases = [Case(inputs={"x": i}) for i in range(1, 6)]
 
     def test_mostly_fail(case):
-        if case.sut_input_values["x"] > 2:
+        if case.inputs["x"] > 2:
             raise AssertionError("fail")
 
     item = TestItem(
@@ -186,10 +238,10 @@ def test_runner_iter_cases_insufficient_passes(null_reporter):
 
 
 def test_runner_iter_cases_default_requires_all_passes(null_reporter):
-    cases = [Case(sut_input_values={"x": i}) for i in range(1, 4)]
+    cases = [Case(inputs={"x": i}) for i in range(1, 4)]
 
     def test_one_fails(case):
-        if case.sut_input_values["x"] == 2:
+        if case.inputs["x"] == 2:
             raise AssertionError("fail")
 
     item = TestItem(
@@ -211,8 +263,8 @@ def test_runner_iter_cases_default_requires_all_passes(null_reporter):
 
 def test_iter_case_groups_decorator():
     groups = [
-        CaseGroup(name="alpha", cases=[Case(sut_input_values={"x": 1})], min_passes=1),
-        CaseGroup(name="beta", cases=[Case(sut_input_values={"x": 2})], min_passes=1),
+        CaseGroup(name="alpha", cases=[Case(inputs={"x": 1})], min_passes=1),
+        CaseGroup(name="beta", cases=[Case(inputs={"x": 2})], min_passes=1),
     ]
 
     @iter_case_groups(*groups)
@@ -234,7 +286,7 @@ def test_iter_case_groups_validation():
             pass
 
     with pytest.raises(ValueError, match="greater than or equal to 1"):
-        bad_low = CaseGroup(name="low", cases=[Case(sut_input_values={"x": 1})], min_passes=0)
+        bad_low = CaseGroup(name="low", cases=[Case(inputs={"x": 1})], min_passes=0)
 
         @iter_case_groups(bad_low)
         def test_low(group, case):
@@ -243,7 +295,7 @@ def test_iter_case_groups_validation():
     with pytest.raises(ValueError, match="cannot exceed cases count"):
         bad_high = CaseGroup(
             name="high",
-            cases=[Case(sut_input_values={"x": 1}), Case(sut_input_values={"x": 2})],
+            cases=[Case(inputs={"x": 1}), Case(inputs={"x": 2})],
             min_passes=3,
         )
 
@@ -265,8 +317,8 @@ def test_iter_case_groups_empty_is_deferred_to_execution():
 
 
 def test_runner_iter_case_groups_injects_group_and_case_and_nests(null_reporter):
-    g1_cases = [Case(sut_input_values={"x": 1}), Case(sut_input_values={"x": 2})]
-    g2_cases = [Case(sut_input_values={"x": 3})]
+    g1_cases = [Case(inputs={"x": 1}), Case(inputs={"x": 2})]
+    g2_cases = [Case(inputs={"x": 3})]
     groups = [
         CaseGroup(name="alpha", cases=g1_cases, min_passes=1),
         CaseGroup(name="beta", cases=g2_cases, min_passes=1),
@@ -291,18 +343,25 @@ def test_runner_iter_case_groups_injects_group_and_case_and_nests(null_reporter)
     assert run_result.result.passed == 1
     assert len(seen_pairs) == 3
     assert len(parent_execution.sub_executions) == 2
-    assert [sub.definition.id_suffix for sub in parent_execution.sub_executions] == [
+    assert [sub.definition.suffix for sub in parent_execution.sub_executions] == [
         "alpha",
         "beta",
     ]
     assert len(parent_execution.sub_executions[0].sub_executions) == 2
     assert len(parent_execution.sub_executions[1].sub_executions) == 1
-    assert [
-        sub.definition.id_suffix for sub in parent_execution.sub_executions[0].sub_executions
-    ] == [str(case.id) for case in g1_cases]
-    assert [
-        sub.definition.id_suffix for sub in parent_execution.sub_executions[1].sub_executions
-    ] == [str(case.id) for case in g2_cases]
+    assert [sub.definition.suffix for sub in parent_execution.sub_executions[0].sub_executions] == [
+        None,
+        None,
+    ]
+    assert [sub.definition.case_id for sub in parent_execution.sub_executions[0].sub_executions] == [
+        case.id for case in g1_cases
+    ]
+    assert [sub.definition.suffix for sub in parent_execution.sub_executions[1].sub_executions] == [
+        None
+    ]
+    assert [sub.definition.case_id for sub in parent_execution.sub_executions[1].sub_executions] == [
+        case.id for case in g2_cases
+    ]
 
 
 def test_runner_iter_case_groups_uses_group_min_passes_and_all_groups_must_pass(
@@ -312,23 +371,23 @@ def test_runner_iter_case_groups_uses_group_min_passes_and_all_groups_must_pass(
         CaseGroup(
             name="alpha",
             cases=[
-                Case(sut_input_values={"x": 1}),
-                Case(sut_input_values={"x": 2}),
-                Case(sut_input_values={"x": 3}),
+                Case(inputs={"x": 1}),
+                Case(inputs={"x": 2}),
+                Case(inputs={"x": 3}),
             ],
             min_passes=2,
         ),
         CaseGroup(
             name="beta",
-            cases=[Case(sut_input_values={"x": 1}), Case(sut_input_values={"x": 2})],
+            cases=[Case(inputs={"x": 1}), Case(inputs={"x": 2})],
             min_passes=2,
         ),
     ]
 
     def test_group_threshold(group, case):
-        if group.name == "alpha" and case.sut_input_values["x"] == 3:
+        if group.name == "alpha" and case.inputs["x"] == 3:
             raise AssertionError("alpha fail")
-        if group.name == "beta" and case.sut_input_values["x"] == 2:
+        if group.name == "beta" and case.inputs["x"] == 2:
             raise AssertionError("beta fail")
 
     item = TestItem(

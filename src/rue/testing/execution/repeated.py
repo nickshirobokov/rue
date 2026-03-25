@@ -44,7 +44,7 @@ class RepeatedTest(Test):
             child_def = replace(
                 self.definition,
                 modifiers=self.definition.modifiers[1:],
-                id_suffix=suffix,
+                suffix=suffix,
             )
             child = self.factory.build(child_def, self.params)
             execution = await child.execute(resolver)

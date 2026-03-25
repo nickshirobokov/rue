@@ -6,6 +6,7 @@ import pytest
 
 from rue.assertions.base import AssertionRepr, AssertionResult
 from rue.context import (
+    PREDICATE_RESULTS_COLLECTOR,
     ResolverContext,
     TestContext as Ctx,
     assertions_collector,
@@ -15,19 +16,24 @@ from rue.context import (
     test_context_scope as context_scope,
 )
 from rue.metrics_.base import Metric, metric
-from rue.predicates.base import PredicateResult
+from rue.predicates.models import PredicateResult
 from rue.resources import ResourceResolver, Scope, clear_registry
 from rue.testing.discovery import TestItem
 
 
-def _make_item(name: str = "test_fn", id_suffix: str | None = None) -> TestItem:
+def _make_item(
+    name: str = "test_fn",
+    suffix: str | None = None,
+    case_id=None,
+) -> TestItem:
     """Create a minimal TestItem for testing."""
     return TestItem(
         name=name,
         fn=lambda: None,
         module_path=Path("test.py"),
         is_async=False,
-        id_suffix=id_suffix,
+        suffix=suffix,
+        case_id=case_id,
     )
 
 
@@ -69,17 +75,16 @@ def test_assertionresult_appends_to_test_context():
     assert ar2 not in assertion_results
 
 
-def test_assertion_context_collects_predicate_results():
+def test_assertion_context_collects_recorded_predicate_results():
     test_ctx = Ctx(item=_make_item("test_name"))
 
     # Collect predicate results into a list
-    predicate_results_list = []
+    predicate_results_list: list[PredicateResult] = []
 
     with (
         context_scope(test_ctx),
         predicate_results_collector(predicate_results_list),
     ):
-        # PredicateResult should attach itself to the collector
         pr = PredicateResult(
             actual="a",
             reference="b",
@@ -87,7 +92,12 @@ def test_assertion_context_collects_predicate_results():
             strict=True,
             value=True,
         )
-        assert pr
+        assert pr.value is True
+        assert predicate_results_list == []
+
+        c = PREDICATE_RESULTS_COLLECTOR.get()
+        assert c is not None
+        c.append(pr)
 
     # Build AssertionResult with collected data
     ar = AssertionResult(

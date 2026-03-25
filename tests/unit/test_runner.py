@@ -4,6 +4,7 @@ import asyncio
 import os
 import time
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -45,7 +46,8 @@ def make_item(
     skip_reason: str | None = None,
     xfail_reason: str | None = None,
     xfail_strict: bool = False,
-    id_suffix: str | None = None,
+    suffix: str | None = None,
+    case_id: UUID | None = None,
 ) -> TestItem:
     """Helper to create TestItem for testing."""
     return TestItem(
@@ -60,7 +62,8 @@ def make_item(
         skip_reason=skip_reason,
         xfail_reason=xfail_reason,
         xfail_strict=xfail_strict,
-        id_suffix=id_suffix,
+        suffix=suffix,
+        case_id=case_id,
     )
 
 
@@ -92,8 +95,10 @@ class EventReporter(Reporter):
 
     async def on_subtest_complete(self, parent: TestItem, sub_execution: TestExecution) -> None:
         elapsed = time.perf_counter() - self.start_time
-        suffix = sub_execution.item.id_suffix or ""
-        self.subtest_event_times.append((parent.name, suffix, elapsed))
+        label = sub_execution.item.suffix or (
+            str(sub_execution.item.case_id) if sub_execution.item.case_id else ""
+        )
+        self.subtest_event_times.append((parent.name, label, elapsed))
 
     async def on_run_complete(self, _rue_run) -> None:
         self.run_complete_elapsed = time.perf_counter() - self.start_time
@@ -303,7 +308,7 @@ class TestRunId:
     @pytest.mark.asyncio
     async def test_constructor_run_id_used_when_run_id_not_passed(self, null_reporter):
         run_id = uuid4()
-        runner = Runner(reporters=[null_reporter], run_id=run_id, save_to_db=False)
+        runner = Runner(reporters=[null_reporter], run_id=run_id, db_enabled=False)
 
         result = await runner.run(items=[make_item(lambda: None)])
 
@@ -313,7 +318,7 @@ class TestRunId:
     async def test_run_run_id_overrides_constructor_run_id(self, null_reporter):
         constructor_run_id = uuid4()
         run_level_run_id = uuid4()
-        runner = Runner(reporters=[null_reporter], run_id=constructor_run_id, save_to_db=False)
+        runner = Runner(reporters=[null_reporter], run_id=constructor_run_id, db_enabled=False)
 
         result = await runner.run(items=[make_item(lambda: None)], run_id=run_level_run_id)
 
@@ -322,7 +327,7 @@ class TestRunId:
     @pytest.mark.asyncio
     async def test_run_id_string_is_accepted_and_normalized(self, null_reporter):
         run_id = uuid4()
-        runner = Runner(reporters=[null_reporter], run_id=str(run_id), save_to_db=False)
+        runner = Runner(reporters=[null_reporter], run_id=str(run_id), db_enabled=False)
 
         result = await runner.run(items=[make_item(lambda: None)])
 
@@ -331,11 +336,11 @@ class TestRunId:
 
     def test_invalid_constructor_run_id_raises_value_error(self, null_reporter):
         with pytest.raises(ValueError, match="Invalid run_id"):
-            Runner(reporters=[null_reporter], run_id="not-a-uuid", save_to_db=False)
+            Runner(reporters=[null_reporter], run_id="not-a-uuid", db_enabled=False)
 
     @pytest.mark.asyncio
     async def test_invalid_run_level_run_id_raises_value_error(self, null_reporter):
-        runner = Runner(reporters=[null_reporter], save_to_db=False)
+        runner = Runner(reporters=[null_reporter], db_enabled=False)
 
         with pytest.raises(ValueError, match="Invalid run_id"):
             await runner.run(items=[make_item(lambda: None)], run_id="not-a-uuid")
@@ -356,7 +361,7 @@ class TestRunId:
     @pytest.mark.asyncio
     async def test_reused_constructor_run_id_allowed_when_db_disabled(self, null_reporter):
         run_id = uuid4()
-        runner = Runner(reporters=[null_reporter], run_id=run_id, save_to_db=False)
+        runner = Runner(reporters=[null_reporter], run_id=run_id, db_enabled=False)
 
         first_result = await runner.run(items=[make_item(lambda: None)])
         second_result = await runner.run(items=[make_item(lambda: None)])
@@ -470,11 +475,11 @@ class TestConcurrency:
     def _make_case_iterated_item(
         *,
         name: str,
-        cases: tuple[Case[dict[str, float]], ...],
+        cases: tuple[Case[dict[str, float], dict[str, Any]], ...],
         min_passes: int,
     ) -> TestItem:
         async def case_iterated_test(case) -> None:
-            await asyncio.sleep(case.sut_input_values["delay"])
+            await asyncio.sleep(case.inputs["delay"])
 
         return TestItem(
             fn=case_iterated_test,
@@ -491,11 +496,11 @@ class TestConcurrency:
     def _make_case_group_iterated_item(
         *,
         name: str,
-        groups: tuple[CaseGroup[dict[str, float], dict[str, float]], ...],
+        groups: tuple[CaseGroup[dict[str, float], dict[str, Any], dict[str, Any]], ...],
     ) -> TestItem:
         async def case_group_iterated_test(group, case) -> None:
             _ = group
-            await asyncio.sleep(case.sut_input_values["delay"])
+            await asyncio.sleep(case.inputs["delay"])
 
         return TestItem(
             fn=case_group_iterated_test,
@@ -536,7 +541,7 @@ class TestConcurrency:
             items.append(make_item(test_fn, name=f"test_{idx}", is_async=True))
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, save_to_db=False)
+        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
         await runner.run(items=items)
 
         complete_times = [
@@ -558,7 +563,7 @@ class TestConcurrency:
             items.append(make_item(test_fn, name=f"test_{idx}", is_async=True))
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, save_to_db=False)
+        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
         await runner.run(items=items)
 
         started = {name for kind, name in reporter.event_order if kind == "start"}
@@ -582,7 +587,7 @@ class TestConcurrency:
         runner = Runner(
             reporters=[StartFailureReporter()],
             concurrency=2,
-            save_to_db=False,
+            db_enabled=False,
         )
         with pytest.raises(RuntimeError, match="start callback failed"):
             await runner.run(items=[make_item(test_fn, name="test_start", is_async=True)])
@@ -599,7 +604,7 @@ class TestConcurrency:
         runner = Runner(
             reporters=[CompleteFailureReporter()],
             concurrency=2,
-            save_to_db=False,
+            db_enabled=False,
         )
         with pytest.raises(RuntimeError, match="complete callback failed"):
             await runner.run(items=[make_item(test_fn, name="test_complete", is_async=True)])
@@ -616,7 +621,7 @@ class TestConcurrency:
         )
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, save_to_db=False)
+        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
         await runner.run(items=[item])
 
         assert len(reporter.subtest_event_times) == 3
@@ -641,12 +646,12 @@ class TestConcurrency:
         )
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, save_to_db=False)
+        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
         test_run = await runner.run(items=[item])
 
         assert len(reporter.subtest_event_times) == len(parameter_sets)
         execution = test_run.result.executions[0]
-        assert [sub.item.id_suffix for sub in execution.sub_executions] == [
+        assert [sub.item.suffix for sub in execution.sub_executions] == [
             "first",
             "second",
             "third",
@@ -657,15 +662,15 @@ class TestConcurrency:
         cases = (
             Case(
                 id=UUID("00000000-0000-0000-0000-000000000001"),
-                sut_input_values={"delay": 0.15},
+                inputs={"delay": 0.15},
             ),
             Case(
                 id=UUID("00000000-0000-0000-0000-000000000002"),
-                sut_input_values={"delay": 0.01},
+                inputs={"delay": 0.01},
             ),
             Case(
                 id=UUID("00000000-0000-0000-0000-000000000003"),
-                sut_input_values={"delay": 0.05},
+                inputs={"delay": 0.05},
             ),
         )
         item = self._make_case_iterated_item(
@@ -675,7 +680,7 @@ class TestConcurrency:
         )
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, save_to_db=False)
+        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
         test_run = await runner.run(items=[item])
 
         assert len(reporter.subtest_event_times) == len(cases)
@@ -689,9 +694,8 @@ class TestConcurrency:
         )
 
         execution = test_run.result.executions[0]
-        assert [sub.item.id_suffix for sub in execution.sub_executions] == [
-            str(case.id) for case in cases
-        ]
+        assert [sub.item.suffix for sub in execution.sub_executions] == [None, None, None]
+        assert [sub.item.case_id for sub in execution.sub_executions] == [case.id for case in cases]
 
     @pytest.mark.asyncio
     async def test_case_group_iterated_callbacks_stream_and_order_is_deterministic(self):
@@ -701,7 +705,7 @@ class TestConcurrency:
                 cases=[
                     Case(
                         id=UUID("00000000-0000-0000-0000-000000000011"),
-                        sut_input_values={"delay": 0.15},
+                        inputs={"delay": 0.15},
                     )
                 ],
                 min_passes=1,
@@ -711,7 +715,7 @@ class TestConcurrency:
                 cases=[
                     Case(
                         id=UUID("00000000-0000-0000-0000-000000000012"),
-                        sut_input_values={"delay": 0.01},
+                        inputs={"delay": 0.01},
                     )
                 ],
                 min_passes=1,
@@ -721,7 +725,7 @@ class TestConcurrency:
                 cases=[
                     Case(
                         id=UUID("00000000-0000-0000-0000-000000000013"),
-                        sut_input_values={"delay": 0.05},
+                        inputs={"delay": 0.05},
                     )
                 ],
                 min_passes=1,
@@ -733,7 +737,7 @@ class TestConcurrency:
         )
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, save_to_db=False)
+        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
         test_run = await runner.run(items=[item])
 
         group_names = {group.name for group in groups}
@@ -749,7 +753,7 @@ class TestConcurrency:
         )
 
         execution = test_run.result.executions[0]
-        assert [sub.item.id_suffix for sub in execution.sub_executions] == [
+        assert [sub.item.suffix for sub in execution.sub_executions] == [
             group.name for group in groups
         ]
 

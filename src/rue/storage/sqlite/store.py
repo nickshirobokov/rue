@@ -11,7 +11,7 @@ from uuid import UUID
 
 from rue.assertions.base import AssertionResult
 from rue.metrics_.base import CalculatedValue, MetricMetadata, MetricResult
-from rue.predicates.base import PredicateResult
+from rue.predicates.models import PredicateResult
 from rue.resources import Scope
 from rue.storage.base import Store
 from rue.storage.sqlite.migrations import MigrationError, MigrationRunner
@@ -203,11 +203,11 @@ class SQLiteStore(Store):
                 module_path = getattr(defn, "module_path", None)
                 file_path = str(module_path) if module_path else None
                 class_name = getattr(defn, "class_name", None)
-                id_suffix = getattr(defn, "id_suffix", None)
+                suffix = getattr(defn, "suffix", None)
                 tags: set[str] = getattr(defn, "tags", set())
                 skip_reason = getattr(defn, "skip_reason", None)
                 xfail_reason = getattr(defn, "xfail_reason", None)
-                case_id = self._parse_case_id(id_suffix)
+                case_id = getattr(defn, "case_id", None)
                 execution_id = str(execution.execution_id)
 
                 execution_rows.append(
@@ -219,7 +219,7 @@ class SQLiteStore(Store):
                         file_path,
                         class_name,
                         str(case_id) if case_id else None,
-                        id_suffix,
+                        suffix,
                         execution.trace_id,
                         json.dumps(list(tags)) if tags else None,
                         skip_reason,
@@ -420,15 +420,6 @@ class SQLiteStore(Store):
     def _to_json_list(self, items: set[str]) -> str | None:
         return json.dumps(list(items)) if items else None
 
-    def _parse_case_id(self, id_suffix: str | None) -> UUID | None:
-        """Extract case_id from id_suffix if it's a valid UUID."""
-        if not id_suffix:
-            return None
-        try:
-            return UUID(id_suffix)
-        except ValueError:
-            return None
-
     def get_run(self, run_id: UUID) -> Run | None:
         """Retrieve a test run by ID."""
         with self._connect() as conn:
@@ -555,7 +546,8 @@ class SQLiteStore(Store):
             tags=tags,
             skip_reason=row["skip_reason"],
             xfail_reason=row["xfail_reason"],
-            id_suffix=row["id_suffix"],
+            suffix=row["id_suffix"],
+            case_id=UUID(row["case_id"]) if row["case_id"] else None,
         )
 
         result = TestResult(

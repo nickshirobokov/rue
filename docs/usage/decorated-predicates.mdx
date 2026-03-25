@@ -1,0 +1,136 @@
+---
+title: "Using Decorated Predicates"
+description: "How to write custom Rue predicates with the predicate decorator."
+---
+
+Use `@predicate` when you need a custom comparison that should behave like a Rue predicate in assertions, traces, and stored predicate results.
+
+## Basic custom predicate
+
+```python
+from rue import predicate
+
+
+@predicate
+def contains_order_id(actual: str, reference: str) -> bool:
+    return reference in actual
+
+
+def test_receipt_text():
+    receipt = "Order ORD-2041 has shipped."
+    assert contains_order_id(receipt, "ORD-2041")
+```
+
+The decorated function still behaves like a normal boolean check at the call site.
+
+## Signature rules
+
+Your function must:
+
+- declare named `actual` and `reference` parameters
+- return either `bool` or `PredicateResult`
+- be sync or async
+
+These are valid:
+
+```python
+from rue import predicate
+
+
+@predicate
+def same_slug(actual: str, reference: str) -> bool:
+    return actual.casefold().replace(" ", "-") == reference
+
+
+@predicate
+def keyword_only(*, actual: str, reference: str) -> bool:
+    return actual == reference
+```
+
+This is not valid because `actual` and `reference` are positional-only:
+
+```python
+from rue import predicate
+
+
+@predicate
+def invalid(actual: str, reference: str, /) -> bool:
+    return actual == reference
+```
+
+## Returning `bool`
+
+If your predicate returns `bool`, Rue normalizes the result into a `PredicateResult` behind the scenes.
+
+If your function also exposes these keyword parameters, their bound values are copied into the recorded metadata:
+
+- `strict`
+- `confidence`
+- `message`
+
+```python
+from rue import predicate
+
+
+@predicate(name="within_tolerance")
+def within_tolerance(
+    actual: float,
+    reference: float,
+    *,
+    tolerance: float = 0.1,
+    strict: bool = False,
+    confidence: float = 0.8,
+    message: str | None = "outside tolerance",
+) -> bool:
+    delta = abs(actual - reference)
+    limit = tolerance if strict else tolerance * 2
+    return delta <= limit
+```
+
+## Returning `PredicateResult`
+
+Return `PredicateResult` when you want full control over the stored metadata.
+
+```python
+from rue import predicate
+from rue.predicates import PredicateResult
+
+
+@predicate
+def contains_invoice_id(actual: str, reference: str) -> PredicateResult:
+    value = reference in actual
+    return PredicateResult(
+        actual=actual,
+        reference=reference,
+        name="contains_invoice_id",
+        strict=False,
+        confidence=0.95,
+        value=value,
+        message="invoice id was present" if value else "invoice id missing",
+    )
+```
+
+When you return `PredicateResult`, Rue uses that object as-is.
+
+## Async custom predicates
+
+The decorator works for async functions too:
+
+```python
+from rue import predicate
+
+
+@predicate
+async def async_prefix_match(actual: str, reference: str) -> bool:
+    return actual.startswith(reference)
+```
+
+## What gets recorded
+
+Decorated predicates integrate with the same recording path as built-ins.
+
+- Inside a Rue-transformed `assert`, Rue collects a `PredicateResult`.
+- Predicate traces are emitted as `predicate.<predicate_name>`.
+- The wrapped call still returns `bool` to the test body.
+
+That means you can keep custom predicate calls simple while still getting structured predicate metadata in reports, traces, and storage.

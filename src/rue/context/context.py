@@ -11,7 +11,7 @@ from uuid import UUID
 if TYPE_CHECKING:
     from rue.assertions.base import AssertionResult
     from rue.metrics_.base import Metric, MetricResult
-    from rue.predicates.base import PredicateResult
+    from rue.predicates.models import PredicateResult
     from rue.testing.models import TestDefinition
     from rue.testing.runner import Runner
 

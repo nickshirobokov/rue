@@ -28,7 +28,7 @@ class CaseIteratedTest(Test):
 
     definition: TestDefinition
     params: dict[str, Any]
-    cases: tuple[Case[Any], ...]
+    cases: tuple[Case[Any, Any], ...]
     min_passes: int
     factory: TestFactory
 
@@ -42,11 +42,12 @@ class CaseIteratedTest(Test):
     async def execute(self, resolver: ResourceResolver) -> TestExecution:
         """Execute test for each case and aggregate results."""
 
-        async def run_child(index: int, case: Case[Any]) -> tuple[int, TestExecution]:
+        async def run_child(index: int, case: Case[Any, Any]) -> tuple[int, TestExecution]:
             child_def = replace(
                 self.definition,
                 modifiers=self.definition.modifiers[1:],
-                id_suffix=str(case.id),
+                suffix=repr(case.metadata) if case.metadata else None,
+                case_id=case.id,
             )
             child_params = {**self.params, "case": case}
             child = self.factory.build(child_def, child_params)
@@ -94,7 +95,7 @@ class CaseGroupIteratedTest(Test):
 
     definition: TestDefinition
     params: dict[str, Any]
-    groups: tuple[CaseGroup[Any, Any], ...]
+    groups: tuple[CaseGroup[Any, Any, Any], ...]
     factory: TestFactory
 
     def __post_init__(self) -> None:
@@ -109,14 +110,16 @@ class CaseGroupIteratedTest(Test):
     async def execute(self, resolver: ResourceResolver) -> TestExecution:
         """Execute each group as a nested case-iterated child."""
 
-        async def run_child(index: int, group: CaseGroup[Any, Any]) -> tuple[int, TestExecution]:
+        async def run_child(
+            index: int, group: CaseGroup[Any, Any, Any]
+        ) -> tuple[int, TestExecution]:
             child_def = replace(
                 self.definition,
                 modifiers=[
                     CaseIterateModifier(cases=tuple(group.cases), min_passes=group.min_passes),
                     *self.definition.modifiers[1:],
                 ],
-                id_suffix=group.name,
+                suffix=group.name,
             )
             child_params = {**self.params, "group": group}
             child = self.factory.build(child_def, child_params)

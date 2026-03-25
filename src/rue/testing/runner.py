@@ -16,10 +16,6 @@ from rue.context import (
 )
 from rue.context.output_capture import sys_output_capture
 from rue.metrics_.base import MetricResult
-from rue.predicates import (
-    close_predicate_api_client,
-    create_predicate_api_client,
-)
 from rue.reports.base import Reporter
 from rue.resources import ResourceResolver, get_registry
 from rue.storage import SQLiteStore
@@ -72,7 +68,7 @@ class Runner:
         enable_tracing: bool = False,
         trace_output: Path | str | None = None,
         capture_output: bool = True,
-        save_to_db: bool = True,
+        db_enabled: bool = True,
         db_path: Path | str | None = None,
         run_id: UUID | str | None = None,
     ) -> None:
@@ -90,7 +86,7 @@ class Runner:
         self.enable_tracing = enable_tracing
         self.trace_output = Path(trace_output) if trace_output else Path(".rue/traces.jsonl")
         self.capture_output = capture_output
-        self.save_to_db = save_to_db
+        self.db_enabled = db_enabled
         self.db_path = Path(db_path) if db_path else None
         self._default_run_id = self._normalize_run_id(run_id)
 
@@ -195,7 +191,7 @@ class Runner:
         """
         selected_run_id = self._resolve_run_id(run_id)
 
-        if self.save_to_db:
+        if self.db_enabled:
             self._ensure_db_ready()
             if selected_run_id and self.run_id_exists(selected_run_id):
                 msg = f"run_id '{selected_run_id}' already exists"
@@ -206,8 +202,6 @@ class Runner:
             self.current_run = Run(environment=environment)
         else:
             self.current_run = Run(environment=environment, run_id=selected_run_id)
-
-        create_predicate_api_client()
 
         if self.enable_tracing:
             init_tracing(output_path=self.trace_output)
@@ -257,8 +251,6 @@ class Runner:
                 self.current_run.result.stopped_early = True
                 self.stop_flag = True
 
-        await close_predicate_api_client()
-
         self.current_run.result.total_duration_ms = (time.perf_counter() - start) * 1000
         self.current_run.result.metric_results = metric_results.copy()
         self.current_run.end_time = datetime.now(UTC)
@@ -268,7 +260,7 @@ class Runner:
         if self.enable_tracing:
             await self._notify_tracing_enabled(self.trace_output)
 
-        if self.save_to_db and self._store:
+        if self.db_enabled and self._store:
             try:
                 self._store.save_run(self.current_run)
                 if self.enable_tracing:

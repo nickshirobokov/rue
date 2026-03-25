@@ -6,7 +6,7 @@ from rue.predicates import (
     follows_policy,
     has_conflicting_facts,
     has_facts,
-    has_topics,
+    has_topic,
     has_unsupported_facts,
     matches_facts,
     matches_writing_layout,
@@ -81,9 +81,10 @@ async def test_predicates_facts_and_topics():
         "Tell me about France. Don't include sports, sociology, politics, religion."
     )
 
-    # has_facts and has_topics check if text contains all facts and topics from the reference text
+    # has_facts checks factual coverage; has_topic checks whether a single topic is present
     assert await has_facts(answer, "Paris is a capital of France. France is a country in Europe.")
-    assert not await has_topics(answer, "Sports, sociology, politics, religion.")
+    assert await has_topic(answer, "France")
+    assert not await has_topic(answer, "sports")
 
 
 async def test_predicates_conflicting_and_unsupported_facts():

@@ -1,546 +1,107 @@
 ---
-title: "AI Predicates"
+title: "Predicates"
+description: "What predicates are in Rue, how built-ins differ from decorated predicates, and where to find the predicate spec."
 ---
 
-`AI Predicates` are AI-powered comparison functions that evaluate inputs based on complex properties like semantic meaning or style matching.
+Predicates are boolean comparison functions in Rue. They answer one narrow question about an `actual` value relative to a `reference` value, and they are designed to read naturally inside `assert` statements.
 
-<Note>Some other libraries call similar functions "LLM-as-a-Judge".</Note>
+<Note>
+Behavioral semantics for built-in predicates are defined by
+[src/rue/predicates/SPEC.md](https://github.com/NickSherrow/rue/blob/main/src/rue/predicates/SPEC.md).
+Use this page as the overview, and treat the spec as the source of truth.
+</Note>
 
-<Callout icon="key" color="#FFC107" iconType="regular">This is a premium feature that requires a Rue API key.</Callout>
+## What a predicate is
 
-Using AI Predicates enables:
-- Asserting on semantic properties like factual consistency and topic coverage
-- Asserting on formatting properties like style and layout matching
-- Asserting on behavioral properties like policy following
+A predicate in Rue:
 
-## Basic Usage
+- returns `bool`
+- compares `actual` to `reference`
+- answers one specific question instead of producing a broad score
+- can run inside normal tests, metrics, traces, and assertion rewriting
 
-Rue provides 8 built-in AI predicates for common LLM evaluation scenarios. All predicates are async functions that return `PredicateResult` objects with boolean values, confidence scores, and explanatory messages.
+That narrowness matters. `matches_facts`, `matches_writing_style`, `has_topic`, and `follows_policy` are intentionally different checks, even if they operate on the same pair of documents.
 
-```python
-import rue
-from rue.predicates import has_unsupported_facts, follows_policy
+## Two ways to work with predicates
 
-async def test_customer_faq_bot(faq_bot):
-    # Knowledge base the bot should use
-    knowledge = """
-    Our store hours are 9 AM to 6 PM, Monday through Saturday.
-    We're closed on Sundays and major holidays.
-    Free shipping on orders over $50.
-    """
+### Built-in predicates
 
-    # Customer asks a question, bot generates response
-    response = faq_bot.answer(
-        "When are you open?",
-        context=knowledge
-    )
-    # Example output:
-    # "We're open Monday through Saturday, 9 AM to 6 PM.
-    # We're closed Sundays and holidays."
+Rue ships 8 built-in predicates in `rue.predicates`. They are async, LLM-backed, and split into two families.
 
-    # Verify response doesn't hallucinate facts
-    assert not await has_unsupported_facts(
-        response,
-        knowledge
-    )
+| Family | Predicate | Question it answers |
+| --- | --- | --- |
+| Factual | `has_facts` | Does `actual` cover every fact in `reference`? |
+| Factual | `has_unsupported_facts` | Does `actual` add any fact that `reference` does not support? |
+| Factual | `has_conflicting_facts` | Does `actual` contradict `reference` anywhere? |
+| Factual | `matches_facts` | Are `actual` and `reference` factually equivalent? |
+| Non-factual | `matches_writing_style` | Are they written in materially the same style? |
+| Non-factual | `matches_writing_layout` | Do they use materially the same structure or template? |
+| Non-factual | `has_topic` | Is `actual` substantively about the topic in `reference`? |
+| Non-factual | `follows_policy` | Does `actual` satisfy the rule in `reference`? |
 
-    # Verify response follows customer service guidelines
-    conversation_policy = """
-    Agent always asks if they can help with
-    any other questions.
-    """
-    assert await follows_policy(response, conversation_policy)
-```
+Use built-ins when your comparison already matches one of those questions.
 
-### Factual Accuracy
+### Decorated predicates
 
-#### has_conflicting_facts
-
-Detects when generated text contradicts source material.
-
-```python
-from rue.predicates import has_conflicting_facts
-
-async def test_rag_no_contradictions(rag_system):
-    # Source document about a company
-    source = """
-    Acme Corp was founded in 2018.
-    The company has 150 employees and is headquartered
-    in Austin, Texas. Revenue was $12M in 2023.
-    """
-
-    # LLM generates answer based on retrieved context
-    answer = rag_system.query("Tell me about Acme Corp")
-
-    # Passes: answer doesn't contradict
-    assert not await has_conflicting_facts(answer, source)
-
-    # Bad output:
-    # "Acme Corp was founded in 2015 in San Francisco..."
-    # Would fail: contradicts year and location
-```
-
-#### has_unsupported_facts
-
-Catches hallucinations - facts the LLM invented that aren't grounded in source material.
-
-```python
-from rue.predicates import has_unsupported_facts
-
-async def test_no_hallucinations(rag_system):
-    # Knowledge base only contains this information
-    source = """
-    Python 3.12 was released in October 2023.
-    It introduced f-string improvements.
-    """
-
-    answer = rag_system.query("What's new in Python 3.12?")
-    # Example output:
-    # "Python 3.12 came out in October 2023
-    # with better f-strings."
-
-    # Passes: all facts are grounded in source
-    assert not await has_unsupported_facts(answer, source)
-
-    # Bad output:
-    # "Python 3.12 released October 2023 with
-    # f-string improvements and a new JIT compiler
-    # for 2x faster performance."
-    # Would fail: JIT compiler claim is hallucinated
-```
-
-#### has_facts
-
-Verifies that required information appears in the output. Use when certain facts must be mentioned.
-
-```python
-from rue.predicates import has_facts
-
-async def test_includes_required_info(medical_summary_bot):
-    # Patient notes that must be summarized
-    patient_notes = """
-    Patient: John Doe, 45M
-    Chief complaint: Chest pain for 2 hours
-    Vitals: BP 150/95, HR 88, O2 98%
-    Assessment: Rule out MI, start workup
-    """
-
-    summary = medical_summary_bot.summarize(patient_notes)
-    # Example:
-    # "45-year-old male presenting with 2-hour
-    # chest pain. Elevated BP at 150/95.
-    # Cardiac workup initiated."
-
-    # Critical facts that must appear in any summary
-    required = """
-    chest pain, elevated blood pressure,
-    cardiac workup
-    """
-    assert await has_facts(summary, required)
-```
-
-#### matches_facts
-
-Checks bidirectional factual equivalence - both texts convey the same information.
-
-```python
-from rue.predicates import matches_facts
-
-async def test_translation_preserves_meaning(translator):
-    original = """
-    The quarterly report shows 23% growth in
-    European markets.
-    """
-
-    translated = translator.translate(
-        original,
-        target="spanish"
-    )
-    back_translated = translator.translate(
-        translated,
-        target="english"
-    )
-    # Example:
-    # "The quarterly report indicates 23% growth
-    # in European markets."
-
-    # Facts should match despite rewording
-    assert await matches_facts(back_translated, original)
-```
-
-### Topic Coverage
-
-#### has_topics
-
-Verifies output covers required subjects. Useful for content generation where specific themes must be addressed.
-
-```python
-from rue.predicates import has_topics
-
-async def test_onboarding_covers_topics(onboarding_bot):
-    # New employee asks about benefits
-    response = onboarding_bot.chat(
-        "What benefits do I get?"
-    )
-    # Example:
-    # "Welcome! Your benefits include comprehensive
-    # health insurance with dental and vision,
-    # a 401k with 4% company match, and 20 days PTO.
-    # You're also eligible for our annual bonus
-    # program."
-
-    # Response must cover these key topics
-    topics = """
-    health insurance, retirement plan,
-    paid time off
-    """
-    assert await has_topics(response, topics)
-```
-
-### Policy Compliance
-
-#### follows_policy
-
-Ensures LLM outputs adhere to business rules, safety guidelines, or content policies.
-
-```python
-from rue.predicates import follows_policy
-
-async def test_support_follows_guidelines(support_bot):
-    # Customer asking about competitor
-    question = "Is your product better than CompetitorX?"
-    response = support_bot.chat(question)
-    # Example:
-    # "I'd be happy to tell you about our product's
-    # strengths! We offer 24/7 support, 99.9% uptime,
-    # and flexible pricing. I can't compare directly
-    # to other products, but I can answer any
-    # questions about what we offer."
-
-    policy = """
-    - Never disparage competitors by name
-    - Focus on our product's strengths, not competitor weaknesses
-    - Don't make claims about competitor products
-    - Redirect to our features when asked for comparisons
-    """
-
-    assert await follows_policy(response, policy)
-```
-
-### Style and Structure
-
-#### matches_writing_style
-
-Validates tone, formality, and voice match a reference example.
-
-```python
-from rue.predicates import matches_writing_style
-
-async def test_maintains_brand_voice(marketing_bot):
-    # Generate product description
-    description = marketing_bot.generate(
-        "Describe our new running shoes"
-    )
-    # Example:
-    # "Meet the CloudRunner Pro. Engineered for
-    # the long haul. 47% lighter than last gen.
-    # Zero compromises."
-
-    # Brand voice reference: punchy, confident, minimal
-    brand_voice = """
-    Built different. The UltraFrame bike handles
-    like nothing else. Carbon fiber.
-    Precision engineering. Pure speed.
-    """
-
-    assert await matches_writing_style(
-        description,
-        brand_voice
-    )
-
-    # Would fail with:
-    # "Our new running shoes are very comfortable
-    # and lightweight, offering great support for
-    # runners of all levels..."
-    # (too generic and wordy for this brand voice)
-```
-
-#### matches_writing_layout
-
-Checks document structure and formatting patterns match a template.
-
-```python
-from rue.predicates import matches_writing_layout
-
-async def test_follows_report_structure(report_generator):
-    report = report_generator.create_weekly_report(
-        data=metrics
-    )
-    # Example output:
-    # "## Weekly Summary
-    #
-    # Key metrics improved across the board.
-    #
-    # ## Highlights
-    # - Revenue up 12%
-    # - Churn down 3%
-    #
-    # ## Action Items
-    # 1. Review pricing
-    # 2. Update dashboard"
-
-    # Template showing expected structure
-    template = """
-    ## Weekly Summary
-    [Overview paragraph]
-
-    ## Highlights
-    - [Bullet points]
-
-    ## Action Items
-    1. [Numbered list]
-    """
-
-    assert await matches_writing_layout(report, template)
-```
-
-## Saving Results for Investigation
-
-When you run tests with database persistence enabled (default behavior), all AI predicate evaluations used inside `assert` statements are automatically saved to the Rue database. This enables post-run analysis, debugging, and quality monitoring.
-
-Every `PredicateResult` evaluated in an assertion is stored with full context. After the run completes, you can investigate these evaluations even if all tests passed.
-
-### Available Data for Analysis
-
-The database stores comprehensive information for each predicate evaluation:
-
-**Per-predicate data:**
-- `predicate_name`: Which predicate function was used (e.g., "has_conflicting_facts")
-- `actual`: The full text that was evaluated
-- `reference`: The reference text used for comparison
-- `strict`: Whether strict mode was enabled
-- `confidence`: The AI judge's confidence score (0.0 to 1.0)
-- `value`: Boolean result (True/False)
-- `message`: The AI's reasoning and explanation
-
-**Linkage to test context:**
-- Which test execution it came from
-- Which assertion it was part of
-- Associated run ID for filtering by test session
-
-<Note>Database persistence is controlled by the `--save-to-db` flag (enabled by default). Database location defaults to `.rue/rue.db` in your project root.</Note>
-
-## Building Custom Predicates
-
-While Rue provides 8 built-in AI predicates, you can create custom predicates for domain-specific comparisons or integrate third-party LLM evaluation tools. Use the `@predicate` decorator to ensure your custom predicates integrate seamlessly with Rue's assertion tracking and database persistence.
-
-### Protocol Conformance Requirements
-
-The `@predicate` decorator transforms ordinary comparison functions into protocol-conforming predicates. To be eligible for decoration, your function must satisfy the `Predicate` protocol's signature constraints:
-
-**Signature Requirements:**
-
-1. **Return type**: Must return `bool` representing the evaluation outcome
-2. **Required parameters**: Must accept `actual` and `reference` as either:
-   - The first two positional parameters, or
-   - Named keyword parameters (`actual=`, `reference=`)
-3. **Execution model**: Can be synchronous or asynchronous—the decorator adapts to both `def` and `async def` functions
-4. **Additional parameters**: May accept optional keyword arguments (e.g., `strict`, `tolerance`, domain-specific flags)
-
-### Custom Predicate Examples
-
-**Example: Integrating third-party LLM judge**
+Use `@predicate` when you need a custom comparison that Rue does not ship out of the box.
 
 ```python
 from rue import predicate
-from openai import AsyncOpenAI
 
-client = AsyncOpenAI()
 
 @predicate
-async def matches_tone_with_gpt4(
-    actual: str,
-    reference: str,
-    *,
-    strict: bool = False
-) -> bool:
-    """Check if actual text matches the tone of reference using GPT-4.
-
-    Args:
-        actual: The text to evaluate
-        reference: Example text with desired tone
-        strict: Whether to require exact tone match or allow similar tones
-    """
-    prompt = f"""Compare the tone of these two texts.
-
-    Reference tone: {reference}
-
-    Text to evaluate: {actual}
-
-    Does the text to evaluate match the reference tone?
-    {"Require exact match." if strict else "Allow similar tones."}
-
-    Answer only 'yes' or 'no'."""
-
-    response = await client.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0
-    )
-
-    answer = response.choices[0].message.content.strip().lower()
-    return answer == "yes"
-
-async def test_brand_consistency(marketing_bot):
-    brand_example = "Hey there! 👋 Let's make this happen together."
-    generated = marketing_bot.create_post("Announce new feature")
-
-    assert await matches_tone_with_gpt4(
-        generated,
-        brand_example,
-        strict=False
-    )
+def contains_ticket_id(actual: str, reference: str) -> bool:
+    return reference in actual
 ```
 
-<Tip>When building custom predicates, follow the naming convention of starting with action verbs like `has_`, `matches_`, `follows_`, or `contains_` to make assertions read naturally.</Tip>
-
-## Recommendations
-
-### 1. Use AI predicates for natural language assertions
-
-AI predicates shine when evaluating LLM outputs where exact string matching is too brittle.
-
-**Don't do this:**
-```python
-# Using AI predicates for exact matching
-from rue.predicates import has_facts
-
-async def test_json_output(api):
-    result = api.get_user(id=123)
-
-    # Semantic predicate overkill for structured data
-    assert await has_facts(
-        str(result),
-        '{"name": "Alice"}'
-    )
-```
-
-**Do this:**
-```python
-# Use standard assertions for structured data
-def test_json_output(api):
-    result = api.get_user(id=123)
-    assert result["name"] == "Alice"
-    assert result["id"] == 123
-
-# Use semantic predicates for natural language
-from rue.predicates import (
-    has_facts,
-    has_unsupported_facts
-)
-
-async def test_text_generation(llm):
-    context = "The company was founded in 2020."
-    summary = llm.summarize(context)
-
-    # Semantic checks for flexible language matching
-    assert await has_facts(summary, "founded in 2020")
-    assert not await has_unsupported_facts(
-        summary,
-        context
-    )
-```
-
-### 2. Combine multiple predicates for comprehensive validation
-
-Layer semantic checks to validate different aspects of LLM outputs. This provides stronger guarantees than single assertions.
+The decorator makes your function participate in Rue's predicate recording and tracing machinery while keeping the call site simple:
 
 ```python
-from rue.predicates import (
-    has_unsupported_facts,
-    has_conflicting_facts,
-    has_topics,
-    follows_policy
-)
-
-async def test_product_description(product_copilot):
-    # Source: product database entry
-    product_data = """
-    Name: ThermoPro X500
-    Price: $299
-    Features: Temperature sensing, WiFi connectivity,
-              Mobile app
-    Warranty: 2 years
-    """
-
-    description = product_copilot.generate_description(
-        product_data
-    )
-    # Example output:
-    # "The ThermoPro X500 ($299) brings smart
-    # temperature monitoring to your home.
-    # Connect via WiFi, control from our mobile app,
-    # and enjoy peace of mind with a 2-year warranty."
-
-    # Layer 1: No hallucinated features or specs
-    assert not await has_unsupported_facts(
-        description,
-        product_data
-    )
-
-    # Layer 2: Price and warranty not misstated
-    assert not await has_conflicting_facts(
-        description,
-        product_data
-    )
-
-    # Layer 3: Must mention key selling points
-    assert await has_topics(
-        description,
-        "WiFi, mobile app, warranty"
-    )
-
-    # Layer 4: Follow marketing guidelines
-    marketing_policy = """
-    No superlatives like 'best' or 'revolutionary'.
-    No competitor mentions.
-    """
-    assert await follows_policy(
-        description,
-        marketing_policy
-    )
+def test_ticket_response():
+    response = "Ticket INC-1042 is now closed."
+    assert contains_ticket_id(response, "INC-1042")
 ```
 
-### 3. Use strict mode appropriately
+## What Rue records
 
-The `strict` parameter controls comparison sensitivity. Use `strict=False` (default) for semantic flexibility, and `strict=True` when precision matters.
+When a predicate runs inside a Rue-transformed `assert`, Rue records a `PredicateResult` for reporting, storage, and tracing.
 
-```python
-from rue.predicates import has_facts
+- Built-in predicates still return `bool` to your test.
+- Decorated predicates still return `bool` to your test.
+- Trace spans are named `predicate.<predicate_name>`.
+- Recorded metadata includes the predicate name, `actual`, `reference`, `strict`, `confidence`, the boolean value, and an optional message.
 
-async def test_financial_report(report_bot):
-    # Financial data requires precision
-    quarterly_data = """
-    Q3 revenue: $4.2M. Operating margin: 23.5%.
-    Headcount: 142.
-    """
+This is why predicate docs need both an API view and a semantic view: the Python call returns a simple boolean, but the evaluation still produces structured metadata behind the scenes.
 
-    report = report_bot.summarize(quarterly_data)
-    # Example:
-    # "Third quarter brought in $4.2M revenue
-    # with healthy 23.5% margins. Team size stable
-    # at 142 employees."
+## Where to go next
 
-    # Lenient: "brought in $4.2M" semantically
-    # matches "$4.2M revenue"
-    assert await has_facts(
-        report,
-        "revenue was $4.2M",
-        strict=False
-    )
-
-    # Strict: exact figures must appear -
-    # "around 24%" would fail
-    assert await has_facts(report, "23.5%", strict=True)
-    assert await has_facts(report, "142", strict=True)
-```
+<CardGroup cols={2}>
+  <Card
+    title="Built-In Predicate Logic"
+    icon="brain"
+    href="/concepts/built-in-predicate-logic"
+  >
+    Spec-driven meaning, invariants, and family boundaries
+  </Card>
+  <Card
+    title="Using Built-In Predicates"
+    icon="sparkles"
+    href="/usage/built-in-predicates"
+  >
+    Practical examples, `strict`, and `with_explanation`
+  </Card>
+  <Card
+    title="Using Decorated Predicates"
+    icon="code"
+    href="/usage/decorated-predicates"
+  >
+    Write custom predicates with `@predicate`
+  </Card>
+  <Card
+    title="Predicate API Reference"
+    icon="book"
+    href="/apis/predicates"
+  >
+    Signatures, parameters, and reference behavior
+  </Card>
+</CardGroup>

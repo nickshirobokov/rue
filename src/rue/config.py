@@ -2,170 +2,163 @@
 
 from __future__ import annotations
 
-import os
-import tomllib
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from functools import lru_cache
+from typing import Annotated, Any, Self
 
-
-@dataclass
-class Config:
-    """Resolved configuration values for running tests."""
-
-    test_paths: list[str]
-    include_tags: list[str]
-    exclude_tags: list[str]
-    keyword: str | None
-    maxfail: int | None
-    verbosity: int
-    addopts: list[str]
-    concurrency: int  # 1=sequential, 0=unlimited, max default=10
-    timeout: float | None
-    db_path: str | None
-    save_to_db: bool
-    reporters: list[str]
-    reporter_options: dict[str, dict[str, Any]]
-
-
-DEFAULT_CONFIG = Config(
-    test_paths=["."],
-    include_tags=[],
-    exclude_tags=[],
-    keyword=None,
-    maxfail=None,
-    verbosity=0,
-    addopts=[],
-    concurrency=1,
-    timeout=None,
-    db_path=None,
-    save_to_db=True,
-    reporters=[],
-    reporter_options={},
+from pydantic import (
+    AliasChoices,
+    AliasGenerator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    model_validator,
+)
+from pydantic_ai.models import KnownModelName
+from pydantic_ai.settings import ModelSettings
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    PyprojectTomlConfigSettingsSource,
+    SettingsConfigDict,
+    TomlConfigSettingsSource,
 )
 
 
-def load_config(start_path: str | Path | None = None) -> Config:
-    """Load configuration from pyproject.toml or rue.toml."""
-    base = Path(start_path or Path.cwd()).resolve()
-    config = Config(
-        test_paths=list(DEFAULT_CONFIG.test_paths),
-        include_tags=list(DEFAULT_CONFIG.include_tags),
-        exclude_tags=list(DEFAULT_CONFIG.exclude_tags),
-        keyword=DEFAULT_CONFIG.keyword,
-        maxfail=DEFAULT_CONFIG.maxfail,
-        verbosity=DEFAULT_CONFIG.verbosity,
-        addopts=list(DEFAULT_CONFIG.addopts),
-        concurrency=DEFAULT_CONFIG.concurrency,
-        timeout=DEFAULT_CONFIG.timeout,
-        db_path=DEFAULT_CONFIG.db_path,
-        save_to_db=DEFAULT_CONFIG.save_to_db,
-        reporters=list(DEFAULT_CONFIG.reporters),
-        reporter_options=dict(DEFAULT_CONFIG.reporter_options),
+class PredicateConfig(BaseModel):
+    """Config for a single predicate — model name plus optional ModelSettings fields."""
+
+    model_config = ConfigDict(protected_namespaces=(), arbitrary_types_allowed=True)
+
+    model: KnownModelName
+    temperature: float | None = None
+    max_tokens: int | None = None
+    top_p: float | None = None
+    timeout: float | None = None
+    seed: int | None = None
+    presence_penalty: float | None = None
+    frequency_penalty: float | None = None
+    stop_sequences: list[str] | None = None
+    parallel_tool_calls: bool | None = None
+
+    @computed_field
+    @property
+    def model_settings(self) -> ModelSettings:
+        """OpenAI-style model kwargs derived from optional predicate fields."""
+        return self.model_dump(
+            exclude={"model"},
+            exclude_none=True,
+            exclude_computed_fields=True,
+        )  # type: ignore[return-value]
+
+
+class PredicateSettings(BaseSettings):
+    """Built-in predicate config from `[tool.rue.predicates]` (also merged under `[tool.rue]`)."""
+
+    model_config = SettingsConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+        alias_generator=AliasGenerator(validation_alias=lambda name: name.replace("_", "-")),
+        pyproject_toml_table_header=("tool", "rue", "predicates"),
     )
 
-    pyproject = _find_file(base, "pyproject.toml")
-    if pyproject:
-        data = _load_toml(pyproject)
-        section = data.get("tool", {}).get("rue")
-        if isinstance(section, dict):
-            _apply_section(config, section)
+    all_predicates: PredicateConfig | None = None
+    follows_policy: PredicateConfig | None = None
+    has_conflicting_facts: PredicateConfig | None = None
+    has_facts: PredicateConfig | None = None
+    has_topic: PredicateConfig | None = Field(
+        default=None,
+        validation_alias=AliasChoices("has_topic", "has-topic", "has_topics", "has-topics"),
+    )
+    has_unsupported_facts: PredicateConfig | None = None
+    matches_facts: PredicateConfig | None = None
+    matches_writing_layout: PredicateConfig | None = None
+    matches_writing_style: PredicateConfig | None = None
 
-    rue_toml = _find_file(base, "rue.toml")
-    if rue_toml:
-        data = _load_toml(rue_toml)
-        _apply_section(config, data)
-
-    env_db_path = os.getenv("RUE_DB_PATH")
-    if env_db_path:
-        config.db_path = env_db_path
-
-    env_db_enabled = os.getenv("RUE_DB_ENABLED")
-    if env_db_enabled is not None:
-        config.save_to_db = env_db_enabled.strip().lower() not in {"0", "false", "no", "off"}
-
-    if not config.test_paths:
-        config.test_paths = list(DEFAULT_CONFIG.test_paths)
-
-    return config
-
-
-def _find_file(start: Path, filename: str) -> Path | None:
-    """Search upwards from start for filename."""
-    current = start
-    while True:
-        candidate = current / filename
-        if candidate.exists():
-            return candidate
-        if current.parent == current:
-            return None
-        current = current.parent
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Load order: init, env, dotenv, secrets, then ``[tool.rue.predicates]``."""
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+            PyprojectTomlConfigSettingsSource(settings_cls),
+        )
 
 
-def _load_toml(path: Path) -> dict[str, Any]:
-    with path.open("rb") as fp:
-        return tomllib.load(fp)
+class Config(BaseSettings):
+    """Resolved configuration values for running tests."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="RUE_",
+        populate_by_name=True,
+        alias_generator=AliasGenerator(validation_alias=lambda name: name.replace("_", "-")),
+        pyproject_toml_table_header=("tool", "rue"),
+        toml_file="rue.toml",
+    )
+
+    test_paths: list[str] = Field(default_factory=lambda: ["."])
+    include_tags: list[str] = Field(default_factory=list)
+    exclude_tags: list[str] = Field(default_factory=list)
+    keyword: str | None = None
+    maxfail: Annotated[int, Field(gt=0)] | None = None
+    verbosity: int = 0
+    addopts: list[str] = Field(default_factory=list)
+    concurrency: Annotated[int, Field(ge=0)] = 1
+    timeout: Annotated[float, Field(gt=0)] | None = None
+    db_path: str | None = None
+    db_enabled: bool = True
+    reporters: list[str] = Field(default_factory=list)
+    reporter_options: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    predicates: PredicateSettings = Field(default_factory=PredicateSettings)
+
+    @model_validator(mode="after")
+    def empty_test_paths_use_default(self) -> Self:
+        r"""Match prior behavior: empty ``test-paths`` resets to ``["."]``."""
+        if not self.test_paths:
+            return self.model_copy(update={"test_paths": ["."]})
+        return self
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
+        file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Load order: init, env, ``rue.toml``, ``[tool.rue]``, then field defaults."""
+        return (
+            init_settings,
+            env_settings,
+            TomlConfigSettingsSource(settings_cls),
+            PyprojectTomlConfigSettingsSource(settings_cls),
+        )
 
 
-def _apply_section(config: Config, section: dict[str, Any]) -> None:
-    """Apply a single config section to the resolved config."""
-    mapping = {
-        "test-paths": "test_paths",
-        "test_paths": "test_paths",
-        "include-tags": "include_tags",
-        "include_tags": "include_tags",
-        "exclude-tags": "exclude_tags",
-        "exclude_tags": "exclude_tags",
-        "keyword": "keyword",
-        "maxfail": "maxfail",
-        "verbosity": "verbosity",
-        "addopts": "addopts",
-        "concurrency": "concurrency",
-        "timeout": "timeout",
-        "db-path": "db_path",
-        "db_path": "db_path",
-        "save-to-db": "save_to_db",
-        "save_to_db": "save_to_db",
-        "reporters": "reporters",
-    }
+@lru_cache(maxsize=1)
+def load_config() -> Config:
+    """Load configuration from pyproject.toml, rue.toml, and environment.
 
-    for key, value in section.items():
-        attr = mapping.get(key)
-        if attr is None:
-            # Handle reporter_options as a nested dict
-            if key in {"reporter-options", "reporter_options"}:
-                if isinstance(value, dict):
-                    config.reporter_options = {
-                        k: dict(v) for k, v in value.items() if isinstance(v, dict)
-                    }
-            continue
-        if attr in {"test_paths", "include_tags", "exclude_tags", "addopts", "reporters"}:
-            if isinstance(value, list):
-                setattr(config, attr, [str(v) for v in value])
-        elif attr == "verbosity":
-            if isinstance(value, int):
-                config.verbosity = value
-        elif attr == "maxfail":
-            if isinstance(value, int) and value > 0:
-                config.maxfail = value
-        elif attr == "keyword":
-            if isinstance(value, str):
-                config.keyword = value
-        elif attr == "concurrency":
-            if isinstance(value, int) and value >= 0:
-                config.concurrency = value
-        elif attr == "timeout":
-            if isinstance(value, (int, float)) and value > 0:
-                config.timeout = float(value)
-        elif attr == "db_path":
-            if isinstance(value, str):
-                config.db_path = value
-        elif attr == "save_to_db":
-            if isinstance(value, bool):
-                config.save_to_db = value
+    Cached for the process. Call ``reset_load_config_cache()`` after cwd/env changes.
+    """
+    return Config()
+
+
+def reset_load_config_cache() -> None:
+    """Drop the cached config so the next ``load_config()`` rebuilds."""
+    load_config.cache_clear()
 
 
 RueConfig = Config
 
-
-__all__ = ["Config", "DEFAULT_CONFIG", "RueConfig", "load_config"]
+__all__ = ["Config", "PredicateConfig", "RueConfig", "load_config", "reset_load_config_cache"]

@@ -1,0 +1,177 @@
+---
+title: "Using Built-In Predicates"
+description: "How to configure and use Rue's built-in predicates in real tests."
+---
+
+Rue's built-in predicates live in `rue.predicates`. They are async, LLM-backed, and designed for narrow semantic checks instead of broad scoring.
+
+## Configure predicate models
+
+Built-in predicates use the configured predicate model from `[tool.rue.predicates]`.
+
+```toml
+[tool.rue.predicates.all_predicates]
+model = "openai:gpt-5.4"
+```
+
+You can also override individual predicates:
+
+```toml
+[tool.rue.predicates.has_facts]
+model = "openai:gpt-5.4-mini"
+
+[tool.rue.predicates.follows_policy]
+model = "openai:gpt-5.4"
+```
+
+Use provider credentials that match the model you configure.
+
+## Basic pattern
+
+Built-in predicates are awaited inside tests:
+
+```python
+from rue.predicates import has_unsupported_facts, follows_policy
+
+
+async def test_store_answer(store_chatbot):
+    context = "Store hours: 9 AM to 6 PM, Monday-Saturday. Closed Sundays."
+    response = store_chatbot("When are you open?")
+
+    assert not await has_unsupported_facts(response, context)
+    assert await follows_policy(response, "must answer in English")
+```
+
+## Choose the factual predicate that matches the question
+
+Use the factual family when `reference` is another document whose facts matter.
+
+| Use | When you want to know |
+| --- | --- |
+| `has_facts` | whether `actual` covers everything required by `reference` |
+| `has_unsupported_facts` | whether `actual` adds unbacked content |
+| `has_conflicting_facts` | whether `actual` contradicts `reference` |
+| `matches_facts` | whether the two documents are factually equivalent |
+
+```python
+from rue.predicates import (
+    has_conflicting_facts,
+    has_facts,
+    has_unsupported_facts,
+    matches_facts,
+)
+
+
+async def test_release_summary():
+    source = """
+    Product: CloudRunner Pro
+    Release date: 2026-03-10
+    Battery life: 12 hours
+    Warranty: 2 years
+    """
+    summary = """
+    CloudRunner Pro ships on 2026-03-10 with 12 hours of battery life
+    and a 2-year warranty.
+    """
+
+    assert await has_facts(summary, "Battery life: 12 hours")
+    assert not await has_unsupported_facts(summary, source)
+    assert not await has_conflicting_facts(summary, source)
+    assert await matches_facts(summary, source)
+```
+
+## Use `strict` only for factual semantics
+
+`strict` changes the world assumption for the factual family:
+
+- `strict=False`: open-world, more permissive grounded support
+- `strict=True`: closed-world, more conservative support
+
+```python
+from rue.predicates import has_facts
+
+
+async def test_grounded_support():
+    actual = "We had so much fun yesterday."
+    reference = "Thanks for the dinner yesterday."
+
+    assert await has_facts(actual, reference, strict=False)
+    assert not await has_facts(actual, reference, strict=True)
+```
+
+For `matches_writing_style`, `matches_writing_layout`, `has_topic`, and `follows_policy`, the callable still accepts `strict`, but it does not change the predicate's meaning.
+
+## Non-factual built-ins
+
+Use the non-factual family when `reference` is not another fact document.
+
+```python
+from rue.predicates import (
+    follows_policy,
+    has_topic,
+    matches_writing_layout,
+    matches_writing_style,
+)
+
+
+async def test_support_reply():
+    reply = """
+    Hi Sam,
+
+    Your refund request is being reviewed.
+
+    Best,
+    Support Team
+    """
+
+    assert await has_topic(reply, "refund policy")
+    assert await follows_policy(reply, "must include a greeting and signoff")
+    assert await matches_writing_style(
+        reply,
+        "Hello there. Thanks for reaching out. Happy to help.",
+    )
+    assert await matches_writing_layout(
+        reply,
+        "Hi,\n\nBody paragraph.\n\nBest,\nSupport Team",
+    )
+```
+
+## Ask the built-in to record an explanation
+
+All built-ins accept `with_explanation=True`.
+
+```python
+from rue.predicates import has_unsupported_facts
+
+
+async def test_grounding():
+    source = "Store hours: 9 AM to 6 PM, Monday-Saturday. Closed Sundays."
+    answer = "We are open from 9 AM to 6 PM Monday through Saturday."
+
+    assert not await has_unsupported_facts(
+        answer,
+        source,
+        with_explanation=True,
+    )
+```
+
+`with_explanation=True` does **not** change the return type. The predicate still returns `bool`.
+
+What it changes is the recorded metadata:
+
+- `PredicateResult.message` stores the explanation
+- predicate traces can include `predicate.message`
+- database-backed runs can persist the message with the predicate result
+
+This is most useful when the predicate runs inside a normal Rue `assert`, because Rue is already collecting predicate metadata for that assertion.
+
+## Recommended usage patterns
+
+- Use `has_facts` for required coverage checks.
+- Use `has_unsupported_facts` to catch hallucinations.
+- Use `has_conflicting_facts` for contradiction checks.
+- Use `matches_facts` only when you really want equivalence, not just overlap.
+- Use `follows_policy` when `reference` is a rule, not a sample.
+- Use `matches_writing_layout` when you care about template shape, not wording.
+- Use `matches_writing_style` when you care about voice and register, not topic.
+- Use `has_topic` when the question is “is this actually about X?” rather than “does it mention X once?”

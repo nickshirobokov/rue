@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from rue.testing.models.modifiers import Modifier
 
@@ -30,7 +31,8 @@ class TestDefinition:
     definition_error: str | None = None
     run_inline: bool = False
     fail_fast: bool = False
-    id_suffix: str | None = None
+    suffix: str | None = None
+    case_id: UUID | None = None
 
     @property
     def full_name(self) -> str:

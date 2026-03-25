@@ -2,6 +2,7 @@ import math
 import statistics
 import warnings
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -19,14 +20,19 @@ from rue.resources import ResourceResolver, Scope, clear_registry
 from rue.testing.discovery import TestItem
 
 
-def _make_item(name: str = "test_fn", id_suffix: str | None = None) -> TestItem:
+def _make_item(
+    name: str = "test_fn",
+    suffix: str | None = None,
+    case_id: UUID | None = None,
+) -> TestItem:
     """Create a minimal TestItem for testing."""
     return TestItem(
         name=name,
         fn=lambda: None,
         module_path=Path("test.py"),
         is_async=False,
-        id_suffix=id_suffix,
+        suffix=suffix,
+        case_id=case_id,
     )
 
 
@@ -122,6 +128,32 @@ def test_metric_timestamps():
     assert m.metadata.last_item_recorded_at is not None
     assert t2 is not None
     assert m.metadata.last_item_recorded_at > t2
+
+
+def test_metric_records_case_id_before_suffix():
+    m = Metric("test_case_id")
+    test_ctx = Ctx(
+        item=_make_item(
+            "test_case",
+            suffix="{'slug': 'example'}",
+            case_id=UUID("00000000-0000-0000-0000-000000000001"),
+        )
+    )
+
+    with context_scope(test_ctx):
+        m.add_record(1)
+
+    assert m.metadata.collected_from_cases == {"00000000-0000-0000-0000-000000000001"}
+
+
+def test_metric_records_suffix_when_case_id_missing():
+    m = Metric("test_case_suffix")
+    test_ctx = Ctx(item=_make_item("test_case", suffix="{'slug': 'example'}"))
+
+    with context_scope(test_ctx):
+        m.add_record(1)
+
+    assert m.metadata.collected_from_cases == {"{'slug': 'example'}"}
 
 
 def test_metric_empty_edge_cases_do_not_crash():

@@ -48,7 +48,7 @@ def store_chatbot(prompt: str) -> str:
 
 cases = [
     Case(
-        sut_input_values={"prompt": "When are you open?"},
+        inputs={"prompt": "When are you open?"},
         references={
             "context": """Store hours:
             9 AM - 6 PM, Monday-Saturday.
@@ -56,18 +56,18 @@ cases = [
         },
     ),
     Case(
-        sut_input_values={"prompt": "Return policy?"},
+        inputs={"prompt": "Return policy?"},
         references={"context": "30-day returns with receipt."},
     ),
     Case(
-        sut_input_values={"prompt": "Shipping cost?"},
+        inputs={"prompt": "Shipping cost?"},
         references={"context": "Free shipping over $50."},
     ),
 ]
 
 @rue.iter_cases(*cases)
 async def test_chatbot_no_hallucinations(case: Case, store_chatbot):
-    response = store_chatbot(**case.sut_input_values)
+    response = store_chatbot(**case.inputs)
 
     assert not await has_unsupported_facts(response, case.references["context"])
 
@@ -97,7 +97,7 @@ def accuracy():
 
 cases = [
     Case(
-        sut_input_values={"prompt": "When are you open?"},
+        inputs={"prompt": "When are you open?"},
         references={
             "context": """Store hours:
             9 AM - 6 PM, Monday-Saturday.
@@ -105,11 +105,11 @@ cases = [
         },
     ),
     Case(
-        sut_input_values={"prompt": "Return policy?"},
+        inputs={"prompt": "Return policy?"},
         references={"context": "30-day returns with receipt."},
     ),
     Case(
-        sut_input_values={"prompt": "Shipping cost?"},
+        inputs={"prompt": "Shipping cost?"},
         references={"context": "Free shipping over $50."},
     ),
 ]
@@ -120,7 +120,7 @@ async def test_chatbot_no_hallucinations(
     store_chatbot,
     accuracy: Metric,
 ):
-    response = store_chatbot(**case.sut_input_values)
+    response = store_chatbot(**case.inputs)
 
     with metrics(accuracy):
         assert not await has_unsupported_facts(
@@ -154,7 +154,7 @@ def accuracy():
 
 cases = [
     Case(
-        sut_input_values={"prompt": "When are you open?"},
+        inputs={"prompt": "When are you open?"},
         references={
             "context": """Store hours:
             9 AM - 6 PM, Monday-Saturday.
@@ -162,11 +162,11 @@ cases = [
         },
     ),
     Case(
-        sut_input_values={"prompt": "Return policy?"},
+        inputs={"prompt": "Return policy?"},
         references={"context": "30-day returns with receipt."},
     ),
     Case(
-        sut_input_values={"prompt": "How much for the Nike Air Max?"},
+        inputs={"prompt": "How much for the Nike Air Max?"},
         references={
             "context": "Nike Air Max: $129.99",
             "expected_tool": "offer_product",
@@ -181,7 +181,7 @@ async def test_chatbot_no_hallucinations(
     accuracy: Metric,
     trace_context,
 ):
-    response = store_chatbot(**case.sut_input_values)
+    response = store_chatbot(**case.inputs)
 
     with metrics(accuracy):
         assert not await has_unsupported_facts(
@@ -215,10 +215,10 @@ uv run rue test --trace
     Deep dive into test patterns
   </Card>
   <Card
-    title="AI Predicates"
+    title="Predicates"
     icon="brain"
     href="/concepts/semantic-predicates"
   >
-    LLM-powered assertions
+    Built-in predicates and custom decorators
   </Card>
 </CardGroup>
