@@ -1,7 +1,10 @@
+---
 title: "OpenTelemetry Traces"
 ---
 
-An OpenTelemetry trace is the structured execution record of a single test case. In Rue, **each test run gets its own OpenTelemetry trace**: a tree of spans showing what happened (tools, retrieval steps, LLM calls), when it happened, and how long it took.
+An OpenTelemetry trace is the structured execution record of a single test execution. In Rue, **each concrete test execution gets its own OpenTelemetry trace**: a tree of spans showing what happened (tools, retrieval steps, LLM calls), when it happened, and how long it took.
+
+For `repeat`, `parametrize`, `iter_cases`, and `iter_case_groups`, each child execution gets its own trace.
 
 <Warning>
 This page uses “trace” in the OpenTelemetry sense (spans you can query and assert on), not a Python exception traceback/stacktrace.
@@ -14,7 +17,7 @@ Using traces enables:
 
 ## How Rue OpenTelemetry traces are structured
 
-When OpenTelemetry is enabled, Rue wraps each test case in a root span:
+When OpenTelemetry is enabled, Rue wraps each concrete test execution in a root span:
 - `test.<full_name>`
 
 Inside that test span, you’ll typically see:
@@ -28,13 +31,15 @@ Inside that test span, you’ll typically see:
 OpenTelemetry capture is disabled by default. Enable it from the CLI:
 
 ```bash
-rue test --otel
+uv run rue test --otel
 ```
 
-OpenTelemetry capture does not persist traces by itself. Add the built-in reporter when you want local files:
+With Rue's default reporters, `uv run rue test --otel` also writes local JSON traces under `.rue/traces/<run_id>/<execution_id>.json`. Those files are separate from SQLite storage.
+
+If you override the reporter list, keep `OtelReporter` attached when you still want local trace files:
 
 ```bash
-rue test --otel --reporter ConsoleReporter --reporter OtelReporter
+uv run rue test --otel --reporter ConsoleReporter --reporter OtelReporter
 ```
 
 <Note>
@@ -43,7 +48,7 @@ The injected `otel_trace` parameter is only available when OpenTelemetry is enab
 
 ## Basic Usage
 
-Use `otel_trace` to query spans created during the current test case execution:
+Use `otel_trace` to query spans created during the current test execution:
 
 ```python
 import rue
@@ -152,4 +157,4 @@ Create a small number of meaningful steps (`retrieve`, `rerank`, `generate`) rat
 
 ### 3. Be deliberate about content capture
 
-OpenTelemetry spans may include request/response content depending on configuration. See the OpenTelemetry API docs (especially `RUE_OTEL_CONTENT`) in [`docs/apis/open-telemetry-traces.mdx`](/apis/open-telemetry-traces).
+OpenTelemetry spans may include request/response content depending on configuration. See the [OpenTelemetry API docs](/apis/open-telemetry-traces) for `RUE_OTEL_CONTENT` and storage details.

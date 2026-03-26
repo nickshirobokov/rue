@@ -12,15 +12,15 @@ uv add rue
 </Step>
 <Step title="Create your first test">
 
-Create `rue_store_chatbot.py`:
+Create `rue_store_chatbot.py` and register the chatbot as a SUT factory:
 
 ```python
 import rue
 from rue.predicates import has_unsupported_facts, follows_policy
 
 @rue.sut
-def store_chatbot(prompt: str) -> str:
-    return call_llm(prompt)
+def store_chatbot():
+    return call_llm
 
 async def test_chatbot_no_hallucinations(store_chatbot):
     context = "Store hours: 9 AM - 6 PM, Monday-Saturday. Closed Sundays."
@@ -43,8 +43,8 @@ from rue import Case
 from rue.predicates import has_unsupported_facts, follows_policy
 
 @rue.sut
-def store_chatbot(prompt: str) -> str:
-    return call_llm(prompt)
+def store_chatbot():
+    return call_llm
 
 cases = [
     Case(
@@ -86,8 +86,8 @@ from rue import Case, Metric, metrics
 from rue.predicates import has_unsupported_facts, follows_policy
 
 @rue.sut
-def store_chatbot(prompt: str) -> str:
-    return call_llm(prompt)
+def store_chatbot():
+    return call_llm
 
 @rue.metric
 def accuracy():
@@ -143,8 +143,8 @@ from rue import Case, Metric, metrics
 from rue.predicates import has_unsupported_facts, follows_policy
 
 @rue.sut
-def store_chatbot(prompt: str) -> str:
-    return call_llm(prompt)
+def store_chatbot():
+    return call_llm
 
 @rue.metric
 def accuracy():

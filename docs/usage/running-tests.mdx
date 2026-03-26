@@ -171,9 +171,11 @@ Enable OpenTelemetry capture to record spans from your SUT and tests:
 # Enable OpenTelemetry capture
 uv run rue test --otel
 
-# Persist traces locally with the built-in reporter
+# If you override reporters, keep OtelReporter attached for local trace files
 uv run rue test --otel --reporter ConsoleReporter --reporter OtelReporter
 ```
+
+With Rue's default reporter set, `uv run rue test --otel` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json`.
 
 **Use OpenTelemetry spans for**:
 - Asserting tool calls in agent tests
@@ -349,7 +351,9 @@ class Reporter(ABC):
 
 ### Built-in Reporters
 
-**ConsoleReporter** (default): Outputs to terminal with Rich formatting.
+If you do not specify reporters, Rue attaches both `ConsoleReporter` and `OtelReporter` by default.
+
+**ConsoleReporter**: Outputs to terminal with Rich formatting.
 
 ```python
 from rue.reports import ConsoleReporter
@@ -502,7 +506,7 @@ The database location is determined by walking up from the current directory to 
 To disable database writes (e.g., for CI environments or quick local runs):
 
 ```bash
-rue test --no-db
+uv run rue test --no-db
 ```
 
 ### Custom Database Path
@@ -510,7 +514,7 @@ rue test --no-db
 Specify a custom database location:
 
 ```bash
-rue test --db-path /path/to/custom/rue.db
+uv run rue test --db-path /path/to/custom/rue.db
 ```
 
 Or configure in `pyproject.toml`:
@@ -535,8 +539,9 @@ uv run rue db status
 **Output:**
 ```
 Database: /Users/you/project/.rue/rue.db
-Current version: 1
-Target version: 1
+Current version: <current schema version>
+Target version: <target schema version>
+Max stored runs: 5
 Status: Up to date
 ```
 
@@ -581,8 +586,9 @@ The database stores:
 - Individual test executions and results
 - Assertion results and predicate outcomes
 - Metric results and statistical data
-- OpenTelemetry trace IDs on test executions (if enabled)
 - Error tracebacks for failed tests
+
+OpenTelemetry trace payloads and trace IDs are stored separately under `.rue/traces` when an `OtelReporter` is attached. SQLite does not persist them.
 
 ### Database Schema
 
@@ -599,7 +605,7 @@ Schema version is stored in SQLite `PRAGMA user_version` (shown by `uv run rue d
   <Card title="Writing Tests" icon="code" href="/usage/writing-tests">
     Learn how to write test functions and use decorators
   </Card>
-  <Card title="Rue Concept" icon="book" href="/concepts/rue-tests">
+  <Card title="Test Concept" icon="book" href="/concepts/test">
     Deep dive into discovery, parametrization, and execution
   </Card>
 </CardGroup>

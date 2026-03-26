@@ -548,7 +548,7 @@ class Runner:
     def __init__(
         self,
         *,
-        reporters: list[Reporter],
+        reporters: list[Reporter] | None = None,
         maxfail: int | None = None,
         fail_fast: bool = False,
         verbosity: int = 0,
@@ -611,7 +611,7 @@ result = await runner.run(
 )
 ```
 
-OpenTelemetry persistence is configured through reporters. Add `OtelReporter` for local `.rue/traces` storage or implement `Reporter.on_trace_collected()` in a custom reporter.
+OpenTelemetry persistence is configured through reporters. The default `Runner()` reporter set already includes `OtelReporter`; if you supply your own reporters, keep it attached for local `.rue/traces` storage or implement `Reporter.on_trace_collected()` in a custom reporter.
 
 ---
 

@@ -27,7 +27,7 @@ def test_chatbot_works(chatbot):
 The most common use case for `@rue.sut` is asserting on the SUT call span(s).
 
 <Note>
-`otel_trace` is only available when OpenTelemetry is enabled. From the CLI, run `rue test --otel`.
+`otel_trace` is only available when OpenTelemetry is enabled. From the CLI, run `uv run rue test --otel`.
 </Note>
 
 <Steps>
@@ -107,8 +107,8 @@ Each SUT call creates a span named `sut.<sut_name>` and sets:
 - `rue.sut.name=<sut_name>`
 
 If `RUE_OTEL_CONTENT=true` (default), Rue also records:
-- `sut.input.args` / `sut.input.kwargs` (truncated repr)
-- `sut.output` (truncated repr)
+- `sut.input.args` / `sut.input.kwargs` (`repr(...)`)
+- `sut.output` (`repr(...)`)
 
 If `RUE_OTEL_CONTENT=false`, Rue records only coarse metadata:
 - `sut.input.count`
