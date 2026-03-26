@@ -46,7 +46,9 @@ class MigrationRunner:
 
         return sorted(migrations, key=lambda m: m.version)
 
-    def _load_migration(self, module: ModuleType, name: str) -> Migration | None:
+    def _load_migration(
+        self, module: ModuleType, name: str
+    ) -> Migration | None:
         """Load a migration from a module."""
         version = getattr(module, "VERSION", None)
         up_fn = getattr(module, "up", None)

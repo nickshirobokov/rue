@@ -47,24 +47,34 @@ all_cases = [
         tags={"geography"},
         metadata={"verbose": False},
         references=ExampleReferences(expected="Paris", max_len=10, min_len=1),
-        inputs=ExampleInputs(prompt="What is the capital of France? Be concise."),
+        inputs=ExampleInputs(
+            prompt="What is the capital of France? Be concise."
+        ),
     ),
     Case[ExampleInputs, ExampleReferences](
         tags={"geography"},
         metadata={"verbose": True},
-        references=ExampleReferences(expected="Berlin", max_len=10000, min_len=20),
-        inputs=ExampleInputs(prompt="What is the capital of Germany? Be verbose."),
+        references=ExampleReferences(
+            expected="Berlin", max_len=10000, min_len=20
+        ),
+        inputs=ExampleInputs(
+            prompt="What is the capital of Germany? Be verbose."
+        ),
     ),
     Case[ExampleInputs, ExampleReferences](
         tags={"music"},
         metadata={"verbose": True},
-        references=ExampleReferences(expected="Metallica", max_len=10000, min_len=20),
+        references=ExampleReferences(
+            expected="Metallica", max_len=10000, min_len=20
+        ),
         inputs=ExampleInputs(prompt="What is the best rock band? Be verbose."),
     ),
     Case[ExampleInputs, ExampleReferences](
         tags={"music"},
         metadata={"verbose": False},
-        references=ExampleReferences(expected="Lady Gaga", max_len=10, min_len=1),
+        references=ExampleReferences(
+            expected="Lady Gaga", max_len=10, min_len=1
+        ),
         inputs=ExampleInputs(prompt="What is the best pop band? Be concise."),
     ),
 ]
@@ -85,7 +95,9 @@ def test_iter_cases_basic_usage(case: Case[ExampleInputs, ExampleReferences]):
 
 # Filter cases in code
 @rue.iter_cases(*[c for c in all_cases if "geography" in c.tags])
-def test_iter_cases_only_geography(case: Case[ExampleInputs, ExampleReferences]):
+def test_iter_cases_only_geography(
+    case: Case[ExampleInputs, ExampleReferences],
+):
     response = simple_chatbot(**case.inputs.model_dump())
 
     assert case.references.expected in response
@@ -100,7 +112,9 @@ def chatbot():
 
 
 @rue.iter_cases(*all_cases)
-def test_iter_cases_with_validation(case: Case[ExampleInputs, ExampleReferences], chatbot):
+def test_iter_cases_with_validation(
+    case: Case[ExampleInputs, ExampleReferences], chatbot
+):
     response = chatbot(**case.inputs.model_dump())
 
     assert case.references.expected in response

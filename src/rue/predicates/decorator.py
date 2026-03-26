@@ -6,10 +6,9 @@ from functools import wraps
 from inspect import BoundArguments, Parameter, signature
 from typing import Any, Protocol, TypeVar, overload, ParamSpec, Concatenate
 
-from rue.context import PREDICATE_RESULTS_COLLECTOR
+from rue.context import PREDICATE_RESULTS_COLLECTOR, get_test_tracer
 from rue.predicates.models import PredicateResult
-from rue.tracing import get_tracer
-from rue.tracing.attributes import is_trace_content_enabled, truncate_repr
+from rue.telemetry.otel.runtime import otel_runtime
 
 P = ParamSpec("P")
 ACTUAL = TypeVar("ACTUAL", contravariant=True)
@@ -75,8 +74,8 @@ def predicate(
     *,
     name: str | None = None,
 ) -> Any:
-    """Decorate a predicate function to record each outcome for test reports and 
-    for tracing. The wrapped function still returns a plain ``bool`` (or ``bool`` 
+    """Decorate a predicate function to record each outcome for test reports and
+    for tracing. The wrapped function still returns a plain ``bool`` (or ``bool``
     from an async function).
 
     The parameters must be named ``actual`` and ``reference`` (not positional-only;
@@ -134,8 +133,17 @@ def predicate(
             async def async_wrapper(*args: Any, **kwargs: Any) -> bool:
                 bound = sig.bind(*args, **kwargs)
                 bound.apply_defaults()
-                tracer = get_tracer()
-                with tracer.start_as_current_span(span_name) as span:
+                tracer = get_test_tracer()
+                if tracer is None or tracer.otel_trace_session is None:
+                    predicate_result = _normalize_result(
+                        await f(*args, **kwargs),
+                        predicate_name,
+                        bound,
+                    )
+                    _record_result(predicate_result)
+                    return predicate_result.value
+
+                with otel_runtime.start_as_current_span(span_name) as span:
                     predicate_result = _normalize_result(
                         await f(*args, **kwargs),
                         predicate_name,
@@ -153,8 +161,17 @@ def predicate(
         def sync_wrapper(*args: Any, **kwargs: Any) -> bool:
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
-            tracer = get_tracer()
-            with tracer.start_as_current_span(span_name) as span:
+            tracer = get_test_tracer()
+            if tracer is None or tracer.otel_trace_session is None:
+                predicate_result = _normalize_result(
+                    f(*args, **kwargs),
+                    predicate_name,
+                    bound,
+                )
+                _record_result(predicate_result)
+                return predicate_result.value
+
+            with otel_runtime.start_as_current_span(span_name) as span:
                 predicate_result = _normalize_result(
                     f(*args, **kwargs),
                     predicate_name,
@@ -220,15 +237,19 @@ def _set_trace_attributes(
     span.set_attribute("predicate.strict", result.strict)
     span.set_attribute("predicate.confidence", result.confidence)
 
-    if not is_trace_content_enabled():
+    tracer = get_test_tracer()
+    if (
+        tracer is None
+        or tracer.otel_trace_session is None
+        or not tracer.otel_content
+    ):
         return
 
     span.set_attribute(
-        "predicate.input.actual", truncate_repr(bound.arguments["actual"])
+        "predicate.input.actual", repr(bound.arguments["actual"])
     )
     span.set_attribute(
-        "predicate.input.reference",
-        truncate_repr(bound.arguments["reference"]),
+        "predicate.input.reference", repr(bound.arguments["reference"])
     )
     if result.message is not None:
-        span.set_attribute("predicate.message", truncate_repr(result.message))
+        span.set_attribute("predicate.message", repr(result.message))

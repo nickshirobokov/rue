@@ -105,7 +105,9 @@ def test_iter_cases_decorator_validation():
         def sample1(case):
             pass
 
-    with pytest.raises(ValueError, match="min_passes .* cannot exceed cases count"):
+    with pytest.raises(
+        ValueError, match="min_passes .* cannot exceed cases count"
+    ):
 
         @iter_cases(*cases, min_passes=5)
         def sample2(case):
@@ -140,14 +142,20 @@ def test_runner_iter_cases_injects_case_and_sets_case_id(null_reporter):
         modifiers=[CaseIterateModifier(cases=tuple(cases), min_passes=2)],
     )
 
-    run_result = asyncio.run(Runner(reporters=[null_reporter]).run(items=[item]))
+    run_result = asyncio.run(
+        Runner(reporters=[null_reporter]).run(items=[item])
+    )
     parent_execution = run_result.result.executions[0]
 
     assert run_result.result.passed == 1
     assert seen_cases == cases
     assert len(parent_execution.sub_executions) == 2
-    assert [sub.definition.suffix for sub in parent_execution.sub_executions] == [None, None]
-    assert [sub.definition.case_id for sub in parent_execution.sub_executions] == [
+    assert [
+        sub.definition.suffix for sub in parent_execution.sub_executions
+    ] == [None, None]
+    assert [
+        sub.definition.case_id for sub in parent_execution.sub_executions
+    ] == [
         cases[0].id,
         cases[1].id,
     ]
@@ -168,14 +176,20 @@ def test_runner_iter_cases_maps_case_metadata_to_suffix(null_reporter):
         modifiers=[CaseIterateModifier(cases=tuple(cases), min_passes=2)],
     )
 
-    run_result = asyncio.run(Runner(reporters=[null_reporter]).run(items=[item]))
+    run_result = asyncio.run(
+        Runner(reporters=[null_reporter]).run(items=[item])
+    )
     parent_execution = run_result.result.executions[0]
 
-    assert [sub.definition.suffix for sub in parent_execution.sub_executions] == [
+    assert [
+        sub.definition.suffix for sub in parent_execution.sub_executions
+    ] == [
         repr(cases[0].metadata),
         repr(cases[1].metadata),
     ]
-    assert [sub.definition.case_id for sub in parent_execution.sub_executions] == [
+    assert [
+        sub.definition.case_id for sub in parent_execution.sub_executions
+    ] == [
         cases[0].id,
         cases[1].id,
     ]
@@ -197,10 +211,14 @@ def test_runner_iter_cases_partial_pass_meets_min_passes(null_reporter):
         modifiers=[CaseIterateModifier(cases=tuple(cases), min_passes=3)],
     )
 
-    run_result = asyncio.run(Runner(reporters=[null_reporter]).run(items=[item]))
+    run_result = asyncio.run(
+        Runner(reporters=[null_reporter]).run(items=[item])
+    )
     parent_execution = run_result.result.executions[0]
     passed = sum(
-        1 for sub in parent_execution.sub_executions if sub.result.status.value == "passed"
+        1
+        for sub in parent_execution.sub_executions
+        if sub.result.status.value == "passed"
     )
 
     assert run_result.result.passed == 1
@@ -225,10 +243,14 @@ def test_runner_iter_cases_insufficient_passes(null_reporter):
         modifiers=[CaseIterateModifier(cases=tuple(cases), min_passes=3)],
     )
 
-    run_result = asyncio.run(Runner(reporters=[null_reporter]).run(items=[item]))
+    run_result = asyncio.run(
+        Runner(reporters=[null_reporter]).run(items=[item])
+    )
     parent_execution = run_result.result.executions[0]
     passed = sum(
-        1 for sub in parent_execution.sub_executions if sub.result.status.value == "passed"
+        1
+        for sub in parent_execution.sub_executions
+        if sub.result.status.value == "passed"
     )
 
     assert run_result.result.failed == 1
@@ -250,10 +272,14 @@ def test_runner_iter_cases_default_requires_all_passes(null_reporter):
         module_path=Path("sample.py"),
         is_async=False,
         params=["case"],
-        modifiers=[CaseIterateModifier(cases=tuple(cases), min_passes=len(cases))],
+        modifiers=[
+            CaseIterateModifier(cases=tuple(cases), min_passes=len(cases))
+        ],
     )
 
-    run_result = asyncio.run(Runner(reporters=[null_reporter]).run(items=[item]))
+    run_result = asyncio.run(
+        Runner(reporters=[null_reporter]).run(items=[item])
+    )
     parent_execution = run_result.result.executions[0]
 
     assert run_result.result.failed == 1
@@ -286,7 +312,9 @@ def test_iter_case_groups_validation():
             pass
 
     with pytest.raises(ValueError, match="greater than or equal to 1"):
-        bad_low = CaseGroup(name="low", cases=[Case(inputs={"x": 1})], min_passes=0)
+        bad_low = CaseGroup(
+            name="low", cases=[Case(inputs={"x": 1})], min_passes=0
+        )
 
         @iter_case_groups(bad_low)
         def test_low(group, case):
@@ -316,7 +344,9 @@ def test_iter_case_groups_empty_is_deferred_to_execution():
     )
 
 
-def test_runner_iter_case_groups_injects_group_and_case_and_nests(null_reporter):
+def test_runner_iter_case_groups_injects_group_and_case_and_nests(
+    null_reporter,
+):
     g1_cases = [Case(inputs={"x": 1}), Case(inputs={"x": 2})]
     g2_cases = [Case(inputs={"x": 3})]
     groups = [
@@ -337,31 +367,41 @@ def test_runner_iter_case_groups_injects_group_and_case_and_nests(null_reporter)
         modifiers=[CaseGroupIterateModifier(groups=tuple(groups))],
     )
 
-    run_result = asyncio.run(Runner(reporters=[null_reporter]).run(items=[item]))
+    run_result = asyncio.run(
+        Runner(reporters=[null_reporter]).run(items=[item])
+    )
     parent_execution = run_result.result.executions[0]
 
     assert run_result.result.passed == 1
     assert len(seen_pairs) == 3
     assert len(parent_execution.sub_executions) == 2
-    assert [sub.definition.suffix for sub in parent_execution.sub_executions] == [
+    assert [
+        sub.definition.suffix for sub in parent_execution.sub_executions
+    ] == [
         "alpha",
         "beta",
     ]
     assert len(parent_execution.sub_executions[0].sub_executions) == 2
     assert len(parent_execution.sub_executions[1].sub_executions) == 1
-    assert [sub.definition.suffix for sub in parent_execution.sub_executions[0].sub_executions] == [
+    assert [
+        sub.definition.suffix
+        for sub in parent_execution.sub_executions[0].sub_executions
+    ] == [
         None,
         None,
     ]
-    assert [sub.definition.case_id for sub in parent_execution.sub_executions[0].sub_executions] == [
-        case.id for case in g1_cases
-    ]
-    assert [sub.definition.suffix for sub in parent_execution.sub_executions[1].sub_executions] == [
-        None
-    ]
-    assert [sub.definition.case_id for sub in parent_execution.sub_executions[1].sub_executions] == [
-        case.id for case in g2_cases
-    ]
+    assert [
+        sub.definition.case_id
+        for sub in parent_execution.sub_executions[0].sub_executions
+    ] == [case.id for case in g1_cases]
+    assert [
+        sub.definition.suffix
+        for sub in parent_execution.sub_executions[1].sub_executions
+    ] == [None]
+    assert [
+        sub.definition.case_id
+        for sub in parent_execution.sub_executions[1].sub_executions
+    ] == [case.id for case in g2_cases]
 
 
 def test_runner_iter_case_groups_uses_group_min_passes_and_all_groups_must_pass(
@@ -399,9 +439,13 @@ def test_runner_iter_case_groups_uses_group_min_passes_and_all_groups_must_pass(
         modifiers=[CaseGroupIterateModifier(groups=tuple(groups))],
     )
 
-    run_result = asyncio.run(Runner(reporters=[null_reporter]).run(items=[item]))
+    run_result = asyncio.run(
+        Runner(reporters=[null_reporter]).run(items=[item])
+    )
     parent_execution = run_result.result.executions[0]
-    group_statuses = [sub.result.status.value for sub in parent_execution.sub_executions]
+    group_statuses = [
+        sub.result.status.value for sub in parent_execution.sub_executions
+    ]
 
     assert run_result.result.failed == 1
     assert parent_execution.result.status.value == "failed"

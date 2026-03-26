@@ -9,6 +9,7 @@ P = ParamSpec("P")
 
 # Data model for predicate results
 
+
 class PredicateResult(BaseModel):
     """Result of a single predicate evaluation.
 
@@ -51,4 +52,3 @@ class PredicateResult(BaseModel):
 
     def __repr__(self) -> str:
         return self.model_dump_json(indent=2)
-

@@ -8,7 +8,9 @@ from typing import Any
 from rue.testing.models import ParameterSet, ParametrizeModifier
 
 
-def _normalize_argnames(argnames: str | Sequence[str]) -> tuple[tuple[str, ...] | None, str | None]:
+def _normalize_argnames(
+    argnames: str | Sequence[str],
+) -> tuple[tuple[str, ...] | None, str | None]:
     if isinstance(argnames, str):
         parts = [name.strip() for name in argnames.split(",") if name.strip()]
     else:
@@ -18,14 +20,19 @@ def _normalize_argnames(argnames: str | Sequence[str]) -> tuple[tuple[str, ...] 
     return tuple(parts), None
 
 
-def _normalize_values(raw: Any, expected: int) -> tuple[tuple[Any, ...] | None, str | None]:
+def _normalize_values(
+    raw: Any, expected: int
+) -> tuple[tuple[Any, ...] | None, str | None]:
     if expected == 1 and not isinstance(raw, (tuple, list)):
         return (raw,), None
     if not isinstance(raw, (tuple, list)):
         return None, "parametrize() values must be tuples or lists"
     values = tuple(raw)
     if len(values) != expected:
-        return None, f"parametrize() expected {expected} values, got {len(values)}"
+        return (
+            None,
+            f"parametrize() expected {expected} values, got {len(values)}",
+        )
     return values, None
 
 
@@ -71,7 +78,7 @@ def _build_modifier(
     parameter_sets = tuple(
         ParameterSet(
             values=dict(zip(names, vals)),
-            id_suffix=ids_tuple[i] if ids_tuple else _format_id(names, vals),
+            suffix=ids_tuple[i] if ids_tuple else _format_id(names, vals),
         )
         for i, vals in enumerate(values_list)
     )
@@ -89,7 +96,9 @@ def parametrize(
 
     Examples:
     --------
-    >>> @parametrize("prompt,expected", [("hi", "Hello hi"), ("hey", "Hello hey")])
+    >>> @parametrize(
+    ...     "prompt,expected", [("hi", "Hello hi"), ("hey", "Hello hey")]
+    ... )
     ... def test_chat(prompt, expected): ...
     """
     modifier, definition_error = _build_modifier(argnames, argvalues, ids)

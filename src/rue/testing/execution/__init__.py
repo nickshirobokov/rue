@@ -8,11 +8,13 @@ from rue.testing.execution.iterated import (
     CaseIteratedTest,
     CaseIteratedRueTest,
 )
-from rue.testing.execution.parametrized import ParametrizedTest, ParametrizedRueTest
+from rue.testing.execution.parametrized import (
+    ParametrizedTest,
+    ParametrizedRueTest,
+)
 from rue.testing.execution.repeated import RepeatedTest, RepeatedRueTest
 from rue.testing.execution.result_builder import ResultBuilder
 from rue.testing.execution.single import SingleTest, SingleRueTest
-from rue.testing.execution.tracer import TestTracer
 
 
 __all__ = [
@@ -31,5 +33,4 @@ __all__ = [
     "ResultBuilder",
     "SingleRueTest",
     "TestFactory",
-    "TestTracer",
 ]

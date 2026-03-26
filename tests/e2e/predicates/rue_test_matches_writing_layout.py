@@ -237,7 +237,10 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
     ),
     Case[Inputs, Refs](
         id=uuid5(NAMESPACE_URL, f"{__name__}:faq_vs_narrative_layout_medium"),
-        metadata={"slug": "faq_vs_narrative_layout_medium", "difficulty": "medium"},
+        metadata={
+            "slug": "faq_vs_narrative_layout_medium",
+            "difficulty": "medium",
+        },
         inputs=Inputs(
             actual="""
         Access note for Wednesday morning
@@ -416,7 +419,9 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         references=Refs(expected=False),
     ),
     Case[Inputs, Refs](
-        id=uuid5(NAMESPACE_URL, f"{__name__}:pseudo_heading_layout_difference_medium"),
+        id=uuid5(
+            NAMESPACE_URL, f"{__name__}:pseudo_heading_layout_difference_medium"
+        ),
         metadata={
             "slug": "pseudo_heading_layout_difference_medium",
             "difficulty": "medium",

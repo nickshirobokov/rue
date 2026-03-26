@@ -8,7 +8,6 @@ from typing import Any
 from rue.testing.execution import iterated, parametrized, repeated, single
 from rue.testing.execution.interfaces import Test, TestFactory
 from rue.testing.execution.result_builder import ResultBuilder
-from rue.testing.execution.tracer import TestTracer
 from rue.testing.models import (
     CaseGroupIterateModifier,
     CaseIterateModifier,
@@ -22,7 +21,6 @@ from rue.testing.models import (
 class DefaultTestFactory(TestFactory):
     """Creates test instances with shared collaborators."""
 
-    tracer: TestTracer
     result_builder: ResultBuilder
 
     def build(
@@ -38,7 +36,6 @@ class DefaultTestFactory(TestFactory):
                 return single.SingleTest(
                     definition=definition,
                     params=params,
-                    tracer=self.tracer,
                     result_builder=self.result_builder,
                 )
             case [RepeatModifier() as mod, *_]:
@@ -72,4 +69,6 @@ class DefaultTestFactory(TestFactory):
                     factory=self,
                 )
             case _:
-                raise NotImplementedError(f"Unknown modifier(s): {definition.modifiers}")
+                raise NotImplementedError(
+                    f"Unknown modifier(s): {definition.modifiers}"
+                )

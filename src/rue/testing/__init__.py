@@ -24,7 +24,6 @@ from rue.testing.execution import (
     SingleRueTest,
     Test,
     TestFactory,
-    TestTracer,
     RueTest,
 )
 from rue.testing.models import (
@@ -46,7 +45,14 @@ from rue.testing.models import (
     TestResult,
     TestStatus,
 )
-from rue.testing.outcomes import FailTest, SkipTest, XFailTest, fail, skip, xfail
+from rue.testing.outcomes import (
+    FailTest,
+    SkipTest,
+    XFailTest,
+    fail,
+    skip,
+    xfail,
+)
 from rue.testing.runner import Runner
 
 
@@ -90,7 +96,6 @@ __all__ = [
     "TestItem",  # alias
     "TestResult",
     "TestStatus",
-    "TestTracer",
     "XFailTest",
     "capture_environment",
     "collect",

@@ -17,11 +17,13 @@ from rue.context import (
 from rue.context.output_capture import sys_output_capture
 from rue.metrics_.base import MetricResult
 from rue.reports.base import Reporter
+from rue.reports.registry import resolve_reporters
 from rue.resources import ResourceResolver, get_registry
 from rue.storage import SQLiteStore
+from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.discovery import collect
 from rue.testing.environment import capture_environment
-from rue.testing.execution import DefaultTestFactory, ResultBuilder, TestTracer
+from rue.testing.execution import DefaultTestFactory, ResultBuilder
 from rue.testing.models import (
     Run,
     TestExecution,
@@ -29,7 +31,7 @@ from rue.testing.models import (
     TestResult,
     TestStatus,
 )
-from rue.tracing import clear_traces, get_span_collector, init_tracing
+from rue.testing.tracing import TestTracer
 
 UUID_STRING_PATTERN = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -40,17 +42,15 @@ class Runner:
     """Executes discovered tests with resource injection.
 
     Args:
-        reporters: At least one reporter is required.
+        reporters: Optional reporters. Defaults to ConsoleReporter and OtelReporter.
 
     Examples:
-        from rue.reports import ConsoleReporter
-
-        # Sequential execution (default)
-        runner = Runner(reporters=[ConsoleReporter()])
+        # Sequential execution (default reporters)
+        runner = Runner()
         result = await runner.run(path="tests/")
 
         # Concurrent execution with 5 workers
-        runner = Runner(reporters=[ConsoleReporter()], concurrency=5)
+        runner = Runner(concurrency=5)
         result = await runner.run(path="tests/")
     """
 
@@ -59,43 +59,36 @@ class Runner:
     def __init__(
         self,
         *,
-        reporters: list[Reporter],
+        reporters: list[Reporter] | None = None,
         maxfail: int | None = None,
         fail_fast: bool = False,
         verbosity: int = 0,
         concurrency: int = 1,
         timeout: float | None = None,
-        enable_tracing: bool = False,
-        trace_output: Path | str | None = None,
+        otel_enabled: bool = False,
+        otel_content: bool = True,
         capture_output: bool = True,
         db_enabled: bool = True,
         db_path: Path | str | None = None,
         run_id: UUID | str | None = None,
     ) -> None:
-        if not reporters:
-            msg = "At least one reporter is required"
-            raise ValueError(msg)
-
-        self.reporters = reporters
-
         self.maxfail = maxfail if maxfail and maxfail > 0 else None
         self.fail_fast = fail_fast
         self.verbosity = verbosity
         self.timeout = timeout
-        self.concurrency = concurrency if concurrency > 0 else self.DEFAULT_MAX_CONCURRENCY
-        self.enable_tracing = enable_tracing
-        self.trace_output = Path(trace_output) if trace_output else Path(".rue/traces.jsonl")
+        self.concurrency = (
+            concurrency if concurrency > 0 else self.DEFAULT_MAX_CONCURRENCY
+        )
+        self.otel_enabled = otel_enabled
+        self.otel_content = otel_content
         self.capture_output = capture_output
         self.db_enabled = db_enabled
         self.db_path = Path(db_path) if db_path else None
         self._default_run_id = self._normalize_run_id(run_id)
+        self.reporters = reporters or self._default_reporters()
 
-        self._tracer = TestTracer(enabled=enable_tracing)
         self._result_builder = ResultBuilder()
-        self._factory = DefaultTestFactory(
-            tracer=self._tracer,
-            result_builder=self._result_builder,
-        )
+        self._factory = DefaultTestFactory(result_builder=self._result_builder)
 
         # Used in single.py test execution through run_context
         self.semaphore: asyncio.Semaphore | None = None
@@ -104,11 +97,21 @@ class Runner:
         self.current_run: Run | None = None
         self._store: SQLiteStore | None = None
 
+    def _default_reporters(self) -> list[Reporter]:
+        return resolve_reporters(
+            ["ConsoleReporter", "OtelReporter"],
+            {"ConsoleReporter": {"verbosity": self.verbosity}},
+        )
+
     async def _notify_no_tests_found(self) -> None:
         await asyncio.gather(*[r.on_no_tests_found() for r in self.reporters])
 
-    async def _notify_collection_complete(self, items: list[TestDefinition]) -> None:
-        await asyncio.gather(*[r.on_collection_complete(items) for r in self.reporters])
+    async def _notify_collection_complete(
+        self, items: list[TestDefinition]
+    ) -> None:
+        await asyncio.gather(
+            *[r.on_collection_complete(items) for r in self.reporters]
+        )
 
     async def _notify_test_start(self, item: TestDefinition) -> None:
         await asyncio.gather(*[r.on_test_start(item) for r in self.reporters])
@@ -119,11 +122,16 @@ class Runner:
         sub_execution: TestExecution,
     ) -> None:
         await asyncio.gather(
-            *[r.on_subtest_complete(parent, sub_execution) for r in self.reporters]
+            *[
+                r.on_subtest_complete(parent, sub_execution)
+                for r in self.reporters
+            ]
         )
 
     async def _notify_test_complete(self, execution: TestExecution) -> None:
-        await asyncio.gather(*[r.on_test_complete(execution) for r in self.reporters])
+        await asyncio.gather(
+            *[r.on_test_complete(execution) for r in self.reporters]
+        )
 
     async def notify_subtest_complete(
         self,
@@ -137,10 +145,25 @@ class Runner:
         await asyncio.gather(*[r.on_run_complete(run) for r in self.reporters])
 
     async def _notify_run_stopped_early(self, failure_count: int) -> None:
-        await asyncio.gather(*[r.on_run_stopped_early(failure_count) for r in self.reporters])
+        await asyncio.gather(
+            *[r.on_run_stopped_early(failure_count) for r in self.reporters]
+        )
 
-    async def _notify_tracing_enabled(self, output_path: Path) -> None:
-        await asyncio.gather(*[r.on_tracing_enabled(output_path) for r in self.reporters])
+    async def _notify_trace_collected(
+        self, tracer: TestTracer, execution_id: UUID
+    ) -> None:
+        await asyncio.gather(
+            *[
+                r.on_trace_collected(tracer, execution_id)
+                for r in self.reporters
+            ]
+        )
+
+    async def notify_trace_collected(
+        self, tracer: TestTracer, execution_id: UUID
+    ) -> None:
+        """Public callback for execution strategies to stream trace updates."""
+        await self._notify_trace_collected(tracer, execution_id)
 
     def _ensure_db_ready(self) -> None:
         """Initialize DB and run migrations. Raises MigrationError if not possible."""
@@ -171,7 +194,10 @@ class Runner:
             raise ValueError(msg)
         if self._store is None:
             self._ensure_db_ready()
-        return self._store is not None and self._store.get_run(normalized_run_id) is not None
+        return (
+            self._store is not None
+            and self._store.get_run(normalized_run_id) is not None
+        )
 
     async def run(
         self,
@@ -201,11 +227,12 @@ class Runner:
         if selected_run_id is None:
             self.current_run = Run(environment=environment)
         else:
-            self.current_run = Run(environment=environment, run_id=selected_run_id)
+            self.current_run = Run(
+                environment=environment, run_id=selected_run_id
+            )
 
-        if self.enable_tracing:
-            init_tracing(output_path=self.trace_output)
-            clear_traces()
+        if self.otel_enabled:
+            otel_runtime.configure()
 
         if items is None:
             items = collect(path)
@@ -251,24 +278,21 @@ class Runner:
                 self.current_run.result.stopped_early = True
                 self.stop_flag = True
 
-        self.current_run.result.total_duration_ms = (time.perf_counter() - start) * 1000
+        self.current_run.result.total_duration_ms = (
+            time.perf_counter() - start
+        ) * 1000
         self.current_run.result.metric_results = metric_results.copy()
         self.current_run.end_time = datetime.now(UTC)
 
         await self._notify_run_complete(self.current_run)
 
-        if self.enable_tracing:
-            await self._notify_tracing_enabled(self.trace_output)
-
         if self.db_enabled and self._store:
             try:
                 self._store.save_run(self.current_run)
-                if self.enable_tracing:
-                    collector = get_span_collector()
-                    if collector:
-                        self._store.save_trace_spans(self.current_run, collector)
             except Exception as e:
-                warnings.warn(f"Failed to persist run to database: {e}", stacklevel=2)
+                warnings.warn(
+                    f"Failed to persist run to database: {e}", stacklevel=2
+                )
 
         return self.current_run
 
@@ -312,7 +336,9 @@ class Runner:
             duration = (time.perf_counter() - t_start) * 1000
             return TestExecution(
                 definition=item,
-                result=TestResult(status=TestStatus.ERROR, duration_ms=duration, error=e),
+                result=TestResult(
+                    status=TestStatus.ERROR, duration_ms=duration, error=e
+                ),
                 execution_id=uuid4(),
             )
 
@@ -370,14 +396,19 @@ class Runner:
             await self._notify_test_complete(execution)
 
         task_results = await asyncio.gather(
-            *[run_one(i, item) for i, item in enumerate(items)], return_exceptions=True
+            *[run_one(i, item) for i, item in enumerate(items)],
+            return_exceptions=True,
         )
 
-        task_errors = [result for result in task_results if isinstance(result, Exception)]
+        task_errors = [
+            result for result in task_results if isinstance(result, Exception)
+        ]
         if task_errors:
             if len(task_errors) == 1:
                 raise task_errors[0]
-            raise ExceptionGroup("Concurrent test callbacks failed", task_errors)
+            raise ExceptionGroup(
+                "Concurrent test callbacks failed", task_errors
+            )
 
         for execution in results:
             if execution is not None:

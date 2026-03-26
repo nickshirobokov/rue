@@ -21,7 +21,9 @@ class ResultBuilder:
         error: Exception | None,
     ) -> TestResult:
         """Create TestResult based on assertion results and raised exceptions."""
-        status, error = self._determine_status(definition, assertion_results, error)
+        status, error = self._determine_status(
+            definition, assertion_results, error
+        )
         return TestResult(
             status=status,
             duration_ms=duration_ms,
@@ -41,7 +43,10 @@ class ResultBuilder:
         has_assertion_failure = len(failed_assertions) > 0
 
         if error is not None and not isinstance(error, AssertionError):
-            return (TestStatus.XFAILED if expect_failure else TestStatus.ERROR, error)
+            return (
+                TestStatus.XFAILED if expect_failure else TestStatus.ERROR,
+                error,
+            )
 
         if has_assertion_failure or isinstance(error, AssertionError):
             status = TestStatus.XFAILED if expect_failure else TestStatus.FAILED
@@ -52,7 +57,9 @@ class ResultBuilder:
             if definition.xfail_strict:
                 return (
                     TestStatus.FAILED,
-                    AssertionError(definition.xfail_reason or "xfail test passed"),
+                    AssertionError(
+                        definition.xfail_reason or "xfail test passed"
+                    ),
                 )
             return (TestStatus.XPASSED, None)
 
@@ -65,6 +72,9 @@ class ResultBuilder:
     ) -> Exception | None:
         """Convert failed assertion to error if no error exists."""
         if error is None and failed_assertions:
-            msg = failed_assertions[0].error_message or failed_assertions[0].expression_repr.expr
+            msg = (
+                failed_assertions[0].error_message
+                or failed_assertions[0].expression_repr.expr
+            )
             return AssertionError(msg)
         return error

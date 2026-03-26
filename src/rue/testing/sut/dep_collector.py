@@ -59,20 +59,30 @@ class DependencyCollectionMode(str, Enum):
     SYMBOL = "symbol"
 
 
-def _resolve_from_import(node: ast.ImportFrom, module_name: str, module_file: Path) -> str:
+def _resolve_from_import(
+    node: ast.ImportFrom, module_name: str, module_file: Path
+) -> str:
     """Resolve a ``from ... import`` statement to a module path"""
 
     if node.level == 0:
         assert node.module
         return node.module
-    package = module_name if module_file.name == "__init__.py" else module_name.rpartition(".")[0]
-    return importlib.util.resolve_name("." * node.level + (node.module or ""), package)
+    package = (
+        module_name
+        if module_file.name == "__init__.py"
+        else module_name.rpartition(".")[0]
+    )
+    return importlib.util.resolve_name(
+        "." * node.level + (node.module or ""), package
+    )
 
 
 class ImportIndex:
     """Index import statements per scope using AST"""
 
-    def __init__(self, source: str, module_name: str, module_file: Path) -> None:
+    def __init__(
+        self, source: str, module_name: str, module_file: Path
+    ) -> None:
         self._module_level: dict[str, ImportBinding] = {}
         self._function_level: dict[str, dict[str, ImportBinding]] = {}
         self._local_functions: set[str] = set()
@@ -89,7 +99,9 @@ class ImportIndex:
 
         return self._module_level.get(name)
 
-    def get_function_level(self, func_name: str, name: str) -> ImportBinding | None:
+    def get_function_level(
+        self, func_name: str, name: str
+    ) -> ImportBinding | None:
         """Get function-scope import target for a local symbol"""
 
         func_imports = self._function_level.get(func_name)
@@ -100,20 +112,28 @@ class ImportIndex:
 
         return {binding.module_name for binding in self._module_level.values()}
 
-    def _build(self, tree: ast.Module, module_name: str, module_file: Path) -> None:
+    def _build(
+        self, tree: ast.Module, module_name: str, module_file: Path
+    ) -> None:
         """Populate import lookup structures from parsed AST"""
 
         for stmt in tree.body:
             match stmt:
                 case ast.Import() | ast.ImportFrom():
-                    for local, mod in self._extract(stmt, module_name, module_file):
+                    for local, mod in self._extract(
+                        stmt, module_name, module_file
+                    ):
                         self._module_level[local] = mod
-                case ast.FunctionDef(name=name) | ast.AsyncFunctionDef(name=name):
+                case (
+                    ast.FunctionDef(name=name) | ast.AsyncFunctionDef(name=name)
+                ):
                     self._local_functions.add(name)
                     func_imports: dict[str, ImportBinding] = {}
                     for node in ast.walk(stmt):
                         if isinstance(node, (ast.Import, ast.ImportFrom)):
-                            for local, mod in self._extract(node, module_name, module_file):
+                            for local, mod in self._extract(
+                                node, module_name, module_file
+                            ):
                                 func_imports[local] = mod
                     if func_imports:
                         self._function_level[name] = func_imports
@@ -134,7 +154,10 @@ class ImportIndex:
                 for alias in node.names:
                     if alias.name != "*":
                         results.append(
-                            (alias.asname or alias.name, ImportBinding(resolved, alias.name))
+                            (
+                                alias.asname or alias.name,
+                                ImportBinding(resolved, alias.name),
+                            )
                         )
         return results
 
@@ -148,18 +171,27 @@ class ModuleAnalyzer:
 
     def __init__(self, source: str, filename: str) -> None:
         self._table = symtable.symtable(source, filename, "exec")
-        self._children = {child.get_name(): child for child in self._table.get_children()}
-        self._module_symbols = {symbol.get_name() for symbol in self._table.get_symbols()}
+        self._children = {
+            child.get_name(): child for child in self._table.get_children()
+        }
+        self._module_symbols = {
+            symbol.get_name() for symbol in self._table.get_symbols()
+        }
 
     def missing_module_symbols(self, names: set[str]) -> set[str]:
         """Return symbol names not present in this module scope."""
 
         return {name for name in names if name not in self._module_symbols}
 
-    def reachable_modules(self, targets: set[str] | None, index: ImportIndex) -> set[str]:
+    def reachable_modules(
+        self, targets: set[str] | None, index: ImportIndex
+    ) -> set[str]:
         """Compatibility helper returning only module names."""
 
-        return {binding.module_name for binding in self.reachable_bindings(targets, index)}
+        return {
+            binding.module_name
+            for binding in self.reachable_bindings(targets, index)
+        }
 
     def reachable_bindings(
         self, targets: set[str] | None, index: ImportIndex
@@ -195,7 +227,9 @@ class ModuleAnalyzer:
                     modules.add(binding)
         return modules
 
-    def _trace_from(self, targets: set[str], index: ImportIndex) -> set[ImportBinding]:
+    def _trace_from(
+        self, targets: set[str], index: ImportIndex
+    ) -> set[ImportBinding]:
         """Trace reachable imports from target symbols using BFS"""
 
         modules: set[ImportBinding] = set()
@@ -227,7 +261,10 @@ class ModuleAnalyzer:
                     binding = index.get_module_level(sym_name)
                     if binding:
                         modules.add(binding)
-                    elif sym_name in index.local_functions and sym_name not in visited:
+                    elif (
+                        sym_name in index.local_functions
+                        and sym_name not in visited
+                    ):
                         pending.append(sym_name)
 
         return modules
@@ -265,7 +302,10 @@ class ModuleResolver:
             self._resolved[module_name] = None
             return None
         module_path = Path(spec.origin).resolve()
-        if "site-packages" in module_path.parts or not module_path.is_relative_to(self._repo_root):
+        if (
+            "site-packages" in module_path.parts
+            or not module_path.is_relative_to(self._repo_root)
+        ):
             self._resolved[module_name] = None
             return None
         self._resolved[module_name] = module_path
@@ -357,10 +397,15 @@ class DependencyCollector:
         ]
 
     @staticmethod
-    def _next_targets(mode: DependencyCollectionMode, binding: ImportBinding) -> set[str] | None:
+    def _next_targets(
+        mode: DependencyCollectionMode, binding: ImportBinding
+    ) -> set[str] | None:
         """Choose target symbols to propagate into a dependency."""
 
-        if mode == DependencyCollectionMode.SYMBOL and binding.imported_name is not None:
+        if (
+            mode == DependencyCollectionMode.SYMBOL
+            and binding.imported_name is not None
+        ):
             return {binding.imported_name}
         return None
 
@@ -403,7 +448,9 @@ class DependencyCollector:
                 discovered[submodule] = resolved
             pending.append((submodule, None))
 
-    def _load(self, file_path: Path, module_name: str) -> tuple[ImportIndex, ModuleAnalyzer]:
+    def _load(
+        self, file_path: Path, module_name: str
+    ) -> tuple[ImportIndex, ModuleAnalyzer]:
         """Load and cache per-module analysis artifacts"""
 
         cached = self._cache.get(file_path)
@@ -445,10 +492,16 @@ def collect_dependencies(
     owner_module = inspect.getmodule(fn)
     owner_file_attr = getattr(owner_module, "__file__", None)
     if not (owner_module and owner_file_attr):
-        raise ValueError("Cannot determine module or file for the provided callable")
+        raise ValueError(
+            "Cannot determine module or file for the provided callable"
+        )
 
     owner_file = Path(owner_file_attr).resolve()
-    repo_root = next(p for p in (owner_file.parent, *owner_file.parents) if (p / ".git").exists())
+    repo_root = next(
+        p
+        for p in (owner_file.parent, *owner_file.parents)
+        if (p / ".git").exists()
+    )
     collector = DependencyCollector(repo_root)
     return collector.collect(
         seed_module=owner_module.__name__,

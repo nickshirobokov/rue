@@ -1,8 +1,10 @@
 ---
-title: "Trace"
+title: "OpenTelemetry Traces"
 ---
 
-`Trace` is the structured execution record of a single test case. In Rue, **each test run gets its own OpenTelemetry trace**: a tree of spans showing what happened (tools, retrieval steps, LLM calls), when it happened, and how long it took.
+An OpenTelemetry trace is the structured execution record of a single test execution. In Rue, **each concrete test execution gets its own OpenTelemetry trace**: a tree of spans showing what happened (tools, retrieval steps, LLM calls), when it happened, and how long it took.
+
+For `repeat`, `parametrize`, `iter_cases`, and `iter_case_groups`, each child execution gets its own trace.
 
 <Warning>
 This page uses “trace” in the OpenTelemetry sense (spans you can query and assert on), not a Python exception traceback/stacktrace.
@@ -13,38 +15,40 @@ Using traces enables:
 - Asserting on **execution behavior**, not just outputs (tool calls happened, retrieval ran, etc.)
 - Correlating LLM spans with your SUT spans and custom pipeline steps
 
-## How Rue traces are structured
+## How Rue OpenTelemetry traces are structured
 
-When tracing is enabled, Rue wraps each test case in a root span:
+When OpenTelemetry is enabled, Rue wraps each concrete test execution in a root span:
 - `test.<full_name>`
 
 Inside that test span, you’ll typically see:
 - **SUT spans**: created by [`@rue.sut`](/concepts/sut), named `sut.<sut_name>`
 - **Predicate spans**: created by [`@predicate`](/apis/predicates), named `predicate.<predicate_name>`
-- **Custom step spans**: created by `rue.trace_step("...")`
+- **Custom step spans**: created by `rue.otel_span("...")`
 - **LLM spans**: auto-instrumented spans whose names usually start with `openai.`, `anthropic.`, or `gen_ai.`
 
-## Enable tracing
+## Enable OpenTelemetry
 
-Tracing is disabled by default. Enable it from the CLI:
+OpenTelemetry capture is disabled by default. Enable it from the CLI:
 
 ```bash
-rue test --trace
+uv run rue test --otel
 ```
 
-By default, spans are exported to `.rue/traces.jsonl`. You can override the output path:
+With Rue's default reporters, `uv run rue test --otel` also writes local JSON traces under `.rue/traces/<run_id>/<execution_id>.json`. Those files are separate from SQLite storage.
+
+If you override the reporter list, keep `OtelReporter` attached when you still want local trace files:
 
 ```bash
-rue test --trace --trace-output traces/run_001.jsonl
+uv run rue test --otel --reporter ConsoleReporter --reporter OtelReporter
 ```
 
 <Note>
-The injected `trace_context` parameter is only available when tracing is enabled. Without `--trace`, resolving `trace_context` raises at runtime.
+The injected `otel_trace` parameter is only available when OpenTelemetry is enabled. Without `--otel`, resolving `otel_trace` raises at runtime.
 </Note>
 
 ## Basic Usage
 
-Use `trace_context` to query spans created during the current test case execution:
+Use `otel_trace` to query spans created during the current test execution:
 
 ```python
 import rue
@@ -58,19 +62,19 @@ def weather_agent():
     return prod_weather_agent
 
 
-def test_can_inspect_trace(weather_agent, trace_context):
-    with rue.trace_step("retrieve"):
+def test_can_inspect_trace(weather_agent, otel_trace):
+    with rue.otel_span("retrieve"):
         docs = retrieve_docs("SF weather")
 
-    with rue.trace_step("generate", {"doc_count": len(docs)}):
+    with rue.otel_span("generate", {"doc_count": len(docs)}):
         out = weather_agent("What's the weather in SF?", docs=docs)
 
-    # All spans created during this test (same trace_id)
-    spans = trace_context.get_child_spans()
+    # All spans created during this test belong to the same OTEL trace
+    spans = otel_trace.get_child_spans()
     assert spans
 
     # Spans created by @rue.sut
-    sut_spans = trace_context.get_sut_spans(name="weather_agent")
+    sut_spans = otel_trace.get_sut_spans(name="weather_agent")
     assert sut_spans[0].attributes.get("rue.sut.name") == "weather_agent"
 
     # If your test evaluates @predicate functions, filter them manually
@@ -81,25 +85,25 @@ def test_can_inspect_trace(weather_agent, trace_context):
     ]
 
     # Attach extra context to the test root span
-    trace_context.set_attribute("response.length", len(out))
+    otel_trace.set_attribute("response.length", len(out))
 ```
 
 ## Common patterns
 
 ### Assert tool-calling contracts (tool dependency + no loops + permissions)
 
-The main point of tracing is enforcing **workflow contracts** that matter in production (especially for agents): not just “did we return a good string”, but “did we call the right tools, in the right shape, without runaway loops”.
+The main point of OpenTelemetry capture is enforcing **workflow contracts** that matter in production (especially for agents): not just “did we return a good string”, but “did we call the right tools, in the right shape, without runaway loops”.
 
 #### 1. If tool A was called, tool B must also be called
 
 Example contract: “if we called `search`, we must also call `cite_sources`”.
 
 ```python
-def test_tool_dependency(my_agent, trace_context):
+def test_tool_dependency(my_agent, otel_trace):
     my_agent("Find the policy and cite sources")
 
     tools: list[str] = []
-    for span in trace_context.get_llm_calls():
+    for span in otel_trace.get_llm_calls():
         attrs = span.attributes or {}
         for key, value in attrs.items():
             if key.startswith("llm.request.functions.") and key.endswith(".name") and value:
@@ -114,11 +118,11 @@ def test_tool_dependency(my_agent, trace_context):
 This catches common failure modes like calling the same 2–3 tools in a tight cycle.
 
 ```python
-def test_no_tool_loops(my_agent, trace_context):
+def test_no_tool_loops(my_agent, otel_trace):
     my_agent("Solve the task with tools, but don't loop.")
 
     tools: list[str] = []
-    for span in trace_context.get_llm_calls():
+    for span in otel_trace.get_llm_calls():
         attrs = span.attributes or {}
         for key, value in attrs.items():
             if key.startswith("llm.request.functions.") and key.endswith(".name") and value:
@@ -135,10 +139,10 @@ def test_no_tool_loops(my_agent, trace_context):
 If your SUT triggers instrumented LLM clients, you can locate those spans:
 
 ```python
-def test_llm_calls_are_traced(my_agent, trace_context):
+def test_llm_calls_are_captured(my_agent, otel_trace):
     my_agent("hello")
 
-    llm_spans = trace_context.get_llm_calls()
+    llm_spans = otel_trace.get_llm_calls()
 ```
 
 ## Recommendations
@@ -149,8 +153,8 @@ If correctness depends on *how* the system behaves (e.g., “must call retrieval
 
 ### 2. Keep spans high-signal
 
-Create a small number of meaningful steps (`retrieve`, `rerank`, `generate`) rather than tracing every minor helper function.
+Create a small number of meaningful steps (`retrieve`, `rerank`, `generate`) rather than wrapping every minor helper function in its own span.
 
 ### 3. Be deliberate about content capture
 
-Traces may include request/response content depending on configuration. See the tracing API docs (especially `RUE_TRACE_CONTENT`) in [`docs/apis/tracing.mdx`](/apis/tracing).
+OpenTelemetry spans may include request/response content depending on configuration. See the [OpenTelemetry API docs](/apis/open-telemetry-traces) for `RUE_OTEL_CONTENT` and storage details.

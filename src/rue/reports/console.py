@@ -68,7 +68,9 @@ class _LiveFileState:
 class ConsoleReporter(Reporter):
     """Reporter that outputs test results to the console using Rich formatting."""
 
-    def __init__(self, console: Console | None = None, verbosity: int = 0) -> None:
+    def __init__(
+        self, console: Console | None = None, verbosity: int = 0
+    ) -> None:
         self.console = console or Console(file=sys.__stdout__)
         self.verbosity = verbosity
         self._failures: list[TestExecution] = []
@@ -77,7 +79,9 @@ class ConsoleReporter(Reporter):
         self._live_enabled = False
         self._file_states: dict[Path, _LiveFileState] = {}
         self._item_state_lookup: dict[int, _LiveTestState] = {}
-        self._item_state_lookup_by_name: dict[tuple[str, str, str], _LiveTestState] = {}
+        self._item_state_lookup_by_name: dict[
+            tuple[str, str, str], _LiveTestState
+        ] = {}
         self._total_tests = 0
         self._completed_count = 0
         self._callback_lock = asyncio.Lock()
@@ -91,7 +95,9 @@ class ConsoleReporter(Reporter):
     def _status_label(self, status: TestStatus) -> str:
         return _STATUS_CONFIG[status][2]
 
-    def _print_section_header(self, title: str, *, include_footer: bool = False) -> None:
+    def _print_section_header(
+        self, title: str, *, include_footer: bool = False
+    ) -> None:
         width = self.console.width
         header_title = f" {title} "
         fill = max(width - len(header_title), 0)
@@ -114,7 +120,9 @@ class ConsoleReporter(Reporter):
         self.console.print(f"• {relative_path.as_posix()}")
         self._current_module = module_path
 
-    def _print_run_header(self, environment: RunEnvironment, run_id: object) -> None:
+    def _print_run_header(
+        self, environment: RunEnvironment, run_id: object
+    ) -> None:
         self._print_section_header("RUE RUN STARTS")
         self.console.print(
             f"platform {environment.platform} -- python {environment.python_version} "
@@ -136,7 +144,9 @@ class ConsoleReporter(Reporter):
         label = self._status_label(result.status)
         prefix = " " * indent + "• "
         duration = f"[dim]({result.duration_ms:.1f}ms)[/dim]"
-        self.console.print(f"{prefix}{name} {duration} {extra}[{color}]{label}[/{color}]")
+        self.console.print(
+            f"{prefix}{name} {duration} {extra}[{color}]{label}[/{color}]"
+        )
 
     def _get_definition_label(self, item: TestDefinition) -> str | None:
         if item.suffix:
@@ -156,13 +166,17 @@ class ConsoleReporter(Reporter):
             return str(execution.execution_id)[:8]
         return "case"
 
-    def _print_sub_execution_line(self, sub: TestExecution, indent: int) -> None:
+    def _print_sub_execution_line(
+        self, sub: TestExecution, indent: int
+    ) -> None:
         color = self._status_color(sub.result.status)
         label = self._status_label(sub.result.status)
         prefix = " " * indent + "• "
         duration = f"[dim]({sub.result.duration_ms:.1f}ms)[/dim]"
         sub_label = self._format_label(self._get_execution_label(sub))
-        self.console.print(f"{prefix}{sub_label} {duration} [{color}]{label}[/{color}]")
+        self.console.print(
+            f"{prefix}{sub_label} {duration} [{color}]{label}[/{color}]"
+        )
 
     def _format_assertion_repr(self, assertion: AssertionResult) -> list[str]:
         lines = []
@@ -176,7 +190,9 @@ class ConsoleReporter(Reporter):
             lines.append(f"{expr.resolved_args}")
         return lines
 
-    def _format_assertions(self, assertion_results: list[AssertionResult]) -> list[str]:
+    def _format_assertions(
+        self, assertion_results: list[AssertionResult]
+    ) -> list[str]:
         lines: list[str] = []
         failed = [a for a in assertion_results if not a.passed]
         for assertion in failed:
@@ -185,7 +201,9 @@ class ConsoleReporter(Reporter):
             lines.extend(self._format_assertion_repr(assertion))
         return lines
 
-    def _format_error(self, error: BaseException | None) -> list[str] | Traceback:
+    def _format_error(
+        self, error: BaseException | None
+    ) -> list[str] | Traceback:
         if not error:
             return []
         if error.__traceback__:
@@ -204,12 +222,16 @@ class ConsoleReporter(Reporter):
             return lines
         return self._format_error(result.error)
 
-    def _render_failure_lines(self, lines: list[str] | Traceback) -> RenderableType:
+    def _render_failure_lines(
+        self, lines: list[str] | Traceback
+    ) -> RenderableType:
         if isinstance(lines, Traceback):
             return lines
         return "\n".join(escape(line) for line in lines) or " "
 
-    def _build_failure_panel(self, title: str, content: RenderableType, color: str) -> Panel:
+    def _build_failure_panel(
+        self, title: str, content: RenderableType, color: str
+    ) -> Panel:
         return Panel(
             content,
             title=title,
@@ -232,14 +254,20 @@ class ConsoleReporter(Reporter):
     ) -> Panel:
         result = execution.result
         color = self._status_color(result.status)
-        sub_failures = [sub for sub in execution.sub_executions if sub.result.status.is_failure]
+        sub_failures = [
+            sub
+            for sub in execution.sub_executions
+            if sub.result.status.is_failure
+        ]
         renderables: list[RenderableType] = []
         lines = self._build_failure_lines(result)
 
         if isinstance(lines, Traceback) or lines:
             renderables.append(self._render_failure_lines(lines))
 
-        renderables.extend(self._build_failure_renderable(sub) for sub in sub_failures)
+        renderables.extend(
+            self._build_failure_renderable(sub) for sub in sub_failures
+        )
 
         content: RenderableType
         if not renderables:
@@ -255,9 +283,15 @@ class ConsoleReporter(Reporter):
             color,
         )
 
-    def _format_metric_value(self, metric: MetricResult) -> tuple[str, int, int, bool]:
+    def _format_metric_value(
+        self, metric: MetricResult
+    ) -> tuple[str, int, int, bool]:
         value = metric.value
-        value_str = "N/A" if isinstance(value, float) and math.isnan(value) else str(value)
+        value_str = (
+            "N/A"
+            if isinstance(value, float) and math.isnan(value)
+            else str(value)
+        )
         assertions = metric.assertion_results
         passed = sum(1 for a in assertions if a.passed)
         total = len(assertions)
@@ -278,7 +312,9 @@ class ConsoleReporter(Reporter):
         else:
             self.console.print(f"{prefix}{label}: [bold]{value_str}[/bold]")
 
-    def _group_case_metrics(self, metrics: list[MetricResult]) -> dict[str, list[MetricResult]]:
+    def _group_case_metrics(
+        self, metrics: list[MetricResult]
+    ) -> dict[str, list[MetricResult]]:
         grouped: dict[str, list[MetricResult]] = {}
         for metric in metrics:
             grouped.setdefault(metric.name, []).append(metric)
@@ -315,7 +351,9 @@ class ConsoleReporter(Reporter):
         if by_id is not None:
             return by_id
 
-        by_name = self._item_state_lookup_by_name.get(self._item_state_key(item))
+        by_name = self._item_state_lookup_by_name.get(
+            self._item_state_key(item)
+        )
         if by_name is not None:
             self._item_state_lookup[id(item)] = by_name
             return by_name
@@ -356,7 +394,9 @@ class ConsoleReporter(Reporter):
             return
         state.live_sub_executions.append(sub_execution)
 
-    def _sub_executions_for_state(self, test_state: _LiveTestState) -> list[TestExecution]:
+    def _sub_executions_for_state(
+        self, test_state: _LiveTestState
+    ) -> list[TestExecution]:
         if test_state.execution is not None:
             return test_state.execution.sub_executions
         return test_state.live_sub_executions
@@ -397,7 +437,10 @@ class ConsoleReporter(Reporter):
                     line.append("⋯", style="dim")
                     continue
                 status = test_state.execution.result.status
-                line.append(self._status_symbol(status), style=self._status_color(status))
+                line.append(
+                    self._status_symbol(status),
+                    style=self._status_color(status),
+                )
             if has_running:
                 lines.append(self._build_live_text_spinner_line(line))
             else:
@@ -424,9 +467,13 @@ class ConsoleReporter(Reporter):
             return Text("")
         return Group(*trees)
 
-    def _build_live_test_line(self, test_state: _LiveTestState) -> RenderableType:
+    def _build_live_test_line(
+        self, test_state: _LiveTestState
+    ) -> RenderableType:
         if test_state.execution is None:
-            text = Text.from_markup(f"{test_state.item.full_name} [dim]⋯ running[/dim]")
+            text = Text.from_markup(
+                f"{test_state.item.full_name} [dim]⋯ running[/dim]"
+            )
             return self._build_live_text_spinner_line(text)
 
         execution = test_state.execution
@@ -441,15 +488,23 @@ class ConsoleReporter(Reporter):
             f"{extra}[{color}]{label}[/{color}]"
         )
 
-    def _add_live_sub_executions(self, parent: Tree, sub_executions: list[TestExecution]) -> None:
+    def _add_live_sub_executions(
+        self, parent: Tree, sub_executions: list[TestExecution]
+    ) -> None:
         for sub in sub_executions:
             node = parent
-            if sub.result.status in {TestStatus.PASSED, TestStatus.FAILED, TestStatus.ERROR}:
+            if sub.result.status in {
+                TestStatus.PASSED,
+                TestStatus.FAILED,
+                TestStatus.ERROR,
+            }:
                 color = self._status_color(sub.result.status)
                 label = self._status_label(sub.result.status)
                 duration = f"[dim]({sub.result.duration_ms:.1f}ms)[/dim]"
                 sub_label = self._format_label(self._get_execution_label(sub))
-                node = parent.add(f"{sub_label} {duration} [{color}]{label}[/{color}]")
+                node = parent.add(
+                    f"{sub_label} {duration} [{color}]{label}[/{color}]"
+                )
 
             if sub.sub_executions:
                 self._add_live_sub_executions(node, sub.sub_executions)
@@ -465,12 +520,20 @@ class ConsoleReporter(Reporter):
 
             runner = get_runner()
             environment = (
-                runner.current_run.environment if runner and runner.current_run else RunEnvironment()
+                runner.current_run.environment
+                if runner and runner.current_run
+                else RunEnvironment()
             )
-            run_id = runner.current_run.run_id if runner and runner.current_run else None
+            run_id = (
+                runner.current_run.run_id
+                if runner and runner.current_run
+                else None
+            )
             self._print_run_header(environment, run_id)
             if self.verbosity >= 0:
-                self.console.print(f"[bold]Collected {len(items)} tests[/bold]\n")
+                self.console.print(
+                    f"[bold]Collected {len(items)} tests[/bold]\n"
+                )
 
             self._live_enabled = self.console.is_terminal
             if self._live_enabled:
@@ -525,7 +588,9 @@ class ConsoleReporter(Reporter):
 
             self._print_verbose_test(execution)
 
-    def _print_compact_test(self, item: TestDefinition, result: TestResult) -> None:
+    def _print_compact_test(
+        self, item: TestDefinition, result: TestResult
+    ) -> None:
         color = self._status_color(result.status)
         symbol = f"[{color}]{self._status_symbol(result.status)}[/{color}]"
         if self._current_module != item.module_path:
@@ -556,15 +621,23 @@ class ConsoleReporter(Reporter):
             reason = result.error.args[0] if result.error else "skipped"
             return f"[dim]skipped ({reason})[/dim] "
         if result.status == TestStatus.XFAILED:
-            reason = result.error.args[0] if result.error else "expected failure"
+            reason = (
+                result.error.args[0] if result.error else "expected failure"
+            )
             return f"[dim]xfailed ({reason})[/dim] "
         if result.status == TestStatus.XPASSED:
             return "[dim]XPASS[/dim] "
         return ""
 
-    def _print_sub_executions(self, sub_executions: list[TestExecution], indent: int) -> None:
+    def _print_sub_executions(
+        self, sub_executions: list[TestExecution], indent: int
+    ) -> None:
         for sub in sub_executions:
-            if sub.result.status in {TestStatus.PASSED, TestStatus.FAILED, TestStatus.ERROR}:
+            if sub.result.status in {
+                TestStatus.PASSED,
+                TestStatus.FAILED,
+                TestStatus.ERROR,
+            }:
                 self._print_sub_execution_line(sub, indent)
             if sub.sub_executions:
                 self._print_sub_executions(sub.sub_executions, indent + 2)
@@ -598,7 +671,9 @@ class ConsoleReporter(Reporter):
                 self.console.print()
 
             self.console.print(
-                self._build_failure_renderable(failure, title=failure.item.full_name)
+                self._build_failure_renderable(
+                    failure, title=failure.item.full_name
+                )
             )
 
         self.console.print()
@@ -638,25 +713,39 @@ class ConsoleReporter(Reporter):
             return
 
         if self.verbosity < 0:
-            failed_count = sum(1 for m in metric_results if self._format_metric_value(m)[3])
+            failed_count = sum(
+                1 for m in metric_results if self._format_metric_value(m)[3]
+            )
             if failed_count:
-                self.console.print(f"[yellow]{failed_count} failed — see DB for details[/yellow]")
+                self.console.print(
+                    f"[yellow]{failed_count} failed — see DB for details[/yellow]"
+                )
                 self.console.print()
             return
 
         self._print_verbose_metrics(metric_results)
 
-    def _print_session_metrics(self, metric_results: list[MetricResult]) -> None:
-        session_metrics = [m for m in metric_results if m.metadata.scope == Scope.SESSION]
+    def _print_session_metrics(
+        self, metric_results: list[MetricResult]
+    ) -> None:
+        session_metrics = [
+            m for m in metric_results if m.metadata.scope == Scope.SESSION
+        ]
         for metric in session_metrics:
             stats = self._format_metric_value(metric)
             self._print_metric_row(metric.name, stats)
         if session_metrics:
             self.console.print()
 
-    def _print_verbose_metrics(self, metric_results: list[MetricResult]) -> None:
-        case_metrics = [m for m in metric_results if m.metadata.scope == Scope.CASE]
-        other_metrics = [m for m in metric_results if m.metadata.scope != Scope.CASE]
+    def _print_verbose_metrics(
+        self, metric_results: list[MetricResult]
+    ) -> None:
+        case_metrics = [
+            m for m in metric_results if m.metadata.scope == Scope.CASE
+        ]
+        other_metrics = [
+            m for m in metric_results if m.metadata.scope != Scope.CASE
+        ]
 
         for metric in other_metrics:
             stats = self._format_metric_value(metric)
@@ -668,7 +757,10 @@ class ConsoleReporter(Reporter):
 
     def _get_metric_display_name(self, metric: MetricResult) -> str:
         name = metric.name
-        if metric.metadata.scope == Scope.CASE and metric.metadata.collected_from_tests:
+        if (
+            metric.metadata.scope == Scope.CASE
+            and metric.metadata.collected_from_tests
+        ):
             tests = sorted(metric.metadata.collected_from_tests)
             case_suffix = ""
             if metric.metadata.collected_from_cases:
@@ -687,16 +779,14 @@ class ConsoleReporter(Reporter):
                 self._print_metric_row(case_label, stats, indent=4)
 
     async def on_run_stopped_early(self, failure_count: int) -> None:
-        self.console.print(f"\n\n[red]Stopping early after {failure_count} failure(s).[/red]")
-
-    async def on_tracing_enabled(self, output_path: Path) -> None:
-        if output_path.exists():
-            self.console.print(
-                f"[dim]Tracing written to {output_path} ({output_path.stat().st_size} bytes)[/dim]"
-            )
+        self.console.print(
+            f"\n\n[red]Stopping early after {failure_count} failure(s).[/red]"
+        )
 
     @staticmethod
-    def rich_traceback_from_json(data: str, *, show_locals: bool = False) -> Traceback:
+    def rich_traceback_from_json(
+        data: str, *, show_locals: bool = False
+    ) -> Traceback:
         """Reconstruct a Rich Traceback from stored JSON data.
 
         Rich's Traceback normally requires live exception objects. This function
@@ -709,7 +799,9 @@ class ConsoleReporter(Reporter):
             # Convert stored repr strings to Rich Node objects for display
             locals_nodes: dict[str, Node] | None = None
             if show_locals and f.get("locals"):
-                locals_nodes = {k: Node(value_repr=v) for k, v in f["locals"].items()}
+                locals_nodes = {
+                    k: Node(value_repr=v) for k, v in f["locals"].items()
+                }
 
             # Use stored line, fall back to linecache if source file still exists
             frames.append(
@@ -717,7 +809,8 @@ class ConsoleReporter(Reporter):
                     filename=f["filename"],
                     lineno=f["lineno"],
                     name=f["name"],
-                    line=f.get("line") or linecache.getline(f["filename"], f["lineno"]).strip(),
+                    line=f.get("line")
+                    or linecache.getline(f["filename"], f["lineno"]).strip(),
                     locals=locals_nodes,
                 )
             )

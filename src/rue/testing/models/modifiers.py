@@ -13,7 +13,7 @@ class ParameterSet:
     """Concrete parameter combination for an individual test run."""
 
     values: dict[str, Any]
-    id_suffix: str
+    suffix: str
 
 
 @dataclass(frozen=True)
@@ -46,4 +46,9 @@ class CaseGroupIterateModifier:
     groups: tuple[CaseGroup[Any, Any, Any], ...]
 
 
-Modifier = RepeatModifier | ParametrizeModifier | CaseIterateModifier | CaseGroupIterateModifier
+Modifier = (
+    RepeatModifier
+    | ParametrizeModifier
+    | CaseIterateModifier
+    | CaseGroupIterateModifier
+)

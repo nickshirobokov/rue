@@ -157,9 +157,13 @@ class Metric:
     name: str | None = None
     metadata: MetricMetadata = field(default_factory=MetricMetadata)
 
-    _raw_values: list[int | float | bool] = field(default_factory=list, repr=False)
+    _raw_values: list[int | float | bool] = field(
+        default_factory=list, repr=False
+    )
     _float_values: list[float] = field(default_factory=list, repr=False)
-    _values_lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
+    _values_lock: threading.RLock = field(
+        default_factory=threading.RLock, repr=False
+    )
     _cache: MetricState = field(default_factory=MetricState, repr=False)
 
     @validate_call
@@ -177,7 +181,9 @@ class Metric:
                 if test_ctx.item.name:
                     self.metadata.collected_from_tests.add(test_ctx.item.name)
                 if test_ctx.item.case_id:
-                    self.metadata.collected_from_cases.add(str(test_ctx.item.case_id))
+                    self.metadata.collected_from_cases.add(
+                        str(test_ctx.item.case_id)
+                    )
                 elif test_ctx.item.suffix:
                     self.metadata.collected_from_cases.add(test_ctx.item.suffix)
 
@@ -305,7 +311,9 @@ class Metric:
                     )
                     self._cache.variance = math.nan
                 else:
-                    self._cache.variance = statistics.variance(self._float_values, xbar=self.mean)
+                    self._cache.variance = statistics.variance(
+                        self._float_values, xbar=self.mean
+                    )
             value = self._cache.variance
             return value
 
@@ -320,7 +328,9 @@ class Metric:
                     )
                     self._cache.std = math.nan
                 else:
-                    self._cache.std = statistics.stdev(self._float_values, xbar=self.mean)
+                    self._cache.std = statistics.stdev(
+                        self._float_values, xbar=self.mean
+                    )
             value = self._cache.std
             return value
 
@@ -335,7 +345,9 @@ class Metric:
                     )
                     self._cache.pvariance = math.nan
                 else:
-                    self._cache.pvariance = statistics.pvariance(self._float_values, mu=self.mean)
+                    self._cache.pvariance = statistics.pvariance(
+                        self._float_values, mu=self.mean
+                    )
             value = self._cache.pvariance
             return value
 
@@ -350,7 +362,9 @@ class Metric:
                     )
                     self._cache.pstd = math.nan
                 else:
-                    self._cache.pstd = statistics.pstdev(self._float_values, mu=self.mean)
+                    self._cache.pstd = statistics.pstdev(
+                        self._float_values, mu=self.mean
+                    )
             value = self._cache.pstd
             return value
 
@@ -468,7 +482,9 @@ class Metric:
                 total = self.len
                 counts = self.counter
                 self._cache.distribution = (
-                    {k: v / total for k, v in counts.items()} if total > 0 else {}
+                    {k: v / total for k, v in counts.items()}
+                    if total > 0
+                    else {}
                 )
             value = self._cache.distribution
             return value
@@ -554,13 +570,17 @@ def metric(
         resolver_ctx = RESOLVER_CONTEXT.get()
         if resolver_ctx is not None:
             if resolver_ctx.consumer_name:
-                m.metadata.collected_from_resources.add(resolver_ctx.consumer_name)
+                m.metadata.collected_from_resources.add(
+                    resolver_ctx.consumer_name
+                )
         return m
 
     if is_generator:
 
         @functools.wraps(fn)
-        def wrapped_gen(*args: Any, **kwargs: Any) -> Generator[Metric, Any, Any]:
+        def wrapped_gen(
+            *args: Any, **kwargs: Any
+        ) -> Generator[Metric, Any, Any]:
             assertions_results = []
 
             with assertions_collector(assertions_results):

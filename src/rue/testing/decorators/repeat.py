@@ -29,10 +29,14 @@ class RepeatDecorator:
         actual_min_passes = min_passes if min_passes is not None else count
 
         if actual_min_passes < 1:
-            raise ValueError(f"min_passes must be >= 1, got {actual_min_passes}")
+            raise ValueError(
+                f"min_passes must be >= 1, got {actual_min_passes}"
+            )
 
         if actual_min_passes > count:
-            raise ValueError(f"min_passes ({actual_min_passes}) cannot exceed count ({count})")
+            raise ValueError(
+                f"min_passes ({actual_min_passes}) cannot exceed count ({count})"
+            )
 
         modifier = RepeatModifier(count=count, min_passes=actual_min_passes)
 

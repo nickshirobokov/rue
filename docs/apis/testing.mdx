@@ -65,7 +65,7 @@ def test_test(api_client, database, authenticated_client):
 
 ### @sut
 
-Register a function factory as a traced system-under-test resource.
+Register a function factory as an OpenTelemetry-observable system-under-test resource.
 
 **Signature:**
 ```python
@@ -84,10 +84,10 @@ Register a function factory as a traced system-under-test resource.
 |------|------|---------|-------------|
 | `fn` | `Callable \| None` | `None` | The SUT factory function to register |
 | `scope` | `Scope \| str` | `Scope.CASE` | Resource lifecycle scope: `"case"`, `"suite"`, `"session"` |
-| `method` | `str` | `"__call__"` | Method to trace when the factory returns a non-callable instance |
+| `method` | `str` | `"__call__"` | Method to wrap in an OpenTelemetry span when the factory returns a non-callable instance |
 | `validate_cases` | `list[Case[Any, Any]] \| None` | `None` | Cases to validate against the resolved SUT signature (raises on invalid input) |
 
-**Returns:** Decorated function registered as a traced resource
+**Returns:** Decorated function registered as an OpenTelemetry-observable resource
 
 **Example:**
 ```python
@@ -548,14 +548,14 @@ class Runner:
     def __init__(
         self,
         *,
-        reporters: list[Reporter],
+        reporters: list[Reporter] | None = None,
         maxfail: int | None = None,
         fail_fast: bool = False,
         verbosity: int = 0,
         concurrency: int = 1,
         timeout: float | None = None,
-        enable_tracing: bool = False,
-        trace_output: Path | str | None = None,
+        otel_enabled: bool = False,
+        otel_content: bool = True,
         capture_output: bool = True,
         db_enabled: bool = True,
         db_path: Path | str | None = None,
@@ -588,11 +588,12 @@ class Runner:
 ```python
 from uuid import UUID
 
-from rue.reports import ConsoleReporter
+from rue.reports import ConsoleReporter, OtelReporter
 from rue.testing import Runner
 
 runner = Runner(
-    reporters=[ConsoleReporter()],
+    reporters=[ConsoleReporter(), OtelReporter()],
+    otel_enabled=True,
     db_path=".rue/rue.db",
     run_id=UUID("00000000-0000-0000-0000-000000000001"),
 )
@@ -609,6 +610,8 @@ result = await runner.run(
     run_id="00000000-0000-0000-0000-000000000002",
 )
 ```
+
+OpenTelemetry persistence is configured through reporters. The default `Runner()` reporter set already includes `OtelReporter`; if you supply your own reporters, keep it attached for local `.rue/traces` storage or implement `Reporter.on_trace_collected()` in a custom reporter.
 
 ---
 

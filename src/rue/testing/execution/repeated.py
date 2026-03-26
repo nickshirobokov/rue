@@ -34,7 +34,9 @@ class RepeatedTest(Test):
         if not self.definition.modifiers or not isinstance(
             self.definition.modifiers[0], RepeatModifier
         ):
-            raise ValueError("RepeatedTest requires RepeatModifier as first modifier")
+            raise ValueError(
+                "RepeatedTest requires RepeatModifier as first modifier"
+            )
 
     async def execute(self, resolver: ResourceResolver) -> TestExecution:
         """Execute test count times and aggregate results."""
@@ -61,7 +63,9 @@ class RepeatedTest(Test):
                 index, sub_execution = await completed_task
                 sub_executions[index] = sub_execution
                 if runner:
-                    await runner.notify_subtest_complete(self.definition, sub_execution)
+                    await runner.notify_subtest_complete(
+                        self.definition, sub_execution
+                    )
         except Exception:
             for task in tasks:
                 if not task.done():
@@ -73,8 +77,16 @@ class RepeatedTest(Test):
             execution for execution in sub_executions if execution is not None
         ]
 
-        passed = sum(1 for e in ordered_sub_executions if e.result.status == TestStatus.PASSED)
-        status = TestStatus.PASSED if passed >= self.min_passes else TestStatus.FAILED
+        passed = sum(
+            1
+            for e in ordered_sub_executions
+            if e.result.status == TestStatus.PASSED
+        )
+        status = (
+            TestStatus.PASSED
+            if passed >= self.min_passes
+            else TestStatus.FAILED
+        )
         duration = sum(e.result.duration_ms for e in ordered_sub_executions)
 
         return TestExecution(

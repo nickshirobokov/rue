@@ -19,7 +19,7 @@ from .testing import (
     xfail,
 )
 from .testing.sut import sut
-from .tracing import TraceContext, init_tracing, trace_step
+from .telemetry import OtelTrace, OtelTraceSession, otel_span
 
 
 __all__ = [
@@ -47,8 +47,8 @@ __all__ = [
     # Reporters
     "Reporter",
     "reporter",
-    # Tracing
-    "init_tracing",
-    "trace_step",
-    "TraceContext",
+    # OpenTelemetry
+    "otel_span",
+    "OtelTrace",
+    "OtelTraceSession",
 ]

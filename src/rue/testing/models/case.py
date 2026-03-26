@@ -38,7 +38,9 @@ class Case(BaseModel, Generic[InputsT, RefsT]):
 
     id: UUID = Field(default_factory=uuid4)
     tags: set[str] = Field(default_factory=set)
-    metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    metadata: dict[str, str | int | float | bool | None] = Field(
+        default_factory=dict
+    )
     inputs: InputsT = Field(default_factory=dict)  # type: ignore[assignment]
     references: RefsT = Field(default_factory=dict)  # type: ignore[assignment]
 
@@ -75,7 +77,9 @@ class CaseGroup(BaseModel, Generic[InputsT, RefsT, GroupRefsT]):
     model_config = ConfigDict(validate_default=True, frozen=True)
 
     name: str
-    cases: list[Case[InputsT, RefsT]] = Field(default_factory=list, min_length=1)
+    cases: list[Case[InputsT, RefsT]] = Field(
+        default_factory=list, min_length=1
+    )
     references: GroupRefsT = Field(default_factory=dict)  # type: ignore[assignment]
     min_passes: int = Field(default=1, ge=1)
 

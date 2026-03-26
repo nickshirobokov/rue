@@ -1,4 +1,3 @@
-import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -10,7 +9,6 @@ from rue.context import predicate_results_collector
 from rue.predicates import PredicateResult, predicate
 from rue.testing.discovery import collect
 from rue.testing.runner import Runner
-from rue.tracing import clear_traces, set_trace_output_path
 
 
 @predicate
@@ -64,42 +62,37 @@ async def async_equals(
     return actual.casefold() == reference.casefold()
 
 
-@pytest.fixture
-def trace_output_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.delenv("RUE_TRACE_CONTENT", raising=False)
-    output_path = tmp_path / "predicate_traces.jsonl"
-    set_trace_output_path(output_path)
-    return output_path
-
-
-@pytest.fixture(autouse=True)
-def clear_traces_each(trace_output_path: Path) -> None:
-    clear_traces()
-    yield
-    clear_traces()
-
-
-def _span_from_output(trace_output_path: Path, name: str) -> dict[str, object]:
-    for line in trace_output_path.read_text().splitlines():
-        span = json.loads(line)
-        if span["name"] == name:
-            return span
-    raise AssertionError(f"Missing span {name!r}")
-
-
-def _trace_names(trace_output_path: Path) -> set[str]:
-    return {
-        json.loads(line)["name"]
-        for line in trace_output_path.read_text().splitlines()
-        if line
-    }
-
-
 def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
     mod_name = f"rue_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(source.lstrip())
     return mod_name, mod_path
+
+
+async def _run_module_with_tracing(
+    *,
+    tmp_path: Path,
+    trace_reporter,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    db_enabled: bool = False,
+    db_path: Path | None = None,
+):
+    mod_name, mod_path = _write_temp_module(tmp_path, source)
+
+    try:
+        monkeypatch.chdir(tmp_path)
+        items = collect(mod_path)
+        runner = Runner(
+            reporters=[trace_reporter],
+            otel_enabled=True,
+            db_enabled=db_enabled,
+            db_path=db_path,
+        )
+        run = await runner.run(items=items)
+        return mod_name, run, trace_reporter.sessions
+    finally:
+        sys.modules.pop(mod_name, None)
 
 
 def test_sync_predicate_collects_normalized_result():
@@ -153,7 +146,29 @@ async def test_async_predicate_collects_returned_result_without_normalizing():
     }
 
 
-def test_sync_predicate_writes_trace_attributes(trace_output_path: Path):
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "span_name", "expected_attrs"),
+    [
+        (
+            """
+from rue.predicates import predicate
+
+@predicate
+def equals(
+    actual: str,
+    reference: str,
+    *,
+    strict: bool = True,
+    confidence: float = 1.0,
+    message: str | None = None,
+) -> bool:
+    _ = confidence, message
+    if strict:
+        return actual == reference
+    return actual.casefold() == reference.casefold()
+
+def test_sample():
     assert equals(
         "abc",
         "a",
@@ -161,40 +176,90 @@ def test_sync_predicate_writes_trace_attributes(trace_output_path: Path):
         confidence=0.25,
         message="prefix",
     ) is False
+""",
+            "predicate.equals",
+            {
+                "rue.predicate": True,
+                "rue.predicate.name": "equals",
+                "predicate.value": False,
+                "predicate.strict": False,
+                "predicate.confidence": 0.25,
+                "predicate.input.actual": "'abc'",
+                "predicate.input.reference": "'a'",
+                "predicate.message": "'prefix'",
+            },
+        ),
+        (
+            """
+from rue.predicates import predicate
 
-    span = _span_from_output(trace_output_path, "predicate.equals")
-    attrs = span["attributes"]
+@predicate
+async def async_equals(
+    actual: str,
+    reference: str,
+    *,
+    strict: bool = True,
+    confidence: float = 1.0,
+    message: str | None = None,
+) -> bool:
+    _ = confidence, message
+    if strict:
+        return actual == reference
+    return actual.casefold() == reference.casefold()
 
-    assert attrs["rue.predicate"] is True
-    assert attrs["rue.predicate.name"] == "equals"
-    assert attrs["predicate.value"] is False
-    assert attrs["predicate.strict"] is False
-    assert attrs["predicate.confidence"] == 0.25
-    assert attrs["predicate.input.actual"] == "'abc'"
-    assert attrs["predicate.input.reference"] == "'a'"
-    assert attrs["predicate.message"] == "'prefix'"
-
-
-@pytest.mark.asyncio
-async def test_async_predicate_writes_trace_attributes(trace_output_path: Path):
+async def test_sample():
     assert await async_equals(
         "abc",
         "ABC",
         strict=False,
         confidence=0.75,
     ) is True
+""",
+            "predicate.async_equals",
+            {
+                "rue.predicate": True,
+                "rue.predicate.name": "async_equals",
+                "predicate.value": True,
+                "predicate.strict": False,
+                "predicate.confidence": 0.75,
+                "predicate.input.actual": "'abc'",
+                "predicate.input.reference": "'ABC'",
+            },
+        ),
+    ],
+)
+async def test_predicate_writes_trace_attributes(
+    tmp_path: Path,
+    trace_reporter,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    span_name: str,
+    expected_attrs: dict[str, object],
+):
+    mod_name, run, sessions = await _run_module_with_tracing(
+        tmp_path=tmp_path,
+        trace_reporter=trace_reporter,
+        monkeypatch=monkeypatch,
+        source=source,
+    )
 
-    span = _span_from_output(trace_output_path, "predicate.async_equals")
-    attrs = span["attributes"]
+    assert run.result.passed == 1
+    payloads = [session.serialize() for session in sessions]
+    attrs = next(
+        span["attributes"]
+        for payload in payloads
+        for span in payload["spans"]
+        if span["name"] == span_name
+    )
 
-    assert attrs["rue.predicate"] is True
-    assert attrs["rue.predicate.name"] == "async_equals"
-    assert attrs["predicate.value"] is True
-    assert attrs["predicate.strict"] is False
-    assert attrs["predicate.confidence"] == 0.75
-    assert attrs["predicate.input.actual"] == "'abc'"
-    assert attrs["predicate.input.reference"] == "'ABC'"
-    assert "predicate.message" not in attrs
+    for key, value in expected_attrs.items():
+        assert attrs[key] == value
+    if "predicate.message" not in expected_attrs:
+        assert "predicate.message" not in attrs
+
+    assert f"test.{mod_name}::test_sample" in {
+        span["name"] for payload in payloads for span in payload["spans"]
+    }
 
 
 def test_predicate_rejects_missing_reference_parameter():
@@ -235,11 +300,17 @@ def test_predicate_uses_signature_binding_for_missing_call_arguments():
 @pytest.mark.asyncio
 async def test_runner_collects_predicate_results_and_trace_data_into_db(
     tmp_path: Path,
-    null_reporter,
+    trace_reporter,
+    monkeypatch: pytest.MonkeyPatch,
 ):
-    mod_name, mod_path = _write_temp_module(
-        tmp_path,
-        """
+    db_path = tmp_path / "rue.db"
+    mod_name, run, sessions = await _run_module_with_tracing(
+        tmp_path=tmp_path,
+        trace_reporter=trace_reporter,
+        monkeypatch=monkeypatch,
+        db_enabled=True,
+        db_path=db_path,
+        source="""
 from rue.predicates import predicate
 
 @predicate
@@ -257,67 +328,75 @@ def test_sample():
     assert equals("a", "b"), "predicate failed"
 """,
     )
-    db_path = tmp_path / "rue.db"
-    trace_path = tmp_path / "runner_traces.jsonl"
 
-    try:
-        items = collect(mod_path)
-        set_trace_output_path(trace_path)
+    execution = run.result.executions[0]
+    assert execution.status.value == "failed"
+    assert len(execution.result.assertion_results) == 1
+    assert len(execution.result.assertion_results[0].predicate_results) == 1
 
-        run = await Runner(
-            reporters=[null_reporter],
-            enable_tracing=True,
-            trace_output=trace_path,
-            db_enabled=True,
-            db_path=db_path,
-        ).run(items=items)
+    predicate_result = execution.result.assertion_results[0].predicate_results[
+        0
+    ]
+    assert predicate_result.model_dump() == {
+        "actual": "a",
+        "reference": "b",
+        "name": "equals",
+        "strict": False,
+        "confidence": 0.25,
+        "value": False,
+        "message": "db-message",
+    }
 
-        execution = run.result.executions[0]
-        assert execution.status.value == "failed"
-        assert len(execution.result.assertion_results) == 1
-        assert len(execution.result.assertion_results[0].predicate_results) == 1
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        assertion = conn.execute(
+            "SELECT * FROM assertions WHERE test_execution_id = ?",
+            (str(execution.execution_id),),
+        ).fetchone()
+        assert assertion is not None
 
-        predicate_result = execution.result.assertion_results[0].predicate_results[0]
-        assert predicate_result.model_dump() == {
-            "actual": "a",
-            "reference": "b",
-            "name": "equals",
-            "strict": False,
-            "confidence": 0.25,
-            "value": False,
-            "message": "db-message",
-        }
+        predicate_rows = conn.execute(
+            "SELECT * FROM predicates WHERE assertion_id = ?",
+            (assertion["id"],),
+        ).fetchall()
 
-        with sqlite3.connect(db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            assertion = conn.execute(
-                "SELECT * FROM assertions WHERE test_execution_id = ?",
-                (str(execution.execution_id),),
-            ).fetchone()
-            assert assertion is not None
+    assert len(predicate_rows) == 1
+    predicate_row = dict(predicate_rows[0])
+    assert predicate_row["predicate_name"] == "equals"
+    assert predicate_row["actual"] == "a"
+    assert predicate_row["reference"] == "b"
+    assert predicate_row["strict"] == 0
+    assert predicate_row["confidence"] == 0.25
+    assert predicate_row["value"] == 0
+    assert predicate_row["message"] == "db-message"
 
-            predicate_rows = conn.execute(
-                "SELECT * FROM predicates WHERE assertion_id = ?",
-                (assertion["id"],),
-            ).fetchall()
-            trace_rows = conn.execute(
-                "SELECT name FROM trace_spans WHERE test_execution_id = ?",
-                (str(execution.execution_id),),
-            ).fetchall()
+    span_names = {
+        span["name"]
+        for payload in [session.serialize() for session in sessions]
+        for span in payload["spans"]
+    }
+    assert "predicate.equals" in span_names
+    assert f"test.{mod_name}::test_sample" in span_names
 
-        assert len(predicate_rows) == 1
-        predicate_row = dict(predicate_rows[0])
-        assert predicate_row["predicate_name"] == "equals"
-        assert predicate_row["actual"] == "a"
-        assert predicate_row["reference"] == "b"
-        assert predicate_row["strict"] == 0
-        assert predicate_row["confidence"] == 0.25
-        assert predicate_row["value"] == 0
-        assert predicate_row["message"] == "db-message"
 
-        trace_names = {row["name"] for row in trace_rows}
-        assert "predicate.equals" in trace_names
-        assert f"test.{mod_name}::test_sample" in trace_names
-        assert "predicate.equals" in _trace_names(trace_path)
-    finally:
-        sys.modules.pop(mod_name, None)
+@pytest.mark.asyncio
+async def test_predicate_does_not_trace_outside_runner_even_after_runtime_configured(
+    tmp_path: Path,
+    trace_reporter,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, _, sessions = await _run_module_with_tracing(
+        tmp_path=tmp_path,
+        trace_reporter=trace_reporter,
+        monkeypatch=monkeypatch,
+        source="""
+def test_sample():
+    assert True
+""",
+    )
+
+    before = [session.serialize() for session in sessions]
+    assert equals("abc", "ABC", strict=False) is True
+    after = [session.serialize() for session in sessions]
+
+    assert before == after

@@ -2,17 +2,26 @@
 
 import asyncio
 import inspect
-import json
+import sys
 from dataclasses import dataclass
+from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel
 from pydantic_core import ValidationError
 
-from rue.resources import ResourceResolver, Scope, clear_registry, get_registry, resource
+from rue.resources import (
+    ResourceResolver,
+    Scope,
+    clear_registry,
+    get_registry,
+    resource,
+)
+from rue.testing.discovery import collect
 from rue.testing.models import Case
+from rue.testing.runner import Runner
 from rue.testing.sut import sut
-from rue.tracing import clear_traces, set_trace_output_path
 
 
 @pytest.fixture(autouse=True)
@@ -22,18 +31,34 @@ def clean_registry():
     clear_registry()
 
 
-@pytest.fixture(scope="module", autouse=True)
-def setup_tracing_once(tmp_path_factory):
-    tmp_dir = tmp_path_factory.mktemp("traces")
-    set_trace_output_path(output_path=tmp_dir / "sut_traces.jsonl")
+def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
+    mod_name = f"rue_{uuid4().hex}"
+    mod_path = tmp_path / f"{mod_name}.py"
+    mod_path.write_text(source.lstrip())
+    return mod_name, mod_path
 
 
-@pytest.fixture(autouse=True)
-def clear_traces_each(tmp_path):
-    set_trace_output_path(tmp_path / "traces.jsonl")
-    clear_traces()
-    yield
-    clear_traces()
+async def _run_module_with_tracing(
+    *,
+    tmp_path: Path,
+    trace_reporter,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+):
+    mod_name, mod_path = _write_temp_module(tmp_path, source)
+
+    try:
+        monkeypatch.chdir(tmp_path)
+        items = collect(mod_path)
+        runner = Runner(
+            reporters=[trace_reporter],
+            otel_enabled=True,
+            db_enabled=False,
+        )
+        run = await runner.run(items=items)
+        return mod_name, run, trace_reporter.sessions
+    finally:
+        sys.modules.pop(mod_name, None)
 
 
 class TestSutDecorator:
@@ -198,7 +223,9 @@ class TestSutResolution:
             x: int
             y: int
 
-        cases = [Case[AdderInputs, dict[str, int]](inputs=AdderInputs(x=1, y=2))]
+        cases = [
+            Case[AdderInputs, dict[str, int]](inputs=AdderInputs(x=1, y=2))
+        ]
 
         @sut(validate_cases=cases)
         def adder():
@@ -236,7 +263,9 @@ class TestSutResolution:
             x: int
 
         cases = [
-            Case[IncrementInputs, dict[str, int]](inputs=IncrementInputs(x="bad")),
+            Case[IncrementInputs, dict[str, int]](
+                inputs=IncrementInputs(x="bad")
+            ),
         ]
 
         @sut(validate_cases=cases)
@@ -257,7 +286,11 @@ class TestSutResolution:
         class IncrementInputs(BaseModel):
             x: str
 
-        cases = [Case[IncrementInputs, dict[str, int]](inputs=IncrementInputs(x="not-an-int"))]
+        cases = [
+            Case[IncrementInputs, dict[str, int]](
+                inputs=IncrementInputs(x="not-an-int")
+            )
+        ]
 
         @sut(validate_cases=cases)
         def increment():
@@ -290,73 +323,108 @@ class TestSutResolution:
         assert resolved.run(3) == 6
 
 
-class TestSutTracing:
+class TestSutOpenTelemetry:
     @pytest.mark.asyncio
-    async def test_callable_sut_creates_span(self):
+    @pytest.mark.parametrize(
+        ("source", "span_name", "expected_attrs"),
+        [
+            (
+                """
+import rue
+
+@rue.sut
+def traced_sut():
+    def run(x: int) -> int:
+        return x * 2
+    return run
+
+def test_sample(traced_sut):
+    assert traced_sut(5) == 10
+""",
+                "sut.traced_sut",
+                {"rue.sut": True, "rue.sut.name": "traced_sut"},
+            ),
+            (
+                """
+import rue
+
+class Service:
+    def run(self, value: str) -> str:
+        return f"ok:{value}"
+
+@rue.sut(method="run")
+def traced_service():
+    return Service()
+
+def test_sample(traced_service):
+    assert traced_service.run("hello") == "ok:hello"
+""",
+                "sut.traced_service",
+                {"rue.sut": True, "rue.sut.name": "traced_service"},
+            ),
+        ],
+    )
+    async def test_sut_creates_span(
+        self,
+        tmp_path: Path,
+        trace_reporter,
+        monkeypatch: pytest.MonkeyPatch,
+        source: str,
+        span_name: str,
+        expected_attrs: dict[str, object],
+    ):
+        mod_name, run, sessions = await _run_module_with_tracing(
+            tmp_path=tmp_path,
+            trace_reporter=trace_reporter,
+            monkeypatch=monkeypatch,
+            source=source,
+        )
+
+        assert run.result.passed == 1
+        payloads = [session.serialize() for session in sessions]
+        span = next(
+            span
+            for payload in payloads
+            for span in payload["spans"]
+            if span["name"] == span_name
+        )
+        assert f"test.{mod_name}::test_sample" in {
+            inner_span["name"]
+            for payload in payloads
+            for inner_span in payload["spans"]
+        }
+        for key, value in expected_attrs.items():
+            assert span["attributes"].get(key) == value
+
+    @pytest.mark.asyncio
+    async def test_sut_does_not_trace_outside_runner_even_after_runtime_configured(
+        self,
+        tmp_path: Path,
+        trace_reporter,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        _, _, sessions = await _run_module_with_tracing(
+            tmp_path=tmp_path,
+            trace_reporter=trace_reporter,
+            monkeypatch=monkeypatch,
+            source="""
+def test_sample():
+    assert True
+""",
+        )
+
         @sut
-        def traced_sut():
-            def run(x: int) -> int:
-                return x * 2
+        def adder():
+            def run(x: int, y: int) -> int:
+                return x + y
 
             return run
 
         resolver = ResourceResolver(get_registry())
-        resolved = await resolver.resolve("traced_sut")
-        resolved(5)
+        resolved = await resolver.resolve("adder")
+        before = [session.serialize() for session in sessions]
 
-        from rue.tracing.lifecycle import _exporter
+        assert resolved(2, 3) == 5
 
-        assert _exporter is not None
-        lines = _exporter.output_path.read_text().strip().splitlines()
-        span_names = [json.loads(line)["name"] for line in lines]
-        assert "sut.traced_sut" in span_names
-
-    @pytest.mark.asyncio
-    async def test_instance_method_sut_creates_span(self):
-        class Service:
-            def run(self, value: str) -> str:
-                return f"ok:{value}"
-
-        @sut(method="run")
-        def traced_service():
-            return Service()
-
-        resolver = ResourceResolver(get_registry())
-        resolved = await resolver.resolve("traced_service")
-        assert resolved.run("hello") == "ok:hello"
-
-        from rue.tracing.lifecycle import _exporter
-
-        assert _exporter is not None
-        lines = _exporter.output_path.read_text().strip().splitlines()
-        span_names = [json.loads(line)["name"] for line in lines]
-        assert "sut.traced_service" in span_names
-
-    @pytest.mark.asyncio
-    async def test_sut_spans_have_rue_attributes(self):
-        @sut
-        def my_test_function():
-            def run(x: int) -> int:
-                return x
-
-            return run
-
-        resolver = ResourceResolver(get_registry())
-        resolved = await resolver.resolve("my_test_function")
-        resolved(1)
-
-        from rue.tracing.lifecycle import _exporter
-
-        assert _exporter is not None
-        lines = _exporter.output_path.read_text().strip().splitlines()
-
-        span = None
-        for line in lines:
-            parsed = json.loads(line)
-            if parsed["name"] == "sut.my_test_function":
-                span = parsed
-                break
-
-        assert span is not None
-        assert span["attributes"].get("rue.sut") is True
-        assert span["attributes"].get("rue.sut.name") == "my_test_function"
+        after = [session.serialize() for session in sessions]
+        assert before == after

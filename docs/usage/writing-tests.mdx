@@ -22,7 +22,7 @@ This page focuses on **how to write tests** and (importantly) **where the behavi
 Rue follows pytest-style discovery patterns to find test functions in your codebase:
 
 <Info>
-  **Related docs**: [Rue Tests (Concept)](/concepts/rue-tests), [Testing (API)](/apis/testing)
+  **Related docs**: [Test (Concept)](/concepts/test), [Testing (API)](/apis/testing)
 </Info>
 
 **Files**: Rue discovers Python files matching `rue_*.py`:
@@ -182,7 +182,7 @@ def test_main_thread_only():
 Resources are the Rue equivalent of pytest fixtures: named, injectable dependencies that Rue resolves by parameter name.
 
 <Info>
-  **Related docs**: [Resource (Concept)](/concepts/resource), [Metric (Concept)](/concepts/metric), [SUT (Concept)](/concepts/sut), [Tracing (API)](/apis/tracing)
+  **Related docs**: [Resource (Concept)](/concepts/resource), [Metric (Concept)](/concepts/metric), [SUT (Concept)](/concepts/sut), [OpenTelemetry Traces (API)](/apis/open-telemetry-traces)
 </Info>
 
 **`@rue.resource(scope="case")`** - Define injectable dependencies with lifecycle management
@@ -233,33 +233,33 @@ def test_classifier(input, expected, classifier, accuracy: Metric):
 
 Scopes: `"session"` (default), `"suite"`, `"case"`.
 
-**`@rue.sut`** - Register a System Under Test (SUT) as an injectable callable
+**`@rue.sut`** - Register a System Under Test (SUT) factory as an injectable, traceable resource
 
-A SUT is the thing you’re actually evaluating (an agent function, a pipeline, a classifier, a client wrapper, etc.). Declaring it with `@rue.sut` makes it injectable and traceable, so you can assert not only on the output, but also on how it behaved internally (for example: tool calls).
+A SUT is the thing you’re actually evaluating (an agent function, a pipeline, a classifier, a client wrapper, etc.). Declaring a factory with `@rue.sut` makes the resolved callable or instance injectable and traceable, so you can assert not only on the output, but also on how it behaved internally (for example: tool calls).
 
 <Note>
-  A SUT must be **callable**. Rue will inject it into your test function and you will call it like a normal function (or callable object).
+  The decorated function is a factory. It should return either a callable, or an instance whose `method=` should be traced. Rue injects that resolved object into your test.
 </Note>
 
 ```python
 from demo_app import agent
 
 @rue.sut
-def weather_agent(prompt: str):
-    return agent(prompt, tools=["get_weather"])
+def weather_agent():
+    return lambda prompt: agent(prompt, tools=["get_weather"])
 
-def test_agent_uses_tools(weather_agent, trace_context):
+def test_agent_uses_tools(weather_agent, otel_trace):
     result = weather_agent("What's the weather?")
 
-    # Access trace spans for assertions
-    sut_spans = trace_context.get_sut_spans(name="weather_agent")
+    # Access OpenTelemetry spans for assertions
+    sut_spans = otel_trace.get_sut_spans(name="weather_agent")
     assert sut_spans
 
     # If you want to assert on tool calls, query LLM spans explicitly.
     # Note: attribute keys come from OpenTelemetry LLM instrumentations.
     tool_names = [
         s.attributes.get("llm.request.functions.0.name")
-        for s in trace_context.get_llm_calls()
+        for s in otel_trace.get_llm_calls()
         if s.attributes
     ]
     assert "get_weather" in tool_names
@@ -334,7 +334,7 @@ def test_validation(response):
 
 
 <CardGroup cols={2}>
-  <Card title="Rue Functions (Concept)" icon="code" href="/concepts/rue-tests">
+  <Card title="Test (Concept)" icon="code" href="/concepts/test">
     Discovery rules, organization, and patterns
   </Card>
   <Card title="Quick Start" icon="rocket" href="/get-started/quick-start">

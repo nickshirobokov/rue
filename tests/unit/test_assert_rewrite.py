@@ -125,7 +125,9 @@ def test_metric_capture_multi():
 
 
 @pytest.mark.asyncio
-async def test_rewritten_asserts_inside_metric_functions_are_collected(tmp_path):
+async def test_rewritten_asserts_inside_metric_functions_are_collected(
+    tmp_path,
+):
     clear_registry()
     mod_name = f"rue_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
@@ -199,7 +201,10 @@ def test_repr_cases():
             item.fn()
 
         assert len(assertion_results) == 5
-        results = {ar.expression_repr.expr: ar.expression_repr for ar in assertion_results}
+        results = {
+            ar.expression_repr.expr: ar.expression_repr
+            for ar in assertion_results
+        }
 
         t1_repr = results["assert t1"]
         assert t1_repr.lines_above == "\n    print(t1)\n    print(t2)"
@@ -240,11 +245,24 @@ def test_compare_cases():
             item.fn()
 
         assert len(assertion_results) == 3
-        results = {ar.expression_repr.expr: ar.expression_repr for ar in assertion_results}
+        results = {
+            ar.expression_repr.expr: ar.expression_repr
+            for ar in assertion_results
+        }
 
-        assert results["assert t1 < t2"].resolved_args == {"t1": "5", "t2": "10"}
-        assert results["assert t1 + t2 > 0"].resolved_args == {"t1": "5", "t2": "10"}
-        assert results["assert a < b < c"].resolved_args == {"a": "1", "b": "2", "c": "3"}
+        assert results["assert t1 < t2"].resolved_args == {
+            "t1": "5",
+            "t2": "10",
+        }
+        assert results["assert t1 + t2 > 0"].resolved_args == {
+            "t1": "5",
+            "t2": "10",
+        }
+        assert results["assert a < b < c"].resolved_args == {
+            "a": "1",
+            "b": "2",
+            "c": "3",
+        }
     finally:
         sys.modules.pop(mod_name, None)
 
@@ -271,7 +289,10 @@ def test_complex_compare_cases():
 
         assert len(assertion_results) == 1
         [ar] = assertion_results
-        assert ar.expression_repr.expr == "assert a > 1 and a in b and sum(b) < c()"
+        assert (
+            ar.expression_repr.expr
+            == "assert a > 1 and a in b and sum(b) < c()"
+        )
         assert ar.expression_repr.resolved_args == {
             "a": "5",
             "b": "[5, 6, 7]",
@@ -309,8 +330,12 @@ def test_multiline_assert():
         [ar] = assertion_results
 
         assert ar.expression_repr.expr == "assert func(\n        x\n    )"
-        assert ar.expression_repr.lines_above == '\n    x = 4\n    print("above")'
+        assert (
+            ar.expression_repr.lines_above == '\n    x = 4\n    print("above")'
+        )
         assert ar.expression_repr.lines_below == '\n    print("below")'
-        assert ar.expression_repr.resolved_args == {"func(\n        x\n    )": "5"}
+        assert ar.expression_repr.resolved_args == {
+            "func(\n        x\n    )": "5"
+        }
     finally:
         sys.modules.pop(mod_name, None)

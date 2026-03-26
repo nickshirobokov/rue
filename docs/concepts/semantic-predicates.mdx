@@ -54,7 +54,7 @@ def contains_ticket_id(actual: str, reference: str) -> bool:
     return reference in actual
 ```
 
-The decorator makes your function participate in Rue's predicate recording and tracing machinery while keeping the call site simple:
+The decorator makes your function participate in Rue's predicate recording and OpenTelemetry span machinery while keeping the call site simple:
 
 ```python
 def test_ticket_response():
@@ -64,11 +64,11 @@ def test_ticket_response():
 
 ## What Rue records
 
-When a predicate runs inside a Rue-transformed `assert`, Rue records a `PredicateResult` for reporting, storage, and tracing.
+When a predicate runs inside a Rue-transformed `assert`, Rue records a `PredicateResult` for reporting, storage, and OpenTelemetry.
 
 - Built-in predicates still return `bool` to your test.
 - Decorated predicates still return `bool` to your test.
-- Trace spans are named `predicate.<predicate_name>`.
+- OpenTelemetry spans are named `predicate.<predicate_name>`.
 - Recorded metadata includes the predicate name, `actual`, `reference`, `strict`, `confidence`, the boolean value, and an optional message.
 
 This is why predicate docs need both an API view and a semantic view: the Python call returns a simple boolean, but the evaluation still produces structured metadata behind the scenes.

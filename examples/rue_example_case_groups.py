@@ -48,7 +48,9 @@ class ExampleGroupReferences(BaseModel):
 
 # Case groups
 
-geography_group = CaseGroup[ExampleInputs, ExampleCaseReferences, ExampleGroupReferences](
+geography_group = CaseGroup[
+    ExampleInputs, ExampleCaseReferences, ExampleGroupReferences
+](
     name="geography",
     references=ExampleGroupReferences(
         stop_keywords=["Lol", "Kek"],
@@ -57,20 +59,30 @@ geography_group = CaseGroup[ExampleInputs, ExampleCaseReferences, ExampleGroupRe
         Case[ExampleInputs, ExampleCaseReferences](
             tags={"geography"},
             metadata={"verbose": False},
-            references=ExampleCaseReferences(expected="Paris", max_len=10, min_len=1),
-            inputs=ExampleInputs(prompt="What is the capital of France? Be concise."),
+            references=ExampleCaseReferences(
+                expected="Paris", max_len=10, min_len=1
+            ),
+            inputs=ExampleInputs(
+                prompt="What is the capital of France? Be concise."
+            ),
         ),
         Case[ExampleInputs, ExampleCaseReferences](
             tags={"geography"},
             metadata={"verbose": True},
-            references=ExampleCaseReferences(expected="Berlin", max_len=10000, min_len=20),
-            inputs=ExampleInputs(prompt="What is the capital of Germany? Be verbose."),
+            references=ExampleCaseReferences(
+                expected="Berlin", max_len=10000, min_len=20
+            ),
+            inputs=ExampleInputs(
+                prompt="What is the capital of Germany? Be verbose."
+            ),
         ),
     ],
     min_passes=2,  # strict: both geography cases must pass
 )
 
-music_group = CaseGroup[ExampleInputs, ExampleCaseReferences, ExampleGroupReferences](
+music_group = CaseGroup[
+    ExampleInputs, ExampleCaseReferences, ExampleGroupReferences
+](
     name="music",
     references=ExampleGroupReferences(
         stop_keywords=["Lol", "Kek"],
@@ -79,14 +91,22 @@ music_group = CaseGroup[ExampleInputs, ExampleCaseReferences, ExampleGroupRefere
         Case[ExampleInputs, ExampleCaseReferences](
             tags={"music"},
             metadata={"verbose": True},
-            references=ExampleCaseReferences(expected="Metallica", max_len=10000, min_len=20),
-            inputs=ExampleInputs(prompt="What is the best rock band? Be verbose."),
+            references=ExampleCaseReferences(
+                expected="Metallica", max_len=10000, min_len=20
+            ),
+            inputs=ExampleInputs(
+                prompt="What is the best rock band? Be verbose."
+            ),
         ),
         Case[ExampleInputs, ExampleCaseReferences](
             tags={"music"},
             metadata={"verbose": False},
-            references=ExampleCaseReferences(expected="Lady Gaga", max_len=10, min_len=1),
-            inputs=ExampleInputs(prompt="What is the best pop band? Be concise."),
+            references=ExampleCaseReferences(
+                expected="Lady Gaga", max_len=10, min_len=1
+            ),
+            inputs=ExampleInputs(
+                prompt="What is the best pop band? Be concise."
+            ),
         ),
     ],
     min_passes=1,  # tolerant: only one music case must pass for this group to pass
@@ -104,7 +124,9 @@ def chatbot():
 
 @rue.iter_case_groups(*all_groups)
 def test_iter_case_groups_with_validation(
-    group: CaseGroup[ExampleInputs, ExampleCaseReferences, ExampleGroupReferences],
+    group: CaseGroup[
+        ExampleInputs, ExampleCaseReferences, ExampleGroupReferences
+    ],
     case: Case[ExampleInputs, ExampleCaseReferences],
     chatbot,
 ):
@@ -116,4 +138,6 @@ def test_iter_case_groups_with_validation(
     assert len(response) >= case.references.min_len
 
     # group-level references
-    assert not any(keyword in response for keyword in group.references.stop_keywords)
+    assert not any(
+        keyword in response for keyword in group.references.stop_keywords
+    )

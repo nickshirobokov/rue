@@ -16,10 +16,10 @@ from pydantic import BaseModel
 from pydantic.experimental.arguments_schema import generate_arguments_schema
 from pydantic_core import ArgsKwargs, SchemaValidator
 
+from rue.context import get_test_tracer
 from rue.resources import Scope, resource
 from rue.testing.models.case import Case
-from rue.tracing import get_tracer
-from rue.tracing.attributes import is_trace_content_enabled, truncate_repr
+from rue.telemetry.otel.runtime import otel_runtime
 
 
 P = ParamSpec("P")
@@ -77,15 +77,23 @@ def sut(
     def on_resolve(sut_instance: Any) -> Any:
         # TODO: Register SUT in the DB with dependencies
         match sut_instance:
-            case types.FunctionType() | types.MethodType() | functools.partial():
+            case (
+                types.FunctionType() | types.MethodType() | functools.partial()
+            ):
                 if normalized_validate_cases:
                     _validate_cases(normalized_validate_cases, sut_instance)
                 return _trace_callable(sut_instance, sut_name=factory_name)
 
-            case _ if isinstance(getattr(sut_instance, method, None), types.MethodType):
+            case _ if isinstance(
+                getattr(sut_instance, method, None), types.MethodType
+            ):
                 if normalized_validate_cases:
-                    _validate_cases(normalized_validate_cases, getattr(sut_instance, method))
-                return _trace_instance_method(sut_instance, sut_name=factory_name, method=method)
+                    _validate_cases(
+                        normalized_validate_cases, getattr(sut_instance, method)
+                    )
+                return _trace_instance_method(
+                    sut_instance, sut_name=factory_name, method=method
+                )
 
             case _:
                 msg = f"""SUT '{factory_name}' resolved to unsupported type:
@@ -105,7 +113,9 @@ def _validate_cases(cases: Sequence[Case[Any, Any]], sut: Callable[..., Any]):
     schema = generate_arguments_schema(
         sut,
         parameters_callback=(
-            lambda index, name, annotation: "skip" if name in {"self", "cls"} else None
+            lambda index, name, annotation: (
+                "skip" if name in {"self", "cls"} else None
+            )
         ),
     )
     validator = SchemaValidator(schema)
@@ -118,7 +128,10 @@ def _validate_cases(cases: Sequence[Case[Any, Any]], sut: Callable[..., Any]):
             case Mapping() as mapping:
                 input_values = dict(mapping)
             case value if is_dataclass(value) and not isinstance(value, type):
-                input_values = {field.name: getattr(value, field.name) for field in fields(value)}
+                input_values = {
+                    field.name: getattr(value, field.name)
+                    for field in fields(value)
+                }
             case value:
                 msg = (
                     "Case inputs must be a dict, mapping, BaseModel, or dataclass instance. "
@@ -129,13 +142,18 @@ def _validate_cases(cases: Sequence[Case[Any, Any]], sut: Callable[..., Any]):
         validator.validate_python(parsed_args)
 
 
-def _trace_callable(fn: Callable[..., Any], *, sut_name: str) -> Callable[..., Any]:
+def _trace_callable(
+    fn: Callable[..., Any], *, sut_name: str
+) -> Callable[..., Any]:
     if inspect.iscoroutinefunction(fn):
 
         @functools.wraps(fn)
         async def traced_async(*args: Any, **kwargs: Any) -> Any:
-            tracer = get_tracer()
-            with tracer.start_as_current_span(f"sut.{sut_name}") as span:
+            tracer = get_test_tracer()
+            if tracer is None or tracer.otel_trace_session is None:
+                return await fn(*args, **kwargs)
+
+            with otel_runtime.start_as_current_span(f"sut.{sut_name}") as span:
                 span.set_attribute("rue.sut", True)
                 span.set_attribute("rue.sut.name", sut_name)
                 _set_input_attrs(span, args, kwargs)
@@ -147,8 +165,11 @@ def _trace_callable(fn: Callable[..., Any], *, sut_name: str) -> Callable[..., A
 
     @functools.wraps(fn)
     def traced(*args: Any, **kwargs: Any) -> Any:
-        tracer = get_tracer()
-        with tracer.start_as_current_span(f"sut.{sut_name}") as span:
+        tracer = get_test_tracer()
+        if tracer is None or tracer.otel_trace_session is None:
+            return fn(*args, **kwargs)
+
+        with otel_runtime.start_as_current_span(f"sut.{sut_name}") as span:
             span.set_attribute("rue.sut", True)
             span.set_attribute("rue.sut.name", sut_name)
             _set_input_attrs(span, args, kwargs)
@@ -166,8 +187,11 @@ def _trace_instance_method(instance: Any, *, sut_name: str, method: str) -> Any:
 
         @functools.wraps(original_method)
         async def traced_async(*args: Any, **kwargs: Any) -> Any:
-            tracer = get_tracer()
-            with tracer.start_as_current_span(f"sut.{sut_name}") as span:
+            tracer = get_test_tracer()
+            if tracer is None or tracer.otel_trace_session is None:
+                return await original_method(*args, **kwargs)
+
+            with otel_runtime.start_as_current_span(f"sut.{sut_name}") as span:
                 span.set_attribute("rue.sut", True)
                 span.set_attribute("rue.sut.name", sut_name)
                 _set_input_attrs(span, args, kwargs)
@@ -180,8 +204,11 @@ def _trace_instance_method(instance: Any, *, sut_name: str, method: str) -> Any:
 
     @functools.wraps(original_method)
     def traced(*args: Any, **kwargs: Any) -> Any:
-        tracer = get_tracer()
-        with tracer.start_as_current_span(f"sut.{sut_name}") as span:
+        tracer = get_test_tracer()
+        if tracer is None or tracer.otel_trace_session is None:
+            return original_method(*args, **kwargs)
+
+        with otel_runtime.start_as_current_span(f"sut.{sut_name}") as span:
             span.set_attribute("rue.sut", True)
             span.set_attribute("rue.sut.name", sut_name)
             _set_input_attrs(span, args, kwargs)
@@ -196,22 +223,34 @@ def _trace_instance_method(instance: Any, *, sut_name: str, method: str) -> Any:
 # Trace helpers
 
 
-def _set_input_attrs(span: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+def _set_input_attrs(
+    span: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> None:
     """Set input attributes on span, respecting trace content settings."""
-    if not is_trace_content_enabled():
+    tracer = get_test_tracer()
+    if (
+        tracer is None
+        or tracer.otel_trace_session is None
+        or not tracer.otel_content
+    ):
         span.set_attribute("sut.input.count", len(args) + len(kwargs))
         return
 
     if args:
-        span.set_attribute("sut.input.args", truncate_repr(args))
+        span.set_attribute("sut.input.args", repr(args))
     if kwargs:
-        span.set_attribute("sut.input.kwargs", truncate_repr(kwargs))
+        span.set_attribute("sut.input.kwargs", repr(kwargs))
 
 
 def _set_output_attrs(span: Any, result: Any) -> None:
     """Set output attributes on span, respecting trace content settings."""
-    if not is_trace_content_enabled():
+    tracer = get_test_tracer()
+    if (
+        tracer is None
+        or tracer.otel_trace_session is None
+        or not tracer.otel_content
+    ):
         span.set_attribute("sut.output.type", type(result).__name__)
         return
 
-    span.set_attribute("sut.output", truncate_repr(result))
+    span.set_attribute("sut.output", repr(result))

@@ -391,7 +391,9 @@ class TestForkForCase:
 
         parent = ResourceResolver(get_registry())
         children = [parent.fork_for_case() for _ in range(8)]
-        values = await asyncio.gather(*[child.resolve("shared_suite") for child in children])
+        values = await asyncio.gather(
+            *[child.resolve("shared_suite") for child in children]
+        )
 
         assert values == ["suite_1"] * len(children)
         assert create_count == 1
@@ -414,7 +416,9 @@ class TestForkForCase:
 
         parent = ResourceResolver(get_registry())
         children = [parent.fork_for_case() for _ in range(8)]
-        values = await asyncio.gather(*[child.resolve("shared_session") for child in children])
+        values = await asyncio.gather(
+            *[child.resolve("shared_session") for child in children]
+        )
 
         assert values == ["session_1"] * len(children)
         assert create_count == 1
@@ -659,7 +663,9 @@ class TestResourceResolutionErrors:
             raise ValueError("Async resource initialization failed")
 
         resolver = ResourceResolver(get_registry())
-        with pytest.raises(ValueError, match="Async resource initialization failed"):
+        with pytest.raises(
+            ValueError, match="Async resource initialization failed"
+        ):
             await resolver.resolve("async_failing_resource")
 
     @pytest.mark.asyncio
@@ -689,7 +695,9 @@ class TestResourceResolutionErrors:
             return shared_left
 
         resolver = ResourceResolver(get_registry())
-        with pytest.raises(RuntimeError, match="Circular resource dependency detected"):
+        with pytest.raises(
+            RuntimeError, match="Circular resource dependency detected"
+        ):
             await asyncio.wait_for(resolver.resolve("shared_left"), timeout=0.2)
 
     @pytest.mark.asyncio

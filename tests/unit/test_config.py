@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from rue.config import load_config, reset_load_config_cache
+from rue.config import Config, load_config, reset_load_config_cache
 
 
 @pytest.fixture(autouse=True)
@@ -12,7 +12,9 @@ def _reset_load_config_cache() -> None:
     reset_load_config_cache()
 
 
-def test_load_config_prefers_rue_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_load_config_prefers_rue_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.chdir(tmp_path)
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
@@ -32,6 +34,9 @@ test-paths = ["examples"]
 include-tags = ["smoke"]
 exclude-tags = ["slow"]
 keyword = "chatbot"
+otel = true
+otel-content = false
+reporters = ["ConsoleReporter", "OtelReporter"]
 db-path = ".rue/custom.db"
 db-enabled = false
 """.strip()
@@ -46,11 +51,16 @@ db-enabled = false
     assert config.maxfail == 1
     assert config.verbosity == 1
     assert config.addopts == ["-q"]
+    assert config.otel is True
+    assert config.otel_content is False
+    assert config.reporters == ["ConsoleReporter", "OtelReporter"]
     assert config.db_path == ".rue/custom.db"
     assert config.db_enabled is False
 
 
-def test_load_config_defaults_when_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_load_config_defaults_when_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.chdir(tmp_path)
     config = load_config()
     assert config.test_paths == ["."]
@@ -60,6 +70,8 @@ def test_load_config_defaults_when_missing(tmp_path: Path, monkeypatch: pytest.M
     assert config.maxfail is None
     assert config.verbosity == 0
     assert config.addopts == []
+    assert config.otel is False
+    assert config.otel_content is True
     assert config.db_path is None
     assert config.db_enabled is True
 
@@ -74,12 +86,17 @@ def test_load_config_defaults_when_missing(tmp_path: Path, monkeypatch: pytest.M
         ("maxfail", None),
         ("verbosity", 0),
         ("addopts", []),
+        ("otel", False),
+        ("otel_content", True),
         ("db_path", None),
         ("db_enabled", True),
     ],
 )
 def test_config_default_values(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, expected: object
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    expected: object,
 ):
     monkeypatch.chdir(tmp_path)
     config = load_config()

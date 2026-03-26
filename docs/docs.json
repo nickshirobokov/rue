@@ -65,7 +65,7 @@
           "concepts/test",
           "concepts/resource",
           "concepts/sut",
-          "concepts/trace",
+          "concepts/open-telemetry-traces",
           "concepts/case",
           "concepts/metric",
           "concepts/semantic-predicates",
@@ -78,7 +78,7 @@
           "apis/testing",
           "apis/predicates",
           "apis/metrics",
-          "apis/tracing"
+          "apis/open-telemetry-traces"
         ]
       },
       {

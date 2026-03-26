@@ -4,7 +4,10 @@ from pathlib import Path
 from types import ModuleType
 from typing import TypeVar
 
-from rue.assertions.transformers import AssertTransformer, InjectAssertionDependenciesTransformer
+from rue.assertions.transformers import (
+    AssertTransformer,
+    InjectAssertionDependenciesTransformer,
+)
 
 
 TFunction = TypeVar("TFunction", ast.FunctionDef, ast.AsyncFunctionDef)
@@ -133,10 +136,16 @@ class RueModuleLoader(importlib.abc.SourceLoader):
 
         module_transformers = [
             RueMetricTransformer(
-                transformers=[InjectAssertionDependenciesTransformer(), AssertTransformer(source)]
+                transformers=[
+                    InjectAssertionDependenciesTransformer(),
+                    AssertTransformer(source),
+                ]
             ),
             RueFunctionTransformer(
-                transformers=[InjectAssertionDependenciesTransformer(), AssertTransformer(source)]
+                transformers=[
+                    InjectAssertionDependenciesTransformer(),
+                    AssertTransformer(source),
+                ]
             ),
         ]
         tree = ast.parse(source, filename=filename)

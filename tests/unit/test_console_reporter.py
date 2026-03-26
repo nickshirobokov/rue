@@ -10,7 +10,13 @@ from rich.table import Table
 
 from rue.assertions.base import AssertionRepr, AssertionResult
 from rue.reports.console import ConsoleReporter
-from rue.testing.models import Run, TestExecution, TestItem, TestResult, TestStatus
+from rue.testing.models import (
+    Run,
+    TestExecution,
+    TestItem,
+    TestResult,
+    TestStatus,
+)
 
 
 class FakeLive:
@@ -95,7 +101,9 @@ def make_execution(
 
 def render_to_text(renderable) -> str:
     output = io.StringIO()
-    console = Console(file=output, force_terminal=False, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=False, color_system=None, width=120
+    )
     console.print(renderable)
     return output.getvalue()
 
@@ -106,22 +114,32 @@ async def test_verbose_live_output_grouped_by_file(monkeypatch):
     FakeLive.instances.clear()
 
     output = io.StringIO()
-    console = Console(file=output, force_terminal=True, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=True, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     auth_login = make_item("test_login", "tests/test_auth.py")
     auth_logout = make_item("test_logout", "tests/test_auth.py")
     users_create = make_item("test_create", "tests/test_users.py")
 
-    await reporter.on_collection_complete([auth_login, auth_logout, users_create])
+    await reporter.on_collection_complete(
+        [auth_login, auth_logout, users_create]
+    )
     await reporter.on_test_start(auth_login)
     await reporter.on_test_start(users_create)
-    await reporter.on_test_complete(make_execution(users_create, TestStatus.PASSED, 45.1))
     await reporter.on_test_complete(
-        make_execution(auth_login, TestStatus.FAILED, 120.3, error=AssertionError("boom"))
+        make_execution(users_create, TestStatus.PASSED, 45.1)
+    )
+    await reporter.on_test_complete(
+        make_execution(
+            auth_login, TestStatus.FAILED, 120.3, error=AssertionError("boom")
+        )
     )
     await reporter.on_test_start(auth_logout)
-    await reporter.on_test_complete(make_execution(auth_logout, TestStatus.PASSED, 22.0))
+    await reporter.on_test_complete(
+        make_execution(auth_logout, TestStatus.PASSED, 22.0)
+    )
 
     assert FakeLive.instances
     assert FakeLive.instances[-1].redirect_stdout is False
@@ -142,7 +160,9 @@ async def test_compact_live_symbols_replace_running_marker(monkeypatch):
     FakeLive.instances.clear()
 
     output = io.StringIO()
-    console = Console(file=output, force_terminal=True, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=True, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=0)
 
     item = make_item("test_login", "tests/test_auth.py")
@@ -152,7 +172,9 @@ async def test_compact_live_symbols_replace_running_marker(monkeypatch):
     running_text = render_to_text(FakeLive.instances[-1].renderables[-1])
     assert "⋯" in running_text
 
-    await reporter.on_test_complete(make_execution(item, TestStatus.PASSED, 15.0))
+    await reporter.on_test_complete(
+        make_execution(item, TestStatus.PASSED, 15.0)
+    )
     done_text = render_to_text(FakeLive.instances[-1].renderables[-1])
     assert "✓" in done_text
 
@@ -163,7 +185,9 @@ async def test_compact_live_shows_spinner_while_running(monkeypatch):
     FakeLive.instances.clear()
 
     output = io.StringIO()
-    console = Console(file=output, force_terminal=True, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=True, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=0)
 
     item = make_item("test_login", "tests/test_auth.py")
@@ -175,7 +199,9 @@ async def test_compact_live_shows_spinner_while_running(monkeypatch):
     assert isinstance(running_renderable, Group)
     assert isinstance(running_renderable.renderables[0], Table)
 
-    await reporter.on_test_complete(make_execution(item, TestStatus.PASSED, 15.0))
+    await reporter.on_test_complete(
+        make_execution(item, TestStatus.PASSED, 15.0)
+    )
     done_renderable = FakeLive.instances[-1].renderables[-1]
     assert isinstance(done_renderable, Group)
     assert not isinstance(done_renderable.renderables[0], Table)
@@ -187,7 +213,9 @@ async def test_live_uses_non_transient_rendering(monkeypatch):
     FakeLive.instances.clear()
 
     output = io.StringIO()
-    console = Console(file=output, force_terminal=True, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=True, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=0)
 
     item = make_item("test_login", "tests/test_auth.py")
@@ -202,7 +230,9 @@ async def test_quiet_live_progress_counter(monkeypatch):
     FakeLive.instances.clear()
 
     output = io.StringIO()
-    console = Console(file=output, force_terminal=True, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=True, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=-1)
 
     first = make_item("test_one", "tests/test_progress.py")
@@ -213,12 +243,16 @@ async def test_quiet_live_progress_counter(monkeypatch):
     assert "0/2 complete" in text
 
     await reporter.on_test_start(first)
-    await reporter.on_test_complete(make_execution(first, TestStatus.PASSED, 5.0))
+    await reporter.on_test_complete(
+        make_execution(first, TestStatus.PASSED, 5.0)
+    )
     text = render_to_text(FakeLive.instances[-1].renderables[-1])
     assert "1/2 complete" in text
 
     await reporter.on_test_start(second)
-    await reporter.on_test_complete(make_execution(second, TestStatus.PASSED, 6.0))
+    await reporter.on_test_complete(
+        make_execution(second, TestStatus.PASSED, 6.0)
+    )
     text = render_to_text(FakeLive.instances[-1].renderables[-1])
     assert "2/2 complete" in text
 
@@ -226,7 +260,9 @@ async def test_quiet_live_progress_counter(monkeypatch):
 @pytest.mark.asyncio
 async def test_non_terminal_fallback_uses_static_output():
     output = io.StringIO()
-    console = Console(file=output, force_terminal=False, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=False, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=0)
 
     item = make_item("test_login", "tests/test_auth.py")
@@ -249,7 +285,9 @@ async def test_non_terminal_fallback_uses_static_output():
 @pytest.mark.asyncio
 async def test_failures_collected_and_rendered_on_run_complete():
     output = io.StringIO()
-    console = Console(file=output, force_terminal=False, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=False, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     item = make_item("test_failure", "tests/test_failures.py")
@@ -275,11 +313,15 @@ async def test_failures_collected_and_rendered_on_run_complete():
 @pytest.mark.asyncio
 async def test_nested_failures_render_leaf_assertion_repr():
     output = io.StringIO()
-    console = Console(file=output, force_terminal=False, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=False, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     parent = make_item("test_nested", "tests/test_nested.py")
-    repeated = make_item("test_nested", "tests/test_nested.py", suffix="repeat=0")
+    repeated = make_item(
+        "test_nested", "tests/test_nested.py", suffix="repeat=0"
+    )
     leaf = make_item("test_nested", "tests/test_nested.py", suffix="case=1")
     assertion = AssertionResult(
         expression_repr=AssertionRepr(
@@ -332,7 +374,9 @@ async def test_verbose_live_renders_sub_executions(monkeypatch):
     FakeLive.instances.clear()
 
     output = io.StringIO()
-    console = Console(file=output, force_terminal=True, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=True, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     parent = make_item("test_matrix", "tests/test_matrix.py")
@@ -341,7 +385,9 @@ async def test_verbose_live_renders_sub_executions(monkeypatch):
 
     sub_executions = [
         make_execution(case_one, TestStatus.PASSED, 8.0),
-        make_execution(case_two, TestStatus.FAILED, 12.0, error=AssertionError("bad case")),
+        make_execution(
+            case_two, TestStatus.FAILED, 12.0, error=AssertionError("bad case")
+        ),
     ]
     execution = make_execution(
         parent,
@@ -368,7 +414,9 @@ async def test_verbose_live_renders_case_id_when_suffix_missing(monkeypatch):
     FakeLive.instances.clear()
 
     output = io.StringIO()
-    console = Console(file=output, force_terminal=True, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=True, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     case_id = UUID("00000000-0000-0000-0000-000000000001")
@@ -377,19 +425,25 @@ async def test_verbose_live_renders_case_id_when_suffix_missing(monkeypatch):
 
     await reporter.on_collection_complete([parent])
     await reporter.on_test_start(parent)
-    await reporter.on_subtest_complete(parent, make_execution(case_one, TestStatus.PASSED, 8.0))
+    await reporter.on_subtest_complete(
+        parent, make_execution(case_one, TestStatus.PASSED, 8.0)
+    )
 
     text = render_to_text(FakeLive.instances[-1].renderables[-1])
     assert str(case_id) in text
 
 
 @pytest.mark.asyncio
-async def test_verbose_live_streams_subtests_before_parent_completion(monkeypatch):
+async def test_verbose_live_streams_subtests_before_parent_completion(
+    monkeypatch,
+):
     monkeypatch.setattr("rue.reports.console.Live", FakeLive)
     FakeLive.instances.clear()
 
     output = io.StringIO()
-    console = Console(file=output, force_terminal=True, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=True, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     parent = make_item("test_matrix", "tests/test_matrix.py")
@@ -408,16 +462,22 @@ async def test_verbose_live_streams_subtests_before_parent_completion(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_verbose_live_does_not_create_orphan_state_from_derived_parent(monkeypatch):
+async def test_verbose_live_does_not_create_orphan_state_from_derived_parent(
+    monkeypatch,
+):
     monkeypatch.setattr("rue.reports.console.Live", FakeLive)
     FakeLive.instances.clear()
 
     output = io.StringIO()
-    console = Console(file=output, force_terminal=True, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=True, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     parent = make_item("test_matrix", "tests/test_matrix.py")
-    derived_parent = make_item("test_matrix", "tests/test_matrix.py", suffix="group=alpha")
+    derived_parent = make_item(
+        "test_matrix", "tests/test_matrix.py", suffix="group=alpha"
+    )
     case_one = make_item("test_matrix", "tests/test_matrix.py", suffix="case=1")
     sub_execution = make_execution(case_one, TestStatus.PASSED, 8.0)
 
@@ -429,7 +489,9 @@ async def test_verbose_live_does_not_create_orphan_state_from_derived_parent(mon
     assert running_text.count("test_matrix::test_matrix") == 1
 
     await reporter.on_test_complete(
-        make_execution(parent, TestStatus.PASSED, 10.0, sub_executions=[sub_execution])
+        make_execution(
+            parent, TestStatus.PASSED, 10.0, sub_executions=[sub_execution]
+        )
     )
     done_text = render_to_text(FakeLive.instances[-1].renderables[-1])
     assert done_text.count("test_matrix::test_matrix") == 1
@@ -439,7 +501,9 @@ async def test_verbose_live_does_not_create_orphan_state_from_derived_parent(mon
 @pytest.mark.asyncio
 async def test_verbose_non_terminal_subexecutions_have_no_arrow():
     output = io.StringIO()
-    console = Console(file=output, force_terminal=False, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=False, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     parent = make_item("test_matrix", "tests/test_matrix.py")
@@ -451,7 +515,12 @@ async def test_verbose_non_terminal_subexecutions_have_no_arrow():
         20.0,
         sub_executions=[
             make_execution(case_one, TestStatus.PASSED, 8.0),
-            make_execution(case_two, TestStatus.FAILED, 12.0, error=AssertionError("bad case")),
+            make_execution(
+                case_two,
+                TestStatus.FAILED,
+                12.0,
+                error=AssertionError("bad case"),
+            ),
         ],
     )
 
@@ -465,7 +534,9 @@ async def test_verbose_non_terminal_subexecutions_have_no_arrow():
 @pytest.mark.asyncio
 async def test_verbose_non_terminal_subexecutions_render_case_id_when_suffix_missing():
     output = io.StringIO()
-    console = Console(file=output, force_terminal=False, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=False, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     case_id = UUID("00000000-0000-0000-0000-000000000001")
@@ -488,7 +559,9 @@ async def test_verbose_non_terminal_subexecutions_render_case_id_when_suffix_mis
 @pytest.mark.asyncio
 async def test_nested_failures_render_case_id_when_suffix_missing():
     output = io.StringIO()
-    console = Console(file=output, force_terminal=False, color_system=None, width=120)
+    console = Console(
+        file=output, force_terminal=False, color_system=None, width=120
+    )
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     case_id = UUID("00000000-0000-0000-0000-0000000000aa")

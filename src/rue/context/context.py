@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from rue.predicates.models import PredicateResult
     from rue.testing.models import TestDefinition
     from rue.testing.runner import Runner
+    from rue.testing.tracing import TestTracer
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,21 +51,37 @@ class ResolverContext:
     consumer_name: str | None = None
 
 
-ASSERTION_RESULTS_COLLECTOR: ContextVar[list[AssertionResult] | None] = ContextVar(
-    "assertion_results_collector", default=None
+ASSERTION_RESULTS_COLLECTOR: ContextVar[list[AssertionResult] | None] = (
+    ContextVar("assertion_results_collector", default=None)
 )
-PREDICATE_RESULTS_COLLECTOR: ContextVar[list[PredicateResult] | None] = ContextVar(
-    "predicate_results_collector", default=None
+PREDICATE_RESULTS_COLLECTOR: ContextVar[list[PredicateResult] | None] = (
+    ContextVar("predicate_results_collector", default=None)
 )
 
 METRIC_RESULTS_COLLECTOR: ContextVar[list[MetricResult] | None] = ContextVar(
     "metric_results_collector", default=None
 )
 
-TEST_CONTEXT: ContextVar[TestContext | None] = ContextVar("test_context", default=None)
-RESOLVER_CONTEXT: ContextVar[ResolverContext | None] = ContextVar("resolver_context", default=None)
-METRIC_CONTEXT: ContextVar[list[Metric] | None] = ContextVar("metric_context", default=None)
-RUNNER_CONTEXT: ContextVar[Runner | None] = ContextVar("runner_context", default=None)
+TEST_CONTEXT: ContextVar[TestContext | None] = ContextVar(
+    "test_context", default=None
+)
+TEST_TRACER: ContextVar[TestTracer | None] = ContextVar(
+    "test_tracer", default=None
+)
+RESOLVER_CONTEXT: ContextVar[ResolverContext | None] = ContextVar(
+    "resolver_context", default=None
+)
+METRIC_CONTEXT: ContextVar[list[Metric] | None] = ContextVar(
+    "metric_context", default=None
+)
+RUNNER_CONTEXT: ContextVar[Runner | None] = ContextVar(
+    "runner_context", default=None
+)
+
+
+def get_test_tracer() -> TestTracer | None:
+    """Get the current test tracer, or None if tracing is inactive."""
+    return TEST_TRACER.get()
 
 
 def get_test_context() -> TestContext | None:
@@ -118,6 +135,19 @@ def test_context_scope(ctx: TestContext) -> Iterator[None]:
         yield
     finally:
         TEST_CONTEXT.reset(token)
+
+
+@contextmanager
+def test_tracer_scope(tracer: TestTracer) -> Iterator[None]:
+    """Temporarily set `TEST_TRACER` for the duration of the ``with`` block."""
+    token = TEST_TRACER.set(tracer)
+    try:
+        yield
+    finally:
+        TEST_TRACER.reset(token)
+
+
+test_tracer_scope.__test__ = False
 
 
 @contextmanager

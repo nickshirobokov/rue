@@ -18,7 +18,6 @@ from rue.storage.sqlite.migrations import MigrationError, MigrationRunner
 from rue.testing.models.definition import TestDefinition
 from rue.testing.models.result import TestExecution, TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
-from rue.tracing.lifecycle import InMemorySpanCollector
 
 
 DEFAULT_DB_NAME = ".rue/rue.db"
@@ -37,9 +36,9 @@ RUN_INSERT_SQL = """
 EXECUTION_INSERT_SQL = """
     INSERT INTO test_executions (
         execution_id, run_id, parent_id, test_name, file_path, class_name,
-        case_id, id_suffix, trace_id, tags_json, skip_reason, xfail_reason,
+        case_id, suffix, tags_json, skip_reason, xfail_reason,
         status, duration_ms, error_message, error_traceback
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 METRIC_INSERT_SQL = """
@@ -62,13 +61,6 @@ PREDICATE_INSERT_SQL = """
         run_id, assertion_id, predicate_name, actual, reference,
         strict, confidence, value, message
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-"""
-
-TRACE_SPAN_INSERT_SQL = """
-    INSERT INTO trace_spans (
-        run_id, test_execution_id, trace_id, span_id, parent_span_id, name,
-        start_time_ns, end_time_ns, duration_ms, span_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -133,7 +125,9 @@ class SQLiteStore(Store):
 
             # Store a compact repr for locals to keep the payload small.
             frame_locals = {
-                k: self._safe_repr(v) for k, v in frame.f_locals.items() if not k.startswith("__")
+                k: self._safe_repr(v)
+                for k, v in frame.f_locals.items()
+                if not k.startswith("__")
             }
 
             frames.append(
@@ -142,7 +136,9 @@ class SQLiteStore(Store):
                     "lineno": tb.tb_lineno,
                     "name": code.co_name,
                     # Cache source line at capture time in case files change later.
-                    "line": linecache.getline(code.co_filename, tb.tb_lineno).strip(),
+                    "line": linecache.getline(
+                        code.co_filename, tb.tb_lineno
+                    ).strip(),
                     "locals": frame_locals,
                 }
             )
@@ -162,7 +158,9 @@ class SQLiteStore(Store):
     def _safe_repr(self, value: object) -> str:
         try:
             r = repr(value)
-            return r[:MAX_REPR_LENGTH] + "..." if len(r) > MAX_REPR_LENGTH else r
+            return (
+                r[:MAX_REPR_LENGTH] + "..." if len(r) > MAX_REPR_LENGTH else r
+            )
         except Exception as e:
             return f"<{type(value).__name__} (repr error: {e})>"
 
@@ -220,7 +218,6 @@ class SQLiteStore(Store):
                         class_name,
                         str(case_id) if case_id else None,
                         suffix,
-                        execution.trace_id,
                         json.dumps(list(tags)) if tags else None,
                         skip_reason,
                         xfail_reason,
@@ -231,14 +228,18 @@ class SQLiteStore(Store):
                     )
                 )
 
-                stack.extend((sub, execution_id) for sub in execution.sub_executions)
+                stack.extend(
+                    (sub, execution_id) for sub in execution.sub_executions
+                )
 
             if execution_rows:
                 conn.executemany(EXECUTION_INSERT_SQL, execution_rows)
 
             for metric_result in run.result.metric_results:
                 metric_id = self._save_metric(conn, run.run_id, metric_result)
-                self._save_metric_assertions(conn, run.run_id, metric_result, metric_id)
+                self._save_metric_assertions(
+                    conn, run.run_id, metric_result, metric_id
+                )
 
             for execution in run.result.executions:
                 self._save_assertions_for_execution(conn, run.run_id, execution)
@@ -257,48 +258,6 @@ class SQLiteStore(Store):
             """,
             (MAX_STORED_RUNS,),
         )
-
-    def save_trace_spans(self, run: Run, collector: InMemorySpanCollector) -> None:
-        """Save trace spans for a run."""
-        trace_to_execution: dict[str, str] = {}
-        stack = list(run.result.executions)
-        while stack:
-            execution = stack.pop()
-            if execution.trace_id:
-                trace_to_execution[execution.trace_id] = str(execution.execution_id)
-            stack.extend(execution.sub_executions)
-
-        if not trace_to_execution:
-            return
-
-        rows: list[tuple[object, ...]] = []
-        for trace_id, execution_id in trace_to_execution.items():
-            for span in collector.get_spans(trace_id):
-                start_time_ns = span.start_time
-                end_time_ns = span.end_time
-                duration_ms = (end_time_ns - start_time_ns) / 1_000_000
-                span_id = format(span.context.span_id, "016x")
-                parent = span.parent
-                parent_span_id = format(parent.span_id, "016x") if parent else None
-                span_json = span.to_json(indent=None)
-                rows.append(
-                    (
-                        str(run.run_id),
-                        execution_id,
-                        trace_id,
-                        span_id,
-                        parent_span_id,
-                        span.name,
-                        start_time_ns,
-                        end_time_ns,
-                        duration_ms,
-                        span_json,
-                    )
-                )
-
-        if rows:
-            with self._connect() as conn:
-                conn.executemany(TRACE_SPAN_INSERT_SQL, rows)
 
     def _save_assertion(
         self,
@@ -381,11 +340,17 @@ class SQLiteStore(Store):
                 str(run_id),
                 str(metric.execution_id) if metric.execution_id else None,
                 metric.name,
-                meta.scope.value if isinstance(meta.scope, Scope) else str(meta.scope),
+                meta.scope.value
+                if isinstance(meta.scope, Scope)
+                else str(meta.scope),
                 value_real,
                 value_json,
-                meta.first_item_recorded_at.isoformat() if meta.first_item_recorded_at else None,
-                meta.last_item_recorded_at.isoformat() if meta.last_item_recorded_at else None,
+                meta.first_item_recorded_at.isoformat()
+                if meta.first_item_recorded_at
+                else None,
+                meta.last_item_recorded_at.isoformat()
+                if meta.last_item_recorded_at
+                else None,
                 self._to_json_list(meta.collected_from_tests),
                 self._to_json_list(meta.collected_from_resources),
                 self._to_json_list(meta.collected_from_cases),
@@ -423,7 +388,9 @@ class SQLiteStore(Store):
     def get_run(self, run_id: UUID) -> Run | None:
         """Retrieve a test run by ID."""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (str(run_id),)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM runs WHERE run_id = ?", (str(run_id),)
+            ).fetchone()
 
             if not row:
                 return None
@@ -439,7 +406,9 @@ class SQLiteStore(Store):
 
             return [self._row_to_run(conn, row) for row in rows]
 
-    def get_metrics_for_execution(self, execution_id: UUID) -> list[MetricResult]:
+    def get_metrics_for_execution(
+        self, execution_id: UUID
+    ) -> list[MetricResult]:
         """Get all metrics for a specific test execution."""
         with self._connect() as conn:
             rows = conn.execute(
@@ -476,7 +445,11 @@ class SQLiteStore(Store):
             return [dict(row) for row in rows]
 
     def _row_to_run(self, conn: sqlite3.Connection, row: sqlite3.Row) -> Run:
-        env_data = json.loads(row["environment_json"]) if row["environment_json"] else {}
+        env_data = (
+            json.loads(row["environment_json"])
+            if row["environment_json"]
+            else {}
+        )
         environment = RunEnvironment(
             commit_hash=env_data.get("commit_hash"),
             branch=env_data.get("branch"),
@@ -496,7 +469,9 @@ class SQLiteStore(Store):
 
         executions_by_id: dict[str, TestExecution] = {}
         for exec_row in exec_rows:
-            executions_by_id[exec_row["execution_id"]] = self._row_to_execution(exec_row)
+            executions_by_id[exec_row["execution_id"]] = self._row_to_execution(
+                exec_row
+            )
 
         executions: list[TestExecution] = []
         for exec_row in exec_rows:
@@ -533,7 +508,9 @@ class SQLiteStore(Store):
         )
 
     def _row_to_execution(self, row: sqlite3.Row) -> TestExecution:
-        error = Exception(row["error_message"]) if row["error_message"] else None
+        error = (
+            Exception(row["error_message"]) if row["error_message"] else None
+        )
         tags_json = row["tags_json"]
         tags = set(json.loads(tags_json)) if tags_json else set()
 
@@ -546,7 +523,7 @@ class SQLiteStore(Store):
             tags=tags,
             skip_reason=row["skip_reason"],
             xfail_reason=row["xfail_reason"],
-            suffix=row["id_suffix"],
+            suffix=row["suffix"],
             case_id=UUID(row["case_id"]) if row["case_id"] else None,
         )
 
@@ -560,7 +537,6 @@ class SQLiteStore(Store):
             definition=definition,
             result=result,
             execution_id=UUID(row["execution_id"]),
-            trace_id=row["trace_id"],
         )
 
     def _row_to_metric(self, row: sqlite3.Row) -> MetricResult:
@@ -572,17 +548,31 @@ class SQLiteStore(Store):
             value = float("nan")
 
         scope_str = row["scope"]
-        scope = Scope(scope_str) if scope_str in {s.value for s in Scope} else Scope.SESSION
+        scope = (
+            Scope(scope_str)
+            if scope_str in {s.value for s in Scope}
+            else Scope.SESSION
+        )
 
         first_at = row["first_recorded_at"]
         last_at = row["last_recorded_at"]
         metadata = MetricMetadata(
-            first_item_recorded_at=datetime.fromisoformat(first_at) if first_at else None,
-            last_item_recorded_at=datetime.fromisoformat(last_at) if last_at else None,
+            first_item_recorded_at=datetime.fromisoformat(first_at)
+            if first_at
+            else None,
+            last_item_recorded_at=datetime.fromisoformat(last_at)
+            if last_at
+            else None,
             scope=scope,
-            collected_from_tests=self._from_json_set(row["collected_from_tests_json"]),
-            collected_from_resources=self._from_json_set(row["collected_from_resources_json"]),
-            collected_from_cases=self._from_json_set(row["collected_from_cases_json"]),
+            collected_from_tests=self._from_json_set(
+                row["collected_from_tests_json"]
+            ),
+            collected_from_resources=self._from_json_set(
+                row["collected_from_resources_json"]
+            ),
+            collected_from_cases=self._from_json_set(
+                row["collected_from_cases_json"]
+            ),
         )
 
         exec_id = row["test_execution_id"]

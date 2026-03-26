@@ -1,14 +1,15 @@
-"""Example rue tests demonstrating OpenTelemetry tracing with SUT.
+"""Example Rue tests demonstrating OpenTelemetry spans with SUTs.
 
 This example shows how to:
-1. Use @sut to register a traced system-under-test
-2. Trace custom steps within tests using trace_step
+1. Use @sut to register an OpenTelemetry-observable system under test
+2. Create custom OpenTelemetry spans within tests using otel_span
 3. Capture LLM calls automatically via OpenLLMetry instrumentation
 
-Run with tracing enabled:
-    rue test examples/rue_example_tracing.py --trace
+Run with OpenTelemetry enabled:
+    rue test examples/rue_example_otel_spans.py --otel
 
-The traces will be exported to traces.json at the end of the run.
+Persist local trace files too:
+    rue test examples/rue_example_otel_spans.py --otel --reporter ConsoleReporter --reporter OtelReporter
 """
 
 from collections.abc import Callable
@@ -20,7 +21,7 @@ import rue
 
 @rue.sut
 def simple_sut() -> Callable:
-    """Simple sync SUT - all calls inside are traced."""
+    """Simple sync SUT with OpenTelemetry span capture."""
     # In a real scenario, this would call an LLM
     return lambda prompt: f"Response to: {prompt}"
 
@@ -42,24 +43,24 @@ async def async_sut() -> Callable:
 @rue.sut
 def pipeline_sut() -> Callable:
     class PipelineSUT:
-        """Class-based SUT - __call__ is automatically traced."""
+        """Class-based SUT with automatic OpenTelemetry root spans."""
 
         def __init__(self) -> None:
             self.context = "initialized"
 
         def __call__(self, query: str) -> str:
-            """Main entry point - traced automatically."""
+            """Main entry point with an automatic OpenTelemetry span."""
             retrieved = self._retrieve(query)
             return self._generate(retrieved, query)
 
         def _retrieve(self, query: str) -> list[str]:
-            """Internal method - use trace_step for finer granularity."""
-            with rue.trace_step("retrieve", {"query_length": len(query)}):
+            """Internal method - use otel_span for finer granularity."""
+            with rue.otel_span("retrieve", {"query_length": len(query)}):
                 return [f"doc1 about {query}", f"doc2 about {query}"]
 
         def _generate(self, docs: list[str], query: str) -> str:
             """Internal method with trace step."""
-            with rue.trace_step("generate", {"doc_count": len(docs)}):
+            with rue.otel_span("generate", {"doc_count": len(docs)}):
                 return f"Answer based on {len(docs)} docs for: {query}"
 
     return PipelineSUT()
@@ -69,13 +70,13 @@ def pipeline_sut() -> Callable:
 
 
 def test_simple_sut_works(simple_sut):
-    """Test that simple SUT is invoked and traced."""
+    """Test that a simple SUT is invoked and captured."""
     result = simple_sut("Hello, world!")
     assert "Hello" in result
 
 
 async def test_async_sut_works(async_sut):
-    """Test async SUT with tracing."""
+    """Test async SUT with OpenTelemetry capture."""
     result = await async_sut("Async question")
     assert "Async" in result
 
@@ -87,17 +88,17 @@ def test_pipeline_works(pipeline_sut):
     assert "Python" in result
 
 
-def test_custom_trace_steps(simple_sut):
-    """Demonstrate custom trace steps in test logic."""
+def test_custom_otel_spans(simple_sut):
+    """Demonstrate custom span scopes in test logic."""
     # Custom preprocessing step
-    with rue.trace_step("preprocessing"):
+    with rue.otel_span("preprocessing"):
         prompt = "processed: test input"
 
-    # SUT invocation (automatically traced)
+    # SUT invocation (captured automatically)
     result = simple_sut(prompt)
 
     # Custom validation step
-    with rue.trace_step("validation", {"result_length": len(result)}):
+    with rue.otel_span("validation", {"result_length": len(result)}):
         assert len(result) > 0
         assert "processed" in result
 
@@ -111,7 +112,7 @@ def test_multiple_sut_calls(simple_sut, pipeline_sut):
     assert "Second" in result2
 
 
-# === Example with external client (would be traced if real) ===
+# === Example with external client (would be captured if real) ===
 
 
 @rue.sut
@@ -126,7 +127,7 @@ def agent_with_external_client() -> Callable:
     # from openai import OpenAI
     # client = OpenAI()  # Even if created at module level
     # response = client.chat.completions.create(...)
-    # All these calls would be traced under the sut.agent_with_external_client span
+    # All these calls would be captured under the sut.agent_with_external_client span
     return lambda task: f"Completed task: {task}"
 
 

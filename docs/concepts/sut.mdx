@@ -3,11 +3,11 @@ title: "SUT"
 ---
 
 <Note>SUT stands for *System Under Test*.</Note>
-<Note>`@rue.sut` is optional. It exists to make your agent/workflow callable injectable and traceable.</Note>
+<Note>`@rue.sut` is optional. It exists to make your agent/workflow callable injectable and OpenTelemetry-observable.</Note>
 
 `@rue.sut` registers a **SUT factory function** as an injectable **resource** and wraps each resolved invocation in an OpenTelemetry span. This gives you two things:
 - A clean dependency injection (DI) boundary in your tests (you call the injected parameter, not a global).
-- Trace spans you can query inside a test via `trace_context` (when tracing is enabled).
+- OpenTelemetry spans you can query inside a test via `otel_trace` (when OpenTelemetry is enabled).
 
 ```python
 import rue
@@ -27,7 +27,7 @@ def test_chatbot_works(chatbot):
 The most common use case for `@rue.sut` is asserting on the SUT call span(s).
 
 <Note>
-`trace_context` is only available when tracing is enabled. From the CLI, run `rue test --trace`.
+`otel_trace` is only available when OpenTelemetry is enabled. From the CLI, run `uv run rue test --otel`.
 </Note>
 
 <Steps>
@@ -44,16 +44,16 @@ def weather_agent():
     return prod_weather_agent
 ```
 </Step>
-<Step title="Inject into a `test` and assert on the trace">
+<Step title="Inject into a `test` and assert on OpenTelemetry">
 
 ```python
 # tests/rue_agent.py
 
-def test_weather_agent_calls_tools(weather_agent, trace_context):
+def test_weather_agent_calls_tools(weather_agent, otel_trace):
     out = weather_agent("What's the weather in SF?")
 
     # Retrieve spans for this SUT by name (defaults to the function name)
-    spans = trace_context.get_sut_spans(name="weather_agent")
+    spans = otel_trace.get_sut_spans(name="weather_agent")
 
     # Assert on SUT span attributes emitted by Rue
     assert spans
@@ -84,8 +84,8 @@ That’s why you should call the injected `chatbot` parameter inside `test_chatb
 - **SUT name**: the factory function name (`def weather_agent(): ...` → `"weather_agent"`).
   - Pick your factory name intentionally, since it’s used for dependency injection *and* the `sut.<sut_name>` span name.
 
-### Instance-based SUTs (trace a method)
-If your factory returns a **non-callable instance**, Rue will trace a method on that instance. By default it traces `__call__`, but you can set `method="run"` (or any method name your object provides):
+### Instance-based SUTs (span a method)
+If your factory returns a **non-callable instance**, Rue will wrap a method on that instance in an OpenTelemetry span. By default it uses `__call__`, but you can set `method="run"` (or any method name your object provides):
 
 ```python
 import rue
@@ -106,11 +106,11 @@ Each SUT call creates a span named `sut.<sut_name>` and sets:
 - `rue.sut=true`
 - `rue.sut.name=<sut_name>`
 
-If `RUE_TRACE_CONTENT=true` (default), Rue also records:
-- `sut.input.args` / `sut.input.kwargs` (truncated repr)
-- `sut.output` (truncated repr)
+If `RUE_OTEL_CONTENT=true` (default), Rue also records:
+- `sut.input.args` / `sut.input.kwargs` (`repr(...)`)
+- `sut.output` (`repr(...)`)
 
-If `RUE_TRACE_CONTENT=false`, Rue records only coarse metadata:
+If `RUE_OTEL_CONTENT=false`, Rue records only coarse metadata:
 - `sut.input.count`
 - `sut.output.type`
 
@@ -118,7 +118,7 @@ If `RUE_TRACE_CONTENT=false`, Rue records only coarse metadata:
 
 ### 1. Create isolated helpers; don't touch your production code
 
-Many evaluation frameworks require developers to modify their production codebase to instrument traces. Rue avoids this pattern. The best way to introduce SUTs to your suite is to create isolated wrapper functions within your `rue_*.py` files.
+Many evaluation frameworks require developers to modify their production codebase to instrument OpenTelemetry traces. Rue avoids this pattern. The best way to introduce SUTs to your suite is to create isolated wrapper functions within your `rue_*.py` files.
 
 **Don't do this:**
 ```python

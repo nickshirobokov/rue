@@ -10,7 +10,9 @@ class InjectAssertionDependenciesTransformer(ast.NodeTransformer):
     module loader to provide them.
     """
 
-    def _inject_dependencies(self, node: ast.FunctionDef | ast.AsyncFunctionDef):
+    def _inject_dependencies(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef
+    ):
         inject_stmts: list[ast.stmt] = [
             ast.ImportFrom(
                 module="rue.assertions.base",
@@ -93,7 +95,9 @@ class AssertTransformer(ast.NodeTransformer):
 
         # Create empty lists for collecting predicate results
         predicate_results_assign = ast.Assign(
-            targets=[ast.Name(id=self.PREDICATE_RESULTS_VAR_NAME, ctx=ast.Store())],
+            targets=[
+                ast.Name(id=self.PREDICATE_RESULTS_VAR_NAME, ctx=ast.Store())
+            ],
             value=ast.List(elts=[], ctx=ast.Load()),
         )
         ast.copy_location(predicate_results_assign, node)
@@ -129,7 +133,9 @@ class AssertTransformer(ast.NodeTransformer):
                     label = expr_name(expr)
                 case ast.Compare():
                     expr.left = wrap(expr.left)
-                    expr.comparators = [wrap(comparator) for comparator in expr.comparators]
+                    expr.comparators = [
+                        wrap(comparator) for comparator in expr.comparators
+                    ]
                     return expr
                 case ast.BinOp():
                     expr.left = wrap(expr.left)
@@ -145,7 +151,10 @@ class AssertTransformer(ast.NodeTransformer):
                     expr.elts = [wrap(elt) for elt in expr.elts]
                     return expr
                 case ast.Dict():
-                    expr.keys = [wrap(key) if key is not None else None for key in expr.keys]
+                    expr.keys = [
+                        wrap(key) if key is not None else None
+                        for key in expr.keys
+                    ]
                     expr.values = [wrap(value) for value in expr.values]
                     return expr
                 case _:
@@ -155,7 +164,9 @@ class AssertTransformer(ast.NodeTransformer):
                 ast.Call(
                     func=ast.Name(id="capture_var", ctx=ast.Load()),
                     args=[
-                        ast.Name(id=self.RESOLVED_ARGS_VAR_NAME, ctx=ast.Load()),
+                        ast.Name(
+                            id=self.RESOLVED_ARGS_VAR_NAME, ctx=ast.Load()
+                        ),
                         ast.Constant(value=label),
                         expr,
                     ],
@@ -171,8 +182,15 @@ class AssertTransformer(ast.NodeTransformer):
             items=[
                 ast.withitem(
                     context_expr=ast.Call(
-                        func=ast.Name(id="predicate_results_collector", ctx=ast.Load()),
-                        args=[ast.Name(id=self.PREDICATE_RESULTS_VAR_NAME, ctx=ast.Load())],
+                        func=ast.Name(
+                            id="predicate_results_collector", ctx=ast.Load()
+                        ),
+                        args=[
+                            ast.Name(
+                                id=self.PREDICATE_RESULTS_VAR_NAME,
+                                ctx=ast.Load(),
+                            )
+                        ],
                         keywords=[],
                     ),
                     optional_vars=None,
@@ -180,7 +198,9 @@ class AssertTransformer(ast.NodeTransformer):
             ],
             body=[
                 ast.Assign(
-                    targets=[ast.Name(id=self.IS_PASSED_VAR_NAME, ctx=ast.Store())],
+                    targets=[
+                        ast.Name(id=self.IS_PASSED_VAR_NAME, ctx=ast.Store())
+                    ],
                     value=ast.Call(
                         func=ast.Name(id="bool", ctx=ast.Load()),
                         args=[wrapped_test],
@@ -192,7 +212,11 @@ class AssertTransformer(ast.NodeTransformer):
         ast.copy_location(eval_under_collectors, node)
 
         # Build statements list starting with list creation and evaluation
-        statements = [predicate_results_assign, resolved_args_assign, eval_under_collectors]
+        statements = [
+            predicate_results_assign,
+            resolved_args_assign,
+            eval_under_collectors,
+        ]
 
         # Conditionally evaluate and store error message if assertion fails
         if node.msg is not None:
@@ -206,7 +230,8 @@ class AssertTransformer(ast.NodeTransformer):
             statements.append(msg_init)
 
             fail_test = ast.UnaryOp(
-                op=ast.Not(), operand=ast.Name(id=self.IS_PASSED_VAR_NAME, ctx=ast.Load())
+                op=ast.Not(),
+                operand=ast.Name(id=self.IS_PASSED_VAR_NAME, ctx=ast.Load()),
             )
             msg_assign = ast.Assign(
                 targets=[ast.Name(id=self.MSG_VAR_NAME, ctx=ast.Store())],
@@ -226,27 +251,39 @@ class AssertTransformer(ast.NodeTransformer):
             args=[],
             keywords=[
                 ast.keyword(arg="expr", value=ast.Constant(value=expr_repr)),
-                ast.keyword(arg="lines_above", value=ast.Constant(value=lines_above)),
-                ast.keyword(arg="lines_below", value=ast.Constant(value=lines_below)),
+                ast.keyword(
+                    arg="lines_above", value=ast.Constant(value=lines_above)
+                ),
+                ast.keyword(
+                    arg="lines_below", value=ast.Constant(value=lines_below)
+                ),
                 ast.keyword(
                     arg="resolved_args",
-                    value=ast.Name(id=self.RESOLVED_ARGS_VAR_NAME, ctx=ast.Load()),
+                    value=ast.Name(
+                        id=self.RESOLVED_ARGS_VAR_NAME, ctx=ast.Load()
+                    ),
                 ),
             ],
         )
         ar_keywords = [
             ast.keyword(arg="expression_repr", value=assertion_repr),
-            ast.keyword(arg="passed", value=ast.Name(id=self.IS_PASSED_VAR_NAME, ctx=ast.Load())),
+            ast.keyword(
+                arg="passed",
+                value=ast.Name(id=self.IS_PASSED_VAR_NAME, ctx=ast.Load()),
+            ),
             ast.keyword(
                 arg="predicate_results",
-                value=ast.Name(id=self.PREDICATE_RESULTS_VAR_NAME, ctx=ast.Load()),
+                value=ast.Name(
+                    id=self.PREDICATE_RESULTS_VAR_NAME, ctx=ast.Load()
+                ),
             ),
         ]
 
         if node.msg is not None:
             ar_keywords.append(
                 ast.keyword(
-                    arg="error_message", value=ast.Name(id=self.MSG_VAR_NAME, ctx=ast.Load())
+                    arg="error_message",
+                    value=ast.Name(id=self.MSG_VAR_NAME, ctx=ast.Load()),
                 )
             )
 

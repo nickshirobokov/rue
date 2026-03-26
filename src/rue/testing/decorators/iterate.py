@@ -1,7 +1,12 @@
 from typing import Any, Callable
 from typing_extensions import TypeVar
 
-from rue.testing.models import Case, CaseGroup, CaseGroupIterateModifier, CaseIterateModifier
+from rue.testing.models import (
+    Case,
+    CaseGroup,
+    CaseGroupIterateModifier,
+    CaseIterateModifier,
+)
 
 
 InputsT = TypeVar("InputsT", default=dict[str, Any])
@@ -34,14 +39,20 @@ def iter_cases(
     if len(cases_list) == 1 and isinstance(cases_list[0], (list, tuple)):
         cases_list = list(cases_list[0])
 
-    definition_error = None if cases_list else "iter_cases requires at least one case"
+    definition_error = (
+        None if cases_list else "iter_cases requires at least one case"
+    )
     actual_min_passes = len(cases_list)
 
     if cases_list:
-        actual_min_passes = min_passes if min_passes is not None else len(cases_list)
+        actual_min_passes = (
+            min_passes if min_passes is not None else len(cases_list)
+        )
 
         if actual_min_passes < 1:
-            raise ValueError(f"min_passes must be >= 1, got {actual_min_passes}")
+            raise ValueError(
+                f"min_passes must be >= 1, got {actual_min_passes}"
+            )
 
         if actual_min_passes > len(cases_list):
             raise ValueError(
@@ -49,7 +60,9 @@ def iter_cases(
             )
 
     modifier = (
-        CaseIterateModifier(cases=tuple(cases_list), min_passes=actual_min_passes)
+        CaseIterateModifier(
+            cases=tuple(cases_list), min_passes=actual_min_passes
+        )
         if cases_list
         else None
     )
@@ -76,8 +89,16 @@ def iter_case_groups(
     """Decorator to run a test function for each case group."""
     groups_list = list(groups)
 
-    definition_error = None if groups_list else "iter_case_groups requires at least one case group"
-    modifier = CaseGroupIterateModifier(groups=tuple(groups_list)) if groups_list else None
+    definition_error = (
+        None
+        if groups_list
+        else "iter_case_groups requires at least one case group"
+    )
+    modifier = (
+        CaseGroupIterateModifier(groups=tuple(groups_list))
+        if groups_list
+        else None
+    )
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         if definition_error:

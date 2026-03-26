@@ -5,7 +5,7 @@ title: "Examples"
 Run any example with Rue's runner from the repo root:
 
 ```bash
-uv run rue test examples/rue_example_tracing.py --trace
+uv run rue test examples/rue_example_otel_spans.py --otel
 ```
 
 ## Example Files
@@ -22,5 +22,5 @@ uv run rue test examples/rue_example_tracing.py --trace
 | `rue_example_parametrize_and_tags.py` | Parametrization, tags, skip, xfail, and repeat |
 | `rue_example_predicates.py` | Predicate assertions |
 | `rue_example_run_inline.py` | `@rue.run_inline` and sync threading behavior |
-| `rue_example_trace_context.py` | Querying trace data with `trace_context` |
-| `rue_example_tracing.py` | SUT tracing and custom trace steps |
+| `rue_example_otel_trace.py` | Querying OpenTelemetry data with `otel_trace` |
+| `rue_example_otel_spans.py` | SUT OpenTelemetry spans and custom span scopes |

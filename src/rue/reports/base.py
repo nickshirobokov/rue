@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 
 if TYPE_CHECKING:
     from rue.testing import TestDefinition
     from rue.testing.models.result import TestExecution
     from rue.testing.models.run import Run
+    from rue.testing.tracing import TestTracer
 
 
 class Reporter(ABC):
@@ -53,6 +54,9 @@ class Reporter(ABC):
     async def on_run_stopped_early(self, failure_count: int) -> None:
         """Called when run stops early due to maxfail limit."""
 
-    @abstractmethod
-    async def on_tracing_enabled(self, output_path: Path) -> None:
-        """Called when tracing is enabled to report output location."""
+    async def on_trace_collected(
+        self, tracer: TestTracer, execution_id: UUID
+    ) -> None:
+        """Called when a test tracer finishes collecting trace data."""
+        _ = tracer, execution_id
+        return None

@@ -65,7 +65,9 @@ def simple_chatbot(text: str) -> str:
 
 
 async def test_predicates_combining():
-    answer = simple_chatbot("What is the greatest rock band of all time? Be verbose.")
+    answer = simple_chatbot(
+        "What is the greatest rock band of all time? Be verbose."
+    )
 
     # check if the answer is a string, has content and is long enough
     assert isinstance(answer, str)
@@ -73,7 +75,9 @@ async def test_predicates_combining():
     assert len(answer) > 50
 
     # check the answer has the expected facts
-    assert await has_facts(answer, "Metallica is the greatest rock band of all time")
+    assert await has_facts(
+        answer, "Metallica is the greatest rock band of all time"
+    )
 
 
 async def test_predicates_facts_and_topics():
@@ -82,7 +86,9 @@ async def test_predicates_facts_and_topics():
     )
 
     # has_facts checks factual coverage; has_topic checks whether a single topic is present
-    assert await has_facts(answer, "Paris is a capital of France. France is a country in Europe.")
+    assert await has_facts(
+        answer, "Paris is a capital of France. France is a country in Europe."
+    )
     assert await has_topic(answer, "France")
     assert not await has_topic(answer, "sports")
 
@@ -124,7 +130,9 @@ async def test_predicates_policy_follows():
 
     # check if answer follows the policy
     assert await follows_policy(answer, "Answer must be in English.")
-    assert await follows_policy(answer, "Must have at least one subjective statement.")
+    assert await follows_policy(
+        answer, "Must have at least one subjective statement."
+    )
 
 
 async def test_predicates_style_match():

@@ -1,146 +1,117 @@
-"""Tests for rue.tracing module."""
+"""Tests for runner-managed Rue tracing."""
 
-import json
+import sys
+from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
-from rue.resources import ResourceResolver, get_registry
-from rue.tracing import (
-    TraceContext,
-    clear_traces,
-    get_tracer,
-    init_tracing,
-    set_trace_output_path,
-    trace_step,
-)
+from rue.testing.discovery import collect
+from rue.testing.runner import Runner
+from rue.telemetry.otel import otel_span
 
 
-@pytest.fixture(scope="module")
-def trace_output_path(tmp_path_factory):
-    """Initialize tracing once for all tests in this module."""
-    tmp_dir = tmp_path_factory.mktemp("traces")
-    output_path = tmp_dir / "test_traces.jsonl"
-    set_trace_output_path(output_path=str(output_path))
-    return output_path
+def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
+    mod_name = f"rue_{uuid4().hex}"
+    mod_path = tmp_path / f"{mod_name}.py"
+    mod_path.write_text(source.lstrip())
+    return mod_name, mod_path
 
 
-@pytest.fixture(autouse=True)
-def clear_traces_each():
-    """Clear traces before and after each test."""
-    clear_traces()
-    yield
-    clear_traces()
+async def _run_module_with_tracing(
+    *,
+    tmp_path: Path,
+    trace_reporter,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+):
+    mod_name, mod_path = _write_temp_module(tmp_path, source)
+
+    try:
+        monkeypatch.chdir(tmp_path)
+        items = collect(mod_path)
+        runner = Runner(
+            reporters=[trace_reporter],
+            otel_enabled=True,
+            db_enabled=False,
+        )
+        run = await runner.run(items=items)
+        return mod_name, run, trace_reporter.sessions
+    finally:
+        sys.modules.pop(mod_name, None)
 
 
-@pytest.mark.usefixtures("trace_output_path")
-class TestInitTracing:
-    """Tests for init_tracing function."""
+@pytest.mark.asyncio
+async def test_otel_trace_injection_and_otel_span_work_inside_runner(
+    tmp_path: Path,
+    trace_reporter,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    mod_name, run, sessions = await _run_module_with_tracing(
+        tmp_path=tmp_path,
+        trace_reporter=trace_reporter,
+        monkeypatch=monkeypatch,
+        source="""
+import rue
 
-    def test_init_tracing_sets_up_provider(self):
-        tracer = get_tracer()
-        assert tracer is not None
+def test_sample(otel_trace: rue.OtelTrace):
+    with rue.otel_span("child_step", {"key": "value"}):
+        pass
 
-    def test_init_tracing_idempotent(self):
-        init_tracing()  # Should not raise
-        tracer = get_tracer()
-        assert tracer is not None
+    child_spans = otel_trace.get_child_spans()
+    assert any(span.name == "child_step" for span in child_spans)
+    otel_trace.set_attribute("my.custom.attr", "value")
+""",
+    )
 
+    assert run.result.passed == 1
+    payloads = [session.serialize() for session in sessions]
+    root_span = next(
+        span
+        for payload in payloads
+        for span in payload["spans"]
+        if span["name"] == f"test.{mod_name}::test_sample"
+    )
+    child_span = next(
+        span
+        for payload in payloads
+        for span in payload["spans"]
+        if span["name"] == "child_step"
+    )
 
-@pytest.mark.usefixtures("trace_output_path")
-class TestTraceStep:
-    """Tests for trace_step context manager."""
-
-    def test_trace_step_creates_span(self, trace_output_path):
-        with trace_step("test_step"):
-            pass
-
-        assert trace_output_path.exists()
-
-        lines = trace_output_path.read_text().strip().split("\n")
-        assert len(lines) == 1
-
-        span = json.loads(lines[0])
-        assert span["name"] == "test_step"
-
-    def test_trace_step_with_attributes(self, trace_output_path):
-        with trace_step("step_with_attrs", {"key": "value", "count": 42}):
-            pass
-
-        lines = trace_output_path.read_text().strip().split("\n")
-        span = json.loads(lines[0])
-
-        attrs = span["attributes"]
-        assert attrs.get("key") == "value"
-        assert attrs.get("count") == 42
-
-    def test_nested_trace_steps(self, trace_output_path):
-        with trace_step("outer"), trace_step("inner"):
-            pass
-
-        lines = trace_output_path.read_text().strip().split("\n")
-        assert len(lines) == 2
+    assert root_span["attributes"]["my.custom.attr"] == "value"
+    assert child_span["attributes"]["key"] == "value"
 
 
-@pytest.mark.usefixtures("trace_output_path")
-class TestTraceContext:
-    """Tests for TraceContext resource and object."""
+@pytest.mark.asyncio
+async def test_otel_span_is_no_op_outside_runner_even_after_runtime_configured(
+    tmp_path: Path,
+    trace_reporter,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, run, sessions = await _run_module_with_tracing(
+        tmp_path=tmp_path,
+        trace_reporter=trace_reporter,
+        monkeypatch=monkeypatch,
+        source="""
+import rue
 
-    @pytest.mark.asyncio
-    async def test_trace_context_injection(self):
-        """Test that trace_context resolves correctly within an active span."""
-        tracer = get_tracer()
+def test_sample():
+    with rue.otel_span("inside_step"):
+        pass
+""",
+    )
 
-        # Start a span to simulate a running test
-        with tracer.start_as_current_span("test_root_span") as span:
-            resolver = ResourceResolver(get_registry())
+    assert run.result.passed == 1
+    before = [session.serialize() for session in sessions]
 
-            # Resolve the trace_context resource
-            # Note: The resource is a generator, resolver handles the lifecycle
-            ctx = await resolver.resolve("trace_context")
+    with otel_span("outside_step", {"ignored": True}) as span:
+        span.set_attribute("more", "ignored")
 
-            assert isinstance(ctx, TraceContext)
-            assert ctx.is_enabled is True
-
-            # Verify IDs match the current span
-            assert ctx.trace_id == format(span.get_span_context().trace_id, "032x")
-            assert ctx.span_id == format(span.get_span_context().span_id, "016x")
-
-            # Create a child span
-            with trace_step("child_step"):
-                pass
-
-            # Verify child span capture
-            child_spans = ctx.get_child_spans()
-            assert len(child_spans) >= 1
-            assert any(s.name == "child_step" for s in child_spans)
-
-            # Test custom attributes
-            ctx.set_attribute("my.custom.attr", "value")
-
-            # Teardown the resolver (important for generators)
-            await resolver.teardown()
-
-    @pytest.mark.asyncio
-    async def test_trace_context_lifecycle(self):
-        """Test that trace_context clears spans on teardown."""
-        tracer = get_tracer()
-
-        with tracer.start_as_current_span("lifecycle_test") as span:
-            resolver = ResourceResolver(get_registry())
-            ctx = await resolver.resolve("trace_context")
-            trace_id = ctx.trace_id
-
-            with trace_step("step_1"):
-                pass
-
-            assert len(ctx.get_child_spans()) > 0
-
-            # Trigger teardown
-            # This should invoke trace_context generator teardown which calls collector.clear(trace_id)
-            await resolver.teardown()
-
-            # Verify spans are cleared from collector for this trace
-            from rue.tracing import get_span_collector
-
-            collector = get_span_collector()
-            assert len(collector.get_spans(trace_id)) == 0
+    after = [session.serialize() for session in sessions]
+    assert before == after
+    assert all(
+        "outside_step"
+        not in {inner_span["name"] for inner_span in content["spans"]}
+        for content in after
+    )
