@@ -49,10 +49,10 @@ def _iter_rue_files(path: Path) -> list[Path]:
     return []
 
 
-def _iter_rueconf_files(path: Path) -> list[Path]:
+def _iter_confrue_files(path: Path) -> list[Path]:
     if not path.is_dir():
         return []
-    return sorted(path.glob("rueconf_*.py"))
+    return sorted(path.glob("confrue_*.py"))
 
 
 def _is_tag_root(expr: ast.expr) -> bool:
@@ -171,7 +171,7 @@ def _iter_ancestor_dirs(root: Path, directory: Path) -> list[Path]:
 def _config_chain_for(path: Path, suite_root: Path) -> list[Path]:
     configs: list[Path] = []
     for directory in _iter_ancestor_dirs(suite_root, path.parent):
-        configs.extend(_iter_rueconf_files(directory))
+        configs.extend(_iter_confrue_files(directory))
     return configs
 
 

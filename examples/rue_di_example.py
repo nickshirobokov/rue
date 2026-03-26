@@ -4,8 +4,6 @@ import asyncio
 
 import rue
 
-from .confrue_assets import some_callable
-from ..confrue_kek import some_other_callable
 
 # === Resources (similar to pytest fixtures) ===
 
@@ -34,21 +32,7 @@ async def async_db():
     yield db
     db["connected"] = False  # Teardown
 
-from pydantic import BaseModel
-
-class T(BaseModel):
-    a: int
-    b: int
-
-tt = T(a=None, b=None)
-
 # === Test Functions ===
-
-def test_some_callable():
-    """Test that some_callable resource is callable."""
-    assert some_callable() == 0
-    assert some_other_callable() == 0
-
 
 def test_config_has_url(config):
     """Test that config resource provides api_url."""

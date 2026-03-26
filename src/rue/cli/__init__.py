@@ -487,6 +487,12 @@ async def _run_tests(args: argparse.Namespace, config: Config) -> int:
             "reporters": reporter_names,
         }
     )
+    try:
+        items = _collect_items(paths, include_tags, exclude_tags, keyword)
+    except ValueError as exc:
+        Console().print(f"[red]{exc}[/red]")
+        return 2
+
     runner = Runner(
         config=runner_config,
         fail_fast=args.fail_fast,
@@ -495,12 +501,6 @@ async def _run_tests(args: argparse.Namespace, config: Config) -> int:
 
     if db_enabled and args.run_id and runner.run_id_exists(args.run_id):
         Console().print(f"[red]run_id '{args.run_id}' already exists[/red]")
-        return 2
-
-    try:
-        items = _collect_items(paths, include_tags, exclude_tags, keyword)
-    except ValueError as exc:
-        Console().print(f"[red]{exc}[/red]")
         return 2
 
     run = await runner.run(items=items, run_id=args.run_id)

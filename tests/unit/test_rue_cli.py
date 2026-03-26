@@ -296,13 +296,23 @@ async def test_run_tests_returns_2_when_run_id_already_exists(
     )
     config = _make_cli_config()
 
-    def _fail_if_called(_paths):
-        msg = "_collect_items should not be called when duplicate run_id is detected"
+    collected = False
+
+    def _collect(_paths, _include_tags, _exclude_tags, _keyword):
+        nonlocal collected
+        collected = True
+        return [make_item("test_ok", set())]
+
+    async def _fail_run(self, items=None, path=None, run_id=None):
+        _ = self, items, path, run_id
+        msg = "Runner.run should not be called when duplicate run_id exists"
         raise AssertionError(msg)
 
-    monkeypatch.setattr("rue.cli._collect_items", _fail_if_called)
+    monkeypatch.setattr("rue.cli._collect_items", _collect)
+    monkeypatch.setattr("rue.cli.Runner.run", _fail_run)
 
     exit_code = await _run_tests(args, config)
+    assert collected is True
     assert exit_code == 2
 
 
