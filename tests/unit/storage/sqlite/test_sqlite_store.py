@@ -53,7 +53,7 @@ def test_sqlite_store_save_and_get_run(tmp_path: Path) -> None:
             error=Exception("boom"),
         ),
         execution_id=execution_id,
-        trace_id="trace-1",
+        otel_trace_id="trace-1",
         sub_executions=[sub_execution],
     )
 
@@ -111,7 +111,7 @@ def test_sqlite_store_save_and_get_run(tmp_path: Path) -> None:
     assert loaded.result.failed == 1
     assert loaded.result.total == 1
     assert len(loaded.result.executions) == 1
-    assert loaded.result.executions[0].trace_id == "trace-1"
+    assert loaded.result.executions[0].otel_trace_id == "trace-1"
     assert loaded.result.executions[0].definition.suffix == "{'slug': 'sample'}"
     assert loaded.result.executions[0].definition.case_id == case_id
     assert len(loaded.result.executions[0].sub_executions) == 1

@@ -8,8 +8,7 @@ from typing import Any, Protocol, TypeVar, overload, ParamSpec, Concatenate
 
 from rue.context import PREDICATE_RESULTS_COLLECTOR
 from rue.predicates.models import PredicateResult
-from rue.tracing import get_tracer
-from rue.tracing.attributes import is_trace_content_enabled, truncate_repr
+from rue.telemetry.otel.runtime import otel_runtime
 
 P = ParamSpec("P")
 ACTUAL = TypeVar("ACTUAL", contravariant=True)
@@ -134,17 +133,23 @@ def predicate(
             async def async_wrapper(*args: Any, **kwargs: Any) -> bool:
                 bound = sig.bind(*args, **kwargs)
                 bound.apply_defaults()
-                tracer = get_tracer()
-                with tracer.start_as_current_span(span_name) as span:
+                if not otel_runtime.is_otel_trace_active():
                     predicate_result = _normalize_result(
                         await f(*args, **kwargs),
                         predicate_name,
                         bound,
                     )
                     _record_result(predicate_result)
-                    _set_trace_attributes(
-                        span, predicate_name, predicate_result, bound
+                    return predicate_result.value
+
+                with otel_runtime.start_as_current_span(span_name) as span:
+                    predicate_result = _normalize_result(
+                        await f(*args, **kwargs),
+                        predicate_name,
+                        bound,
                     )
+                    _record_result(predicate_result)
+                    _set_trace_attributes(span, predicate_name, predicate_result, bound)
                     return predicate_result.value
 
             return async_wrapper
@@ -153,17 +158,23 @@ def predicate(
         def sync_wrapper(*args: Any, **kwargs: Any) -> bool:
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
-            tracer = get_tracer()
-            with tracer.start_as_current_span(span_name) as span:
+            if not otel_runtime.is_otel_trace_active():
                 predicate_result = _normalize_result(
                     f(*args, **kwargs),
                     predicate_name,
                     bound,
                 )
                 _record_result(predicate_result)
-                _set_trace_attributes(
-                    span, predicate_name, predicate_result, bound
+                return predicate_result.value
+
+            with otel_runtime.start_as_current_span(span_name) as span:
+                predicate_result = _normalize_result(
+                    f(*args, **kwargs),
+                    predicate_name,
+                    bound,
                 )
+                _record_result(predicate_result)
+                _set_trace_attributes(span, predicate_name, predicate_result, bound)
                 return predicate_result.value
 
         return sync_wrapper
@@ -220,15 +231,10 @@ def _set_trace_attributes(
     span.set_attribute("predicate.strict", result.strict)
     span.set_attribute("predicate.confidence", result.confidence)
 
-    if not is_trace_content_enabled():
+    if not otel_runtime.is_otel_content_enabled():
         return
 
-    span.set_attribute(
-        "predicate.input.actual", truncate_repr(bound.arguments["actual"])
-    )
-    span.set_attribute(
-        "predicate.input.reference",
-        truncate_repr(bound.arguments["reference"]),
-    )
+    span.set_attribute("predicate.input.actual", repr(bound.arguments["actual"]))
+    span.set_attribute("predicate.input.reference", repr(bound.arguments["reference"]))
     if result.message is not None:
-        span.set_attribute("predicate.message", truncate_repr(result.message))
+        span.set_attribute("predicate.message", repr(result.message))

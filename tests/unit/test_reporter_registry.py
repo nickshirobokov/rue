@@ -47,7 +47,7 @@ class DummyReporter(Reporter):
     async def on_run_stopped_early(self, failure_count: int) -> None:
         pass
 
-    async def on_tracing_enabled(self, output_path: Path) -> None:
+    async def on_otel_enabled(self, output_path: Path) -> None:
         pass
 
 

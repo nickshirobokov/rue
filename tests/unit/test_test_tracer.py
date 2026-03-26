@@ -1,7 +1,7 @@
 from pathlib import Path
 from uuid import UUID
 
-from rue.testing.execution.tracer import TestTracer
+from rue.telemetry.otel.test_span_manager import OtelTestSpanManager
 from rue.testing.models import TestItem
 
 
@@ -20,11 +20,11 @@ class FakeSpan:
         self.attributes[key] = value
 
 
-class FakeTracer:
+class FakeSpanContext:
     def __init__(self, span: FakeSpan) -> None:
         self._span = span
 
-    def start_as_current_span(self, _name: str) -> FakeSpan:
+    def __call__(self, _name: str) -> FakeSpan:
         return self._span
 
 
@@ -42,11 +42,15 @@ def make_item(*, suffix: str | None = None, case_id: UUID | None = None) -> Test
 def test_tracer_records_suffix_and_case_id(monkeypatch):
     span = FakeSpan()
     monkeypatch.setattr(
-        "rue.testing.execution.tracer.get_tracer",
-        lambda: FakeTracer(span),
+        "rue.telemetry.otel.test_span_manager.otel_runtime.start_as_current_span",
+        FakeSpanContext(span),
+    )
+    monkeypatch.setattr(
+        "rue.telemetry.otel.test_span_manager.otel_runtime.is_configured",
+        lambda: True,
     )
 
-    tracer = TestTracer(enabled=True)
+    tracer = OtelTestSpanManager(enabled=True)
     item = make_item(
         suffix="{'slug': 'example'}",
         case_id=UUID("00000000-0000-0000-0000-000000000001"),
@@ -62,11 +66,15 @@ def test_tracer_records_suffix_and_case_id(monkeypatch):
 def test_tracer_does_not_infer_case_id_from_suffix(monkeypatch):
     span = FakeSpan()
     monkeypatch.setattr(
-        "rue.testing.execution.tracer.get_tracer",
-        lambda: FakeTracer(span),
+        "rue.telemetry.otel.test_span_manager.otel_runtime.start_as_current_span",
+        FakeSpanContext(span),
+    )
+    monkeypatch.setattr(
+        "rue.telemetry.otel.test_span_manager.otel_runtime.is_configured",
+        lambda: True,
     )
 
-    tracer = TestTracer(enabled=True)
+    tracer = OtelTestSpanManager(enabled=True)
     item = make_item(suffix="00000000-0000-0000-0000-000000000001")
 
     with tracer.span(item):

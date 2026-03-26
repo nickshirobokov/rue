@@ -18,8 +18,7 @@ from pydantic_core import ArgsKwargs, SchemaValidator
 
 from rue.resources import Scope, resource
 from rue.testing.models.case import Case
-from rue.tracing import get_tracer
-from rue.tracing.attributes import is_trace_content_enabled, truncate_repr
+from rue.telemetry.otel.runtime import otel_runtime
 
 
 P = ParamSpec("P")
@@ -134,8 +133,10 @@ def _trace_callable(fn: Callable[..., Any], *, sut_name: str) -> Callable[..., A
 
         @functools.wraps(fn)
         async def traced_async(*args: Any, **kwargs: Any) -> Any:
-            tracer = get_tracer()
-            with tracer.start_as_current_span(f"sut.{sut_name}") as span:
+            if not otel_runtime.is_otel_trace_active():
+                return await fn(*args, **kwargs)
+
+            with otel_runtime.start_as_current_span(f"sut.{sut_name}") as span:
                 span.set_attribute("rue.sut", True)
                 span.set_attribute("rue.sut.name", sut_name)
                 _set_input_attrs(span, args, kwargs)
@@ -147,8 +148,10 @@ def _trace_callable(fn: Callable[..., Any], *, sut_name: str) -> Callable[..., A
 
     @functools.wraps(fn)
     def traced(*args: Any, **kwargs: Any) -> Any:
-        tracer = get_tracer()
-        with tracer.start_as_current_span(f"sut.{sut_name}") as span:
+        if not otel_runtime.is_otel_trace_active():
+            return fn(*args, **kwargs)
+
+        with otel_runtime.start_as_current_span(f"sut.{sut_name}") as span:
             span.set_attribute("rue.sut", True)
             span.set_attribute("rue.sut.name", sut_name)
             _set_input_attrs(span, args, kwargs)
@@ -166,8 +169,10 @@ def _trace_instance_method(instance: Any, *, sut_name: str, method: str) -> Any:
 
         @functools.wraps(original_method)
         async def traced_async(*args: Any, **kwargs: Any) -> Any:
-            tracer = get_tracer()
-            with tracer.start_as_current_span(f"sut.{sut_name}") as span:
+            if not otel_runtime.is_otel_trace_active():
+                return await original_method(*args, **kwargs)
+
+            with otel_runtime.start_as_current_span(f"sut.{sut_name}") as span:
                 span.set_attribute("rue.sut", True)
                 span.set_attribute("rue.sut.name", sut_name)
                 _set_input_attrs(span, args, kwargs)
@@ -180,8 +185,10 @@ def _trace_instance_method(instance: Any, *, sut_name: str, method: str) -> Any:
 
     @functools.wraps(original_method)
     def traced(*args: Any, **kwargs: Any) -> Any:
-        tracer = get_tracer()
-        with tracer.start_as_current_span(f"sut.{sut_name}") as span:
+        if not otel_runtime.is_otel_trace_active():
+            return original_method(*args, **kwargs)
+
+        with otel_runtime.start_as_current_span(f"sut.{sut_name}") as span:
             span.set_attribute("rue.sut", True)
             span.set_attribute("rue.sut.name", sut_name)
             _set_input_attrs(span, args, kwargs)
@@ -198,20 +205,20 @@ def _trace_instance_method(instance: Any, *, sut_name: str, method: str) -> Any:
 
 def _set_input_attrs(span: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
     """Set input attributes on span, respecting trace content settings."""
-    if not is_trace_content_enabled():
+    if not otel_runtime.is_otel_content_enabled():
         span.set_attribute("sut.input.count", len(args) + len(kwargs))
         return
 
     if args:
-        span.set_attribute("sut.input.args", truncate_repr(args))
+        span.set_attribute("sut.input.args", repr(args))
     if kwargs:
-        span.set_attribute("sut.input.kwargs", truncate_repr(kwargs))
+        span.set_attribute("sut.input.kwargs", repr(kwargs))
 
 
 def _set_output_attrs(span: Any, result: Any) -> None:
     """Set output attributes on span, respecting trace content settings."""
-    if not is_trace_content_enabled():
+    if not otel_runtime.is_otel_content_enabled():
         span.set_attribute("sut.output.type", type(result).__name__)
         return
 
-    span.set_attribute("sut.output", truncate_repr(result))
+    span.set_attribute("sut.output", repr(result))

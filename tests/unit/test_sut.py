@@ -3,16 +3,20 @@
 import asyncio
 import inspect
 import json
+import sys
 from dataclasses import dataclass
+from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel
 from pydantic_core import ValidationError
 
 from rue.resources import ResourceResolver, Scope, clear_registry, get_registry, resource
+from rue.testing.discovery import collect
 from rue.testing.models import Case
+from rue.testing.runner import Runner
 from rue.testing.sut import sut
-from rue.tracing import clear_traces, set_trace_output_path
 
 
 @pytest.fixture(autouse=True)
@@ -22,18 +26,42 @@ def clean_registry():
     clear_registry()
 
 
-@pytest.fixture(scope="module", autouse=True)
-def setup_tracing_once(tmp_path_factory):
-    tmp_dir = tmp_path_factory.mktemp("traces")
-    set_trace_output_path(output_path=tmp_dir / "sut_traces.jsonl")
+def _span_from_output(otel_output_path: Path, name: str) -> dict[str, object]:
+    for line in otel_output_path.read_text().splitlines():
+        span = json.loads(line)
+        if span["name"] == name:
+            return span
+    raise AssertionError(f"Missing span {name!r}")
 
 
-@pytest.fixture(autouse=True)
-def clear_traces_each(tmp_path):
-    set_trace_output_path(tmp_path / "traces.jsonl")
-    clear_traces()
-    yield
-    clear_traces()
+def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
+    mod_name = f"rue_{uuid4().hex}"
+    mod_path = tmp_path / f"{mod_name}.py"
+    mod_path.write_text(source.lstrip())
+    return mod_name, mod_path
+
+
+async def _run_module_with_tracing(
+    *,
+    tmp_path: Path,
+    null_reporter,
+    source: str,
+    trace_name: str = "sut_traces.jsonl",
+):
+    mod_name, mod_path = _write_temp_module(tmp_path, source)
+    trace_path = tmp_path / trace_name
+
+    try:
+        items = collect(mod_path)
+        run = await Runner(
+            reporters=[null_reporter],
+            otel_enabled=True,
+            otel_output=trace_path,
+            db_enabled=False,
+        ).run(items=items)
+        return mod_name, run, trace_path
+    finally:
+        sys.modules.pop(mod_name, None)
 
 
 class TestSutDecorator:
@@ -290,73 +318,110 @@ class TestSutResolution:
         assert resolved.run(3) == 6
 
 
-class TestSutTracing:
+class TestSutOpenTelemetry:
     @pytest.mark.asyncio
-    async def test_callable_sut_creates_span(self):
-        @sut
-        def traced_sut():
-            def run(x: int) -> int:
-                return x * 2
+    async def test_callable_sut_creates_span(self, tmp_path: Path, null_reporter):
+        mod_name, run, otel_output_path = await _run_module_with_tracing(
+            tmp_path=tmp_path,
+            null_reporter=null_reporter,
+            source="""
+import rue
 
-            return run
+@rue.sut
+def traced_sut():
+    def run(x: int) -> int:
+        return x * 2
+    return run
 
-        resolver = ResourceResolver(get_registry())
-        resolved = await resolver.resolve("traced_sut")
-        resolved(5)
+def test_sample(traced_sut):
+    assert traced_sut(5) == 10
+""",
+        )
 
-        from rue.tracing.lifecycle import _exporter
-
-        assert _exporter is not None
-        lines = _exporter.output_path.read_text().strip().splitlines()
-        span_names = [json.loads(line)["name"] for line in lines]
+        assert run.result.passed == 1
+        span_names = {json.loads(line)["name"] for line in otel_output_path.read_text().splitlines()}
         assert "sut.traced_sut" in span_names
+        assert f"test.{mod_name}::test_sample" in span_names
 
     @pytest.mark.asyncio
-    async def test_instance_method_sut_creates_span(self):
-        class Service:
-            def run(self, value: str) -> str:
-                return f"ok:{value}"
+    async def test_instance_method_sut_creates_span(self, tmp_path: Path, null_reporter):
+        _, run, otel_output_path = await _run_module_with_tracing(
+            tmp_path=tmp_path,
+            null_reporter=null_reporter,
+            source="""
+import rue
 
-        @sut(method="run")
-        def traced_service():
-            return Service()
+class Service:
+    def run(self, value: str) -> str:
+        return f"ok:{value}"
 
-        resolver = ResourceResolver(get_registry())
-        resolved = await resolver.resolve("traced_service")
-        assert resolved.run("hello") == "ok:hello"
+@rue.sut(method="run")
+def traced_service():
+    return Service()
 
-        from rue.tracing.lifecycle import _exporter
+def test_sample(traced_service):
+    assert traced_service.run("hello") == "ok:hello"
+""",
+            trace_name="sut_instance_traces.jsonl",
+        )
 
-        assert _exporter is not None
-        lines = _exporter.output_path.read_text().strip().splitlines()
-        span_names = [json.loads(line)["name"] for line in lines]
+        assert run.result.passed == 1
+        span_names = {json.loads(line)["name"] for line in otel_output_path.read_text().splitlines()}
         assert "sut.traced_service" in span_names
 
     @pytest.mark.asyncio
-    async def test_sut_spans_have_rue_attributes(self):
+    async def test_sut_spans_have_rue_attributes(self, tmp_path: Path, null_reporter):
+        _, run, otel_output_path = await _run_module_with_tracing(
+            tmp_path=tmp_path,
+            null_reporter=null_reporter,
+            source="""
+import rue
+
+@rue.sut
+def my_test_function():
+    def run(x: int) -> int:
+        return x
+    return run
+
+def test_sample(my_test_function):
+    assert my_test_function(1) == 1
+""",
+            trace_name="sut_attrs_traces.jsonl",
+        )
+
+        assert run.result.passed == 1
+        span = _span_from_output(otel_output_path, "sut.my_test_function")
+        assert span["attributes"].get("rue.sut") is True
+        assert span["attributes"].get("rue.sut.name") == "my_test_function"
+
+    @pytest.mark.asyncio
+    async def test_sut_does_not_trace_outside_runner_even_after_runtime_configured(
+        self,
+        tmp_path: Path,
+        null_reporter,
+    ):
+        _, _, otel_output_path = await _run_module_with_tracing(
+            tmp_path=tmp_path,
+            null_reporter=null_reporter,
+            source="""
+def test_sample():
+    assert True
+""",
+            trace_name="outside_runner_sut_traces.jsonl",
+        )
+
         @sut
-        def my_test_function():
-            def run(x: int) -> int:
-                return x
+        def adder():
+            def run(x: int, y: int) -> int:
+                return x + y
 
             return run
 
         resolver = ResourceResolver(get_registry())
-        resolved = await resolver.resolve("my_test_function")
-        resolved(1)
+        resolved = await resolver.resolve("adder")
+        before = otel_output_path.read_text()
 
-        from rue.tracing.lifecycle import _exporter
+        assert resolved(2, 3) == 5
 
-        assert _exporter is not None
-        lines = _exporter.output_path.read_text().strip().splitlines()
-
-        span = None
-        for line in lines:
-            parsed = json.loads(line)
-            if parsed["name"] == "sut.my_test_function":
-                span = parsed
-                break
-
-        assert span is not None
-        assert span["attributes"].get("rue.sut") is True
-        assert span["attributes"].get("rue.sut.name") == "my_test_function"
+        after = otel_output_path.read_text()
+        assert before == after

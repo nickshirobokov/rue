@@ -91,15 +91,37 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Global test run timeout in seconds",
     )
     test_parser.add_argument(
-        "--trace",
+        "--otel",
         action="store_true",
-        help="Enable OpenTelemetry tracing of tests and SUT calls",
+        default=None,
+        help="Enable OpenTelemetry spans for tests and SUT calls",
     )
     test_parser.add_argument(
-        "--trace-output",
+        "--no-otel",
+        dest="otel",
+        action="store_false",
+        default=None,
+        help="Disable OpenTelemetry spans for tests and SUT calls",
+    )
+    test_parser.add_argument(
+        "--otel-output",
         type=str,
-        default=".rue/traces.jsonl",
-        help="Output path for trace data (default: .rue/traces.jsonl)",
+        default=None,
+        help="Output path for OpenTelemetry span data (default: .rue/otel-spans.jsonl)",
+    )
+    test_parser.add_argument(
+        "--otel-content",
+        dest="otel_content",
+        action="store_true",
+        default=None,
+        help="Record content-bearing SUT and predicate span attributes",
+    )
+    test_parser.add_argument(
+        "--no-otel-content",
+        dest="otel_content",
+        action="store_false",
+        default=None,
+        help="Disable content-bearing SUT and predicate span attributes",
     )
     test_parser.add_argument("-q", "--quiet", action="count", default=0, help="Reduce CLI output")
     test_parser.add_argument(
@@ -326,6 +348,24 @@ def _resolve_timeout(args: argparse.Namespace, config: Config) -> float | None:
     return config.timeout
 
 
+def _resolve_otel(args: argparse.Namespace, config: Config) -> bool:
+    if args.otel is not None:
+        return args.otel
+    return config.otel
+
+
+def _resolve_otel_output(args: argparse.Namespace, config: Config) -> str | None:
+    if args.otel_output is not None:
+        return args.otel_output
+    return config.otel_output
+
+
+def _resolve_otel_content(args: argparse.Namespace, config: Config) -> bool:
+    if args.otel_content is not None:
+        return args.otel_content
+    return config.otel_content
+
+
 def _resolve_reporters(
     args: argparse.Namespace, config: Config, verbosity: int
 ) -> list[Reporter]:
@@ -408,6 +448,9 @@ async def _run_tests(args: argparse.Namespace, config: Config) -> int:
     verbosity = _resolve_verbosity(args, config)
     concurrency = _resolve_concurrency(args, config)
     timeout = _resolve_timeout(args, config)
+    otel_enabled = _resolve_otel(args, config)
+    otel_output = _resolve_otel_output(args, config)
+    otel_content = _resolve_otel_content(args, config)
     db_path = args.db_path or config.db_path
     db_enabled = config.db_enabled
     if args.no_db:
@@ -420,8 +463,9 @@ async def _run_tests(args: argparse.Namespace, config: Config) -> int:
         verbosity=verbosity,
         concurrency=concurrency,
         timeout=timeout,
-        enable_tracing=args.trace,
-        trace_output=args.trace_output,
+        otel_enabled=otel_enabled,
+        otel_output=otel_output,
+        otel_content=otel_content,
         fail_fast=args.fail_fast,
         capture_output=not args.show_output,
         db_enabled=db_enabled,

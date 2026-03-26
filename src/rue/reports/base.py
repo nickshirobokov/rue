@@ -54,5 +54,5 @@ class Reporter(ABC):
         """Called when run stops early due to maxfail limit."""
 
     @abstractmethod
-    async def on_tracing_enabled(self, output_path: Path) -> None:
-        """Called when tracing is enabled to report output location."""
+    async def on_otel_enabled(self, output_path: Path) -> None:
+        """Called when OpenTelemetry capture is enabled to report output location."""

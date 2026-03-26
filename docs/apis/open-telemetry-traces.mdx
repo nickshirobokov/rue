@@ -1,0 +1,122 @@
+title: "Rue OpenTelemetry Traces"
+---
+
+Rue OpenTelemetry capture is **Runner-managed**. Traces exist only while a test function is executing inside an OpenTelemetry-enabled `SingleTest` started by `Runner` or `rue test --otel`.
+
+## Enabling OpenTelemetry
+
+### CLI
+
+```bash
+# Enable OpenTelemetry
+uv run rue test --otel
+
+# Disable OpenTelemetry explicitly, even if config enables it
+uv run rue test --no-otel
+
+# Write OpenTelemetry spans to a custom file
+uv run rue test --otel --otel-output traces/run_001.jsonl
+
+# Disable content-bearing SUT/predicate attributes
+uv run rue test --otel --no-otel-content
+```
+
+### Config
+
+OpenTelemetry settings can be resolved from `rue.toml`, `[tool.rue]` in `pyproject.toml`, environment variables, CLI args, and `addopts`.
+
+```toml
+[tool.rue]
+otel = true
+otel-output = "traces/default.jsonl"
+otel-content = false
+```
+
+Environment variable equivalents:
+- `RUE_OTEL`
+- `RUE_OTEL_OUTPUT`
+- `RUE_OTEL_CONTENT`
+
+CLI flags override config and environment.
+
+### Runner
+
+```python
+from rue.reports import ConsoleReporter
+from rue.testing import Runner
+
+runner = Runner(
+    reporters=[ConsoleReporter()],
+    otel_enabled=True,
+    otel_output="traces/run_001.jsonl",
+    otel_content=True,
+)
+```
+
+## Public APIs
+
+### `otel_span`
+
+Create a custom child span inside the current OpenTelemetry-enabled test.
+
+```python
+from rue import otel_span
+
+def test_pipeline():
+    with otel_span("retrieve", {"query": "weather"}):
+        pass
+```
+
+Outside an OpenTelemetry-enabled `SingleTest`, `otel_span()` is a no-op and does not create Rue span output.
+
+### `OtelTrace`
+
+Declare `otel_trace` in a test signature to inspect the current OpenTelemetry test session.
+
+```python
+import rue
+
+def test_agent_workflow(my_agent, otel_trace: rue.OtelTrace):
+    result = my_agent("hello")
+
+    with rue.otel_span("postprocess"):
+        assert result
+
+    spans = otel_trace.get_child_spans()
+    llm_calls = otel_trace.get_llm_calls()
+    otel_trace.set_attribute("response.length", len(result))
+```
+
+Available properties and methods:
+- `otel_trace_id`
+- `otel_span_id`
+- `is_enabled`
+- `get_child_spans()`
+- `get_llm_calls()`
+- `get_sut_spans(name=None)`
+- `set_attribute(key, value)`
+
+`otel_trace` is only available while an OpenTelemetry-enabled test is actively executing. If OpenTelemetry is off, resolving it raises at runtime.
+
+## Behavior
+
+- Rue creates one root span per OpenTelemetry-enabled `SingleTest`: `test.<full_name>`.
+- Aggregator executions (`repeat`, `parametrize`, `iter_cases`, `iter_case_groups`) do not get their own OpenTelemetry roots; each child `SingleTest` gets its own trace.
+- `@rue.sut` and `@predicate` write spans only when an active OpenTelemetry session exists.
+- OpenAI and Anthropic client instrumentation is initialized by the OpenTelemetry runtime and captured only when calls belong to an active OpenTelemetry test session.
+
+## Storage
+
+- Default OpenTelemetry file: `.rue/otel-spans.jsonl`
+- File format: JSONL, one serialized OpenTelemetry span per line
+- If SQLite persistence is enabled, Rue also stores spans in `otel_spans`
+
+`otel_content` controls Rue-added content-bearing SUT and predicate attributes:
+- `sut.input.args`
+- `sut.input.kwargs`
+- `sut.output`
+- `predicate.input.actual`
+- `predicate.input.reference`
+- `predicate.message`
+
+When `otel_content=false`, Rue records only coarse metadata for those spans.

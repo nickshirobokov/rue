@@ -18,7 +18,7 @@ from rue.storage.sqlite.migrations import MigrationError, MigrationRunner
 from rue.testing.models.definition import TestDefinition
 from rue.testing.models.result import TestExecution, TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
-from rue.tracing.lifecycle import InMemorySpanCollector
+from rue.telemetry.otel.runtime import OtelTraceSnapshot
 
 
 DEFAULT_DB_NAME = ".rue/rue.db"
@@ -37,7 +37,7 @@ RUN_INSERT_SQL = """
 EXECUTION_INSERT_SQL = """
     INSERT INTO test_executions (
         execution_id, run_id, parent_id, test_name, file_path, class_name,
-        case_id, id_suffix, trace_id, tags_json, skip_reason, xfail_reason,
+        case_id, id_suffix, otel_trace_id, tags_json, skip_reason, xfail_reason,
         status, duration_ms, error_message, error_traceback
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
@@ -64,9 +64,9 @@ PREDICATE_INSERT_SQL = """
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
-TRACE_SPAN_INSERT_SQL = """
-    INSERT INTO trace_spans (
-        run_id, test_execution_id, trace_id, span_id, parent_span_id, name,
+OTEL_SPAN_INSERT_SQL = """
+    INSERT INTO otel_spans (
+        run_id, test_execution_id, otel_trace_id, span_id, parent_span_id, name,
         start_time_ns, end_time_ns, duration_ms, span_json
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
@@ -220,7 +220,7 @@ class SQLiteStore(Store):
                         class_name,
                         str(case_id) if case_id else None,
                         suffix,
-                        execution.trace_id,
+                        execution.otel_trace_id,
                         json.dumps(list(tags)) if tags else None,
                         skip_reason,
                         xfail_reason,
@@ -258,22 +258,14 @@ class SQLiteStore(Store):
             (MAX_STORED_RUNS,),
         )
 
-    def save_trace_spans(self, run: Run, collector: InMemorySpanCollector) -> None:
+    def save_otel_spans(self, run: Run, snapshots: dict[UUID, OtelTraceSnapshot]) -> None:
         """Save trace spans for a run."""
-        trace_to_execution: dict[str, str] = {}
-        stack = list(run.result.executions)
-        while stack:
-            execution = stack.pop()
-            if execution.trace_id:
-                trace_to_execution[execution.trace_id] = str(execution.execution_id)
-            stack.extend(execution.sub_executions)
-
-        if not trace_to_execution:
+        if not snapshots:
             return
 
         rows: list[tuple[object, ...]] = []
-        for trace_id, execution_id in trace_to_execution.items():
-            for span in collector.get_spans(trace_id):
+        for execution_id, snapshot in snapshots.items():
+            for span in snapshot.spans:
                 start_time_ns = span.start_time
                 end_time_ns = span.end_time
                 duration_ms = (end_time_ns - start_time_ns) / 1_000_000
@@ -284,8 +276,8 @@ class SQLiteStore(Store):
                 rows.append(
                     (
                         str(run.run_id),
-                        execution_id,
-                        trace_id,
+                        str(execution_id),
+                        snapshot.otel_trace_id,
                         span_id,
                         parent_span_id,
                         span.name,
@@ -298,7 +290,7 @@ class SQLiteStore(Store):
 
         if rows:
             with self._connect() as conn:
-                conn.executemany(TRACE_SPAN_INSERT_SQL, rows)
+                conn.executemany(OTEL_SPAN_INSERT_SQL, rows)
 
     def _save_assertion(
         self,
@@ -560,7 +552,7 @@ class SQLiteStore(Store):
             definition=definition,
             result=result,
             execution_id=UUID(row["execution_id"]),
-            trace_id=row["trace_id"],
+            otel_trace_id=row["otel_trace_id"],
         )
 
     def _row_to_metric(self, row: sqlite3.Row) -> MetricResult:

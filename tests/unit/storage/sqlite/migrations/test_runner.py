@@ -289,7 +289,7 @@ class TestMigrationVersions:
             "metrics",
             "assertions",
             "predicates",
-            "trace_spans",
+            "otel_spans",
         }
         assert expected_tables.issubset(table_names)
         conn.close()

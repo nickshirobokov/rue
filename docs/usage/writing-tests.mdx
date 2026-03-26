@@ -182,7 +182,7 @@ def test_main_thread_only():
 Resources are the Rue equivalent of pytest fixtures: named, injectable dependencies that Rue resolves by parameter name.
 
 <Info>
-  **Related docs**: [Resource (Concept)](/concepts/resource), [Metric (Concept)](/concepts/metric), [SUT (Concept)](/concepts/sut), [Tracing (API)](/apis/tracing)
+  **Related docs**: [Resource (Concept)](/concepts/resource), [Metric (Concept)](/concepts/metric), [SUT (Concept)](/concepts/sut), [OpenTelemetry Traces (API)](/apis/open-telemetry-traces)
 </Info>
 
 **`@rue.resource(scope="case")`** - Define injectable dependencies with lifecycle management
@@ -248,18 +248,18 @@ from demo_app import agent
 def weather_agent(prompt: str):
     return agent(prompt, tools=["get_weather"])
 
-def test_agent_uses_tools(weather_agent, trace_context):
+def test_agent_uses_tools(weather_agent, otel_trace):
     result = weather_agent("What's the weather?")
 
-    # Access trace spans for assertions
-    sut_spans = trace_context.get_sut_spans(name="weather_agent")
+    # Access OpenTelemetry spans for assertions
+    sut_spans = otel_trace.get_sut_spans(name="weather_agent")
     assert sut_spans
 
     # If you want to assert on tool calls, query LLM spans explicitly.
     # Note: attribute keys come from OpenTelemetry LLM instrumentations.
     tool_names = [
         s.attributes.get("llm.request.functions.0.name")
-        for s in trace_context.get_llm_calls()
+        for s in otel_trace.get_llm_calls()
         if s.attributes
     ]
     assert "get_weather" in tool_names

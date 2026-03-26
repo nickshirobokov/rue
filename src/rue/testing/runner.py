@@ -16,12 +16,14 @@ from rue.context import (
 )
 from rue.context.output_capture import sys_output_capture
 from rue.metrics_.base import MetricResult
+from rue.telemetry.otel.runtime import OtelTraceSnapshot, otel_runtime
+from rue.telemetry.otel.test_span_manager import OtelTestSpanManager
 from rue.reports.base import Reporter
 from rue.resources import ResourceResolver, get_registry
 from rue.storage import SQLiteStore
 from rue.testing.discovery import collect
 from rue.testing.environment import capture_environment
-from rue.testing.execution import DefaultTestFactory, ResultBuilder, TestTracer
+from rue.testing.execution import DefaultTestFactory, ResultBuilder
 from rue.testing.models import (
     Run,
     TestExecution,
@@ -29,7 +31,6 @@ from rue.testing.models import (
     TestResult,
     TestStatus,
 )
-from rue.tracing import clear_traces, get_span_collector, init_tracing
 
 UUID_STRING_PATTERN = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -65,8 +66,9 @@ class Runner:
         verbosity: int = 0,
         concurrency: int = 1,
         timeout: float | None = None,
-        enable_tracing: bool = False,
-        trace_output: Path | str | None = None,
+        otel_enabled: bool = False,
+        otel_output: Path | str | None = None,
+        otel_content: bool = True,
         capture_output: bool = True,
         db_enabled: bool = True,
         db_path: Path | str | None = None,
@@ -83,17 +85,24 @@ class Runner:
         self.verbosity = verbosity
         self.timeout = timeout
         self.concurrency = concurrency if concurrency > 0 else self.DEFAULT_MAX_CONCURRENCY
-        self.enable_tracing = enable_tracing
-        self.trace_output = Path(trace_output) if trace_output else Path(".rue/traces.jsonl")
+        self.otel_enabled = otel_enabled
+        self.otel_output = (
+            Path(otel_output) if otel_output else Path(".rue/otel-spans.jsonl")
+        )
+        self.otel_content = otel_content
         self.capture_output = capture_output
         self.db_enabled = db_enabled
         self.db_path = Path(db_path) if db_path else None
         self._default_run_id = self._normalize_run_id(run_id)
+        self._otel_trace_snapshots: dict[UUID, OtelTraceSnapshot] = {}
 
-        self._tracer = TestTracer(enabled=enable_tracing)
+        self._otel_span_manager = OtelTestSpanManager(
+            enabled=otel_enabled,
+            otel_content=otel_content,
+        )
         self._result_builder = ResultBuilder()
         self._factory = DefaultTestFactory(
-            tracer=self._tracer,
+            otel_span_manager=self._otel_span_manager,
             result_builder=self._result_builder,
         )
 
@@ -139,8 +148,16 @@ class Runner:
     async def _notify_run_stopped_early(self, failure_count: int) -> None:
         await asyncio.gather(*[r.on_run_stopped_early(failure_count) for r in self.reporters])
 
-    async def _notify_tracing_enabled(self, output_path: Path) -> None:
-        await asyncio.gather(*[r.on_tracing_enabled(output_path) for r in self.reporters])
+    async def _notify_otel_enabled(self, output_path: Path) -> None:
+        await asyncio.gather(*[r.on_otel_enabled(output_path) for r in self.reporters])
+
+    def record_otel_trace_snapshot(
+        self,
+        execution_id: UUID,
+        snapshot: OtelTraceSnapshot,
+    ) -> None:
+        """Store the completed OpenTelemetry snapshot for a finished test execution."""
+        self._otel_trace_snapshots[execution_id] = snapshot
 
     def _ensure_db_ready(self) -> None:
         """Initialize DB and run migrations. Raises MigrationError if not possible."""
@@ -203,9 +220,9 @@ class Runner:
         else:
             self.current_run = Run(environment=environment, run_id=selected_run_id)
 
-        if self.enable_tracing:
-            init_tracing(output_path=self.trace_output)
-            clear_traces()
+        if self.otel_enabled:
+            otel_runtime.configure(self.otel_output)
+            self._otel_trace_snapshots.clear()
 
         if items is None:
             items = collect(path)
@@ -257,16 +274,17 @@ class Runner:
 
         await self._notify_run_complete(self.current_run)
 
-        if self.enable_tracing:
-            await self._notify_tracing_enabled(self.trace_output)
+        if self.otel_enabled:
+            await self._notify_otel_enabled(self.otel_output)
 
         if self.db_enabled and self._store:
             try:
                 self._store.save_run(self.current_run)
-                if self.enable_tracing:
-                    collector = get_span_collector()
-                    if collector:
-                        self._store.save_trace_spans(self.current_run, collector)
+                if self.otel_enabled and self._otel_trace_snapshots:
+                    self._store.save_otel_spans(
+                        self.current_run,
+                        self._otel_trace_snapshots,
+                    )
             except Exception as e:
                 warnings.warn(f"Failed to persist run to database: {e}", stacklevel=2)
 

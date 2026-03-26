@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from rue.predicates.models import PredicateResult
     from rue.testing.models import TestDefinition
     from rue.testing.runner import Runner
+    from rue.telemetry.otel.runtime import OtelTraceSession
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +36,7 @@ class TestContext:
 
     item: TestDefinition
     execution_id: UUID | None = None
+    otel_trace_session: OtelTraceSession | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +72,12 @@ RUNNER_CONTEXT: ContextVar[Runner | None] = ContextVar("runner_context", default
 def get_test_context() -> TestContext | None:
     """Get the current test context, or None if not in a test."""
     return TEST_CONTEXT.get()
+
+
+def get_otel_trace_session() -> OtelTraceSession | None:
+    """Get the active OpenTelemetry session from the current test context."""
+    ctx = get_test_context()
+    return ctx.otel_trace_session if ctx is not None else None
 
 
 def get_runner() -> Runner | None:

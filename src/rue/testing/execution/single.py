@@ -22,9 +22,10 @@ from rue.context import (
 )
 from rue.resources import ResourceResolver
 from rue.resources.resolver import Scope
+from rue.telemetry.otel.runtime import otel_runtime
+from rue.telemetry.otel.test_span_manager import OtelTestSpanManager
 from rue.testing.execution.interfaces import Test
 from rue.testing.execution.result_builder import ResultBuilder
-from rue.testing.execution.tracer import TestTracer
 from rue.testing.models import TestDefinition, TestExecution, TestResult, TestStatus
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
 
@@ -38,7 +39,7 @@ class SingleTest(Test):
 
     definition: TestDefinition
     params: dict[str, Any]
-    tracer: TestTracer
+    otel_span_manager: OtelTestSpanManager
     result_builder: ResultBuilder
 
     def __post_init__(self) -> None:
@@ -77,11 +78,24 @@ class SingleTest(Test):
         # fork resolver for case isolation
         forked_resolver = resolver.fork_for_case()
 
-        ctx = TestContext(item=self.definition, execution_id=exec_id)
         assertion_results: list[AssertionResult] = []
         error: Exception | None = None
+        otel_trace_id: str | None = None
+        otel_trace_session = None
 
-        with self.tracer.span(self.definition) as span:
+        with self.otel_span_manager.span(self.definition) as span:
+            if span is not None:
+                otel_trace_session = otel_runtime.start_otel_trace(
+                    span,
+                    otel_content=self.otel_span_manager.otel_content,
+                )
+                otel_trace_id = self.otel_span_manager.get_otel_trace_id(span)
+
+            ctx = TestContext(
+                item=self.definition,
+                execution_id=exec_id,
+                otel_trace_session=otel_trace_session,
+            )
             imperative_outcome: TestStatus | None = None
 
             with test_context_scope(ctx), assertions_collector(assertion_results):
@@ -136,15 +150,19 @@ class SingleTest(Test):
                     self.definition, duration_ms, assertion_results, error
                 )
 
-            trace_id = self.tracer.get_trace_id(span)
-            self.tracer.record(span, result)
+            self.otel_span_manager.record(span, result)
 
-            return TestExecution(
-                definition=self.definition,
-                result=result,
-                execution_id=exec_id,
-                trace_id=trace_id,
-            )
+        if otel_trace_session is not None:
+            snapshot = otel_runtime.finish_otel_trace(otel_trace_session)
+            if runner is not None:
+                runner.record_otel_trace_snapshot(exec_id, snapshot)
+
+        return TestExecution(
+            definition=self.definition,
+            result=result,
+            execution_id=exec_id,
+            otel_trace_id=otel_trace_id,
+        )
 
     async def _resolve_params(self, resolver: ResourceResolver) -> dict[str, Any]:
         """Resolve test parameters from resources."""

@@ -20,6 +20,7 @@ from rue.testing.models import (
     CaseIterateModifier,
     ParameterSet,
     ParametrizeModifier,
+    RepeatModifier,
     RunEnvironment,
     RunResult,
     TestExecution,
@@ -28,6 +29,7 @@ from rue.testing.models import (
     TestStatus,
 )
 from rue.testing.runner import Runner
+from rue.telemetry.otel import otel_span
 
 
 @pytest.fixture(autouse=True)
@@ -106,7 +108,7 @@ class EventReporter(Reporter):
     async def on_run_stopped_early(self, failure_count: int) -> None:
         pass
 
-    async def on_tracing_enabled(self, output_path: Path) -> None:
+    async def on_otel_enabled(self, output_path: Path) -> None:
         pass
 
 
@@ -391,16 +393,16 @@ class TestResourceInjection:
         assert captured == ["injected_value"]
 
     @pytest.mark.asyncio
-    async def test_trace_context_requires_trace_flag(self, null_reporter):
-        def test_needs_trace(trace_context):
+    async def test_otel_trace_requires_trace_flag(self, null_reporter):
+        def test_needs_trace(otel_trace):
             pass
 
-        item = make_item(test_needs_trace, params=["trace_context"])
+        item = make_item(test_needs_trace, params=["otel_trace"])
         runner = Runner(reporters=[null_reporter])
         result = await runner.run(items=[item])
 
         assert result.result.errors == 1
-        assert "Tracing is not enabled" in str(result.result.executions[0].result.error)
+        assert "OpenTelemetry is not enabled" in str(result.result.executions[0].result.error)
 
     @pytest.mark.asyncio
     async def test_ignores_unknown_params(self, null_reporter):
@@ -413,6 +415,173 @@ class TestResourceInjection:
 
         # Should error because unknown_param is not provided
         assert result.result.errors == 1
+
+
+class TestOpenTelemetry:
+    """Tests for runner-managed tracing behavior."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_traced_tests_keep_spans_isolated(self, null_reporter, tmp_path: Path):
+        captured: dict[str, set[str]] = {}
+
+        async def first(otel_trace):
+            with otel_span("first_step"):
+                await asyncio.sleep(0.01)
+            captured["first"] = {span.name for span in otel_trace.get_child_spans()}
+
+        async def second(otel_trace):
+            with otel_span("second_step"):
+                await asyncio.sleep(0.01)
+            captured["second"] = {span.name for span in otel_trace.get_child_spans()}
+
+        items = [
+            make_item(first, name="test_first", is_async=True, params=["otel_trace"]),
+            make_item(second, name="test_second", is_async=True, params=["otel_trace"]),
+        ]
+
+        runner = Runner(
+            reporters=[null_reporter],
+            concurrency=2,
+            otel_enabled=True,
+            otel_output=tmp_path / "isolated_traces.jsonl",
+            db_enabled=False,
+        )
+        result = await runner.run(items=items)
+
+        assert result.result.passed == 2
+        assert captured["first"] == {"first_step"}
+        assert captured["second"] == {"second_step"}
+
+        otel_trace_ids = {execution.otel_trace_id for execution in result.result.executions}
+        assert None not in otel_trace_ids
+        assert len(otel_trace_ids) == 2
+
+    @pytest.mark.asyncio
+    async def test_repeated_children_get_otel_trace_ids_but_parent_does_not(
+        self,
+        null_reporter,
+        tmp_path: Path,
+    ):
+        async def repeated_case():
+            await asyncio.sleep(0)
+
+        item = TestItem(
+            fn=repeated_case,
+            name="test_repeated_trace",
+            module_path=Path("test_module.py"),
+            is_async=True,
+            params=[],
+            class_name=None,
+            modifiers=[RepeatModifier(count=2, min_passes=2)],
+            tags=set(),
+        )
+
+        runner = Runner(
+            reporters=[null_reporter],
+            otel_enabled=True,
+            otel_output=tmp_path / "repeat_traces.jsonl",
+            db_enabled=False,
+        )
+        result = await runner.run(items=[item])
+
+        execution = result.result.executions[0]
+        child_otel_trace_ids = [sub.otel_trace_id for sub in execution.sub_executions]
+
+        assert execution.otel_trace_id is None
+        assert len(child_otel_trace_ids) == 2
+        assert all(child_otel_trace_ids)
+        assert len(set(child_otel_trace_ids)) == 2
+
+    @pytest.mark.asyncio
+    async def test_parametrized_children_get_otel_trace_ids_but_parent_does_not(
+        self,
+        null_reporter,
+        tmp_path: Path,
+    ):
+        async def parametrized_case(value: int):
+            _ = value
+            await asyncio.sleep(0)
+
+        item = TestItem(
+            fn=parametrized_case,
+            name="test_parametrized_trace",
+            module_path=Path("test_module.py"),
+            is_async=True,
+            params=["value"],
+            class_name=None,
+            modifiers=[
+                ParametrizeModifier(
+                    parameter_sets=(
+                        ParameterSet(values={"value": 1}, id_suffix="one"),
+                        ParameterSet(values={"value": 2}, id_suffix="two"),
+                    )
+                )
+            ],
+            tags=set(),
+        )
+
+        runner = Runner(
+            reporters=[null_reporter],
+            otel_enabled=True,
+            otel_output=tmp_path / "param_traces.jsonl",
+            db_enabled=False,
+        )
+        result = await runner.run(items=[item])
+
+        execution = result.result.executions[0]
+        child_otel_trace_ids = [sub.otel_trace_id for sub in execution.sub_executions]
+
+        assert execution.otel_trace_id is None
+        assert len(child_otel_trace_ids) == 2
+        assert all(child_otel_trace_ids)
+        assert len(set(child_otel_trace_ids)) == 2
+
+    @pytest.mark.asyncio
+    async def test_case_iterated_children_get_otel_trace_ids_but_parent_does_not(
+        self,
+        null_reporter,
+        tmp_path: Path,
+    ):
+        async def case_iterated_test(case):
+            _ = case
+            await asyncio.sleep(0)
+
+        cases = (
+            Case(
+                id=UUID("00000000-0000-0000-0000-000000000001"),
+                inputs={"value": 1},
+            ),
+            Case(
+                id=UUID("00000000-0000-0000-0000-000000000002"),
+                inputs={"value": 2},
+            ),
+        )
+        item = TestItem(
+            fn=case_iterated_test,
+            name="test_case_trace",
+            module_path=Path("test_module.py"),
+            is_async=True,
+            params=["case"],
+            class_name=None,
+            modifiers=[CaseIterateModifier(cases=cases, min_passes=2)],
+            tags=set(),
+        )
+
+        runner = Runner(
+            reporters=[null_reporter],
+            otel_enabled=True,
+            otel_output=tmp_path / "case_traces.jsonl",
+            db_enabled=False,
+        )
+        result = await runner.run(items=[item])
+
+        execution = result.result.executions[0]
+        child_otel_trace_ids = [sub.otel_trace_id for sub in execution.sub_executions]
+
+        assert execution.otel_trace_id is None
+        assert len(child_otel_trace_ids) == 2
+        assert all(child_otel_trace_ids)
+        assert len(set(child_otel_trace_ids)) == 2
 
 
 class TestMaxfail:

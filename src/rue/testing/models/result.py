@@ -53,7 +53,7 @@ class TestExecution:
     definition: TestDefinition
     result: TestResult
     execution_id: UUID = field(default_factory=uuid4)
-    trace_id: str | None = None
+    otel_trace_id: str | None = None
     sub_executions: list[TestExecution] = field(default_factory=list)
 
     @property

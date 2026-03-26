@@ -1,4 +1,4 @@
-"""Test tracer - handles tracing for test execution."""
+"""OpenTelemetry span manager for Rue test execution."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from opentelemetry.trace import Span, StatusCode
 
-from rue.tracing import get_tracer
+from rue.telemetry.otel.runtime import otel_runtime
 
 
 if TYPE_CHECKING:
@@ -17,24 +17,20 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class TestTracer:
-    """Handles tracing spans for test execution."""
+class OtelTestSpanManager:
+    """Creates and records OpenTelemetry root spans for test execution."""
 
     enabled: bool = False
+    otel_content: bool = True
 
     @contextmanager
     def span(self, definition: TestDefinition) -> Iterator[Span | None]:
-        """Context manager for optional tracing."""
-        if not self.enabled:
+        """Context manager for an optional test root span."""
+        if not self.enabled or not otel_runtime.is_configured():
             yield None
             return
 
-        tracer = get_tracer()
-        if not tracer:
-            yield None
-            return
-
-        with tracer.start_as_current_span(f"test.{definition.full_name}") as span:
+        with otel_runtime.start_as_current_span(f"test.{definition.full_name}") as span:
             span.set_attribute("test.name", definition.name)
             span.set_attribute("test.module", str(definition.module_path))
             if definition.tags:
@@ -45,15 +41,15 @@ class TestTracer:
                 span.set_attribute("test.case_id", str(definition.case_id))
             yield span
 
-    def get_trace_id(self, span: Span | None) -> str | None:
-        """Extract trace_id from span."""
+    def get_otel_trace_id(self, span: Span | None) -> str | None:
+        """Extract the OpenTelemetry trace ID from a span."""
         if not span:
             return None
         ctx = span.get_span_context()
         return format(ctx.trace_id, "032x") if ctx.trace_id else None
 
     def record(self, span: Span | None, result: TestResult) -> None:
-        """Record span attributes from test result."""
+        """Record test result attributes on the root span."""
         if not span:
             return
         span.set_attribute("test.status", result.status.value)

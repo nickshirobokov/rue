@@ -163,24 +163,24 @@ uv run rue test --show-output
 
 This is useful for debugging tests with print statements or logging output.
 
-## Tracing
+## OpenTelemetry
 
-Enable OpenTelemetry tracing to capture spans from your SUT and tests:
+Enable OpenTelemetry capture to record spans from your SUT and tests:
 
 ```bash
-# Enable tracing (writes to .rue/traces.jsonl)
-uv run rue test --trace
+# Enable OpenTelemetry (writes to .rue/otel-spans.jsonl)
+uv run rue test --otel
 
 # Custom output path
-uv run rue test --trace --trace-output my-traces.jsonl
+uv run rue test --otel --otel-output my-traces.jsonl
 ```
 
-**Use traces for**:
+**Use OpenTelemetry spans for**:
 - Asserting tool calls in agent tests
 - Debugging LLM request/response flows
 - Performance analysis
 
-See [SUT](/concepts/sut) for trace assertions.
+See [SUT](/concepts/sut) for OpenTelemetry span assertions.
 
 ## Custom Run UUID
 
@@ -344,8 +344,8 @@ class Reporter(ABC):
         """Called when run stops early due to maxfail limit."""
 
     @abstractmethod
-    async def on_tracing_enabled(self, output_path: Path) -> None:
-        """Called when tracing is enabled to report output location."""
+    async def on_otel_enabled(self, output_path: Path) -> None:
+        """Called when OpenTelemetry is enabled to report output location."""
 ```
 
 ### Built-in Reporters
@@ -412,8 +412,8 @@ class JsonFileReporter(Reporter):
     async def on_run_stopped_early(self, failure_count: int) -> None:
         print(f"Run stopped after {failure_count} failures")
 
-    async def on_tracing_enabled(self, output_path: Path) -> None:
-        print(f"Tracing enabled: {output_path}")
+    async def on_otel_enabled(self, output_path: Path) -> None:
+        print(f"OpenTelemetry enabled: {output_path}")
 ```
 
 ### Using Multiple Reporters
@@ -452,9 +452,9 @@ asyncio.run(main())
 uv run rue test --tag smoke --concurrency 5
 ```
 
-**Debug a specific test with tracing**:
+**Debug a specific test with OpenTelemetry**:
 ```bash
-uv run rue test -k "agent_tool_call" --trace -vv
+uv run rue test -k "agent_tool_call" --otel -vv
 ```
 
 **Run fast tests, stop on first failure**:
@@ -570,7 +570,7 @@ The database stores:
 - Individual test executions and results
 - Assertion results and predicate outcomes
 - Metric results and statistical data
-- Trace references (if tracing enabled)
+- OpenTelemetry references (if enabled)
 - Error tracebacks for failed tests
 
 ### Database Schema
@@ -581,7 +581,7 @@ The schema is versioned and managed through migrations. Current tables include:
 - `metrics` - Aggregated metrics
 - `assertions` - Assertion outcomes
 - `predicates` - Predicate results linked to assertions
-- `trace_spans` - Trace spans linked to executions
+- `otel_spans` - OpenTelemetry spans linked to executions
 
 Schema version is stored in SQLite `PRAGMA user_version` (shown by `uv run rue db status` as "Current version").
 

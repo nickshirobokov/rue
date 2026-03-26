@@ -133,9 +133,9 @@ async def test_chatbot_no_hallucinations(
 ```
 
 </Step>
-<Step title="Assert on trace spans">
+<Step title="Assert on OpenTelemetry Spans">
 
-Inject `trace_context` to verify the chatbot actually called the right tools:
+Inject `otel_trace` to verify the chatbot actually called the right tools:
 
 ```python
 import rue
@@ -179,7 +179,7 @@ async def test_chatbot_no_hallucinations(
     case: Case,
     store_chatbot,
     accuracy: Metric,
-    trace_context,
+    otel_trace,
 ):
     response = store_chatbot(**case.inputs)
 
@@ -191,10 +191,10 @@ async def test_chatbot_no_hallucinations(
 
     # Verify tool was called when expected
     if expected_tool := case.references.get("expected_tool"):
-        sut_spans = trace_context.get_sut_spans(name="store_chatbot")
+        sut_spans = otel_trace.get_sut_spans(name="store_chatbot")
         tool_names = [
             s.attributes.get("llm.request.functions.0.name")
-            for s in trace_context.get_llm_calls()
+            for s in otel_trace.get_llm_calls()
             if s.attributes
         ]
         assert expected_tool in tool_names
@@ -204,7 +204,7 @@ async def test_chatbot_no_hallucinations(
 <Step title="Run">
 
 ```bash
-uv run rue test --trace
+uv run rue test --otel
 ```
 
 </Step>
