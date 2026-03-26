@@ -10,10 +10,12 @@ from collections.abc import AsyncGenerator, Callable, Generator
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
 
 from rue.context.runtime import (
     CURRENT_RESOURCE_CONSUMER,
+    CURRENT_TEST,
     bind,
 )
 
@@ -29,7 +31,16 @@ class Scope(Enum):
     SESSION = "session"  # Shared across entire test run
 
 
-_RESOLUTION_PATH: ContextVar[tuple[tuple[Scope, str], ...]] = ContextVar(
+@dataclass(frozen=True, slots=True)
+class ResourceKey:
+    """Cache and resolution identity for a resource provider."""
+
+    scope: Scope
+    name: str
+    provider_dir: Path | None = None
+
+
+_RESOLUTION_PATH: ContextVar[tuple[ResourceKey, ...]] = ContextVar(
     "resource_resolution_path",
     default=(),
 )
@@ -49,10 +60,37 @@ class ResourceDef:
     on_resolve: Callable[[Any], Any] | None = None
     on_injection: Callable[[Any], Any] | None = None
     on_teardown: Callable[[Any], Any] | None = None
+    origin_path: Path | None = None
+    origin_dir: Path | None = None
 
 
 _registry: dict[str, ResourceDef] = {}
+_session_registry: dict[str, list[ResourceDef]] = {}
 _builtin_registry: dict[str, ResourceDef] = {}
+_builtin_session_registry: dict[str, list[ResourceDef]] = {}
+
+
+def _resource_origin(fn: Callable[..., Any]) -> tuple[Path | None, Path | None]:
+    filename = fn.__code__.co_filename
+    if filename.startswith("<") and filename.endswith(">"):
+        return None, None
+
+    path = Path(filename).resolve()
+    return path, path.parent
+
+
+def _register_resource(defn: ResourceDef) -> None:
+    if defn.scope == Scope.SESSION:
+        defs = _session_registry.setdefault(defn.name, [])
+        defs.append(defn)
+
+        current = _registry.get(defn.name)
+        if current is None or current.scope == Scope.SESSION:
+            _registry[defn.name] = defn
+        return
+
+    _registry[defn.name] = defn
+
 
 def resource(
     fn: Callable[P, T] | None = None,
@@ -75,6 +113,7 @@ def resource(
         is_async = inspect.iscoroutinefunction(fn)
         is_async_gen = inspect.isasyncgenfunction(fn)
         is_gen = inspect.isgeneratorfunction(fn)
+        origin_path, origin_dir = _resource_origin(fn)
 
         defn = ResourceDef(
             name=fn.__name__,
@@ -87,8 +126,10 @@ def resource(
             on_resolve=on_resolve,
             on_injection=on_injection,
             on_teardown=on_teardown,
+            origin_path=origin_path,
+            origin_dir=origin_dir,
         )
-        _registry[defn.name] = defn
+        _register_resource(defn)
         return fn
 
     if fn is not None:
@@ -100,13 +141,21 @@ def get_registry() -> dict[str, ResourceDef]:
     """Get the global resource registry."""
     return _registry
 
+
 def register_builtin(name: str) -> None:
     _builtin_registry[name] = _registry[name]
+    if name in _session_registry:
+        _builtin_session_registry[name] = list(_session_registry[name])
+
 
 def clear_registry() -> None:
     """Clear all registered resources."""
     _registry.clear()
     _registry.update(_builtin_registry)
+    _session_registry.clear()
+    _session_registry.update(
+        {name: list(defs) for name, defs in _builtin_session_registry.items()}
+    )
 
 
 class ResourceResolver:
@@ -119,23 +168,98 @@ class ResourceResolver:
         parent: "ResourceResolver | None" = None,
     ) -> None:
         self._registry = registry if registry is not None else _registry
-        self._cache: dict[tuple[Scope, str], Any] = {}
+        self._session_registry = self._resolve_session_registry(
+            registry=registry,
+            parent=parent,
+        )
+        self._cache: dict[ResourceKey, Any] = {}
         self._teardowns: list[
             tuple[
-                Scope,
-                str,
+                ResourceKey,
+                ResourceDef,
                 Generator[Any, None, None] | AsyncGenerator[Any, None],
             ]
         ] = []
         self._parent = parent
-        self._shared_creation_locks: dict[tuple[Scope, str], asyncio.Lock] = (
+        self._shared_creation_locks: dict[ResourceKey, asyncio.Lock] = (
             parent._shared_creation_locks if parent is not None else {}
         )
+
+    @staticmethod
+    def _resolve_session_registry(
+        *,
+        registry: dict[str, ResourceDef] | None,
+        parent: "ResourceResolver | None",
+    ) -> dict[str, list[ResourceDef]]:
+        if parent is not None:
+            return parent._session_registry
+        if registry is None or registry is _registry:
+            return _session_registry
+        return {
+            name: [defn]
+            for name, defn in registry.items()
+            if defn.scope == Scope.SESSION
+        }
 
     def _owner_resolver_for_scope(self, scope: Scope) -> "ResourceResolver":
         if scope in {Scope.SUITE, Scope.SESSION} and self._parent is not None:
             return self._parent._owner_resolver_for_scope(scope)
         return self
+
+    @staticmethod
+    def _cycle_label(key: ResourceKey) -> str:
+        if key.provider_dir is None:
+            return f"{key.scope.value}:{key.name}"
+        return f"{key.scope.value}:{key.name}@{key.provider_dir}"
+
+    @staticmethod
+    def _request_dir() -> Path | None:
+        test_ctx = CURRENT_TEST.get()
+        if test_ctx is None:
+            return None
+        return test_ctx.item.module_path.resolve().parent
+
+    def _select_session_definition(
+        self, name: str
+    ) -> tuple[ResourceDef, ResourceKey]:
+        request_dir = self._request_dir()
+        selected: ResourceDef | None = None
+        selected_depth = -1
+
+        if request_dir is not None:
+            for defn in self._session_registry.get(name, []):
+                if defn.origin_dir is None or not request_dir.is_relative_to(
+                    defn.origin_dir
+                ):
+                    continue
+                depth = len(defn.origin_dir.parts)
+                if depth >= selected_depth:
+                    selected = defn
+                    selected_depth = depth
+
+        if selected is not None:
+            return selected, ResourceKey(
+                scope=selected.scope,
+                name=name,
+                provider_dir=selected.origin_dir,
+            )
+
+        if name not in self._registry:
+            msg = f"Unknown resource: {name}"
+            raise ValueError(msg)
+
+        defn = self._registry[name]
+        return defn, ResourceKey(scope=defn.scope, name=name)
+
+    def _select_definition(self, name: str) -> tuple[ResourceDef, ResourceKey]:
+        if name not in self._registry and name not in self._session_registry:
+            msg = f"Unknown resource: {name}"
+            raise ValueError(msg)
+
+        defn = self._registry.get(name)
+        if defn is not None and defn.scope != Scope.SESSION:
+            return defn, ResourceKey(scope=defn.scope, name=name)
+        return self._select_session_definition(name)
 
     async def _apply_on_injection(
         self, defn: ResourceDef, name: str, value: Any
@@ -156,7 +280,7 @@ class ResourceResolver:
         *,
         name: str,
         defn: ResourceDef,
-        cache_key: tuple[Scope, str],
+        cache_key: ResourceKey,
     ) -> Any:
         kwargs = {}
         with bind(CURRENT_RESOURCE_CONSUMER, name):
@@ -166,11 +290,11 @@ class ResourceResolver:
         if defn.is_async_generator:
             gen = defn.fn(**kwargs)
             value = await gen.__anext__()
-            self._register_teardown(defn.scope, name, gen)
+            self._register_teardown(cache_key, defn, gen)
         elif defn.is_generator:
             gen = defn.fn(**kwargs)
             value = next(gen)
-            self._register_teardown(defn.scope, name, gen)
+            self._register_teardown(cache_key, defn, gen)
         elif defn.is_async:
             value = await defn.fn(**kwargs)
         else:
@@ -195,32 +319,27 @@ class ResourceResolver:
         """Create a child resolver for isolated CASE-scope execution."""
         child = ResourceResolver(self._registry, parent=self)
         for key, value in self._cache.items():
-            if key[0] in {Scope.SUITE, Scope.SESSION}:
+            if key.scope in {Scope.SUITE, Scope.SESSION}:
                 child._cache[key] = value
         return child
 
     def _register_teardown(
         self,
-        scope: Scope,
-        name: str,
+        key: ResourceKey,
+        defn: ResourceDef,
         gen: Generator[Any, None, None] | AsyncGenerator[Any, None],
     ) -> None:
-        if scope in {Scope.SUITE, Scope.SESSION} and self._parent:
-            self._parent._register_teardown(scope, name, gen)
+        if key.scope in {Scope.SUITE, Scope.SESSION} and self._parent:
+            self._parent._register_teardown(key, defn, gen)
         else:
-            self._teardowns.append((scope, name, gen))
+            self._teardowns.append((key, defn, gen))
 
     async def resolve(self, name: str) -> Any:
-        if name not in self._registry:
-            msg = f"Unknown resource: {name}"
-            raise ValueError(msg)
-
-        defn = self._registry[name]
-        cache_key = (defn.scope, name)
+        defn, cache_key = self._select_definition(name)
         path = _RESOLUTION_PATH.get()
         if cache_key in path:
             cycle = " -> ".join(
-                f"{scope.value}:{dep}" for scope, dep in (*path, cache_key)
+                self._cycle_label(key) for key in (*path, cache_key)
             )
             raise RuntimeError(
                 f"Circular resource dependency detected: {cycle}"
@@ -263,7 +382,7 @@ class ResourceResolver:
     async def teardown(self) -> None:
         teardown_errors: list[Exception] = []
 
-        for s, name, gen in reversed(self._teardowns):
+        for key, defn, gen in reversed(self._teardowns):
             try:
                 if isinstance(gen, AsyncGenerator):
                     try:
@@ -278,25 +397,21 @@ class ResourceResolver:
             except Exception as e:
                 teardown_errors.append(
                     RuntimeError(
-                        f"Generator teardown failed for resource '{name}': {e}"
+                        f"Generator teardown failed for resource '{key.name}': {e}"
                     )
                 )
 
-            defn = self._registry.get(name)
-            if defn and defn.on_teardown:
-                cache_key = (s, name)
-                if cache_key in self._cache:
-                    try:
-                        result = defn.on_teardown(self._cache[cache_key])
-                        if inspect.iscoroutine(result):
-                            await result
-                    except Exception as e:
-                        teardown_errors.append(
-                            RuntimeError(
-                                f"Hook {defn.on_teardown.__name__} failed for resource '{name}': {e}"
-                            )
+            if defn.on_teardown and key in self._cache:
+                try:
+                    result = defn.on_teardown(self._cache[key])
+                    if inspect.iscoroutine(result):
+                        await result
+                except Exception as e:
+                    teardown_errors.append(
+                        RuntimeError(
+                            f"Hook {defn.on_teardown.__name__} failed for resource '{key.name}': {e}"
                         )
-
+                    )
         self._teardowns.clear()
 
         if teardown_errors:
@@ -308,8 +423,8 @@ class ResourceResolver:
         remaining = []
         teardown_errors: list[Exception] = []
 
-        for s, name, gen in reversed(self._teardowns):
-            if s == scope:
+        for key, defn, gen in reversed(self._teardowns):
+            if key.scope == scope:
                 try:
                     if isinstance(gen, AsyncGenerator):
                         try:
@@ -324,30 +439,27 @@ class ResourceResolver:
                 except Exception as e:
                     teardown_errors.append(
                         RuntimeError(
-                            f"Generator teardown failed for resource '{name}': {e}"
+                            f"Generator teardown failed for resource '{key.name}': {e}"
                         )
                     )
 
-                defn = self._registry.get(name)
-                if defn and defn.on_teardown:
-                    cache_key = (s, name)
-                    if cache_key in self._cache:
-                        try:
-                            result = defn.on_teardown(self._cache[cache_key])
-                            if inspect.iscoroutine(result):
-                                await result
-                        except Exception as e:
-                            teardown_errors.append(
-                                RuntimeError(
-                                    f"Hook {defn.on_teardown.__name__} failed for resource '{name}': {e}"
-                                )
+                if defn.on_teardown and key in self._cache:
+                    try:
+                        result = defn.on_teardown(self._cache[key])
+                        if inspect.iscoroutine(result):
+                            await result
+                    except Exception as e:
+                        teardown_errors.append(
+                            RuntimeError(
+                                f"Hook {defn.on_teardown.__name__} failed for resource '{key.name}': {e}"
                             )
+                        )
             else:
-                remaining.append((s, name, gen))
+                remaining.append((key, defn, gen))
 
         self._teardowns = list(reversed(remaining))
 
-        keys_to_remove = [k for k in self._cache if k[0] == scope]
+        keys_to_remove = [key for key in self._cache if key.scope == scope]
         for key in keys_to_remove:
             del self._cache[key]
 
@@ -355,4 +467,3 @@ class ResourceResolver:
             if len(teardown_errors) == 1:
                 raise RuntimeError(teardown_errors[0])
             raise ExceptionGroup("Teardown errors occurred", teardown_errors)
-

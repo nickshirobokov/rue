@@ -4,6 +4,7 @@ from textwrap import dedent
 import pytest
 
 from rue.cli import _collect_items
+from rue.config import RueConfig
 from rue.resources import clear_registry
 from rue.testing.discovery import collect
 from rue.testing.runner import Runner
@@ -109,6 +110,77 @@ async def test_collect_autoloads_confrue_chain_in_order(
     assert run.result.failed == 0
     assert run.result.errors == 0
     assert run.result.passed == 1
+
+
+@pytest.mark.asyncio
+async def test_confrue_session_resources_resolve_hierarchically(
+    tmp_path,
+    null_reporter,
+):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'tmp'\nversion = '0.0.0'\n"
+    )
+    child = tmp_path / "child"
+    sibling = tmp_path / "sibling"
+    child.mkdir()
+    sibling.mkdir()
+
+    (tmp_path / "confrue_root.py").write_text(
+        dedent(
+            """
+            import rue
+
+            @rue.resource(scope="session")
+            def shared_value():
+                return "root"
+            """
+        )
+    )
+    (child / "confrue_child.py").write_text(
+        dedent(
+            """
+            import rue
+
+            @rue.resource(scope="session")
+            def shared_value():
+                return "child"
+            """
+        )
+    )
+    (tmp_path / "rue_root.py").write_text(
+        dedent(
+            """
+            def test_root(shared_value):
+                assert shared_value == "root"
+            """
+        )
+    )
+    (child / "rue_child.py").write_text(
+        dedent(
+            """
+            def test_child(shared_value):
+                assert shared_value == "child"
+            """
+        )
+    )
+    (sibling / "rue_sibling.py").write_text(
+        dedent(
+            """
+            def test_sibling(shared_value):
+                assert shared_value == "root"
+            """
+        )
+    )
+
+    items = collect(tmp_path)
+    run = await Runner(
+        config=RueConfig.model_construct(db_enabled=False),
+        reporters=[null_reporter],
+    ).run(items=items)
+
+    assert run.result.failed == 0
+    assert run.result.errors == 0
+    assert run.result.passed == 3
 
 
 def test_collect_items_share_confrue_session_across_selected_modules(

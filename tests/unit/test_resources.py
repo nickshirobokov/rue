@@ -1,7 +1,9 @@
 """Tests for rue.resources module."""
 
 import asyncio
+import builtins
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 
@@ -25,16 +27,22 @@ def _make_item(
     name: str = "test_fn",
     suffix: str | None = None,
     case_id=None,
+    module_path: Path | None = None,
 ) -> TestItem:
     """Create a minimal TestItem for testing."""
     return TestItem(
         name=name,
         fn=lambda: None,
-        module_path=Path("test.py"),
+        module_path=module_path or Path("test.py"),
         is_async=False,
         suffix=suffix,
         case_id=case_id,
     )
+
+
+def _register_resource_source(path: Path, source: str) -> None:
+    namespace = {"resource": resource, "Scope": Scope}
+    exec(compile(dedent(source), str(path.resolve()), "exec"), namespace)
 
 
 @pytest.fixture(autouse=True)
@@ -348,7 +356,12 @@ class TestForkForCase:
         await child.resolve("suite_new")
 
         # Parent should now have it cached
-        assert (Scope.SUITE, "suite_new") in parent._cache
+        assert any(
+            key.scope == Scope.SUITE
+            and key.name == "suite_new"
+            and key.provider_dir is None
+            for key in parent._cache
+        )
 
     @pytest.mark.asyncio
     async def test_multiple_children_share_suite(self):
@@ -425,6 +438,251 @@ class TestForkForCase:
 
         await parent.teardown()
         assert teardown_count == 1
+
+
+class TestHierarchicalSessionResources:
+    """Tests for conftest-style SESSION resource lookup."""
+
+    @pytest.mark.asyncio
+    async def test_nearest_ancestor_session_resource_wins(self, tmp_path):
+        root = tmp_path / "project"
+        child = root / "tests" / "child"
+        root.mkdir(parents=True)
+        child.mkdir(parents=True)
+
+        _register_resource_source(
+            root / "confrue_root.py",
+            """
+            @resource(scope=Scope.SESSION)
+            def shared():
+                return "root"
+            """,
+        )
+        _register_resource_source(
+            child / "confrue_child.py",
+            """
+            @resource(scope=Scope.SESSION)
+            def shared():
+                return "child"
+            """,
+        )
+
+        resolver = ResourceResolver(get_registry())
+
+        with bind(
+            CURRENT_TEST,
+            Ctx(item=_make_item(module_path=root / "tests" / "rue_root.py")),
+        ):
+            assert await resolver.resolve("shared") == "root"
+
+        with bind(
+            CURRENT_TEST,
+            Ctx(item=_make_item(module_path=child / "rue_child.py")),
+        ):
+            assert await resolver.resolve("shared") == "child"
+
+    @pytest.mark.asyncio
+    async def test_sibling_branch_uses_nearest_shared_ancestor(self, tmp_path):
+        root = tmp_path / "project"
+        branch = root / "tests" / "branch"
+        sibling = root / "tests" / "sibling"
+        branch.mkdir(parents=True)
+        sibling.mkdir(parents=True)
+
+        _register_resource_source(
+            root / "confrue_root.py",
+            """
+            @resource(scope=Scope.SESSION)
+            def shared():
+                return "root"
+            """,
+        )
+        _register_resource_source(
+            branch / "confrue_branch.py",
+            """
+            @resource(scope=Scope.SESSION)
+            def shared():
+                return "branch"
+            """,
+        )
+
+        resolver = ResourceResolver(get_registry())
+        with bind(
+            CURRENT_TEST,
+            Ctx(item=_make_item(module_path=sibling / "rue_sibling.py")),
+        ):
+            assert await resolver.resolve("shared") == "root"
+
+    @pytest.mark.asyncio
+    async def test_parent_session_dependency_uses_requesting_test_chain(
+        self,
+        tmp_path,
+    ):
+        root = tmp_path / "project"
+        child = root / "tests" / "child"
+        root.mkdir(parents=True)
+        child.mkdir(parents=True)
+
+        _register_resource_source(
+            root / "confrue_root.py",
+            """
+            @resource(scope=Scope.SESSION)
+            def shared():
+                return "root"
+
+            @resource(scope=Scope.SESSION)
+            def consumer(shared):
+                return f"consumer:{shared}"
+            """,
+        )
+        _register_resource_source(
+            child / "confrue_child.py",
+            """
+            @resource(scope=Scope.SESSION)
+            def shared():
+                return "child"
+            """,
+        )
+
+        resolver = ResourceResolver(get_registry())
+        with bind(
+            CURRENT_TEST,
+            Ctx(item=_make_item(module_path=child / "rue_child.py")),
+        ):
+            assert await resolver.resolve("consumer") == "consumer:child"
+
+    @pytest.mark.asyncio
+    async def test_direct_resolve_without_current_test_uses_flat_fallback(
+        self,
+        tmp_path,
+    ):
+        root = tmp_path / "project"
+        child = root / "tests" / "child"
+        root.mkdir(parents=True)
+        child.mkdir(parents=True)
+
+        _register_resource_source(
+            root / "confrue_root.py",
+            """
+            @resource(scope=Scope.SESSION)
+            def shared():
+                return "root"
+            """,
+        )
+        _register_resource_source(
+            child / "confrue_child.py",
+            """
+            @resource(scope=Scope.SESSION)
+            def shared():
+                return "child"
+            """,
+        )
+
+        resolver = ResourceResolver(get_registry())
+        assert await resolver.resolve("shared") == "child"
+
+    @pytest.mark.parametrize("scope", [Scope.CASE, Scope.SUITE])
+    @pytest.mark.asyncio
+    async def test_non_session_scope_wins_mixed_scope_clash(
+        self,
+        tmp_path,
+        scope,
+    ):
+        root = tmp_path / "project"
+        root.mkdir(parents=True)
+
+        _register_resource_source(
+            root / "confrue_root.py",
+            """
+            @resource(scope=Scope.SESSION)
+            def shared():
+                return "session"
+            """,
+        )
+
+        @resource(scope=scope)
+        def shared():
+            return scope.value
+
+        resolver = ResourceResolver(get_registry())
+        assert await resolver.resolve("shared") == scope.value
+        assert get_registry()["shared"].scope == scope
+
+    @pytest.mark.asyncio
+    async def test_hierarchical_session_resources_use_distinct_cache_keys(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        root = tmp_path / "project"
+        child = root / "tests" / "child"
+        root.mkdir(parents=True)
+        child.mkdir(parents=True)
+        monkeypatch.setattr(builtins, "session_events", [], raising=False)
+
+        _register_resource_source(
+            root / "confrue_root.py",
+            """
+            import builtins
+
+            @resource(scope=Scope.SESSION)
+            def shared():
+                builtins.session_events.append("root_create")
+                yield "root"
+                builtins.session_events.append("root_teardown")
+            """,
+        )
+        _register_resource_source(
+            child / "confrue_child.py",
+            """
+            import builtins
+
+            @resource(scope=Scope.SESSION)
+            def shared():
+                builtins.session_events.append("child_create")
+                yield "child"
+                builtins.session_events.append("child_teardown")
+            """,
+        )
+
+        resolver = ResourceResolver(get_registry())
+
+        with bind(
+            CURRENT_TEST,
+            Ctx(item=_make_item(module_path=root / "tests" / "rue_root.py")),
+        ):
+            assert await resolver.resolve("shared") == "root"
+
+        with bind(
+            CURRENT_TEST,
+            Ctx(item=_make_item(module_path=child / "rue_child.py")),
+        ):
+            assert await resolver.resolve("shared") == "child"
+
+        with bind(
+            CURRENT_TEST,
+            Ctx(item=_make_item(module_path=root / "tests" / "rue_root.py")),
+        ):
+            assert await resolver.resolve("shared") == "root"
+
+        cache_keys = [
+            key
+            for key in resolver._cache
+            if key.scope == Scope.SESSION and key.name == "shared"
+        ]
+        assert len(cache_keys) == 2
+        assert {key.provider_dir for key in cache_keys} == {
+            root.resolve(),
+            child.resolve(),
+        }
+
+        await resolver.teardown()
+        assert builtins.session_events == [
+            "root_create",
+            "child_create",
+            "child_teardown",
+            "root_teardown",
+        ]
 
 
 class TestResourceHooks:
