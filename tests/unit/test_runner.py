@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from rue.config import RueConfig
 from rue.reports import ConsoleReporter, OtelReporter
 from rue.reports.base import Reporter
 from rue.reports.otel import DEFAULT_OTEL_OUTPUT_ROOT, MAX_STORED_OTEL_RUNS
@@ -71,6 +72,10 @@ def make_item(
         suffix=suffix,
         case_id=case_id,
     )
+
+
+def make_runner_config(**kwargs) -> RueConfig:
+    return RueConfig.model_construct(**kwargs)
 
 
 class EventReporter(Reporter):
@@ -226,7 +231,7 @@ class TestRunner:
     """Tests for Runner class."""
 
     def test_defaults_to_console_and_otel_reporters(self):
-        runner = Runner(db_enabled=False, verbosity=2)
+        runner = Runner(config=make_runner_config(db_enabled=False, verbosity=2))
 
         assert len(runner.reporters) == 2
         assert isinstance(runner.reporters[0], ConsoleReporter)
@@ -339,7 +344,9 @@ class TestRunId:
     ):
         run_id = uuid4()
         runner = Runner(
-            reporters=[null_reporter], run_id=run_id, db_enabled=False
+            config=make_runner_config(db_enabled=False),
+            reporters=[null_reporter],
+            run_id=run_id,
         )
 
         result = await runner.run(items=[make_item(lambda: None)])
@@ -351,9 +358,9 @@ class TestRunId:
         constructor_run_id = uuid4()
         run_level_run_id = uuid4()
         runner = Runner(
+            config=make_runner_config(db_enabled=False),
             reporters=[null_reporter],
             run_id=constructor_run_id,
-            db_enabled=False,
         )
 
         result = await runner.run(
@@ -368,7 +375,9 @@ class TestRunId:
     ):
         run_id = uuid4()
         runner = Runner(
-            reporters=[null_reporter], run_id=str(run_id), db_enabled=False
+            config=make_runner_config(db_enabled=False),
+            reporters=[null_reporter],
+            run_id=str(run_id),
         )
 
         result = await runner.run(items=[make_item(lambda: None)])
@@ -379,14 +388,19 @@ class TestRunId:
     def test_invalid_constructor_run_id_raises_value_error(self, null_reporter):
         with pytest.raises(ValueError, match="Invalid run_id"):
             Runner(
-                reporters=[null_reporter], run_id="not-a-uuid", db_enabled=False
+                config=make_runner_config(db_enabled=False),
+                reporters=[null_reporter],
+                run_id="not-a-uuid",
             )
 
     @pytest.mark.asyncio
     async def test_invalid_run_level_run_id_raises_value_error(
         self, null_reporter
     ):
-        runner = Runner(reporters=[null_reporter], db_enabled=False)
+        runner = Runner(
+            config=make_runner_config(db_enabled=False),
+            reporters=[null_reporter],
+        )
 
         with pytest.raises(ValueError, match="Invalid run_id"):
             await runner.run(
@@ -399,8 +413,8 @@ class TestRunId:
     ):
         run_id = uuid4()
         runner = Runner(
+            config=make_runner_config(db_path=tmp_path / "rue.db"),
             reporters=[null_reporter],
-            db_path=tmp_path / "rue.db",
             run_id=run_id,
         )
 
@@ -416,7 +430,9 @@ class TestRunId:
     ):
         run_id = uuid4()
         runner = Runner(
-            reporters=[null_reporter], run_id=run_id, db_enabled=False
+            config=make_runner_config(db_enabled=False),
+            reporters=[null_reporter],
+            run_id=run_id,
         )
 
         first_result = await runner.run(items=[make_item(lambda: None)])
@@ -507,10 +523,12 @@ class TestOpenTelemetry:
 
         reporter = EventReporter()
         runner = Runner(
+            config=make_runner_config(
+                concurrency=2,
+                otel=True,
+                db_enabled=False,
+            ),
             reporters=[reporter],
-            concurrency=2,
-            otel_enabled=True,
-            db_enabled=False,
         )
         result = await runner.run(items=items)
 
@@ -556,9 +574,8 @@ class TestOpenTelemetry:
         monkeypatch.chdir(tmp_path)
         reporter = EventReporter()
         result = await Runner(
+            config=make_runner_config(otel=True, db_enabled=False),
             reporters=[reporter],
-            otel_enabled=True,
-            db_enabled=False,
         ).run(
             items=[make_item(traced, name="test_trace_session", is_async=True)]
         )
@@ -578,8 +595,8 @@ class TestOpenTelemetry:
     ):
         reporter = EventReporter()
         result = await Runner(
+            config=make_runner_config(db_enabled=False),
             reporters=[reporter],
-            db_enabled=False,
         ).run(items=[make_item(lambda: None, name="test_without_otel")])
 
         assert result.result.passed == 1
@@ -662,9 +679,8 @@ class TestOpenTelemetry:
 
         reporter = EventReporter()
         result = await Runner(
+            config=make_runner_config(otel=True, db_enabled=False),
             reporters=[reporter],
-            otel_enabled=True,
-            db_enabled=False,
         ).run(items=[item])
 
         execution = result.result.executions[0]
@@ -694,9 +710,8 @@ class TestOpenTelemetry:
 
         monkeypatch.chdir(tmp_path)
         result = await Runner(
+            config=make_runner_config(otel=True, db_enabled=False),
             reporters=[OtelReporter()],
-            otel_enabled=True,
-            db_enabled=False,
         ).run(
             items=[make_item(traced, name="test_default_trace", is_async=True)]
         )
@@ -733,9 +748,8 @@ class TestOpenTelemetry:
         monkeypatch.chdir(tmp_path)
 
         first_run = await Runner(
+            config=make_runner_config(otel=True, db_enabled=False),
             reporters=[OtelReporter()],
-            otel_enabled=True,
-            db_enabled=False,
             run_id=run_id,
         ).run(
             items=[
@@ -747,9 +761,8 @@ class TestOpenTelemetry:
         )
 
         second_run = await Runner(
+            config=make_runner_config(otel=True, db_enabled=False),
             reporters=[OtelReporter()],
-            otel_enabled=True,
-            db_enabled=False,
             run_id=run_id,
         ).run(
             items=[
@@ -779,9 +792,8 @@ class TestOpenTelemetry:
         kept_run_ids: list[str] = []
         for _ in range(MAX_STORED_OTEL_RUNS + 2):
             result = await Runner(
+                config=make_runner_config(otel=True, db_enabled=False),
                 reporters=[OtelReporter()],
-                otel_enabled=True,
-                db_enabled=False,
             ).run(
                 items=[
                     make_item(traced, name="test_prune_trace", is_async=True)
@@ -808,7 +820,10 @@ class TestMaxfail:
             assert False
 
         items = [make_item(failing, name=f"fail_{i}") for i in range(5)]
-        runner = Runner(reporters=[null_reporter], maxfail=2)
+        runner = Runner(
+            config=make_runner_config(maxfail=2),
+            reporters=[null_reporter],
+        )
         result = await runner.run(items=items)
 
         assert result.result.failed == 2
@@ -821,7 +836,10 @@ class TestMaxfail:
             raise RuntimeError
 
         items = [make_item(error_test, name=f"err_{i}") for i in range(5)]
-        runner = Runner(reporters=[null_reporter], maxfail=1)
+        runner = Runner(
+            config=make_runner_config(maxfail=1),
+            reporters=[null_reporter],
+        )
         result = await runner.run(items=items)
 
         assert result.result.errors == 1
@@ -907,7 +925,10 @@ class TestConcurrency:
             make_item(slow_test, name=f"slow_{i}", is_async=True)
             for i in range(3)
         ]
-        runner = Runner(reporters=[null_reporter], concurrency=3)
+        runner = Runner(
+            config=make_runner_config(concurrency=3),
+            reporters=[null_reporter],
+        )
         result = await runner.run(items=items)
 
         assert result.result.passed == 3
@@ -926,7 +947,10 @@ class TestConcurrency:
             items.append(make_item(test_fn, name=f"test_{idx}", is_async=True))
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
+        runner = Runner(
+            config=make_runner_config(concurrency=3, db_enabled=False),
+            reporters=[reporter],
+        )
         await runner.run(items=items)
 
         complete_times = [
@@ -950,7 +974,10 @@ class TestConcurrency:
             items.append(make_item(test_fn, name=f"test_{idx}", is_async=True))
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
+        runner = Runner(
+            config=make_runner_config(concurrency=3, db_enabled=False),
+            reporters=[reporter],
+        )
         await runner.run(items=items)
 
         started = {
@@ -976,9 +1003,8 @@ class TestConcurrency:
                 raise RuntimeError("start callback failed")
 
         runner = Runner(
+            config=make_runner_config(concurrency=2, db_enabled=False),
             reporters=[StartFailureReporter()],
-            concurrency=2,
-            db_enabled=False,
         )
         with pytest.raises(RuntimeError, match="start callback failed"):
             await runner.run(
@@ -995,9 +1021,8 @@ class TestConcurrency:
                 raise RuntimeError("complete callback failed")
 
         runner = Runner(
+            config=make_runner_config(concurrency=2, db_enabled=False),
             reporters=[CompleteFailureReporter()],
-            concurrency=2,
-            db_enabled=False,
         )
         with pytest.raises(RuntimeError, match="complete callback failed"):
             await runner.run(
@@ -1016,7 +1041,10 @@ class TestConcurrency:
         )
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
+        runner = Runner(
+            config=make_runner_config(concurrency=3, db_enabled=False),
+            reporters=[reporter],
+        )
         await runner.run(items=[item])
 
         assert len(reporter.subtest_event_times) == 3
@@ -1044,7 +1072,10 @@ class TestConcurrency:
         )
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
+        runner = Runner(
+            config=make_runner_config(concurrency=3, db_enabled=False),
+            reporters=[reporter],
+        )
         test_run = await runner.run(items=[item])
 
         assert len(reporter.subtest_event_times) == len(parameter_sets)
@@ -1080,7 +1111,10 @@ class TestConcurrency:
         )
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
+        runner = Runner(
+            config=make_runner_config(concurrency=3, db_enabled=False),
+            reporters=[reporter],
+        )
         test_run = await runner.run(items=[item])
 
         assert len(reporter.subtest_event_times) == len(cases)
@@ -1146,7 +1180,10 @@ class TestConcurrency:
         )
 
         reporter = EventReporter()
-        runner = Runner(reporters=[reporter], concurrency=3, db_enabled=False)
+        runner = Runner(
+            config=make_runner_config(concurrency=3, db_enabled=False),
+            reporters=[reporter],
+        )
         test_run = await runner.run(items=[item])
 
         group_names = {group.name for group in groups}
@@ -1187,7 +1224,10 @@ class TestConcurrency:
 
             items.append(make_item(test_fn, name=f"test_{i}", is_async=True))
 
-        runner = Runner(reporters=[null_reporter], concurrency=1)
+        runner = Runner(
+            config=make_runner_config(concurrency=1),
+            reporters=[null_reporter],
+        )
         result = await runner.run(items=items)
 
         assert result.result.passed == 3
@@ -1196,8 +1236,11 @@ class TestConcurrency:
 
     @pytest.mark.asyncio
     async def test_concurrency_zero_caps_at_default(self, null_reporter):
-        runner = Runner(reporters=[null_reporter], concurrency=0)
-        assert runner.concurrency == Runner.DEFAULT_MAX_CONCURRENCY
+        runner = Runner(
+            config=make_runner_config(concurrency=0),
+            reporters=[null_reporter],
+        )
+        assert runner._concurrency_limit() == Runner.DEFAULT_MAX_CONCURRENCY
 
     @pytest.mark.asyncio
     async def test_concurrent_maxfail(self, null_reporter):
@@ -1213,7 +1256,10 @@ class TestConcurrency:
             make_item(failing, name=f"fail_{i}", is_async=True)
             for i in range(10)
         ]
-        runner = Runner(reporters=[null_reporter], concurrency=5, maxfail=2)
+        runner = Runner(
+            config=make_runner_config(concurrency=5, maxfail=2),
+            reporters=[null_reporter],
+        )
         result = await runner.run(items=items)
 
         assert result.result.stopped_early
@@ -1236,7 +1282,10 @@ class TestTimeout:
             make_item(quick_test, name="quick", is_async=True),
             make_item(slow_test, name="slow", is_async=True),
         ]
-        runner = Runner(reporters=[null_reporter], concurrency=1, timeout=0.05)
+        runner = Runner(
+            config=make_runner_config(concurrency=1, timeout=0.05),
+            reporters=[null_reporter],
+        )
         result = await runner.run(items=items)
 
         assert result.result.stopped_early
@@ -1250,9 +1299,12 @@ class TestTimeout:
             await asyncio.sleep(0.01)
 
         item = make_item(quick_test, is_async=True)
-        runner = Runner(reporters=[null_reporter], concurrency=2)
+        runner = Runner(
+            config=make_runner_config(concurrency=2),
+            reporters=[null_reporter],
+        )
         # timeout is None by default
-        assert runner.timeout is None
+        assert runner.config.timeout is None
 
         result = await runner.run(items=[item])
         assert result.result.passed == 1
@@ -1275,7 +1327,10 @@ class TestResultOrdering:
 
             items.append(make_item(test_fn, name=f"test_{i}", is_async=True))
 
-        runner = Runner(reporters=[null_reporter], concurrency=3)
+        runner = Runner(
+            config=make_runner_config(concurrency=3),
+            reporters=[null_reporter],
+        )
         result = await runner.run(items=items)
 
         # Results should be in discovery order, not completion order
@@ -1364,7 +1419,10 @@ class TestResourceTeardown:
             for i in range(8)
         ]
 
-        runner = Runner(reporters=[null_reporter], concurrency=4)
+        runner = Runner(
+            config=make_runner_config(concurrency=4),
+            reporters=[null_reporter],
+        )
         result = await runner.run(items=items)
 
         assert result.result.passed == len(items)
@@ -1437,7 +1495,10 @@ class TestResourceResolutionErrors:
             ),
             make_item(lambda: None, name="test_2"),
         ]
-        runner = Runner(reporters=[null_reporter], concurrency=1)
+        runner = Runner(
+            config=make_runner_config(concurrency=1),
+            reporters=[null_reporter],
+        )
         result = await runner.run(items=items)
 
         assert result.result.errors == 1
@@ -1467,7 +1528,10 @@ class TestResourceResolutionErrors:
             ),
             make_item(lambda: None, name="test_2"),
         ]
-        runner = Runner(reporters=[null_reporter], concurrency=2)
+        runner = Runner(
+            config=make_runner_config(concurrency=2),
+            reporters=[null_reporter],
+        )
         result = await runner.run(items=items)
 
         assert result.result.errors == 1

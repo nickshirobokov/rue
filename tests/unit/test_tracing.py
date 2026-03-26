@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from rue.config import RueConfig
 from rue.testing.discovery import collect
 from rue.testing.runner import Runner
 from rue.telemetry.otel import otel_span
@@ -31,9 +32,8 @@ async def _run_module_with_tracing(
         monkeypatch.chdir(tmp_path)
         items = collect(mod_path)
         runner = Runner(
+            config=RueConfig.model_construct(otel=True, db_enabled=False),
             reporters=[trace_reporter],
-            otel_enabled=True,
-            db_enabled=False,
         )
         run = await runner.run(items=items)
         return mod_name, run, trace_reporter.sessions

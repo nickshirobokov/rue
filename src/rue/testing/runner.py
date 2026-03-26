@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from rue.config import RueConfig, load_config
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.runtime import (
     CURRENT_RUNNER,
@@ -43,6 +44,7 @@ class Runner:
     """Executes discovered tests with resource injection.
 
     Args:
+        config: Runner configuration values.
         reporters: Optional reporters. Defaults to ConsoleReporter and OtelReporter.
 
     Examples:
@@ -51,7 +53,7 @@ class Runner:
         result = await runner.run(path="tests/")
 
         # Concurrent execution with 5 workers
-        runner = Runner(concurrency=5)
+        runner = Runner(config=RueConfig(concurrency=5))
         result = await runner.run(path="tests/")
     """
 
@@ -60,31 +62,15 @@ class Runner:
     def __init__(
         self,
         *,
+        config: RueConfig | None = None,
         reporters: list[Reporter] | None = None,
-        maxfail: int | None = None,
         fail_fast: bool = False,
-        verbosity: int = 0,
-        concurrency: int = 1,
-        timeout: float | None = None,
-        otel_enabled: bool = False,
-        otel_content: bool = True,
         capture_output: bool = True,
-        db_enabled: bool = True,
-        db_path: Path | str | None = None,
         run_id: UUID | str | None = None,
     ) -> None:
-        self.maxfail = maxfail if maxfail and maxfail > 0 else None
+        self.config = config or load_config()
         self.fail_fast = fail_fast
-        self.verbosity = verbosity
-        self.timeout = timeout
-        self.concurrency = (
-            concurrency if concurrency > 0 else self.DEFAULT_MAX_CONCURRENCY
-        )
-        self.otel_enabled = otel_enabled
-        self.otel_content = otel_content
         self.capture_output = capture_output
-        self.db_enabled = db_enabled
-        self.db_path = Path(db_path) if db_path else None
         self._default_run_id = self._normalize_run_id(run_id)
         self.reporters = reporters or self._default_reporters()
 
@@ -98,10 +84,31 @@ class Runner:
         self.current_run: Run | None = None
         self._store: SQLiteStore | None = None
 
+    def _concurrency_limit(self) -> int:
+        return (
+            self.config.concurrency
+            if self.config.concurrency > 0
+            else self.DEFAULT_MAX_CONCURRENCY
+        )
+
+    def _db_path(self) -> Path | None:
+        return Path(self.config.db_path) if self.config.db_path else None
+
     def _default_reporters(self) -> list[Reporter]:
+        reporter_names = self.config.reporters or [
+            "ConsoleReporter",
+            "OtelReporter",
+        ]
+        options = dict(self.config.reporter_options)
+        if "ConsoleReporter" in reporter_names:
+            console_opts = options.get("ConsoleReporter", {})
+            options["ConsoleReporter"] = {
+                "verbosity": self.config.verbosity,
+                **console_opts,
+            }
         return resolve_reporters(
-            ["ConsoleReporter", "OtelReporter"],
-            {"ConsoleReporter": {"verbosity": self.verbosity}},
+            reporter_names,
+            options,
         )
 
     async def _notify_no_tests_found(self) -> None:
@@ -168,7 +175,7 @@ class Runner:
 
     def _ensure_db_ready(self) -> None:
         """Initialize DB and run migrations. Raises MigrationError if not possible."""
-        self._store = SQLiteStore(self.db_path)
+        self._store = SQLiteStore(self._db_path())
 
     @staticmethod
     def _normalize_run_id(run_id: UUID | str | None) -> UUID | None:
@@ -218,7 +225,7 @@ class Runner:
         """
         selected_run_id = self._resolve_run_id(run_id)
 
-        if self.db_enabled:
+        if self.config.db_enabled:
             self._ensure_db_ready()
             if selected_run_id and self.run_id_exists(selected_run_id):
                 msg = f"run_id '{selected_run_id}' already exists"
@@ -232,7 +239,7 @@ class Runner:
                 environment=environment, run_id=selected_run_id
             )
 
-        if self.otel_enabled:
+        if self.config.otel:
             otel_runtime.configure()
 
         if items is None:
@@ -259,7 +266,7 @@ class Runner:
 
             resolver = ResourceResolver(get_registry())
 
-            self.semaphore = asyncio.Semaphore(self.concurrency)
+            self.semaphore = asyncio.Semaphore(self._concurrency_limit())
             self.stop_flag = False
 
             execution = self._execute_run(
@@ -271,8 +278,10 @@ class Runner:
             run_task = asyncio.create_task(execution)
 
             try:
-                if self.timeout:
-                    await asyncio.wait_for(run_task, timeout=self.timeout)
+                if self.config.timeout is not None:
+                    await asyncio.wait_for(
+                        run_task, timeout=self.config.timeout
+                    )
                 else:
                     await run_task
             except TimeoutError:
@@ -287,7 +296,7 @@ class Runner:
 
         await self._notify_run_complete(self.current_run)
 
-        if self.db_enabled and self._store:
+        if self.config.db_enabled and self._store:
             try:
                 self._store.save_run(self.current_run)
             except Exception as e:
@@ -306,7 +315,7 @@ class Runner:
     ) -> None:
         """Execute the test run with the given items and resolver."""
         try:
-            if self.concurrency == 1:
+            if self._concurrency_limit() == 1:
                 await self._run_sequential(items, resolver, run)
             else:
                 await self._run_concurrent(items, resolver, run)
@@ -362,10 +371,10 @@ class Runner:
 
             if execution.result.status.is_failure:
                 failures += 1
-                if self.maxfail and failures >= self.maxfail:
+                if self.config.maxfail and failures >= self.config.maxfail:
                     run.result.stopped_early = True
                     self.stop_flag = True
-                    await self._notify_run_stopped_early(self.maxfail)
+                    await self._notify_run_stopped_early(self.config.maxfail)
                     break
 
     async def _run_concurrent(
@@ -390,7 +399,7 @@ class Runner:
                 results[idx] = execution
                 if execution.result.status.is_failure:
                     failures += 1
-                    if self.maxfail and failures >= self.maxfail:
+                    if self.config.maxfail and failures >= self.config.maxfail:
                         self.stop_flag = True
                         run.result.stopped_early = True
 
@@ -415,5 +424,5 @@ class Runner:
             if execution is not None:
                 run.result.executions.append(execution)
 
-        if run.result.stopped_early and self.maxfail:
-            await self._notify_run_stopped_early(self.maxfail)
+        if run.result.stopped_early and self.config.maxfail:
+            await self._notify_run_stopped_early(self.config.maxfail)

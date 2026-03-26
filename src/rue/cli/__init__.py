@@ -10,7 +10,7 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, TypeVar
+from typing import Protocol, TypeVar, Callable
 from uuid import UUID
 
 from rich.console import Console
@@ -489,18 +489,23 @@ async def _run_tests(args: argparse.Namespace, config: Config) -> int:
         db_enabled = False
 
     reporters = _resolve_reporters(args, config, verbosity)
+    runner_config = config.model_copy(
+        update={
+            "maxfail": maxfail,
+            "verbosity": verbosity,
+            "concurrency": concurrency,
+            "timeout": timeout,
+            "otel": otel_enabled,
+            "otel_content": otel_content,
+            "db_enabled": db_enabled,
+            "db_path": db_path,
+        }
+    )
     runner = Runner(
+        config=runner_config,
         reporters=reporters,
-        maxfail=maxfail,
-        verbosity=verbosity,
-        concurrency=concurrency,
-        timeout=timeout,
-        otel_enabled=otel_enabled,
-        otel_content=otel_content,
         fail_fast=args.fail_fast,
         capture_output=not args.show_output,
-        db_enabled=db_enabled,
-        db_path=db_path,
     )
 
     if db_enabled and args.run_id and runner.run_id_exists(args.run_id):

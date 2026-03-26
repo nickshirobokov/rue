@@ -85,8 +85,10 @@ class SingleTest(Test):
         assertion_results: list[AssertionResult] = []
         error: Exception | None = None
         tracer = TestTracer(
-            otel_enabled=runner.otel_enabled if runner is not None else False,
-            otel_content=runner.otel_content if runner is not None else True,
+            otel_enabled=runner.config.otel if runner is not None else False,
+            otel_content=(
+                runner.config.otel_content if runner is not None else True
+            ),
         )
 
         with bind(CURRENT_TEST_TRACER, tracer):
