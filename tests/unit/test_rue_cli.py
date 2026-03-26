@@ -16,7 +16,6 @@ from rue.cli import (
     _run_tests,
 )
 from rue.config import Config
-from rue.reports import ConsoleReporter, OtelReporter
 from rue.storage.sqlite import SQLiteStore
 from rue.testing.discovery import TestItem, collect_static
 from rue.testing.models.run import Run, RunEnvironment, RunResult
@@ -177,56 +176,40 @@ class TestResolveReporters:
     def test_default_console_and_otel_reporters(self):
         args = self._make_args()
         config = self._make_config()
-        reporters = _resolve_reporters(args, config, verbosity=0)
-        assert len(reporters) == 2
-        assert isinstance(reporters[0], ConsoleReporter)
-        assert isinstance(reporters[1], OtelReporter)
+        reporters = _resolve_reporters(args, config)
+        assert reporters == []
 
-    def test_default_reporter_always_added(self):
+    def test_default_uses_runner_registry_when_config_is_empty(self):
         args = self._make_args()
         config = self._make_config(reporters=[])
-        reporters = _resolve_reporters(args, config, verbosity=0)
-        assert len(reporters) == 2
-        assert isinstance(reporters[0], ConsoleReporter)
-        assert isinstance(reporters[1], OtelReporter)
+        reporters = _resolve_reporters(args, config)
+        assert reporters == []
 
     def test_cli_reporter_flag(self):
         args = self._make_args(reporters=["ConsoleReporter"])
         config = self._make_config()
-        reporters = _resolve_reporters(args, config, verbosity=0)
-        assert len(reporters) == 1
-        assert isinstance(reporters[0], ConsoleReporter)
+        reporters = _resolve_reporters(args, config)
+        assert reporters == ["ConsoleReporter"]
 
     def test_config_reporters(self):
         args = self._make_args()
         config = self._make_config(reporters=["ConsoleReporter"])
-        reporters = _resolve_reporters(args, config, verbosity=0)
-        assert len(reporters) == 1
-        assert isinstance(reporters[0], ConsoleReporter)
+        reporters = _resolve_reporters(args, config)
+        assert reporters == ["ConsoleReporter"]
 
     def test_config_can_enable_otel_reporter(self):
         args = self._make_args()
         config = self._make_config(
             reporters=["ConsoleReporter", "OtelReporter"]
         )
-        reporters = _resolve_reporters(args, config, verbosity=0)
-        assert len(reporters) == 2
-        assert isinstance(reporters[0], ConsoleReporter)
-        assert isinstance(reporters[1], OtelReporter)
+        reporters = _resolve_reporters(args, config)
+        assert reporters == ["ConsoleReporter", "OtelReporter"]
 
     def test_cli_overrides_config(self):
         args = self._make_args(reporters=["ConsoleReporter"])
-        config = self._make_config(
-            reporters=["rue.reports.console:ConsoleReporter"]
-        )
-        reporters = _resolve_reporters(args, config, verbosity=0)
-        assert len(reporters) == 1
-
-    def test_verbosity_passed_to_console_reporter(self):
-        args = self._make_args()
-        config = self._make_config()
-        reporters = _resolve_reporters(args, config, verbosity=2)
-        assert reporters[0].verbosity == 2
+        config = self._make_config(reporters=["OtelReporter"])
+        reporters = _resolve_reporters(args, config)
+        assert reporters == ["ConsoleReporter"]
 
 
 def _make_cli_config() -> Config:

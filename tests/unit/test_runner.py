@@ -83,11 +83,15 @@ class EventReporter(Reporter):
 
     def __init__(self) -> None:
         self.start_time = 0.0
+        self.verbosity = 0
         self.event_times: list[tuple[str, str, float]] = []
         self.event_order: list[tuple[str, str]] = []
         self.subtest_event_times: list[tuple[str, str, float]] = []
         self.trace_events: list[tuple[UUID, OtelTraceSession]] = []
         self.run_complete_elapsed = 0.0
+
+    def configure(self, config: RueConfig) -> None:
+        self.verbosity = config.verbosity
 
     async def on_no_tests_found(self) -> None:
         pass
@@ -230,13 +234,47 @@ class TestEnvironmentCapture:
 class TestRunner:
     """Tests for Runner class."""
 
-    def test_defaults_to_console_and_otel_reporters(self):
+    def test_defaults_to_all_registered_reporters(self):
         runner = Runner(config=make_runner_config(db_enabled=False, verbosity=2))
 
         assert len(runner.reporters) == 2
         assert isinstance(runner.reporters[0], ConsoleReporter)
         assert runner.reporters[0].verbosity == 2
         assert isinstance(runner.reporters[1], OtelReporter)
+
+    def test_uses_all_registered_reporters_when_not_specified(self):
+        extra = EventReporter()
+        runner = Runner(config=make_runner_config(db_enabled=False, verbosity=4))
+
+        assert runner.reporters[:2] == [
+            Reporter.REGISTRY["ConsoleReporter"],
+            Reporter.REGISTRY["OtelReporter"],
+        ]
+        assert runner.reporters[2] is extra
+        assert extra.verbosity == 4
+
+    def test_configures_provided_reporters(self):
+        reporter = EventReporter()
+        config = make_runner_config(db_enabled=False, verbosity=5)
+        runner = Runner(config=config, reporters=[reporter])
+
+        assert runner.reporters == [reporter]
+        assert reporter.verbosity == 5
+
+    def test_config_reporter_names_override_provided_instances(self):
+        class SelectedReporter(EventReporter):
+            pass
+
+        class OtherReporter(EventReporter):
+            pass
+
+        selected = SelectedReporter()
+        other = OtherReporter()
+        config = make_runner_config(db_enabled=False, reporters=["SelectedReporter"])
+
+        runner = Runner(config=config, reporters=[other])
+
+        assert runner.reporters == [selected]
 
     @pytest.mark.asyncio
     async def test_runs_passing_test(self, null_reporter):

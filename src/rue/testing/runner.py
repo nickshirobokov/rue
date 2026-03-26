@@ -18,7 +18,6 @@ from rue.context.runtime import (
 )
 from rue.metrics_.base import MetricResult
 from rue.reports.base import Reporter
-from rue.reports.registry import resolve_reporters
 from rue.resources import ResourceResolver, get_registry
 from rue.storage import SQLiteStore
 from rue.telemetry.otel.runtime import otel_runtime
@@ -45,7 +44,7 @@ class Runner:
 
     Args:
         config: Runner configuration values.
-        reporters: Optional reporters. Defaults to ConsoleReporter and OtelReporter.
+        reporters: Optional reporters. Defaults to all registered reporters.
 
     Examples:
         # Sequential execution (default reporters)
@@ -72,7 +71,9 @@ class Runner:
         self.fail_fast = fail_fast
         self.capture_output = capture_output
         self._default_run_id = self._normalize_run_id(run_id)
-        self.reporters = reporters or self._default_reporters()
+        self.reporters = self._resolve_reporters(reporters)
+        for reporter in self.reporters:
+            reporter.configure(self.config)
 
         self._result_builder = ResultBuilder()
         self._factory = DefaultTestFactory(result_builder=self._result_builder)
@@ -94,22 +95,24 @@ class Runner:
     def _db_path(self) -> Path | None:
         return Path(self.config.db_path) if self.config.db_path else None
 
-    def _default_reporters(self) -> list[Reporter]:
-        reporter_names = self.config.reporters or [
-            "ConsoleReporter",
-            "OtelReporter",
-        ]
-        options = dict(self.config.reporter_options)
-        if "ConsoleReporter" in reporter_names:
-            console_opts = options.get("ConsoleReporter", {})
-            options["ConsoleReporter"] = {
-                "verbosity": self.config.verbosity,
-                **console_opts,
-            }
-        return resolve_reporters(
-            reporter_names,
-            options,
-        )
+    def _resolve_reporters(
+        self, reporters: list[Reporter] | None
+    ) -> list[Reporter]:
+        from rue.reports.console import console_reporter  # noqa: F401
+        from rue.reports.otel import otel_reporter  # noqa: F401
+
+        if self.config.reporters:
+            resolved_reporters: list[Reporter] = []
+            for name in self.config.reporters:
+                if name not in Reporter.REGISTRY:
+                    available = ", ".join(sorted(Reporter.REGISTRY))
+                    msg = f"Unknown reporter: {name}. Available: {available}"
+                    raise ValueError(msg)
+                resolved_reporters.append(Reporter.REGISTRY[name])
+            return resolved_reporters
+        if reporters is not None:
+            return reporters
+        return list(Reporter.REGISTRY.values())
 
     async def _notify_no_tests_found(self) -> None:
         await asyncio.gather(*[r.on_no_tests_found() for r in self.reporters])

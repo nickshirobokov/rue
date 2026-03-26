@@ -16,7 +16,6 @@ from uuid import UUID
 from rich.console import Console
 
 from rue.config import Config, load_config
-from rue.reports import Reporter, resolve_reporters
 from rue.storage.sqlite.migrations import MigrationRunner
 from rue.storage.sqlite.store import (
     DEFAULT_DB_NAME,
@@ -398,31 +397,18 @@ def _resolve_otel_content(args: argparse.Namespace, config: Config) -> bool:
 
 
 def _resolve_reporters(
-    args: argparse.Namespace, config: Config, verbosity: int
-) -> list[Reporter]:
-    """Resolve reporters from CLI args and config.
+    args: argparse.Namespace, config: Config
+) -> list[str]:
+    """Resolve reporter names from CLI args and config.
 
     Priority:
     1. CLI --reporter flags (if provided, replaces config)
     2. Config reporters list
-    3. Default ConsoleReporter and OtelReporter
+    3. Empty list, which lets Runner use all registered reporters
     """
-    reporter_names: list[str] = []
-
     if args.reporters:
-        reporter_names = args.reporters
-    elif config.reporters:
-        reporter_names = config.reporters
-
-    if not reporter_names:
-        reporter_names = ["ConsoleReporter", "OtelReporter"]
-
-    options = dict(config.reporter_options)
-    if "ConsoleReporter" in reporter_names:
-        console_opts = options.get("ConsoleReporter", {})
-        options["ConsoleReporter"] = {"verbosity": verbosity, **console_opts}
-
-    return resolve_reporters(reporter_names, options)
+        return args.reporters
+    return config.reporters
 
 
 def _collect_items(
@@ -488,7 +474,7 @@ async def _run_tests(args: argparse.Namespace, config: Config) -> int:
     if args.no_db:
         db_enabled = False
 
-    reporters = _resolve_reporters(args, config, verbosity)
+    reporter_names = _resolve_reporters(args, config)
     runner_config = config.model_copy(
         update={
             "maxfail": maxfail,
@@ -499,11 +485,11 @@ async def _run_tests(args: argparse.Namespace, config: Config) -> int:
             "otel_content": otel_content,
             "db_enabled": db_enabled,
             "db_path": db_path,
+            "reporters": reporter_names,
         }
     )
     runner = Runner(
         config=runner_config,
-        reporters=reporters,
         fail_fast=args.fail_fast,
         capture_output=not args.show_output,
     )

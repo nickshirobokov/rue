@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Annotated, Any, Self
+from typing import Annotated, Self
 
 from pydantic import (
     AliasChoices,
@@ -127,7 +127,6 @@ class Config(BaseSettings):
     db_path: str | None = None
     db_enabled: bool = True
     reporters: list[str] = Field(default_factory=list)
-    reporter_options: dict[str, dict[str, Any]] = Field(default_factory=dict)
     predicates: PredicateSettings = Field(default_factory=PredicateSettings)
 
     @model_validator(mode="after")

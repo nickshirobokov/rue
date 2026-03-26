@@ -1,25 +1,8 @@
-"""Tests for rue.reports.registry module."""
+"""Tests for reporter instance registration."""
 
-import pytest
-
-from rue.reports import OtelReporter
+from rue.config import RueConfig
+from rue.reports import ConsoleReporter, OtelReporter
 from rue.reports.base import Reporter
-from rue.reports.registry import (
-    clear_reporter_registry,
-    get_reporter_registry,
-    register_builtin,
-    reporter,
-    resolve_reporter,
-    resolve_reporters,
-)
-
-
-@pytest.fixture(autouse=True)
-def clean_registry():
-    """Clear the reporter registry before and after each test."""
-    clear_reporter_registry()
-    yield
-    clear_reporter_registry()
 
 
 class DummyReporter(Reporter):
@@ -27,6 +10,9 @@ class DummyReporter(Reporter):
 
     def __init__(self, verbosity: int = 0):
         self.verbosity = verbosity
+
+    def configure(self, config: RueConfig) -> None:
+        self.verbosity = config.verbosity
 
     async def on_no_tests_found(self) -> None:
         pass
@@ -47,145 +33,66 @@ class DummyReporter(Reporter):
         pass
 
 
-class TestReporterDecorator:
-    """Tests for the @reporter decorator."""
+class TestReporterBase:
+    """Tests for base Reporter behavior."""
 
-    def test_registers_class(self):
-        @reporter
-        class MyReporter(DummyReporter):
+    def test_instances_register_by_class_name(self):
+        class OtherReporter(DummyReporter):
             pass
 
-        registry = get_reporter_registry()
-        assert "MyReporter" in registry
-        assert registry["MyReporter"] is MyReporter
+        first = DummyReporter()
+        second = OtherReporter()
 
-    def test_registers_with_custom_name(self):
-        @reporter(name="custom")
-        class MyReporter(DummyReporter):
-            pass
+        assert Reporter.REGISTRY["DummyReporter"] is first
+        assert Reporter.REGISTRY["OtherReporter"] is second
 
-        registry = get_reporter_registry()
-        assert "custom" in registry
-        assert "MyReporter" not in registry
-        assert registry["custom"] is MyReporter
+    def test_configure_adjusts_params_from_config(self):
+        reporter = DummyReporter()
+        config = RueConfig.model_construct(verbosity=3)
 
-    def test_disabled_registration(self):
-        @reporter(enabled=False)
-        class DisabledReporter(DummyReporter):
-            pass
+        reporter.configure(config)
 
-        registry = get_reporter_registry()
-        assert "DisabledReporter" not in registry
-
-    def test_returns_original_class(self):
-        @reporter
-        class MyReporter(DummyReporter):
-            pass
-
-        assert MyReporter.__name__ == "MyReporter"
-        instance = MyReporter()
-        assert isinstance(instance, DummyReporter)
+        assert reporter.verbosity == 3
 
 
-class TestResolveReporter:
-    """Tests for resolve_reporter function."""
+class TestReporterRegistry:
+    """Tests for direct Reporter.REGISTRY access."""
 
-    def test_resolve_from_registry(self):
-        @reporter
-        class TestReporter(DummyReporter):
-            pass
+    def test_default_registry_contains_console_and_otel(self):
+        registry = Reporter.REGISTRY
 
-        instance = resolve_reporter("TestReporter")
-        assert isinstance(instance, TestReporter)
+        assert isinstance(registry["ConsoleReporter"], ConsoleReporter)
+        assert isinstance(registry["OtelReporter"], OtelReporter)
 
-    def test_resolve_with_kwargs(self):
-        @reporter
-        class ConfigurableReporter(DummyReporter):
-            def __init__(self, verbosity: int = 0):
-                self.verbosity = verbosity
+    def test_registry_clear_removes_all_instances(self):
+        Reporter.REGISTRY.clear()
 
-        instance = resolve_reporter("ConfigurableReporter", verbosity=2)
-        assert instance.verbosity == 2
+        assert Reporter.REGISTRY == {}
 
-    def test_resolve_import_string_colon(self):
-        instance = resolve_reporter("rue.reports.console:ConsoleReporter")
-        from rue.reports.console import ConsoleReporter
+    def test_registry_returns_registered_instance(self):
+        reporter = DummyReporter()
 
-        assert isinstance(instance, ConsoleReporter)
+        assert Reporter.REGISTRY["DummyReporter"] is reporter
 
-    def test_resolve_import_string_dot(self):
-        instance = resolve_reporter("rue.reports.console.ConsoleReporter")
-        from rue.reports.console import ConsoleReporter
-
-        assert isinstance(instance, ConsoleReporter)
-
-    def test_resolve_unknown_raises(self):
-        with pytest.raises(ValueError, match="Unknown reporter"):
-            resolve_reporter("NonExistent")
-
-    def test_resolve_invalid_import_raises(self):
-        with pytest.raises((ModuleNotFoundError, ValueError)):
-            resolve_reporter("nonexistent.module:Reporter")
-
-
-class TestResolveReporters:
-    """Tests for resolve_reporters function."""
-
-    def test_resolve_multiple(self):
-        @reporter
+    def test_registry_preserves_name_order_when_selected(self):
         class ReporterA(DummyReporter):
             pass
 
-        @reporter
         class ReporterB(DummyReporter):
             pass
 
-        instances = resolve_reporters(["ReporterA", "ReporterB"])
-        assert len(instances) == 2
-        assert isinstance(instances[0], ReporterA)
-        assert isinstance(instances[1], ReporterB)
+        first = ReporterA()
+        second = ReporterB()
 
-    def test_resolve_with_options(self):
-        @reporter
-        class OptionsReporter(DummyReporter):
-            def __init__(self, verbosity: int = 0):
-                self.verbosity = verbosity
+        assert [Reporter.REGISTRY[name] for name in ["ReporterB", "ReporterA"]] == [
+            second,
+            first,
+        ]
 
-        instances = resolve_reporters(
-            ["OptionsReporter"],
-            options={"OptionsReporter": {"verbosity": 3}},
-        )
-        assert instances[0].verbosity == 3
+    def test_registry_values_include_all_registered_instances(self):
+        extra = DummyReporter()
+        reporters = list(Reporter.REGISTRY.values())
 
-    def test_resolve_empty_list(self):
-        instances = resolve_reporters([])
-        assert instances == []
-
-
-class TestBuiltinRegistration:
-    """Tests for register_builtin decorator."""
-
-    def test_builtin_persists_after_clear(self):
-        @register_builtin
-        class BuiltinReporter(DummyReporter):
-            pass
-
-        assert "BuiltinReporter" in get_reporter_registry()
-        clear_reporter_registry()
-        assert "BuiltinReporter" in get_reporter_registry()
-
-    def test_console_reporter_is_builtin(self):
-        clear_reporter_registry()
-        assert "ConsoleReporter" in get_reporter_registry()
-
-    def test_otel_reporter_is_builtin(self):
-        clear_reporter_registry()
-        assert "OtelReporter" in get_reporter_registry()
-
-    def test_otel_reporter_rejects_output_path_override(self):
-        with pytest.raises(TypeError):
-            resolve_reporter("OtelReporter", output_path=".rue/other-traces")
-
-    def test_builtin_otel_reporter_resolves(self):
-        instance = resolve_reporter("OtelReporter")
-        assert isinstance(instance, OtelReporter)
+        assert isinstance(reporters[0], ConsoleReporter)
+        assert isinstance(reporters[1], OtelReporter)
+        assert reporters[2] is extra
