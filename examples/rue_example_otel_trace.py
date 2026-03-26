@@ -49,7 +49,9 @@ def test_set_custom_attributes(simple_pipeline, otel_trace):
     result = simple_pipeline("hello world")
 
     otel_trace.set_attribute("response.length", len(result))
-    otel_trace.set_attribute("response.has_prefix", result.startswith("Processed"))
+    otel_trace.set_attribute(
+        "response.has_prefix", result.startswith("Processed")
+    )
 
     assert "hello" in result
 
@@ -123,7 +125,10 @@ def test_assert_on_trace_data(multi_step_pipeline, otel_trace):
     for span in child_spans:
         if span.name == "retrieve":
             # Span completed successfully
-            assert span.status.status_code.name == "UNSET" or span.status.status_code.name == "OK"
+            assert (
+                span.status.status_code.name == "UNSET"
+                or span.status.status_code.name == "OK"
+            )
             break
 
 

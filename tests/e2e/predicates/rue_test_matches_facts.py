@@ -119,7 +119,9 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         references=Refs(expected=True),
     ),
     Case[Inputs, Refs](
-        id=uuid5(NAMESPACE_URL, f"{__name__}:redis_migration_equivalent_medium"),
+        id=uuid5(
+            NAMESPACE_URL, f"{__name__}:redis_migration_equivalent_medium"
+        ),
         metadata={
             "slug": "redis_migration_equivalent_medium",
             "difficulty": "medium",
@@ -282,7 +284,8 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
     ),
     Case[Inputs, Refs](
         id=uuid5(
-            NAMESPACE_URL, f"{__name__}:titan_losses_equivalent_open_world_medium"
+            NAMESPACE_URL,
+            f"{__name__}:titan_losses_equivalent_open_world_medium",
         ),
         metadata={
             "slug": "titan_losses_equivalent_open_world_medium",

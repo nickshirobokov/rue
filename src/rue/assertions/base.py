@@ -3,7 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from rue.context import ASSERTION_RESULTS_COLLECTOR, METRIC_CONTEXT, TEST_CONTEXT
+from rue.context import (
+    ASSERTION_RESULTS_COLLECTOR,
+    METRIC_CONTEXT,
+    TEST_CONTEXT,
+)
 
 
 if TYPE_CHECKING:
@@ -74,7 +78,10 @@ class AssertionResult:
         test_ctx = TEST_CONTEXT.get()
         if test_ctx is not None:
             if test_ctx.item.fail_fast and not self.passed:
-                msg = self.error_message or f"Assertion failed: {self.expression_repr.expr}"
+                msg = (
+                    self.error_message
+                    or f"Assertion failed: {self.expression_repr.expr}"
+                )
                 raise AssertionError(msg)
 
 

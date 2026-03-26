@@ -1,6 +1,10 @@
 """Test discovery."""
 
-from rue.testing.discovery.collector import StaticTestReference, collect, collect_static
+from rue.testing.discovery.collector import (
+    StaticTestReference,
+    collect,
+    collect_static,
+)
 from rue.testing.discovery.loader import RueModuleLoader
 from rue.testing.models import TestDefinition, RueTestDefinition
 

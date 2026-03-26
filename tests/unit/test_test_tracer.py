@@ -42,7 +42,9 @@ class FakeSpanScope:
         return None
 
 
-def make_definition(*, suffix: str | None = None, case_id: UUID | None = None) -> TestDefinition:
+def make_definition(
+    *, suffix: str | None = None, case_id: UUID | None = None
+) -> TestDefinition:
     return TestDefinition(
         name="test_traced",
         fn=lambda: None,
@@ -87,7 +89,9 @@ def test_test_tracer_records_root_span_metadata(
     )
 
     tracer = TestTracer(otel_enabled=True, otel_content=True)
-    active_span = tracer.start_otel_root_span(make_definition(suffix=suffix, case_id=case_id))
+    active_span = tracer.start_otel_root_span(
+        make_definition(suffix=suffix, case_id=case_id)
+    )
 
     assert active_span is span
     assert {
@@ -118,7 +122,9 @@ def test_test_tracer_records_result_and_finishes_session(monkeypatch):
 
     tracer = TestTracer(otel_enabled=True, otel_content=False)
     tracer.start_otel_root_span(make_definition())
-    started = tracer.start_otel_trace(run_id=UUID(int=1), execution_id=UUID(int=2))
+    started = tracer.start_otel_trace(
+        run_id=UUID(int=1), execution_id=UUID(int=2)
+    )
     tracer.record_otel_result(
         TestResult(status=TestStatus.FAILED, duration_ms=12.5, error=error)
     )

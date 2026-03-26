@@ -143,7 +143,9 @@ def test_metric_records_case_id_before_suffix():
     with context_scope(test_ctx):
         m.add_record(1)
 
-    assert m.metadata.collected_from_cases == {"00000000-0000-0000-0000-000000000001"}
+    assert m.metadata.collected_from_cases == {
+        "00000000-0000-0000-0000-000000000001"
+    }
 
 
 def test_metric_records_suffix_when_case_id_missing():
@@ -242,7 +244,9 @@ async def test_metric_on_injection_hook_with_context():
     resolver = ResourceResolver()
     ctx = Ctx(item=_make_item("my_merit"))
     with context_scope(ctx):
-        with resolver_context_scope(ResolverContext(consumer_name="some_resource")):
+        with resolver_context_scope(
+            ResolverContext(consumer_name="some_resource")
+        ):
             m = await resolver.resolve("test_ctx_metric")
             # injection hook attribution
             assert "some_resource" in m.metadata.collected_from_resources
@@ -322,7 +326,10 @@ async def test_metric_decorator_emits_metric_result_on_teardown_with_assertions_
     r = metric_results[0]
     assert r.name == "scored_metric"
     assert r.value == 123
-    assert [a.expression_repr.expr for a in r.assertion_results] == ["before", "after"]
+    assert [a.expression_repr.expr for a in r.assertion_results] == [
+        "before",
+        "after",
+    ]
     assert r.metadata.scope == Scope.CASE
     assert r.metadata is not m.metadata
 

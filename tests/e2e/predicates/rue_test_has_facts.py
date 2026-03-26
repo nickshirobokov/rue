@@ -118,7 +118,10 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
     ),
     Case[Inputs, Refs](
         id=uuid5(NAMESPACE_URL, f"{__name__}:certificate_rotation_medium"),
-        metadata={"slug": "certificate_rotation_medium", "difficulty": "medium"},
+        metadata={
+            "slug": "certificate_rotation_medium",
+            "difficulty": "medium",
+        },
         inputs=Inputs(
             actual="""
         Change ticket CHG-8471
@@ -214,7 +217,10 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
     ),
     Case[Inputs, Refs](
         id=uuid5(NAMESPACE_URL, f"{__name__}:bridge_round_too_vague_medium"),
-        metadata={"slug": "bridge_round_too_vague_medium", "difficulty": "medium"},
+        metadata={
+            "slug": "bridge_round_too_vague_medium",
+            "difficulty": "medium",
+        },
         inputs=Inputs(
             actual="""
         Board follow-up, messy notes:
@@ -294,7 +300,10 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
     ),
     Case[Inputs, Refs](
         id=uuid5(NAMESPACE_URL, f"{__name__}:titan_losses_open_world_medium"),
-        metadata={"slug": "titan_losses_open_world_medium", "difficulty": "medium"},
+        metadata={
+            "slug": "titan_losses_open_world_medium",
+            "difficulty": "medium",
+        },
         inputs=Inputs(
             actual="""
         Quarterly review transcript, cleaned up from notes:

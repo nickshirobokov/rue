@@ -45,7 +45,14 @@ from rue.testing.models import (
     TestResult,
     TestStatus,
 )
-from rue.testing.outcomes import FailTest, SkipTest, XFailTest, fail, skip, xfail
+from rue.testing.outcomes import (
+    FailTest,
+    SkipTest,
+    XFailTest,
+    fail,
+    skip,
+    xfail,
+)
 from rue.testing.runner import Runner
 
 

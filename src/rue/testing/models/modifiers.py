@@ -46,4 +46,9 @@ class CaseGroupIterateModifier:
     groups: tuple[CaseGroup[Any, Any, Any], ...]
 
 
-Modifier = RepeatModifier | ParametrizeModifier | CaseIterateModifier | CaseGroupIterateModifier
+Modifier = (
+    RepeatModifier
+    | ParametrizeModifier
+    | CaseIterateModifier
+    | CaseGroupIterateModifier
+)

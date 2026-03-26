@@ -69,4 +69,6 @@ class DefaultTestFactory(TestFactory):
                     factory=self,
                 )
             case _:
-                raise NotImplementedError(f"Unknown modifier(s): {definition.modifiers}")
+                raise NotImplementedError(
+                    f"Unknown modifier(s): {definition.modifiers}"
+                )

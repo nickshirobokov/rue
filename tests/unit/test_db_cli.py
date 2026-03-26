@@ -10,7 +10,9 @@ from rue.cli import _db_backup, _db_migrate, _db_reset, _db_status
 class TestDbStatus:
     """Tests for rue db status command."""
 
-    def test_status_fresh_db(self, sqlite_db_path: Path, mock_console: MagicMock) -> None:
+    def test_status_fresh_db(
+        self, sqlite_db_path: Path, mock_console: MagicMock
+    ) -> None:
         """Status should show migration required for fresh DB."""
         result = _db_status(mock_console, sqlite_db_path)
 
@@ -33,7 +35,9 @@ class TestDbStatus:
 class TestDbMigrate:
     """Tests for rue db migrate command."""
 
-    def test_migrate_fresh_db(self, sqlite_db_path: Path, mock_console: MagicMock) -> None:
+    def test_migrate_fresh_db(
+        self, sqlite_db_path: Path, mock_console: MagicMock
+    ) -> None:
         """Migrate should create and populate fresh DB."""
         result = _db_migrate(mock_console, sqlite_db_path)
 
@@ -70,7 +74,9 @@ class TestDbMigrate:
         self, migrated_sqlite_db_path: Path, mock_console: MagicMock
     ) -> None:
         """Dry run on current DB should report up to date."""
-        result = _db_migrate(mock_console, migrated_sqlite_db_path, dry_run=True)
+        result = _db_migrate(
+            mock_console, migrated_sqlite_db_path, dry_run=True
+        )
 
         assert result == 0
         calls = [str(c) for c in mock_console.print.call_args_list]
@@ -90,7 +96,9 @@ class TestDbBackup:
         backup_files = list(migrated_sqlite_db_path.parent.glob("*.backup.*"))
         assert len(backup_files) == 1
 
-    def test_backup_missing_db_fails(self, sqlite_db_path: Path, mock_console: MagicMock) -> None:
+    def test_backup_missing_db_fails(
+        self, sqlite_db_path: Path, mock_console: MagicMock
+    ) -> None:
         """Backup should fail if database doesn't exist."""
         result = _db_backup(mock_console, sqlite_db_path)
 
@@ -108,7 +116,19 @@ class TestDbBackup:
             "INSERT INTO runs (run_id, start_time, total_duration_ms, "
             "passed, failed, errors, skipped, xfailed, xpassed, total, stopped_early) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("wal-test-run", "2024-01-01T00:00:00", 100.0, 1, 0, 0, 0, 0, 0, 1, 0),
+            (
+                "wal-test-run",
+                "2024-01-01T00:00:00",
+                100.0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+            ),
         )
         conn.commit()
         conn.close()
@@ -132,7 +152,9 @@ class TestDbReset:
         self, migrated_sqlite_db_path: Path, mock_console: MagicMock
     ) -> None:
         """Reset without --yes should show warning and not delete."""
-        result = _db_reset(mock_console, migrated_sqlite_db_path, confirmed=False)
+        result = _db_reset(
+            mock_console, migrated_sqlite_db_path, confirmed=False
+        )
 
         assert result == 1
         assert migrated_sqlite_db_path.exists()
@@ -153,7 +175,9 @@ class TestDbReset:
         conn.commit()
         conn.close()
 
-        result = _db_reset(mock_console, migrated_sqlite_db_path, confirmed=True)
+        result = _db_reset(
+            mock_console, migrated_sqlite_db_path, confirmed=True
+        )
 
         assert result == 0
         assert migrated_sqlite_db_path.exists()

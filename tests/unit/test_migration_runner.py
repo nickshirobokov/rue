@@ -23,7 +23,9 @@ class TestMigrationRunner:
         version: int = conn.execute("PRAGMA user_version").fetchone()[0]
         assert version == migration_runner.get_target_version()
 
-        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        tables = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
         table_names = {t[0] for t in tables}
         assert "runs" in table_names
         assert "test_executions" in table_names
@@ -49,7 +51,9 @@ class TestMigrationRunner:
         runner2 = MigrationRunner(sqlite_db_path)
         assert not runner2.needs_migration()
 
-    def test_can_migrate_returns_false_for_downgrade(self, sqlite_db_path: Path) -> None:
+    def test_can_migrate_returns_false_for_downgrade(
+        self, sqlite_db_path: Path
+    ) -> None:
         """can_migrate returns False when DB version is ahead of code."""
         conn = sqlite3.connect(sqlite_db_path)
         conn.execute("PRAGMA user_version = 999")
@@ -64,7 +68,9 @@ class TestMigrationRunner:
         runner = MigrationRunner(sqlite_db_path)
         assert runner.get_current_version() == 0
 
-    def test_get_pending_migrations(self, migration_runner: MigrationRunner) -> None:
+    def test_get_pending_migrations(
+        self, migration_runner: MigrationRunner
+    ) -> None:
         """Should return list of migrations to apply."""
         pending = migration_runner.get_pending_migrations()
         assert len(pending) > 0
@@ -96,7 +102,9 @@ class TestMigrationRunner:
         assert not runner2.needs_migration()
 
         conn = sqlite3.connect(sqlite_db_path)
-        rows = conn.execute("SELECT run_id FROM runs ORDER BY run_id").fetchall()
+        rows = conn.execute(
+            "SELECT run_id FROM runs ORDER BY run_id"
+        ).fetchall()
         assert [r[0] for r in rows] == ["run-1", "run-2"]
         conn.close()
 
@@ -167,9 +175,14 @@ class TestMigrationRunner:
 
         conn = sqlite3.connect(sqlite_db_path)
         version: int = conn.execute("PRAGMA user_version").fetchone()[0]
-        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        tables = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
         execution_columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(test_executions)").fetchall()
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(test_executions)"
+            ).fetchall()
         }
         rows = conn.execute("SELECT run_id FROM runs").fetchall()
 
@@ -240,7 +253,9 @@ class TestMigrationFailure:
             conn.execute("CREATE TABLE new_table (id INTEGER)")
             raise RuntimeError("Simulated failure")
 
-        bad_migration = Migration(version=original_version + 1, name="bad", up=failing_up)
+        bad_migration = Migration(
+            version=original_version + 1, name="bad", up=failing_up
+        )
 
         runner2 = MigrationRunner.__new__(MigrationRunner)
         runner2.path = sqlite_db_path
@@ -263,7 +278,9 @@ class TestMigrationFailure:
 class TestMigrationValidation:
     """Tests for migration file validation."""
 
-    def test_version_gap_raises_config_error(self, sqlite_db_path: Path) -> None:
+    def test_version_gap_raises_config_error(
+        self, sqlite_db_path: Path
+    ) -> None:
         """Gap in version numbers should raise MigrationConfigError."""
         migrations = [
             Migration(version=1, name="v001", up=lambda conn: None),
@@ -277,7 +294,9 @@ class TestMigrationValidation:
         with pytest.raises(MigrationConfigError, match="version gap"):
             runner._validate_migrations(migrations)
 
-    def test_duplicate_version_raises_config_error(self, sqlite_db_path: Path) -> None:
+    def test_duplicate_version_raises_config_error(
+        self, sqlite_db_path: Path
+    ) -> None:
         """Duplicate versions should raise MigrationConfigError."""
         migrations = [
             Migration(version=1, name="v001_a", up=lambda conn: None),
@@ -292,7 +311,9 @@ class TestMigrationValidation:
         with pytest.raises(MigrationConfigError, match="Duplicate"):
             runner._validate_migrations(migrations)
 
-    def test_no_migrations_raises_config_error(self, sqlite_db_path: Path) -> None:
+    def test_no_migrations_raises_config_error(
+        self, sqlite_db_path: Path
+    ) -> None:
         """Empty migrations list should raise MigrationConfigError."""
         runner = MigrationRunner.__new__(MigrationRunner)
         runner.path = sqlite_db_path
@@ -301,7 +322,9 @@ class TestMigrationValidation:
         with pytest.raises(MigrationConfigError):
             runner._validate_migrations([])
 
-    def test_migrations_not_starting_at_1_raises_error(self, sqlite_db_path: Path) -> None:
+    def test_migrations_not_starting_at_1_raises_error(
+        self, sqlite_db_path: Path
+    ) -> None:
         """Migrations must start at version 1."""
         migrations = [
             Migration(version=2, name="v002", up=lambda conn: None),
@@ -346,7 +369,9 @@ class TestMigrationVersions:
         migration_runner.migrate()
 
         conn = sqlite3.connect(sqlite_db_path)
-        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        tables = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
         table_names = {t[0] for t in tables}
 
         expected_tables = {

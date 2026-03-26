@@ -54,12 +54,20 @@ def _is_tag_root(expr: ast.expr) -> bool:
     if isinstance(expr, ast.Name):
         return expr.id == "tag"
     if isinstance(expr, ast.Attribute):
-        return isinstance(expr.value, ast.Name) and expr.value.id == "rue" and expr.attr == "tag"
+        return (
+            isinstance(expr.value, ast.Name)
+            and expr.value.id == "rue"
+            and expr.attr == "tag"
+        )
     return False
 
 
 def _is_tag_method(expr: ast.expr, method_name: str) -> bool:
-    return isinstance(expr, ast.Attribute) and expr.attr == method_name and _is_tag_root(expr.value)
+    return (
+        isinstance(expr, ast.Attribute)
+        and expr.attr == method_name
+        and _is_tag_root(expr.value)
+    )
 
 
 def _extract_static_tags(decorators: list[ast.expr]) -> set[str]:
@@ -91,7 +99,9 @@ def _collect_static_from_module(path: Path) -> list[StaticTestReference]:
                     StaticTestReference(
                         name=node.name,
                         module_path=path,
-                        tags=frozenset(_extract_static_tags(node.decorator_list)),
+                        tags=frozenset(
+                            _extract_static_tags(node.decorator_list)
+                        ),
                     )
                 )
             continue
@@ -99,9 +109,13 @@ def _collect_static_from_module(path: Path) -> list[StaticTestReference]:
         if isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
             class_tags = _extract_static_tags(node.decorator_list)
             for class_node in node.body:
-                if isinstance(class_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if isinstance(
+                    class_node, (ast.FunctionDef, ast.AsyncFunctionDef)
+                ):
                     if class_node.name.startswith("test_"):
-                        tags = class_tags | _extract_static_tags(class_node.decorator_list)
+                        tags = class_tags | _extract_static_tags(
+                            class_node.decorator_list
+                        )
                         refs.append(
                             StaticTestReference(
                                 name=class_node.name,
@@ -155,7 +169,9 @@ def _get_modifiers(fn: Callable[..., Any]) -> list[Modifier]:
     return getattr(fn, "__rue_modifiers__", [])
 
 
-def _collect_from_module(module: ModuleType, module_path: Path) -> list[TestDefinition]:
+def _collect_from_module(
+    module: ModuleType, module_path: Path
+) -> list[TestDefinition]:
     """Collect all matching tests from a module."""
     items: list[TestDefinition] = []
 
@@ -165,7 +181,9 @@ def _collect_from_module(module: ModuleType, module_path: Path) -> list[TestDefi
 
         elif name.startswith("Test") and inspect.isclass(obj):
             class_tags = get_tag_data(obj)
-            for method_name, method in inspect.getmembers(obj, predicate=inspect.isfunction):
+            for method_name, method in inspect.getmembers(
+                obj, predicate=inspect.isfunction
+            ):
                 if method_name.startswith("test_"):
                     items.append(
                         _build_item_for_callable(

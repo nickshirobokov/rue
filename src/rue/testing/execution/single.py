@@ -25,7 +25,12 @@ from rue.resources import ResourceResolver
 from rue.resources.resolver import Scope
 from rue.testing.execution.interfaces import Test
 from rue.testing.execution.result_builder import ResultBuilder
-from rue.testing.models import TestDefinition, TestExecution, TestResult, TestStatus
+from rue.testing.models import (
+    TestDefinition,
+    TestExecution,
+    TestResult,
+    TestStatus,
+)
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
 from rue.testing.tracing import TestTracer
 
@@ -100,7 +105,10 @@ class SingleTest(Test):
             )
             imperative_outcome: TestStatus | None = None
 
-            with test_context_scope(ctx), assertions_collector(assertion_results):
+            with (
+                test_context_scope(ctx),
+                assertions_collector(assertion_results),
+            ):
                 try:
                     semaphore = (
                         runner.semaphore
@@ -136,7 +144,9 @@ class SingleTest(Test):
                 try:
                     await forked_resolver.teardown_scope(Scope.CASE)
                 except Exception as teardown_err:
-                    logger.warning(f"Error during resource teardown: {teardown_err}")
+                    logger.warning(
+                        f"Error during resource teardown: {teardown_err}"
+                    )
                     if error is None:
                         error = teardown_err
 
@@ -155,7 +165,10 @@ class SingleTest(Test):
             tracer.record_otel_result(result)
             tracer.finish_otel_trace()
 
-        if tracer.completed_otel_trace_session is not None and runner is not None:
+        if (
+            tracer.completed_otel_trace_session is not None
+            and runner is not None
+        ):
             await runner.notify_trace_collected(tracer, exec_id)
 
         return TestExecution(
@@ -164,10 +177,14 @@ class SingleTest(Test):
             execution_id=exec_id,
         )
 
-    async def _resolve_params(self, resolver: ResourceResolver) -> dict[str, Any]:
+    async def _resolve_params(
+        self, resolver: ResourceResolver
+    ) -> dict[str, Any]:
         """Resolve test parameters from resources."""
         kwargs = dict(self.params)
-        with resolver_context_scope(ResolverContext(consumer_name=self.definition.name)):
+        with resolver_context_scope(
+            ResolverContext(consumer_name=self.definition.name)
+        ):
             for param in self.definition.params:
                 if param not in kwargs:
                     kwargs[param] = await resolver.resolve(param)
@@ -188,7 +205,11 @@ class SingleTest(Test):
 
             instance = cls()
 
-        call = partial(fn, instance, **kwargs) if instance else partial(fn, **kwargs)
+        call = (
+            partial(fn, instance, **kwargs)
+            if instance
+            else partial(fn, **kwargs)
+        )
 
         if self.definition.is_async:
             await call()

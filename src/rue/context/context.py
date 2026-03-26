@@ -51,22 +51,32 @@ class ResolverContext:
     consumer_name: str | None = None
 
 
-ASSERTION_RESULTS_COLLECTOR: ContextVar[list[AssertionResult] | None] = ContextVar(
-    "assertion_results_collector", default=None
+ASSERTION_RESULTS_COLLECTOR: ContextVar[list[AssertionResult] | None] = (
+    ContextVar("assertion_results_collector", default=None)
 )
-PREDICATE_RESULTS_COLLECTOR: ContextVar[list[PredicateResult] | None] = ContextVar(
-    "predicate_results_collector", default=None
+PREDICATE_RESULTS_COLLECTOR: ContextVar[list[PredicateResult] | None] = (
+    ContextVar("predicate_results_collector", default=None)
 )
 
 METRIC_RESULTS_COLLECTOR: ContextVar[list[MetricResult] | None] = ContextVar(
     "metric_results_collector", default=None
 )
 
-TEST_CONTEXT: ContextVar[TestContext | None] = ContextVar("test_context", default=None)
-TEST_TRACER: ContextVar[TestTracer | None] = ContextVar("test_tracer", default=None)
-RESOLVER_CONTEXT: ContextVar[ResolverContext | None] = ContextVar("resolver_context", default=None)
-METRIC_CONTEXT: ContextVar[list[Metric] | None] = ContextVar("metric_context", default=None)
-RUNNER_CONTEXT: ContextVar[Runner | None] = ContextVar("runner_context", default=None)
+TEST_CONTEXT: ContextVar[TestContext | None] = ContextVar(
+    "test_context", default=None
+)
+TEST_TRACER: ContextVar[TestTracer | None] = ContextVar(
+    "test_tracer", default=None
+)
+RESOLVER_CONTEXT: ContextVar[ResolverContext | None] = ContextVar(
+    "resolver_context", default=None
+)
+METRIC_CONTEXT: ContextVar[list[Metric] | None] = ContextVar(
+    "metric_context", default=None
+)
+RUNNER_CONTEXT: ContextVar[Runner | None] = ContextVar(
+    "runner_context", default=None
+)
 
 
 def get_test_tracer() -> TestTracer | None:

@@ -16,7 +16,10 @@ def _column_names(conn: sqlite3.Connection, table_name: str) -> set[str]:
 def up(conn: sqlite3.Connection) -> None:
     """Rename trace schema objects to their OpenTelemetry-specific equivalents."""
     execution_columns = _column_names(conn, "test_executions")
-    if "trace_id" in execution_columns and "otel_trace_id" not in execution_columns:
+    if (
+        "trace_id" in execution_columns
+        and "otel_trace_id" not in execution_columns
+    ):
         conn.execute(
             "ALTER TABLE test_executions RENAME COLUMN trace_id TO otel_trace_id"
         )
@@ -37,7 +40,10 @@ def up(conn: sqlite3.Connection) -> None:
         ).fetchall()
     }:
         otel_span_columns = _column_names(conn, "otel_spans")
-        if "trace_id" in otel_span_columns and "otel_trace_id" not in otel_span_columns:
+        if (
+            "trace_id" in otel_span_columns
+            and "otel_trace_id" not in otel_span_columns
+        ):
             conn.execute(
                 "ALTER TABLE otel_spans RENAME COLUMN trace_id TO otel_trace_id"
             )

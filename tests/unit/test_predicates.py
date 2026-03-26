@@ -334,7 +334,9 @@ def test_sample():
     assert len(execution.result.assertion_results) == 1
     assert len(execution.result.assertion_results[0].predicate_results) == 1
 
-    predicate_result = execution.result.assertion_results[0].predicate_results[0]
+    predicate_result = execution.result.assertion_results[0].predicate_results[
+        0
+    ]
     assert predicate_result.model_dump() == {
         "actual": "a",
         "reference": "b",

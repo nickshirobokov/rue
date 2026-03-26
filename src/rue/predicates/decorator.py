@@ -74,8 +74,8 @@ def predicate(
     *,
     name: str | None = None,
 ) -> Any:
-    """Decorate a predicate function to record each outcome for test reports and 
-    for tracing. The wrapped function still returns a plain ``bool`` (or ``bool`` 
+    """Decorate a predicate function to record each outcome for test reports and
+    for tracing. The wrapped function still returns a plain ``bool`` (or ``bool``
     from an async function).
 
     The parameters must be named ``actual`` and ``reference`` (not positional-only;
@@ -150,7 +150,9 @@ def predicate(
                         bound,
                     )
                     _record_result(predicate_result)
-                    _set_trace_attributes(span, predicate_name, predicate_result, bound)
+                    _set_trace_attributes(
+                        span, predicate_name, predicate_result, bound
+                    )
                     return predicate_result.value
 
             return async_wrapper
@@ -176,7 +178,9 @@ def predicate(
                     bound,
                 )
                 _record_result(predicate_result)
-                _set_trace_attributes(span, predicate_name, predicate_result, bound)
+                _set_trace_attributes(
+                    span, predicate_name, predicate_result, bound
+                )
                 return predicate_result.value
 
         return sync_wrapper
@@ -234,10 +238,18 @@ def _set_trace_attributes(
     span.set_attribute("predicate.confidence", result.confidence)
 
     tracer = get_test_tracer()
-    if tracer is None or tracer.otel_trace_session is None or not tracer.otel_content:
+    if (
+        tracer is None
+        or tracer.otel_trace_session is None
+        or not tracer.otel_content
+    ):
         return
 
-    span.set_attribute("predicate.input.actual", repr(bound.arguments["actual"]))
-    span.set_attribute("predicate.input.reference", repr(bound.arguments["reference"]))
+    span.set_attribute(
+        "predicate.input.actual", repr(bound.arguments["actual"])
+    )
+    span.set_attribute(
+        "predicate.input.reference", repr(bound.arguments["reference"])
+    )
     if result.message is not None:
         span.set_attribute("predicate.message", repr(result.message))

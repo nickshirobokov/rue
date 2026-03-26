@@ -15,7 +15,11 @@ from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
 from opentelemetry.instrumentation.openai import OpenAIInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
+from opentelemetry.sdk.trace.export import (
+    SimpleSpanProcessor,
+    SpanExporter,
+    SpanExportResult,
+)
 from opentelemetry.trace import INVALID_SPAN, Span
 
 from rue.context import get_test_tracer
@@ -46,7 +50,10 @@ class OtelTraceSession:
             return {
                 "run_id": str(self.run_id),
                 "execution_id": str(self.execution_id),
-                "spans": [json.loads(span.to_json(indent=None)) for span in self._spans],
+                "spans": [
+                    json.loads(span.to_json(indent=None))
+                    for span in self._spans
+                ],
             }
 
 
@@ -116,7 +123,9 @@ class OtelRuntime:
 
     def finish_otel_trace(self, session: OtelTraceSession) -> OtelTraceSession:
         with self._otel_traces_lock:
-            self._otel_traces.pop(session.root_span.get_span_context().trace_id, None)
+            self._otel_traces.pop(
+                session.root_span.get_span_context().trace_id, None
+            )
         return session
 
     def get_otel_trace(self, trace_id: int) -> OtelTraceSession | None:

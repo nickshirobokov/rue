@@ -214,7 +214,9 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
         references=Refs(expected=False),
     ),
     Case[Inputs, Refs](
-        id=uuid5(NAMESPACE_URL, f"{__name__}:tabloid_vs_regulatory_style_medium"),
+        id=uuid5(
+            NAMESPACE_URL, f"{__name__}:tabloid_vs_regulatory_style_medium"
+        ),
         metadata={
             "slug": "tabloid_vs_regulatory_style_medium",
             "difficulty": "medium",

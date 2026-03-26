@@ -28,7 +28,9 @@ from pydantic_settings import (
 class PredicateConfig(BaseModel):
     """Config for a single predicate — model name plus optional ModelSettings fields."""
 
-    model_config = ConfigDict(protected_namespaces=(), arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        protected_namespaces=(), arbitrary_types_allowed=True
+    )
 
     model: KnownModelName
     temperature: float | None = None
@@ -58,7 +60,9 @@ class PredicateSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="forbid",
         populate_by_name=True,
-        alias_generator=AliasGenerator(validation_alias=lambda name: name.replace("_", "-")),
+        alias_generator=AliasGenerator(
+            validation_alias=lambda name: name.replace("_", "-")
+        ),
         pyproject_toml_table_header=("tool", "rue", "predicates"),
     )
 
@@ -68,7 +72,9 @@ class PredicateSettings(BaseSettings):
     has_facts: PredicateConfig | None = None
     has_topic: PredicateConfig | None = Field(
         default=None,
-        validation_alias=AliasChoices("has_topic", "has-topic", "has_topics", "has-topics"),
+        validation_alias=AliasChoices(
+            "has_topic", "has-topic", "has_topics", "has-topics"
+        ),
     )
     has_unsupported_facts: PredicateConfig | None = None
     matches_facts: PredicateConfig | None = None
@@ -100,7 +106,9 @@ class Config(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="RUE_",
         populate_by_name=True,
-        alias_generator=AliasGenerator(validation_alias=lambda name: name.replace("_", "-")),
+        alias_generator=AliasGenerator(
+            validation_alias=lambda name: name.replace("_", "-")
+        ),
         pyproject_toml_table_header=("tool", "rue"),
         toml_file="rue.toml",
     )
@@ -163,4 +171,10 @@ def reset_load_config_cache() -> None:
 
 RueConfig = Config
 
-__all__ = ["Config", "PredicateConfig", "RueConfig", "load_config", "reset_load_config_cache"]
+__all__ = [
+    "Config",
+    "PredicateConfig",
+    "RueConfig",
+    "load_config",
+    "reset_load_config_cache",
+]

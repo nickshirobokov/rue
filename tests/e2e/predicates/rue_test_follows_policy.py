@@ -122,7 +122,10 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
     ),
     Case[Inputs, Refs](
         id=uuid5(NAMESPACE_URL, f"{__name__}:incident_json_policy_medium"),
-        metadata={"slug": "incident_json_policy_medium", "difficulty": "medium"},
+        metadata={
+            "slug": "incident_json_policy_medium",
+            "difficulty": "medium",
+        },
         inputs=Inputs(
             actual="""
         {

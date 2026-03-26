@@ -370,7 +370,8 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
     ),
     Case[Inputs, Refs](
         id=uuid5(
-            NAMESPACE_URL, f"{__name__}:introduction_and_name_not_conflict_medium"
+            NAMESPACE_URL,
+            f"{__name__}:introduction_and_name_not_conflict_medium",
         ),
         metadata={
             "slug": "introduction_and_name_not_conflict_medium",

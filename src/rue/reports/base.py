@@ -54,7 +54,9 @@ class Reporter(ABC):
     async def on_run_stopped_early(self, failure_count: int) -> None:
         """Called when run stops early due to maxfail limit."""
 
-    async def on_trace_collected(self, tracer: TestTracer, execution_id: UUID) -> None:
+    async def on_trace_collected(
+        self, tracer: TestTracer, execution_id: UUID
+    ) -> None:
         """Called when a test tracer finishes collecting trace data."""
         _ = tracer, execution_id
         return None

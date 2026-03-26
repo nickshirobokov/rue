@@ -10,7 +10,9 @@ from rue.testing.outcomes import SkipTest, XFailTest
 from rue.testing.runner import Runner
 
 
-def make_item(fn, name: str | None = None, is_async: bool = False) -> TestDefinition:
+def make_item(
+    fn, name: str | None = None, is_async: bool = False
+) -> TestDefinition:
     return TestDefinition(
         fn=fn,
         name=name or fn.__name__,
@@ -46,7 +48,9 @@ class TestImperativeSkip:
         result = await runner.run(items=[item])
 
         assert result.result.skipped == 1
-        assert "missing dependency" in str(result.result.executions[0].result.error)
+        assert "missing dependency" in str(
+            result.result.executions[0].result.error
+        )
 
     @pytest.mark.asyncio
     async def test_skip_without_reason(self, null_reporter):
@@ -99,7 +103,9 @@ class TestImperativeFail:
         result = await runner.run(items=[item])
 
         assert result.result.failed == 1
-        assert "something went wrong" in str(result.result.executions[0].result.error)
+        assert "something went wrong" in str(
+            result.result.executions[0].result.error
+        )
 
     @pytest.mark.asyncio
     async def test_fail_without_reason(self, null_reporter):

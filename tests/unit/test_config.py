@@ -12,7 +12,9 @@ def _reset_load_config_cache() -> None:
     reset_load_config_cache()
 
 
-def test_load_config_prefers_rue_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_load_config_prefers_rue_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.chdir(tmp_path)
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
@@ -56,7 +58,9 @@ db-enabled = false
     assert config.db_enabled is False
 
 
-def test_load_config_defaults_when_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_load_config_defaults_when_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.chdir(tmp_path)
     config = load_config()
     assert config.test_paths == ["."]
@@ -89,7 +93,10 @@ def test_load_config_defaults_when_missing(tmp_path: Path, monkeypatch: pytest.M
     ],
 )
 def test_config_default_values(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, expected: object
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    expected: object,
 ):
     monkeypatch.chdir(tmp_path)
     config = load_config()

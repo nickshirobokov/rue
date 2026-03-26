@@ -139,7 +139,10 @@ def case_hallucinations_count(average_hallucinations_per_case: Metric):
     ],
 )
 def test_hallucinations_test(
-    city: str, expected_state: str, expected_country: str, case_hallucinations_count: Metric
+    city: str,
+    expected_state: str,
+    expected_country: str,
+    case_hallucinations_count: Metric,
 ):
     """Test that the geography bot returns the correct state and country for the given city.
     If AI returns a different state or country: register it as a hallucination for the case.

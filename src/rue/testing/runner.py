@@ -76,7 +76,9 @@ class Runner:
         self.fail_fast = fail_fast
         self.verbosity = verbosity
         self.timeout = timeout
-        self.concurrency = concurrency if concurrency > 0 else self.DEFAULT_MAX_CONCURRENCY
+        self.concurrency = (
+            concurrency if concurrency > 0 else self.DEFAULT_MAX_CONCURRENCY
+        )
         self.otel_enabled = otel_enabled
         self.otel_content = otel_content
         self.capture_output = capture_output
@@ -104,8 +106,12 @@ class Runner:
     async def _notify_no_tests_found(self) -> None:
         await asyncio.gather(*[r.on_no_tests_found() for r in self.reporters])
 
-    async def _notify_collection_complete(self, items: list[TestDefinition]) -> None:
-        await asyncio.gather(*[r.on_collection_complete(items) for r in self.reporters])
+    async def _notify_collection_complete(
+        self, items: list[TestDefinition]
+    ) -> None:
+        await asyncio.gather(
+            *[r.on_collection_complete(items) for r in self.reporters]
+        )
 
     async def _notify_test_start(self, item: TestDefinition) -> None:
         await asyncio.gather(*[r.on_test_start(item) for r in self.reporters])
@@ -116,11 +122,16 @@ class Runner:
         sub_execution: TestExecution,
     ) -> None:
         await asyncio.gather(
-            *[r.on_subtest_complete(parent, sub_execution) for r in self.reporters]
+            *[
+                r.on_subtest_complete(parent, sub_execution)
+                for r in self.reporters
+            ]
         )
 
     async def _notify_test_complete(self, execution: TestExecution) -> None:
-        await asyncio.gather(*[r.on_test_complete(execution) for r in self.reporters])
+        await asyncio.gather(
+            *[r.on_test_complete(execution) for r in self.reporters]
+        )
 
     async def notify_subtest_complete(
         self,
@@ -134,14 +145,23 @@ class Runner:
         await asyncio.gather(*[r.on_run_complete(run) for r in self.reporters])
 
     async def _notify_run_stopped_early(self, failure_count: int) -> None:
-        await asyncio.gather(*[r.on_run_stopped_early(failure_count) for r in self.reporters])
-
-    async def _notify_trace_collected(self, tracer: TestTracer, execution_id: UUID) -> None:
         await asyncio.gather(
-            *[r.on_trace_collected(tracer, execution_id) for r in self.reporters]
+            *[r.on_run_stopped_early(failure_count) for r in self.reporters]
         )
 
-    async def notify_trace_collected(self, tracer: TestTracer, execution_id: UUID) -> None:
+    async def _notify_trace_collected(
+        self, tracer: TestTracer, execution_id: UUID
+    ) -> None:
+        await asyncio.gather(
+            *[
+                r.on_trace_collected(tracer, execution_id)
+                for r in self.reporters
+            ]
+        )
+
+    async def notify_trace_collected(
+        self, tracer: TestTracer, execution_id: UUID
+    ) -> None:
         """Public callback for execution strategies to stream trace updates."""
         await self._notify_trace_collected(tracer, execution_id)
 
@@ -174,7 +194,10 @@ class Runner:
             raise ValueError(msg)
         if self._store is None:
             self._ensure_db_ready()
-        return self._store is not None and self._store.get_run(normalized_run_id) is not None
+        return (
+            self._store is not None
+            and self._store.get_run(normalized_run_id) is not None
+        )
 
     async def run(
         self,
@@ -204,7 +227,9 @@ class Runner:
         if selected_run_id is None:
             self.current_run = Run(environment=environment)
         else:
-            self.current_run = Run(environment=environment, run_id=selected_run_id)
+            self.current_run = Run(
+                environment=environment, run_id=selected_run_id
+            )
 
         if self.otel_enabled:
             otel_runtime.configure()
@@ -253,7 +278,9 @@ class Runner:
                 self.current_run.result.stopped_early = True
                 self.stop_flag = True
 
-        self.current_run.result.total_duration_ms = (time.perf_counter() - start) * 1000
+        self.current_run.result.total_duration_ms = (
+            time.perf_counter() - start
+        ) * 1000
         self.current_run.result.metric_results = metric_results.copy()
         self.current_run.end_time = datetime.now(UTC)
 
@@ -263,9 +290,12 @@ class Runner:
             try:
                 self._store.save_run(self.current_run)
             except Exception as e:
-                warnings.warn(f"Failed to persist run to database: {e}", stacklevel=2)
+                warnings.warn(
+                    f"Failed to persist run to database: {e}", stacklevel=2
+                )
 
         return self.current_run
+
     async def _execute_run(
         self,
         *,
@@ -306,7 +336,9 @@ class Runner:
             duration = (time.perf_counter() - t_start) * 1000
             return TestExecution(
                 definition=item,
-                result=TestResult(status=TestStatus.ERROR, duration_ms=duration, error=e),
+                result=TestResult(
+                    status=TestStatus.ERROR, duration_ms=duration, error=e
+                ),
                 execution_id=uuid4(),
             )
 
@@ -364,14 +396,19 @@ class Runner:
             await self._notify_test_complete(execution)
 
         task_results = await asyncio.gather(
-            *[run_one(i, item) for i, item in enumerate(items)], return_exceptions=True
+            *[run_one(i, item) for i, item in enumerate(items)],
+            return_exceptions=True,
         )
 
-        task_errors = [result for result in task_results if isinstance(result, Exception)]
+        task_errors = [
+            result for result in task_results if isinstance(result, Exception)
+        ]
         if task_errors:
             if len(task_errors) == 1:
                 raise task_errors[0]
-            raise ExceptionGroup("Concurrent test callbacks failed", task_errors)
+            raise ExceptionGroup(
+                "Concurrent test callbacks failed", task_errors
+            )
 
         for execution in results:
             if execution is not None:

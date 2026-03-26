@@ -52,7 +52,9 @@ class OtelReporter(Reporter):
         _ = failure_count
         return None
 
-    async def on_trace_collected(self, tracer: TestTracer, execution_id: UUID) -> None:
+    async def on_trace_collected(
+        self, tracer: TestTracer, execution_id: UUID
+    ) -> None:
         session = tracer.completed_otel_trace_session
         if session is None:
             return None

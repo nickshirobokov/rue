@@ -111,6 +111,7 @@ def test_sample():
     after = [session.serialize() for session in sessions]
     assert before == after
     assert all(
-        "outside_step" not in {inner_span["name"] for inner_span in content["spans"]}
+        "outside_step"
+        not in {inner_span["name"] for inner_span in content["spans"]}
         for content in after
     )

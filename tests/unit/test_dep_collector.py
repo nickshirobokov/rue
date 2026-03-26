@@ -56,7 +56,9 @@ def build():
     assert index.get_module_level("alias") == ImportBinding(
         module_name="pkg.deep", imported_name="thing"
     )
-    assert index.get_function_level("build", "local_dep") == ImportBinding(module_name="inner.mod")
+    assert index.get_function_level("build", "local_dep") == ImportBinding(
+        module_name="inner.mod"
+    )
     assert index.local_functions == {"build"}
     assert index.all_module_imports() == {"top.dep", "pkg.deep"}
 
@@ -99,16 +101,21 @@ def build():
     assert reachable == {"top.dep", "pkg.deep"}
 
 
-def test_module_resolver_ignores_stdlib_and_site_packages(monkeypatch: pytest.MonkeyPatch):
+def test_module_resolver_ignores_stdlib_and_site_packages(
+    monkeypatch: pytest.MonkeyPatch,
+):
     repo_root = Path("/repo")
     resolver = ModuleResolver(repo_root)
 
-    monkeypatch.setattr("rue.testing.sut.dep_collector.importlib.util.find_spec", lambda _: None)
+    monkeypatch.setattr(
+        "rue.testing.sut.dep_collector.importlib.util.find_spec", lambda _: None
+    )
     assert resolver.resolve("unknown.module") is None
     assert resolver.resolve("sys") is None
 
     site_spec = SimpleNamespace(
-        has_location=True, origin="/venv/lib/python3.12/site-packages/pkg/mod.py"
+        has_location=True,
+        origin="/venv/lib/python3.12/site-packages/pkg/mod.py",
     )
     monkeypatch.setattr(
         "rue.testing.sut.dep_collector.importlib.util.find_spec",
@@ -117,7 +124,9 @@ def test_module_resolver_ignores_stdlib_and_site_packages(monkeypatch: pytest.Mo
     assert resolver.resolve("external.pkg") is None
 
 
-def test_module_resolver_resolves_repo_local_module(monkeypatch: pytest.MonkeyPatch):
+def test_module_resolver_resolves_repo_local_module(
+    monkeypatch: pytest.MonkeyPatch,
+):
     repo_root = Path("/repo")
     resolver = ModuleResolver(repo_root)
     local_spec = SimpleNamespace(has_location=True, origin="/repo/pkg/mod.py")
@@ -130,7 +139,9 @@ def test_module_resolver_resolves_repo_local_module(monkeypatch: pytest.MonkeyPa
     assert resolver.resolve("pkg.mod") == Path("/repo/pkg/mod.py")
 
 
-def test_module_resolver_cache_is_instance_local(monkeypatch: pytest.MonkeyPatch):
+def test_module_resolver_cache_is_instance_local(
+    monkeypatch: pytest.MonkeyPatch,
+):
     repo_root = Path("/repo")
     first = ModuleResolver(repo_root)
     second = ModuleResolver(repo_root)
@@ -202,7 +213,12 @@ def test_dependency_collector_module_mode_enqueues_parent_packages(
         mode=DependencyCollectionMode.MODULE,
     )
 
-    assert [dep.module_name for dep in deps] == ["pkg", "pkg.sub", "pkg.sub.dep", "pkg.sub.mod"]
+    assert [dep.module_name for dep in deps] == [
+        "pkg",
+        "pkg.sub",
+        "pkg.sub.dep",
+        "pkg.sub.mod",
+    ]
 
 
 def test_dependency_collector_symbol_mode_uses_seed_symbol_only_once(
@@ -236,7 +252,9 @@ def test_dependency_collector_symbol_mode_uses_seed_symbol_only_once(
             return graph[self.module_name]
 
     monkeypatch.setattr(
-        collector._resolver, "resolve", lambda module_name: module_files.get(module_name)
+        collector._resolver,
+        "resolve",
+        lambda module_name: module_files.get(module_name),
     )
     monkeypatch.setattr(
         collector,
@@ -255,7 +273,10 @@ def test_dependency_collector_symbol_mode_uses_seed_symbol_only_once(
     )
 
     assert [dep.module_name for dep in deps] == ["pkg.dep", "pkg.mod"]
-    assert calls == [("pkg.mod", {"entrypoint"}), ("pkg.dep", {"dep_entrypoint"})]
+    assert calls == [
+        ("pkg.mod", {"entrypoint"}),
+        ("pkg.dep", {"dep_entrypoint"}),
+    ]
 
 
 def test_dependency_collector_symbol_mode_handles_cycles_and_duplicate_edges(
@@ -291,7 +312,9 @@ def test_dependency_collector_symbol_mode_handles_cycles_and_duplicate_edges(
             return graph[self.module_name]
 
     monkeypatch.setattr(
-        collector._resolver, "resolve", lambda module_name: module_files.get(module_name)
+        collector._resolver,
+        "resolve",
+        lambda module_name: module_files.get(module_name),
     )
     monkeypatch.setattr(
         collector,
@@ -331,7 +354,9 @@ def test_dependency_collector_symbol_mode_falls_back_to_submodule_when_symbol_mi
     }
 
     monkeypatch.setattr(
-        collector._resolver, "resolve", lambda module_name: module_files.get(module_name)
+        collector._resolver,
+        "resolve",
+        lambda module_name: module_files.get(module_name),
     )
     monkeypatch.setattr(
         collector,
@@ -399,9 +424,13 @@ def test_collect_dependencies_collects_real_repo_local_dependencies(
     def entrypoint():
         return None
 
-    fake_module = SimpleNamespace(__name__="pkg.module", __file__=str(module_file.resolve()))
+    fake_module = SimpleNamespace(
+        __name__="pkg.module", __file__=str(module_file.resolve())
+    )
     monkeypatch.syspath_prepend(str(repo_root))
-    monkeypatch.setattr("rue.testing.sut.dep_collector.inspect.getmodule", lambda _: fake_module)
+    monkeypatch.setattr(
+        "rue.testing.sut.dep_collector.inspect.getmodule", lambda _: fake_module
+    )
 
     deps = collect_dependencies(entrypoint, mode="module")
 
@@ -416,22 +445,30 @@ def test_collect_dependencies_rejects_invalid_mode_value():
         collect_dependencies(entrypoint, mode="not-a-mode")
 
 
-def test_collect_dependencies_requires_owner_module(monkeypatch: pytest.MonkeyPatch):
+def test_collect_dependencies_requires_owner_module(
+    monkeypatch: pytest.MonkeyPatch,
+):
     def entrypoint():
         return None
 
-    monkeypatch.setattr("rue.testing.sut.dep_collector.inspect.getmodule", lambda _: None)
+    monkeypatch.setattr(
+        "rue.testing.sut.dep_collector.inspect.getmodule", lambda _: None
+    )
 
     with pytest.raises(ValueError):
         collect_dependencies(entrypoint)
 
 
-def test_collect_dependencies_requires_owner_file(monkeypatch: pytest.MonkeyPatch):
+def test_collect_dependencies_requires_owner_file(
+    monkeypatch: pytest.MonkeyPatch,
+):
     def entrypoint():
         return None
 
     fake_module = SimpleNamespace(__name__="pkg.module")
-    monkeypatch.setattr("rue.testing.sut.dep_collector.inspect.getmodule", lambda _: fake_module)
+    monkeypatch.setattr(
+        "rue.testing.sut.dep_collector.inspect.getmodule", lambda _: fake_module
+    )
 
     with pytest.raises(ValueError):
         collect_dependencies(entrypoint)
@@ -443,13 +480,19 @@ def test_collect_dependencies_fails_when_git_root_is_missing(
 ):
     module_file = tmp_path / "pkg" / "module.py"
     module_file.parent.mkdir(parents=True)
-    module_file.write_text("def entrypoint():\n    return None\n", encoding="utf-8")
+    module_file.write_text(
+        "def entrypoint():\n    return None\n", encoding="utf-8"
+    )
 
     def entrypoint():
         return None
 
-    fake_module = SimpleNamespace(__name__="pkg.module", __file__=str(module_file.resolve()))
-    monkeypatch.setattr("rue.testing.sut.dep_collector.inspect.getmodule", lambda _: fake_module)
+    fake_module = SimpleNamespace(
+        __name__="pkg.module", __file__=str(module_file.resolve())
+    )
+    monkeypatch.setattr(
+        "rue.testing.sut.dep_collector.inspect.getmodule", lambda _: fake_module
+    )
 
     with pytest.raises(StopIteration):
         collect_dependencies(entrypoint)

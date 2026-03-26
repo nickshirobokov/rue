@@ -18,7 +18,11 @@ from rich.console import Console
 from rue.config import Config, load_config
 from rue.reports import Reporter, resolve_reporters
 from rue.storage.sqlite.migrations import MigrationRunner
-from rue.storage.sqlite.store import DEFAULT_DB_NAME, MAX_STORED_RUNS, find_project_root
+from rue.storage.sqlite.store import (
+    DEFAULT_DB_NAME,
+    MAX_STORED_RUNS,
+    find_project_root,
+)
 from rue.testing import TestDefinition, collect
 from rue.testing.discovery import StaticTestReference, collect_static
 from rue.testing.runner import Runner
@@ -59,14 +63,24 @@ def main() -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="rue", description="Rue AI Testing Framework")
+    parser = argparse.ArgumentParser(
+        prog="rue", description="Rue AI Testing Framework"
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     test_parser = subparsers.add_parser("test", help="Run rue tests")
-    test_parser.add_argument("paths", nargs="*", help="Test files or directories")
-    test_parser.add_argument("-k", "--keyword", help="Filter tests by keyword expression")
     test_parser.add_argument(
-        "-t", "--tag", dest="include_tags", action="append", help="Run tests with given tag"
+        "paths", nargs="*", help="Test files or directories"
+    )
+    test_parser.add_argument(
+        "-k", "--keyword", help="Filter tests by keyword expression"
+    )
+    test_parser.add_argument(
+        "-t",
+        "--tag",
+        dest="include_tags",
+        action="append",
+        help="Run tests with given tag",
     )
     test_parser.add_argument(
         "--skip-tag",
@@ -74,7 +88,9 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Skip tests that match this tag",
     )
-    test_parser.add_argument("--maxfail", type=int, help="Stop after this many failures")
+    test_parser.add_argument(
+        "--maxfail", type=int, help="Stop after this many failures"
+    )
     test_parser.add_argument(
         "--fail-fast",
         action="store_true",
@@ -117,7 +133,9 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Disable content-bearing SUT and predicate span attributes",
     )
-    test_parser.add_argument("-q", "--quiet", action="count", default=0, help="Reduce CLI output")
+    test_parser.add_argument(
+        "-q", "--quiet", action="count", default=0, help="Reduce CLI output"
+    )
     test_parser.add_argument(
         "-v", "--verbose", action="count", default=0, help="Increase CLI output"
     )
@@ -152,9 +170,13 @@ def _build_parser() -> argparse.ArgumentParser:
     db_parser = subparsers.add_parser("db", help="Database management commands")
     db_subparsers = db_parser.add_subparsers(dest="db_command")
 
-    db_subparsers.add_parser("status", help="Show database schema version status")
+    db_subparsers.add_parser(
+        "status", help="Show database schema version status"
+    )
 
-    migrate_parser = db_subparsers.add_parser("migrate", help="Run pending migrations")
+    migrate_parser = db_subparsers.add_parser(
+        "migrate", help="Run pending migrations"
+    )
     migrate_parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -162,7 +184,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     db_subparsers.add_parser("backup", help="Create a backup of the database")
 
-    reset_parser = db_subparsers.add_parser("reset", help="Delete and recreate the database")
+    reset_parser = db_subparsers.add_parser(
+        "reset", help="Delete and recreate the database"
+    )
     reset_parser.add_argument(
         "--yes",
         action="store_true",
@@ -170,7 +194,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     for p in [db_parser, *db_subparsers.choices.values()]:
-        p.add_argument("--db-path", type=str, help="Path to the Rue SQLite database")
+        p.add_argument(
+            "--db-path", type=str, help="Path to the Rue SQLite database"
+        )
 
     return parser
 
@@ -217,14 +243,20 @@ def _db_status(console: Console, db_path: Path) -> int:
     if current == target:
         console.print("[green]Status: Up to date[/green]")
     elif current > target:
-        console.print("[red]Status: Database ahead of code (downgrade not supported)[/red]")
+        console.print(
+            "[red]Status: Database ahead of code (downgrade not supported)[/red]"
+        )
     else:
-        console.print(f"[yellow]Status: Migration required ({pending} pending)[/yellow]")
+        console.print(
+            f"[yellow]Status: Migration required ({pending} pending)[/yellow]"
+        )
 
     return 0
 
 
-def _db_migrate(console: Console, db_path: Path, *, dry_run: bool = False) -> int:
+def _db_migrate(
+    console: Console, db_path: Path, *, dry_run: bool = False
+) -> int:
     """Run pending migrations."""
     runner = MigrationRunner(db_path)
 
@@ -240,14 +272,18 @@ def _db_migrate(console: Console, db_path: Path, *, dry_run: bool = False) -> in
     pending = runner.get_pending_migrations()
 
     if dry_run:
-        console.print(f"[yellow]Dry run: {len(pending)} migration(s) would be applied:[/yellow]")
+        console.print(
+            f"[yellow]Dry run: {len(pending)} migration(s) would be applied:[/yellow]"
+        )
         for migration in pending:
             console.print(f"  - v{migration.version:03d}: {migration.name}")
         return 0
 
     console.print(f"Applying {len(pending)} migration(s)...")
     runner.migrate()
-    console.print(f"[green]Migrated to version {runner.get_target_version()}[/green]")
+    console.print(
+        f"[green]Migrated to version {runner.get_target_version()}[/green]"
+    )
     return 0
 
 
@@ -260,7 +296,10 @@ def _db_backup(console: Console, db_path: Path) -> int:
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     backup_path = db_path.with_suffix(f".db.backup.{timestamp}")
 
-    with sqlite3.connect(db_path) as source, sqlite3.connect(backup_path) as dest:
+    with (
+        sqlite3.connect(db_path) as source,
+        sqlite3.connect(backup_path) as dest,
+    ):
         source.backup(dest)
 
     console.print(f"Backed up database to: {backup_path}")
@@ -270,7 +309,9 @@ def _db_backup(console: Console, db_path: Path) -> int:
 def _db_reset(console: Console, db_path: Path, *, confirmed: bool) -> int:
     """Delete and recreate the database."""
     if not confirmed:
-        console.print("[bold red]WARNING: This will DELETE all test run history.[/bold red]")
+        console.print(
+            "[bold red]WARNING: This will DELETE all test run history.[/bold red]"
+        )
         console.print()
         console.print(f"Database: {db_path}")
         if db_path.exists():
@@ -306,7 +347,9 @@ def _resolve_paths(args: argparse.Namespace, config: Config) -> list[str]:
     return config.test_paths
 
 
-def _resolve_tags(args: argparse.Namespace, config: Config) -> tuple[list[str], list[str]]:
+def _resolve_tags(
+    args: argparse.Namespace, config: Config
+) -> tuple[list[str], list[str]]:
     include = list(config.include_tags)
     exclude = list(config.exclude_tags)
     if args.include_tags:
@@ -346,6 +389,7 @@ def _resolve_otel(args: argparse.Namespace, config: Config) -> bool:
     if args.otel is not None:
         return args.otel
     return config.otel
+
 
 def _resolve_otel_content(args: argparse.Namespace, config: Config) -> bool:
     if args.otel_content is not None:
@@ -391,7 +435,9 @@ def _collect_items(
     for path in paths:
         static_refs.extend(collect_static(path))
 
-    selected_refs = _filter_items(static_refs, include_tags, exclude_tags, keyword)
+    selected_refs = _filter_items(
+        static_refs, include_tags, exclude_tags, keyword
+    )
     if not selected_refs:
         return []
 
@@ -492,7 +538,9 @@ class KeywordMatcher:
             self._advance()
             right = self._parse_and()
             prev = left
-            left = lambda text, prev=prev, right=right: prev(text) or right(text)
+            left = lambda text, prev=prev, right=right: (
+                prev(text) or right(text)
+            )
         return left
 
     def _parse_and(self) -> Callable[[str], bool]:
@@ -501,7 +549,9 @@ class KeywordMatcher:
             self._advance()
             right = self._parse_not()
             prev = left
-            left = lambda text, prev=prev, right=right: prev(text) and right(text)
+            left = lambda text, prev=prev, right=right: (
+                prev(text) and right(text)
+            )
         return left
 
     def _parse_not(self) -> Callable[[str], bool]:
@@ -532,7 +582,9 @@ class KeywordMatcher:
         return lambda text, literal=literal: literal in text
 
     def _peek(self) -> str | None:
-        return self.tokens[self.index] if self.index < len(self.tokens) else None
+        return (
+            self.tokens[self.index] if self.index < len(self.tokens) else None
+        )
 
     def _peek_word(self, word: str) -> bool:
         token = self._peek()

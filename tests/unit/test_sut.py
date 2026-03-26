@@ -11,7 +11,13 @@ import pytest
 from pydantic import BaseModel
 from pydantic_core import ValidationError
 
-from rue.resources import ResourceResolver, Scope, clear_registry, get_registry, resource
+from rue.resources import (
+    ResourceResolver,
+    Scope,
+    clear_registry,
+    get_registry,
+    resource,
+)
 from rue.testing.discovery import collect
 from rue.testing.models import Case
 from rue.testing.runner import Runner
@@ -217,7 +223,9 @@ class TestSutResolution:
             x: int
             y: int
 
-        cases = [Case[AdderInputs, dict[str, int]](inputs=AdderInputs(x=1, y=2))]
+        cases = [
+            Case[AdderInputs, dict[str, int]](inputs=AdderInputs(x=1, y=2))
+        ]
 
         @sut(validate_cases=cases)
         def adder():
@@ -255,7 +263,9 @@ class TestSutResolution:
             x: int
 
         cases = [
-            Case[IncrementInputs, dict[str, int]](inputs=IncrementInputs(x="bad")),
+            Case[IncrementInputs, dict[str, int]](
+                inputs=IncrementInputs(x="bad")
+            ),
         ]
 
         @sut(validate_cases=cases)
@@ -276,7 +286,11 @@ class TestSutResolution:
         class IncrementInputs(BaseModel):
             x: str
 
-        cases = [Case[IncrementInputs, dict[str, int]](inputs=IncrementInputs(x="not-an-int"))]
+        cases = [
+            Case[IncrementInputs, dict[str, int]](
+                inputs=IncrementInputs(x="not-an-int")
+            )
+        ]
 
         @sut(validate_cases=cases)
         def increment():
@@ -375,7 +389,9 @@ def test_sample(traced_service):
             if span["name"] == span_name
         )
         assert f"test.{mod_name}::test_sample" in {
-            inner_span["name"] for payload in payloads for inner_span in payload["spans"]
+            inner_span["name"]
+            for payload in payloads
+            for inner_span in payload["spans"]
         }
         for key, value in expected_attrs.items():
             assert span["attributes"].get(key) == value

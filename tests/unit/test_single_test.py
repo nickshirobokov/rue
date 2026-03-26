@@ -38,9 +38,13 @@ async def test_single_test_executes_without_runner():
 
 
 def test_single_test_rejects_modifiers():
-    with pytest.raises(ValueError, match="SingleTest should not have modifiers"):
+    with pytest.raises(
+        ValueError, match="SingleTest should not have modifiers"
+    ):
         SingleTest(
-            definition=make_item(modifiers=[RepeatModifier(count=2, min_passes=2)]),
+            definition=make_item(
+                modifiers=[RepeatModifier(count=2, min_passes=2)]
+            ),
             params={},
             result_builder=ResultBuilder(),
         )

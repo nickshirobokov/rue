@@ -38,7 +38,9 @@ class TestTracer:
         if not self.otel_enabled:
             return None
 
-        scope = otel_runtime.start_as_current_span(f"test.{definition.full_name}")
+        scope = otel_runtime.start_as_current_span(
+            f"test.{definition.full_name}"
+        )
         span = scope.__enter__()
         self._otel_root_span_scope = scope
         self.otel_root_span = span
@@ -52,7 +54,9 @@ class TestTracer:
             span.set_attribute("test.case_id", str(definition.case_id))
         return span
 
-    def start_otel_trace(self, *, run_id: UUID, execution_id: UUID) -> OtelTraceSession | None:
+    def start_otel_trace(
+        self, *, run_id: UUID, execution_id: UUID
+    ) -> OtelTraceSession | None:
         if self.otel_root_span is None:
             return None
 
@@ -69,7 +73,9 @@ class TestTracer:
             return
 
         self.otel_root_span.set_attribute("test.status", result.status.value)
-        self.otel_root_span.set_attribute("test.duration_ms", result.duration_ms)
+        self.otel_root_span.set_attribute(
+            "test.duration_ms", result.duration_ms
+        )
         if result.error:
             self.otel_root_span.set_status(StatusCode.ERROR, str(result.error))
             self.otel_root_span.record_exception(result.error)

@@ -22,12 +22,16 @@ class OtelTrace:
     @property
     def otel_trace_id(self) -> str:
         """The OpenTelemetry trace ID for this test's span tree."""
-        return format(self._session.root_span.get_span_context().trace_id, "032x")
+        return format(
+            self._session.root_span.get_span_context().trace_id, "032x"
+        )
 
     @property
     def otel_span_id(self) -> str:
         """The OpenTelemetry span ID for this test's root span."""
-        return format(self._session.root_span.get_span_context().span_id, "016x")
+        return format(
+            self._session.root_span.get_span_context().span_id, "016x"
+        )
 
     def get_child_spans(self) -> list[ReadableSpan]:
         """Get all spans created during this test's execution."""
@@ -50,7 +54,9 @@ class OtelTrace:
         ]
         if name:
             spans = [
-                span for span in spans if span.attributes.get("rue.sut.name") == name
+                span
+                for span in spans
+                if span.attributes.get("rue.sut.name") == name
             ]
         return spans
 

@@ -77,15 +77,23 @@ def sut(
     def on_resolve(sut_instance: Any) -> Any:
         # TODO: Register SUT in the DB with dependencies
         match sut_instance:
-            case types.FunctionType() | types.MethodType() | functools.partial():
+            case (
+                types.FunctionType() | types.MethodType() | functools.partial()
+            ):
                 if normalized_validate_cases:
                     _validate_cases(normalized_validate_cases, sut_instance)
                 return _trace_callable(sut_instance, sut_name=factory_name)
 
-            case _ if isinstance(getattr(sut_instance, method, None), types.MethodType):
+            case _ if isinstance(
+                getattr(sut_instance, method, None), types.MethodType
+            ):
                 if normalized_validate_cases:
-                    _validate_cases(normalized_validate_cases, getattr(sut_instance, method))
-                return _trace_instance_method(sut_instance, sut_name=factory_name, method=method)
+                    _validate_cases(
+                        normalized_validate_cases, getattr(sut_instance, method)
+                    )
+                return _trace_instance_method(
+                    sut_instance, sut_name=factory_name, method=method
+                )
 
             case _:
                 msg = f"""SUT '{factory_name}' resolved to unsupported type:
@@ -105,7 +113,9 @@ def _validate_cases(cases: Sequence[Case[Any, Any]], sut: Callable[..., Any]):
     schema = generate_arguments_schema(
         sut,
         parameters_callback=(
-            lambda index, name, annotation: "skip" if name in {"self", "cls"} else None
+            lambda index, name, annotation: (
+                "skip" if name in {"self", "cls"} else None
+            )
         ),
     )
     validator = SchemaValidator(schema)
@@ -118,7 +128,10 @@ def _validate_cases(cases: Sequence[Case[Any, Any]], sut: Callable[..., Any]):
             case Mapping() as mapping:
                 input_values = dict(mapping)
             case value if is_dataclass(value) and not isinstance(value, type):
-                input_values = {field.name: getattr(value, field.name) for field in fields(value)}
+                input_values = {
+                    field.name: getattr(value, field.name)
+                    for field in fields(value)
+                }
             case value:
                 msg = (
                     "Case inputs must be a dict, mapping, BaseModel, or dataclass instance. "
@@ -129,7 +142,9 @@ def _validate_cases(cases: Sequence[Case[Any, Any]], sut: Callable[..., Any]):
         validator.validate_python(parsed_args)
 
 
-def _trace_callable(fn: Callable[..., Any], *, sut_name: str) -> Callable[..., Any]:
+def _trace_callable(
+    fn: Callable[..., Any], *, sut_name: str
+) -> Callable[..., Any]:
     if inspect.iscoroutinefunction(fn):
 
         @functools.wraps(fn)
@@ -208,10 +223,16 @@ def _trace_instance_method(instance: Any, *, sut_name: str, method: str) -> Any:
 # Trace helpers
 
 
-def _set_input_attrs(span: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+def _set_input_attrs(
+    span: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> None:
     """Set input attributes on span, respecting trace content settings."""
     tracer = get_test_tracer()
-    if tracer is None or tracer.otel_trace_session is None or not tracer.otel_content:
+    if (
+        tracer is None
+        or tracer.otel_trace_session is None
+        or not tracer.otel_content
+    ):
         span.set_attribute("sut.input.count", len(args) + len(kwargs))
         return
 
@@ -224,7 +245,11 @@ def _set_input_attrs(span: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -
 def _set_output_attrs(span: Any, result: Any) -> None:
     """Set output attributes on span, respecting trace content settings."""
     tracer = get_test_tracer()
-    if tracer is None or tracer.otel_trace_session is None or not tracer.otel_content:
+    if (
+        tracer is None
+        or tracer.otel_trace_session is None
+        or not tracer.otel_content
+    ):
         span.set_attribute("sut.output.type", type(result).__name__)
         return
 

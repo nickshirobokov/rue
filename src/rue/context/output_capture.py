@@ -103,7 +103,9 @@ class SysOutputCapture:
 
     def __init__(self, swallow: bool = True) -> None:
         self._swallow = swallow
-        self._buffer: ContextVar[OutputBuffer | None] = ContextVar("output_buffer", default=None)
+        self._buffer: ContextVar[OutputBuffer | None] = ContextVar(
+            "output_buffer", default=None
+        )
         self._original_stdout: TextIO | None = None
         self._original_stderr: TextIO | None = None
 
@@ -122,10 +124,16 @@ class SysOutputCapture:
         self._original_stdout = sys.stdout
         self._original_stderr = sys.stderr
         sys.stdout = _SysStreamDispatcher(
-            self._original_stdout, self._buffer, is_stdout=True, swallow=self._swallow
+            self._original_stdout,
+            self._buffer,
+            is_stdout=True,
+            swallow=self._swallow,
         )
         sys.stderr = _SysStreamDispatcher(
-            self._original_stderr, self._buffer, is_stdout=False, swallow=self._swallow
+            self._original_stderr,
+            self._buffer,
+            is_stdout=False,
+            swallow=self._swallow,
         )
 
     def uninstall(self) -> None:
@@ -146,7 +154,9 @@ class SysOutputCapture:
             self._buffer.reset(token)
 
 
-_current_capture: ContextVar[SysOutputCapture | None] = ContextVar("current_capture", default=None)
+_current_capture: ContextVar[SysOutputCapture | None] = ContextVar(
+    "current_capture", default=None
+)
 
 
 def get_current_capture() -> SysOutputCapture | None:

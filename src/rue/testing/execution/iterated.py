@@ -37,12 +37,16 @@ class CaseIteratedTest(Test):
         if not self.definition.modifiers or not isinstance(
             self.definition.modifiers[0], CaseIterateModifier
         ):
-            raise ValueError("CaseIteratedTest requires CaseIterateModifier as first modifier")
+            raise ValueError(
+                "CaseIteratedTest requires CaseIterateModifier as first modifier"
+            )
 
     async def execute(self, resolver: ResourceResolver) -> TestExecution:
         """Execute test for each case and aggregate results."""
 
-        async def run_child(index: int, case: Case[Any, Any]) -> tuple[int, TestExecution]:
+        async def run_child(
+            index: int, case: Case[Any, Any]
+        ) -> tuple[int, TestExecution]:
             child_def = replace(
                 self.definition,
                 modifiers=self.definition.modifiers[1:],
@@ -65,7 +69,9 @@ class CaseIteratedTest(Test):
                 index, sub_execution = await completed_task
                 sub_executions[index] = sub_execution
                 if runner:
-                    await runner.notify_subtest_complete(self.definition, sub_execution)
+                    await runner.notify_subtest_complete(
+                        self.definition, sub_execution
+                    )
         except Exception:
             for task in tasks:
                 if not task.done():
@@ -77,8 +83,16 @@ class CaseIteratedTest(Test):
             execution for execution in sub_executions if execution is not None
         ]
 
-        passed = sum(1 for e in ordered_sub_executions if e.result.status == TestStatus.PASSED)
-        status = TestStatus.PASSED if passed >= self.min_passes else TestStatus.FAILED
+        passed = sum(
+            1
+            for e in ordered_sub_executions
+            if e.result.status == TestStatus.PASSED
+        )
+        status = (
+            TestStatus.PASSED
+            if passed >= self.min_passes
+            else TestStatus.FAILED
+        )
         duration = sum(e.result.duration_ms for e in ordered_sub_executions)
 
         return TestExecution(
@@ -116,7 +130,9 @@ class CaseGroupIteratedTest(Test):
             child_def = replace(
                 self.definition,
                 modifiers=[
-                    CaseIterateModifier(cases=tuple(group.cases), min_passes=group.min_passes),
+                    CaseIterateModifier(
+                        cases=tuple(group.cases), min_passes=group.min_passes
+                    ),
                     *self.definition.modifiers[1:],
                 ],
                 suffix=group.name,
@@ -137,7 +153,9 @@ class CaseGroupIteratedTest(Test):
                 index, sub_execution = await completed_task
                 sub_executions[index] = sub_execution
                 if runner:
-                    await runner.notify_subtest_complete(self.definition, sub_execution)
+                    await runner.notify_subtest_complete(
+                        self.definition, sub_execution
+                    )
         except Exception:
             for task in tasks:
                 if not task.done():

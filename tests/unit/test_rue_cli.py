@@ -51,13 +51,19 @@ def test_filter_items_applies_tag_logic():
         make_item("test_slow", {"slow"}),
     ]
 
-    filtered = _filter_items(items, include_tags=["smoke"], exclude_tags=[], keyword=None)
+    filtered = _filter_items(
+        items, include_tags=["smoke"], exclude_tags=[], keyword=None
+    )
     assert [item.name for item in filtered] == ["test_fast"]
 
-    filtered = _filter_items(items, include_tags=[], exclude_tags=["slow"], keyword=None)
+    filtered = _filter_items(
+        items, include_tags=[], exclude_tags=["slow"], keyword=None
+    )
     assert [item.name for item in filtered] == ["test_fast"]
 
-    filtered = _filter_items(items, include_tags=[], exclude_tags=[], keyword="slow")
+    filtered = _filter_items(
+        items, include_tags=[], exclude_tags=[], keyword="slow"
+    )
     assert [item.name for item in filtered] == ["test_slow"]
 
 
@@ -200,7 +206,9 @@ class TestResolveReporters:
 
     def test_config_can_enable_otel_reporter(self):
         args = self._make_args()
-        config = self._make_config(reporters=["ConsoleReporter", "OtelReporter"])
+        config = self._make_config(
+            reporters=["ConsoleReporter", "OtelReporter"]
+        )
         reporters = _resolve_reporters(args, config, verbosity=0)
         assert len(reporters) == 2
         assert isinstance(reporters[0], ConsoleReporter)
@@ -208,7 +216,9 @@ class TestResolveReporters:
 
     def test_cli_overrides_config(self):
         args = self._make_args(reporters=["ConsoleReporter"])
-        config = self._make_config(reporters=["rue.reports.console:ConsoleReporter"])
+        config = self._make_config(
+            reporters=["rue.reports.console:ConsoleReporter"]
+        )
         reporters = _resolve_reporters(args, config, verbosity=0)
         assert len(reporters) == 1
 
@@ -293,7 +303,13 @@ async def test_run_tests_returns_2_when_run_id_already_exists(
 
     parser = _build_parser()
     args = parser.parse_args(
-        ["test", "--db-path", str(sqlite_db_path), "--run-id", str(existing_run_id)]
+        [
+            "test",
+            "--db-path",
+            str(sqlite_db_path),
+            "--run-id",
+            str(existing_run_id),
+        ]
     )
     config = _make_cli_config()
 
@@ -308,14 +324,18 @@ async def test_run_tests_returns_2_when_run_id_already_exists(
 
 
 @pytest.mark.asyncio
-async def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(monkeypatch):
+async def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(
+    monkeypatch,
+):
     parser = _build_parser()
     args = parser.parse_args(["test", "--run-id", str(uuid4()), "--no-db"])
     config = _make_cli_config()
 
     monkeypatch.setattr(
         "rue.cli._collect_items",
-        lambda _paths, _include_tags, _exclude_tags, _keyword: [make_item("test_ok", set())],
+        lambda _paths, _include_tags, _exclude_tags, _keyword: [
+            make_item("test_ok", set())
+        ],
     )
 
     exit_code = await _run_tests(args, config)

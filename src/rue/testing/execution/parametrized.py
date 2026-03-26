@@ -34,12 +34,16 @@ class ParametrizedTest(Test):
         if not self.definition.modifiers or not isinstance(
             self.definition.modifiers[0], ParametrizeModifier
         ):
-            raise ValueError("ParametrizedTest requires ParametrizeModifier as first modifier")
+            raise ValueError(
+                "ParametrizedTest requires ParametrizeModifier as first modifier"
+            )
 
     async def execute(self, resolver: ResourceResolver) -> TestExecution:
         """Execute test for each parameter set and aggregate results."""
 
-        async def run_child(index: int, parameter_set: ParameterSet) -> tuple[int, TestExecution]:
+        async def run_child(
+            index: int, parameter_set: ParameterSet
+        ) -> tuple[int, TestExecution]:
             child_def = replace(
                 self.definition,
                 modifiers=self.definition.modifiers[1:],
@@ -54,14 +58,18 @@ class ParametrizedTest(Test):
         for index, ps in enumerate(self.parameter_sets):
             tasks.append(asyncio.create_task(run_child(index, ps)))
 
-        sub_executions: list[TestExecution | None] = [None] * len(self.parameter_sets)
+        sub_executions: list[TestExecution | None] = [None] * len(
+            self.parameter_sets
+        )
         runner = get_runner()
         try:
             for completed_task in asyncio.as_completed(tasks):
                 index, sub_execution = await completed_task
                 sub_executions[index] = sub_execution
                 if runner:
-                    await runner.notify_subtest_complete(self.definition, sub_execution)
+                    await runner.notify_subtest_complete(
+                        self.definition, sub_execution
+                    )
         except Exception:
             for task in tasks:
                 if not task.done():
@@ -73,7 +81,9 @@ class ParametrizedTest(Test):
             execution for execution in sub_executions if execution is not None
         ]
 
-        has_failure = any(e.result.status.is_failure for e in ordered_sub_executions)
+        has_failure = any(
+            e.result.status.is_failure for e in ordered_sub_executions
+        )
         status = TestStatus.FAILED if has_failure else TestStatus.PASSED
         duration = sum(e.result.duration_ms for e in ordered_sub_executions)
 

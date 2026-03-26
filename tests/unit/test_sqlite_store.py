@@ -141,7 +141,9 @@ def test_sqlite_store_list_runs(sqlite_store: SQLiteStore) -> None:
     assert runs[0].run_id == run_two.run_id
 
 
-def test_sqlite_store_assertions_and_predicates(sqlite_store: SQLiteStore) -> None:
+def test_sqlite_store_assertions_and_predicates(
+    sqlite_store: SQLiteStore,
+) -> None:
     execution_id = uuid4()
     predicate_result = PredicateResult(
         actual="actual",
@@ -223,8 +225,13 @@ def test_sqlite_store_assertions_and_predicates(sqlite_store: SQLiteStore) -> No
 
     run_assertions = sqlite_store.get_assertions_for_run(run.run_id)
     assert any(row["metric_id"] is not None for row in run_assertions)
-    assert any(row["test_execution_id"] == str(execution_id) for row in run_assertions)
-    assert any(json.loads(row["expression_repr"])["expr"] == "metric > 0" for row in run_assertions)
+    assert any(
+        row["test_execution_id"] == str(execution_id) for row in run_assertions
+    )
+    assert any(
+        json.loads(row["expression_repr"])["expr"] == "metric > 0"
+        for row in run_assertions
+    )
 
 
 def test_sqlite_store_prunes_old_runs(sqlite_store: SQLiteStore) -> None:

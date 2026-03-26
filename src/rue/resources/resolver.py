@@ -120,7 +120,11 @@ class ResourceResolver:
         self._registry = registry if registry is not None else _registry
         self._cache: dict[tuple[Scope, str], Any] = {}
         self._teardowns: list[
-            tuple[Scope, str, Generator[Any, None, None] | AsyncGenerator[Any, None]]
+            tuple[
+                Scope,
+                str,
+                Generator[Any, None, None] | AsyncGenerator[Any, None],
+            ]
         ] = []
         self._parent = parent
         self._shared_creation_locks: dict[tuple[Scope, str], asyncio.Lock] = (
@@ -132,7 +136,9 @@ class ResourceResolver:
             return self._parent._owner_resolver_for_scope(scope)
         return self
 
-    async def _apply_on_injection(self, defn: ResourceDef, name: str, value: Any) -> Any:
+    async def _apply_on_injection(
+        self, defn: ResourceDef, name: str, value: Any
+    ) -> Any:
         if defn.on_injection:
             try:
                 value = defn.on_injection(value)
@@ -194,7 +200,10 @@ class ResourceResolver:
         return child
 
     def _register_teardown(
-        self, scope: Scope, name: str, gen: Generator[Any, None, None] | AsyncGenerator[Any, None]
+        self,
+        scope: Scope,
+        name: str,
+        gen: Generator[Any, None, None] | AsyncGenerator[Any, None],
     ) -> None:
         if scope in {Scope.SUITE, Scope.SESSION} and self._parent:
             self._parent._register_teardown(scope, name, gen)
@@ -210,8 +219,12 @@ class ResourceResolver:
         cache_key = (defn.scope, name)
         path = _RESOLUTION_PATH.get()
         if cache_key in path:
-            cycle = " -> ".join(f"{scope.value}:{dep}" for scope, dep in (*path, cache_key))
-            raise RuntimeError(f"Circular resource dependency detected: {cycle}")
+            cycle = " -> ".join(
+                f"{scope.value}:{dep}" for scope, dep in (*path, cache_key)
+            )
+            raise RuntimeError(
+                f"Circular resource dependency detected: {cycle}"
+            )
 
         token = _RESOLUTION_PATH.set((*path, cache_key))
         try:
@@ -220,7 +233,9 @@ class ResourceResolver:
             if cache_key in owner._cache:
                 value = owner._cache[cache_key]
             elif defn.scope in {Scope.SUITE, Scope.SESSION}:
-                lock = owner._shared_creation_locks.setdefault(cache_key, asyncio.Lock())
+                lock = owner._shared_creation_locks.setdefault(
+                    cache_key, asyncio.Lock()
+                )
                 async with lock:
                     if cache_key in owner._cache:
                         value = owner._cache[cache_key]
@@ -231,7 +246,9 @@ class ResourceResolver:
                             cache_key=cache_key,
                         )
             else:
-                value = await owner._resolve_uncached(name=name, defn=defn, cache_key=cache_key)
+                value = await owner._resolve_uncached(
+                    name=name, defn=defn, cache_key=cache_key
+                )
 
             if owner is not self and cache_key in owner._cache:
                 self._cache[cache_key] = owner._cache[cache_key]
@@ -260,7 +277,9 @@ class ResourceResolver:
                         pass
             except Exception as e:
                 teardown_errors.append(
-                    RuntimeError(f"Generator teardown failed for resource '{name}': {e}")
+                    RuntimeError(
+                        f"Generator teardown failed for resource '{name}': {e}"
+                    )
                 )
 
             defn = self._registry.get(name)
@@ -304,7 +323,9 @@ class ResourceResolver:
                             pass
                 except Exception as e:
                     teardown_errors.append(
-                        RuntimeError(f"Generator teardown failed for resource '{name}': {e}")
+                        RuntimeError(
+                            f"Generator teardown failed for resource '{name}': {e}"
+                        )
                     )
 
                 defn = self._registry.get(name)
@@ -341,7 +362,9 @@ def otel_trace() -> Generator[OtelTrace, None, None]:
     """Provide access to OpenTelemetry data for the current test."""
     tracer = get_test_tracer()
     if tracer is None or tracer.otel_trace_session is None:
-        raise RuntimeError("OpenTelemetry is not enabled; cannot resolve otel_trace resource.")
+        raise RuntimeError(
+            "OpenTelemetry is not enabled; cannot resolve otel_trace resource."
+        )
     yield OtelTrace(_session=tracer.otel_trace_session)
 
 
