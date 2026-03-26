@@ -1,7 +1,7 @@
 title: "Rue OpenTelemetry Traces"
 ---
 
-Rue OpenTelemetry capture is **Runner-managed**. Traces exist only while a test function is executing inside an OpenTelemetry-enabled `SingleTest` started by `Runner` or `rue test --otel`.
+Rue OpenTelemetry capture is **Runner-managed**, while persistence is **reporter-managed**. Traces exist only while a test function is executing inside an active OpenTelemetry-enabled test execution created by `Runner` or `rue test --otel`.
 
 ## Enabling OpenTelemetry
 
@@ -14,8 +14,8 @@ uv run rue test --otel
 # Disable OpenTelemetry explicitly, even if config enables it
 uv run rue test --no-otel
 
-# Write OpenTelemetry spans to a custom file
-uv run rue test --otel --otel-output traces/run_001.jsonl
+# Persist OpenTelemetry traces locally with the built-in reporter
+uv run rue test --otel --reporter ConsoleReporter --reporter OtelReporter
 
 # Disable content-bearing SUT/predicate attributes
 uv run rue test --otel --no-otel-content
@@ -28,13 +28,12 @@ OpenTelemetry settings can be resolved from `rue.toml`, `[tool.rue]` in `pyproje
 ```toml
 [tool.rue]
 otel = true
-otel-output = "traces/default.jsonl"
 otel-content = false
+reporters = ["ConsoleReporter", "OtelReporter"]
 ```
 
 Environment variable equivalents:
 - `RUE_OTEL`
-- `RUE_OTEL_OUTPUT`
 - `RUE_OTEL_CONTENT`
 
 CLI flags override config and environment.
@@ -42,13 +41,12 @@ CLI flags override config and environment.
 ### Runner
 
 ```python
-from rue.reports import ConsoleReporter
+from rue.reports import ConsoleReporter, OtelReporter
 from rue.testing import Runner
 
 runner = Runner(
-    reporters=[ConsoleReporter()],
+    reporters=[ConsoleReporter(), OtelReporter()],
     otel_enabled=True,
-    otel_output="traces/run_001.jsonl",
     otel_content=True,
 )
 ```
@@ -67,7 +65,7 @@ def test_pipeline():
         pass
 ```
 
-Outside an OpenTelemetry-enabled `SingleTest`, `otel_span()` is a no-op and does not create Rue span output.
+Outside an active OpenTelemetry-enabled test execution, `otel_span()` is a no-op and does not create Rue span output.
 
 ### `OtelTrace`
 
@@ -90,7 +88,6 @@ def test_agent_workflow(my_agent, otel_trace: rue.OtelTrace):
 Available properties and methods:
 - `otel_trace_id`
 - `otel_span_id`
-- `is_enabled`
 - `get_child_spans()`
 - `get_llm_calls()`
 - `get_sut_spans(name=None)`
@@ -100,16 +97,19 @@ Available properties and methods:
 
 ## Behavior
 
-- Rue creates one root span per OpenTelemetry-enabled `SingleTest`: `test.<full_name>`.
-- Aggregator executions (`repeat`, `parametrize`, `iter_cases`, `iter_case_groups`) do not get their own OpenTelemetry roots; each child `SingleTest` gets its own trace.
+- Rue creates one root span per OpenTelemetry-enabled test execution: `test.<full_name>`.
+- Aggregator executions (`repeat`, `parametrize`, `iter_cases`, `iter_case_groups`) do not get their own OpenTelemetry roots; each child execution gets its own trace.
 - `@rue.sut` and `@predicate` write spans only when an active OpenTelemetry session exists.
 - OpenAI and Anthropic client instrumentation is initialized by the OpenTelemetry runtime and captured only when calls belong to an active OpenTelemetry test session.
 
 ## Storage
 
-- Default OpenTelemetry file: `.rue/otel-spans.jsonl`
-- File format: JSONL, one serialized OpenTelemetry span per line
-- If SQLite persistence is enabled, Rue also stores spans in `otel_spans`
+- `otel_enabled=True` captures spans during test execution but does not persist them on its own
+- `OtelReporter` stores compact JSON payloads under `.rue/traces/<run_id>/<execution_id>.json`
+- `OtelReporter` keeps only the 5 most recent run directories under `.rue/traces`
+- Custom OTEL persistence or forwarding belongs in custom reporters via `Reporter.on_trace_collected()`
+- File format: one compact JSON trace payload per execution from `session.serialize()` with `run_id`, `execution_id`, and `spans`
+- SQLite does not persist OpenTelemetry trace payloads or trace IDs
 
 `otel_content` controls Rue-added content-bearing SUT and predicate attributes:
 - `sut.input.args`

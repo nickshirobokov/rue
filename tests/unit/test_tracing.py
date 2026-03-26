@@ -1,6 +1,5 @@
 """Tests for runner-managed Rue tracing."""
 
-import json
 import sys
 from pathlib import Path
 from uuid import uuid4
@@ -10,14 +9,6 @@ import pytest
 from rue.testing.discovery import collect
 from rue.testing.runner import Runner
 from rue.telemetry.otel import otel_span
-
-
-def _span_from_output(otel_output_path: Path, name: str) -> dict[str, object]:
-    for line in otel_output_path.read_text().splitlines():
-        span = json.loads(line)
-        if span["name"] == name:
-            return span
-    raise AssertionError(f"Missing span {name!r}")
 
 
 def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
@@ -30,22 +21,22 @@ def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
 async def _run_module_with_tracing(
     *,
     tmp_path: Path,
-    null_reporter,
+    trace_reporter,
+    monkeypatch: pytest.MonkeyPatch,
     source: str,
-    trace_name: str = "test_traces.jsonl",
 ):
     mod_name, mod_path = _write_temp_module(tmp_path, source)
-    trace_path = tmp_path / trace_name
 
     try:
+        monkeypatch.chdir(tmp_path)
         items = collect(mod_path)
-        run = await Runner(
-            reporters=[null_reporter],
+        runner = Runner(
+            reporters=[trace_reporter],
             otel_enabled=True,
-            otel_output=trace_path,
             db_enabled=False,
-        ).run(items=items)
-        return mod_name, run, trace_path
+        )
+        run = await runner.run(items=items)
+        return mod_name, run, trace_reporter.sessions
     finally:
         sys.modules.pop(mod_name, None)
 
@@ -53,17 +44,17 @@ async def _run_module_with_tracing(
 @pytest.mark.asyncio
 async def test_otel_trace_injection_and_otel_span_work_inside_runner(
     tmp_path: Path,
-    null_reporter,
+    trace_reporter,
+    monkeypatch: pytest.MonkeyPatch,
 ):
-    mod_name, run, otel_output_path = await _run_module_with_tracing(
+    mod_name, run, sessions = await _run_module_with_tracing(
         tmp_path=tmp_path,
-        null_reporter=null_reporter,
+        trace_reporter=trace_reporter,
+        monkeypatch=monkeypatch,
         source="""
 import rue
 
 def test_sample(otel_trace: rue.OtelTrace):
-    assert otel_trace.is_enabled is True
-
     with rue.otel_span("child_step", {"key": "value"}):
         pass
 
@@ -74,8 +65,19 @@ def test_sample(otel_trace: rue.OtelTrace):
     )
 
     assert run.result.passed == 1
-    root_span = _span_from_output(otel_output_path, f"test.{mod_name}::test_sample")
-    child_span = _span_from_output(otel_output_path, "child_step")
+    payloads = [session.serialize() for session in sessions]
+    root_span = next(
+        span
+        for payload in payloads
+        for span in payload["spans"]
+        if span["name"] == f"test.{mod_name}::test_sample"
+    )
+    child_span = next(
+        span
+        for payload in payloads
+        for span in payload["spans"]
+        if span["name"] == "child_step"
+    )
 
     assert root_span["attributes"]["my.custom.attr"] == "value"
     assert child_span["attributes"]["key"] == "value"
@@ -84,11 +86,13 @@ def test_sample(otel_trace: rue.OtelTrace):
 @pytest.mark.asyncio
 async def test_otel_span_is_no_op_outside_runner_even_after_runtime_configured(
     tmp_path: Path,
-    null_reporter,
+    trace_reporter,
+    monkeypatch: pytest.MonkeyPatch,
 ):
-    _, run, otel_output_path = await _run_module_with_tracing(
+    _, run, sessions = await _run_module_with_tracing(
         tmp_path=tmp_path,
-        null_reporter=null_reporter,
+        trace_reporter=trace_reporter,
+        monkeypatch=monkeypatch,
         source="""
 import rue
 
@@ -96,15 +100,17 @@ def test_sample():
     with rue.otel_span("inside_step"):
         pass
 """,
-        trace_name="noop_traces.jsonl",
     )
 
     assert run.result.passed == 1
-    before = otel_output_path.read_text()
+    before = [session.serialize() for session in sessions]
 
     with otel_span("outside_step", {"ignored": True}) as span:
         span.set_attribute("more", "ignored")
 
-    after = otel_output_path.read_text()
+    after = [session.serialize() for session in sessions]
     assert before == after
-    assert "outside_step" not in after
+    assert all(
+        "outside_step" not in {inner_span["name"] for inner_span in content["spans"]}
+        for content in after
+    )

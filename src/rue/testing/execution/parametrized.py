@@ -43,7 +43,7 @@ class ParametrizedTest(Test):
             child_def = replace(
                 self.definition,
                 modifiers=self.definition.modifiers[1:],
-                suffix=parameter_set.id_suffix,
+                suffix=parameter_set.suffix,
             )
             child_params = {**self.params, **parameter_set.values}
             child = self.factory.build(child_def, child_params)

@@ -1,9 +1,8 @@
 """Tests for rue.reports.registry module."""
 
-from pathlib import Path
-
 import pytest
 
+from rue.reports import OtelReporter
 from rue.reports.base import Reporter
 from rue.reports.registry import (
     clear_reporter_registry,
@@ -45,9 +44,6 @@ class DummyReporter(Reporter):
         pass
 
     async def on_run_stopped_early(self, failure_count: int) -> None:
-        pass
-
-    async def on_otel_enabled(self, output_path: Path) -> None:
         pass
 
 
@@ -181,3 +177,15 @@ class TestBuiltinRegistration:
     def test_console_reporter_is_builtin(self):
         clear_reporter_registry()
         assert "ConsoleReporter" in get_reporter_registry()
+
+    def test_otel_reporter_is_builtin(self):
+        clear_reporter_registry()
+        assert "OtelReporter" in get_reporter_registry()
+
+    def test_otel_reporter_rejects_output_path_override(self):
+        with pytest.raises(TypeError):
+            resolve_reporter("OtelReporter", output_path=".rue/other-traces")
+
+    def test_builtin_otel_reporter_resolves(self):
+        instance = resolve_reporter("OtelReporter")
+        assert isinstance(instance, OtelReporter)

@@ -8,7 +8,6 @@ from typing import Any
 from rue.testing.execution import iterated, parametrized, repeated, single
 from rue.testing.execution.interfaces import Test, TestFactory
 from rue.testing.execution.result_builder import ResultBuilder
-from rue.telemetry.otel.test_span_manager import OtelTestSpanManager
 from rue.testing.models import (
     CaseGroupIterateModifier,
     CaseIterateModifier,
@@ -22,7 +21,6 @@ from rue.testing.models import (
 class DefaultTestFactory(TestFactory):
     """Creates test instances with shared collaborators."""
 
-    otel_span_manager: OtelTestSpanManager
     result_builder: ResultBuilder
 
     def build(
@@ -38,7 +36,6 @@ class DefaultTestFactory(TestFactory):
                 return single.SingleTest(
                     definition=definition,
                     params=params,
-                    otel_span_manager=self.otel_span_manager,
                     result_builder=self.result_builder,
                 )
             case [RepeatModifier() as mod, *_]:

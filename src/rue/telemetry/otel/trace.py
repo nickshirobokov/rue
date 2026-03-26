@@ -19,25 +19,15 @@ class OtelTrace:
 
     _session: OtelTraceSession
 
-    @classmethod
-    def from_session(cls, session: OtelTraceSession) -> "OtelTrace":
-        """Create an OpenTelemetry trace view for the active test session."""
-        return cls(_session=session)
-
     @property
     def otel_trace_id(self) -> str:
         """The OpenTelemetry trace ID for this test's span tree."""
-        return self._session.otel_trace_id
+        return format(self._session.root_span.get_span_context().trace_id, "032x")
 
     @property
     def otel_span_id(self) -> str:
         """The OpenTelemetry span ID for this test's root span."""
         return format(self._session.root_span.get_span_context().span_id, "016x")
-
-    @property
-    def is_enabled(self) -> bool:
-        """Whether OpenTelemetry capture is enabled."""
-        return True
 
     def get_child_spans(self) -> list[ReadableSpan]:
         """Get all spans created during this test's execution."""

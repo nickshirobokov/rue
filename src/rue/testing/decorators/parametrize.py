@@ -71,7 +71,7 @@ def _build_modifier(
     parameter_sets = tuple(
         ParameterSet(
             values=dict(zip(names, vals)),
-            id_suffix=ids_tuple[i] if ids_tuple else _format_id(names, vals),
+            suffix=ids_tuple[i] if ids_tuple else _format_id(names, vals),
         )
         for i, vals in enumerate(values_list)
     )

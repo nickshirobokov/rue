@@ -19,7 +19,7 @@ from .testing import (
     xfail,
 )
 from .testing.sut import sut
-from .telemetry import OtelTrace, otel_span
+from .telemetry import OtelTrace, OtelTraceSession, otel_span
 
 
 __all__ = [
@@ -50,4 +50,5 @@ __all__ = [
     # OpenTelemetry
     "otel_span",
     "OtelTrace",
+    "OtelTraceSession",
 ]

@@ -13,7 +13,7 @@ class ParameterSet:
     """Concrete parameter combination for an individual test run."""
 
     values: dict[str, Any]
-    id_suffix: str
+    suffix: str
 
 
 @dataclass(frozen=True)

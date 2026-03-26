@@ -689,12 +689,6 @@ class ConsoleReporter(Reporter):
     async def on_run_stopped_early(self, failure_count: int) -> None:
         self.console.print(f"\n\n[red]Stopping early after {failure_count} failure(s).[/red]")
 
-    async def on_otel_enabled(self, output_path: Path) -> None:
-        if output_path.exists():
-            self.console.print(
-                f"[dim]OpenTelemetry spans written to {output_path} ({output_path.stat().st_size} bytes)[/dim]"
-            )
-
     @staticmethod
     def rich_traceback_from_json(data: str, *, show_locals: bool = False) -> Traceback:
         """Reconstruct a Rich Traceback from stored JSON data.

@@ -19,15 +19,15 @@ from rue.context import (
     get_runner,
     resolver_context_scope,
     test_context_scope,
+    test_tracer_scope,
 )
 from rue.resources import ResourceResolver
 from rue.resources.resolver import Scope
-from rue.telemetry.otel.runtime import otel_runtime
-from rue.telemetry.otel.test_span_manager import OtelTestSpanManager
 from rue.testing.execution.interfaces import Test
 from rue.testing.execution.result_builder import ResultBuilder
 from rue.testing.models import TestDefinition, TestExecution, TestResult, TestStatus
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
+from rue.testing.tracing import TestTracer
 
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,6 @@ class SingleTest(Test):
 
     definition: TestDefinition
     params: dict[str, Any]
-    otel_span_manager: OtelTestSpanManager
     result_builder: ResultBuilder
 
     def __post_init__(self) -> None:
@@ -80,21 +79,24 @@ class SingleTest(Test):
 
         assertion_results: list[AssertionResult] = []
         error: Exception | None = None
-        otel_trace_id: str | None = None
-        otel_trace_session = None
+        tracer = TestTracer(
+            otel_enabled=runner.otel_enabled if runner is not None else False,
+            otel_content=runner.otel_content if runner is not None else True,
+        )
 
-        with self.otel_span_manager.span(self.definition) as span:
-            if span is not None:
-                otel_trace_session = otel_runtime.start_otel_trace(
-                    span,
-                    otel_content=self.otel_span_manager.otel_content,
+        with test_tracer_scope(tracer):
+            tracer.start_otel_root_span(self.definition)
+            if tracer.otel_enabled:
+                assert runner is not None
+                assert runner.current_run is not None
+                tracer.start_otel_trace(
+                    run_id=runner.current_run.run_id,
+                    execution_id=exec_id,
                 )
-                otel_trace_id = self.otel_span_manager.get_otel_trace_id(span)
 
             ctx = TestContext(
                 item=self.definition,
                 execution_id=exec_id,
-                otel_trace_session=otel_trace_session,
             )
             imperative_outcome: TestStatus | None = None
 
@@ -150,18 +152,16 @@ class SingleTest(Test):
                     self.definition, duration_ms, assertion_results, error
                 )
 
-            self.otel_span_manager.record(span, result)
+            tracer.record_otel_result(result)
+            tracer.finish_otel_trace()
 
-        if otel_trace_session is not None:
-            snapshot = otel_runtime.finish_otel_trace(otel_trace_session)
-            if runner is not None:
-                runner.record_otel_trace_snapshot(exec_id, snapshot)
+        if tracer.completed_otel_trace_session is not None and runner is not None:
+            await runner.notify_trace_collected(tracer, exec_id)
 
         return TestExecution(
             definition=self.definition,
             result=result,
             execution_id=exec_id,
-            otel_trace_id=otel_trace_id,
         )
 
     async def _resolve_params(self, resolver: ResourceResolver) -> dict[str, Any]:

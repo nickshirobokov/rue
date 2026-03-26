@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from pydantic.experimental.arguments_schema import generate_arguments_schema
 from pydantic_core import ArgsKwargs, SchemaValidator
 
+from rue.context import get_test_tracer
 from rue.resources import Scope, resource
 from rue.testing.models.case import Case
 from rue.telemetry.otel.runtime import otel_runtime
@@ -133,7 +134,8 @@ def _trace_callable(fn: Callable[..., Any], *, sut_name: str) -> Callable[..., A
 
         @functools.wraps(fn)
         async def traced_async(*args: Any, **kwargs: Any) -> Any:
-            if not otel_runtime.is_otel_trace_active():
+            tracer = get_test_tracer()
+            if tracer is None or tracer.otel_trace_session is None:
                 return await fn(*args, **kwargs)
 
             with otel_runtime.start_as_current_span(f"sut.{sut_name}") as span:
@@ -148,7 +150,8 @@ def _trace_callable(fn: Callable[..., Any], *, sut_name: str) -> Callable[..., A
 
     @functools.wraps(fn)
     def traced(*args: Any, **kwargs: Any) -> Any:
-        if not otel_runtime.is_otel_trace_active():
+        tracer = get_test_tracer()
+        if tracer is None or tracer.otel_trace_session is None:
             return fn(*args, **kwargs)
 
         with otel_runtime.start_as_current_span(f"sut.{sut_name}") as span:
@@ -169,7 +172,8 @@ def _trace_instance_method(instance: Any, *, sut_name: str, method: str) -> Any:
 
         @functools.wraps(original_method)
         async def traced_async(*args: Any, **kwargs: Any) -> Any:
-            if not otel_runtime.is_otel_trace_active():
+            tracer = get_test_tracer()
+            if tracer is None or tracer.otel_trace_session is None:
                 return await original_method(*args, **kwargs)
 
             with otel_runtime.start_as_current_span(f"sut.{sut_name}") as span:
@@ -185,7 +189,8 @@ def _trace_instance_method(instance: Any, *, sut_name: str, method: str) -> Any:
 
     @functools.wraps(original_method)
     def traced(*args: Any, **kwargs: Any) -> Any:
-        if not otel_runtime.is_otel_trace_active():
+        tracer = get_test_tracer()
+        if tracer is None or tracer.otel_trace_session is None:
             return original_method(*args, **kwargs)
 
         with otel_runtime.start_as_current_span(f"sut.{sut_name}") as span:
@@ -205,7 +210,8 @@ def _trace_instance_method(instance: Any, *, sut_name: str, method: str) -> Any:
 
 def _set_input_attrs(span: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
     """Set input attributes on span, respecting trace content settings."""
-    if not otel_runtime.is_otel_content_enabled():
+    tracer = get_test_tracer()
+    if tracer is None or tracer.otel_trace_session is None or not tracer.otel_content:
         span.set_attribute("sut.input.count", len(args) + len(kwargs))
         return
 
@@ -217,7 +223,8 @@ def _set_input_attrs(span: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -
 
 def _set_output_attrs(span: Any, result: Any) -> None:
     """Set output attributes on span, respecting trace content settings."""
-    if not otel_runtime.is_otel_content_enabled():
+    tracer = get_test_tracer()
+    if tracer is None or tracer.otel_trace_session is None or not tracer.otel_content:
         span.set_attribute("sut.output.type", type(result).__name__)
         return
 

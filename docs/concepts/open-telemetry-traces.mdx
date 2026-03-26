@@ -31,10 +31,10 @@ OpenTelemetry capture is disabled by default. Enable it from the CLI:
 rue test --otel
 ```
 
-By default, spans are exported to `.rue/otel-spans.jsonl`. You can override the output path:
+OpenTelemetry capture does not persist traces by itself. Add the built-in reporter when you want local files:
 
 ```bash
-rue test --otel --otel-output traces/run_001.jsonl
+rue test --otel --reporter ConsoleReporter --reporter OtelReporter
 ```
 
 <Note>
@@ -64,7 +64,7 @@ def test_can_inspect_trace(weather_agent, otel_trace):
     with rue.otel_span("generate", {"doc_count": len(docs)}):
         out = weather_agent("What's the weather in SF?", docs=docs)
 
-    # All spans created during this test (same otel_trace_id)
+    # All spans created during this test belong to the same OTEL trace
     spans = otel_trace.get_child_spans()
     assert spans
 

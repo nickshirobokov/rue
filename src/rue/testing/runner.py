@@ -16,11 +16,11 @@ from rue.context import (
 )
 from rue.context.output_capture import sys_output_capture
 from rue.metrics_.base import MetricResult
-from rue.telemetry.otel.runtime import OtelTraceSnapshot, otel_runtime
-from rue.telemetry.otel.test_span_manager import OtelTestSpanManager
 from rue.reports.base import Reporter
+from rue.reports.registry import resolve_reporters
 from rue.resources import ResourceResolver, get_registry
 from rue.storage import SQLiteStore
+from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.discovery import collect
 from rue.testing.environment import capture_environment
 from rue.testing.execution import DefaultTestFactory, ResultBuilder
@@ -31,6 +31,7 @@ from rue.testing.models import (
     TestResult,
     TestStatus,
 )
+from rue.testing.tracing import TestTracer
 
 UUID_STRING_PATTERN = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -41,17 +42,15 @@ class Runner:
     """Executes discovered tests with resource injection.
 
     Args:
-        reporters: At least one reporter is required.
+        reporters: Optional reporters. Defaults to ConsoleReporter and OtelReporter.
 
     Examples:
-        from rue.reports import ConsoleReporter
-
-        # Sequential execution (default)
-        runner = Runner(reporters=[ConsoleReporter()])
+        # Sequential execution (default reporters)
+        runner = Runner()
         result = await runner.run(path="tests/")
 
         # Concurrent execution with 5 workers
-        runner = Runner(reporters=[ConsoleReporter()], concurrency=5)
+        runner = Runner(concurrency=5)
         result = await runner.run(path="tests/")
     """
 
@@ -60,51 +59,34 @@ class Runner:
     def __init__(
         self,
         *,
-        reporters: list[Reporter],
+        reporters: list[Reporter] | None = None,
         maxfail: int | None = None,
         fail_fast: bool = False,
         verbosity: int = 0,
         concurrency: int = 1,
         timeout: float | None = None,
         otel_enabled: bool = False,
-        otel_output: Path | str | None = None,
         otel_content: bool = True,
         capture_output: bool = True,
         db_enabled: bool = True,
         db_path: Path | str | None = None,
         run_id: UUID | str | None = None,
     ) -> None:
-        if not reporters:
-            msg = "At least one reporter is required"
-            raise ValueError(msg)
-
-        self.reporters = reporters
-
         self.maxfail = maxfail if maxfail and maxfail > 0 else None
         self.fail_fast = fail_fast
         self.verbosity = verbosity
         self.timeout = timeout
         self.concurrency = concurrency if concurrency > 0 else self.DEFAULT_MAX_CONCURRENCY
         self.otel_enabled = otel_enabled
-        self.otel_output = (
-            Path(otel_output) if otel_output else Path(".rue/otel-spans.jsonl")
-        )
         self.otel_content = otel_content
         self.capture_output = capture_output
         self.db_enabled = db_enabled
         self.db_path = Path(db_path) if db_path else None
         self._default_run_id = self._normalize_run_id(run_id)
-        self._otel_trace_snapshots: dict[UUID, OtelTraceSnapshot] = {}
+        self.reporters = reporters or self._default_reporters()
 
-        self._otel_span_manager = OtelTestSpanManager(
-            enabled=otel_enabled,
-            otel_content=otel_content,
-        )
         self._result_builder = ResultBuilder()
-        self._factory = DefaultTestFactory(
-            otel_span_manager=self._otel_span_manager,
-            result_builder=self._result_builder,
-        )
+        self._factory = DefaultTestFactory(result_builder=self._result_builder)
 
         # Used in single.py test execution through run_context
         self.semaphore: asyncio.Semaphore | None = None
@@ -112,6 +94,12 @@ class Runner:
 
         self.current_run: Run | None = None
         self._store: SQLiteStore | None = None
+
+    def _default_reporters(self) -> list[Reporter]:
+        return resolve_reporters(
+            ["ConsoleReporter", "OtelReporter"],
+            {"ConsoleReporter": {"verbosity": self.verbosity}},
+        )
 
     async def _notify_no_tests_found(self) -> None:
         await asyncio.gather(*[r.on_no_tests_found() for r in self.reporters])
@@ -148,16 +136,14 @@ class Runner:
     async def _notify_run_stopped_early(self, failure_count: int) -> None:
         await asyncio.gather(*[r.on_run_stopped_early(failure_count) for r in self.reporters])
 
-    async def _notify_otel_enabled(self, output_path: Path) -> None:
-        await asyncio.gather(*[r.on_otel_enabled(output_path) for r in self.reporters])
+    async def _notify_trace_collected(self, tracer: TestTracer, execution_id: UUID) -> None:
+        await asyncio.gather(
+            *[r.on_trace_collected(tracer, execution_id) for r in self.reporters]
+        )
 
-    def record_otel_trace_snapshot(
-        self,
-        execution_id: UUID,
-        snapshot: OtelTraceSnapshot,
-    ) -> None:
-        """Store the completed OpenTelemetry snapshot for a finished test execution."""
-        self._otel_trace_snapshots[execution_id] = snapshot
+    async def notify_trace_collected(self, tracer: TestTracer, execution_id: UUID) -> None:
+        """Public callback for execution strategies to stream trace updates."""
+        await self._notify_trace_collected(tracer, execution_id)
 
     def _ensure_db_ready(self) -> None:
         """Initialize DB and run migrations. Raises MigrationError if not possible."""
@@ -221,8 +207,7 @@ class Runner:
             self.current_run = Run(environment=environment, run_id=selected_run_id)
 
         if self.otel_enabled:
-            otel_runtime.configure(self.otel_output)
-            self._otel_trace_snapshots.clear()
+            otel_runtime.configure()
 
         if items is None:
             items = collect(path)
@@ -274,22 +259,13 @@ class Runner:
 
         await self._notify_run_complete(self.current_run)
 
-        if self.otel_enabled:
-            await self._notify_otel_enabled(self.otel_output)
-
         if self.db_enabled and self._store:
             try:
                 self._store.save_run(self.current_run)
-                if self.otel_enabled and self._otel_trace_snapshots:
-                    self._store.save_otel_spans(
-                        self.current_run,
-                        self._otel_trace_snapshots,
-                    )
             except Exception as e:
                 warnings.warn(f"Failed to persist run to database: {e}", stacklevel=2)
 
         return self.current_run
-
     async def _execute_run(
         self,
         *,

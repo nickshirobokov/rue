@@ -28,8 +28,7 @@ CREATE TABLE IF NOT EXISTS test_executions (
     file_path           TEXT,
     class_name          TEXT,
     case_id             TEXT,
-    id_suffix           TEXT,
-    otel_trace_id            TEXT,
+    suffix              TEXT,
     tags_json           TEXT,
     skip_reason         TEXT,
     xfail_reason        TEXT,
@@ -44,7 +43,6 @@ CREATE INDEX IF NOT EXISTS idx_tests_run ON test_executions(run_id);
 CREATE INDEX IF NOT EXISTS idx_tests_parent ON test_executions(parent_id);
 CREATE INDEX IF NOT EXISTS idx_tests_name ON test_executions(test_name);
 CREATE INDEX IF NOT EXISTS idx_tests_status ON test_executions(status);
-CREATE INDEX IF NOT EXISTS idx_tests_otel_trace ON test_executions(otel_trace_id);
 
 CREATE TABLE IF NOT EXISTS metrics (
     metric_id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,23 +96,4 @@ CREATE INDEX IF NOT EXISTS idx_assertions_metric ON assertions(metric_id);
 CREATE INDEX IF NOT EXISTS idx_predicates_assertion ON predicates(assertion_id);
 CREATE INDEX IF NOT EXISTS idx_predicates_run ON predicates(run_id);
 CREATE INDEX IF NOT EXISTS idx_predicates_name ON predicates(predicate_name);
-
-CREATE TABLE IF NOT EXISTS otel_spans (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id              TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-    test_execution_id   TEXT REFERENCES test_executions(execution_id) ON DELETE CASCADE,
-    otel_trace_id            TEXT NOT NULL,
-    span_id             TEXT NOT NULL,
-    parent_span_id      TEXT,
-    name                TEXT NOT NULL,
-    start_time_ns       INTEGER NOT NULL,
-    end_time_ns         INTEGER NOT NULL,
-    duration_ms         REAL NOT NULL,
-    span_json           TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_otel_spans_run ON otel_spans(run_id);
-CREATE INDEX IF NOT EXISTS idx_otel_spans_execution ON otel_spans(test_execution_id);
-CREATE INDEX IF NOT EXISTS idx_otel_spans_trace ON otel_spans(otel_trace_id);
-CREATE INDEX IF NOT EXISTS idx_otel_spans_name ON otel_spans(name);
 """

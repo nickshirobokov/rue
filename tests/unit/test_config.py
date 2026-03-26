@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from rue.config import load_config, reset_load_config_cache
+from rue.config import Config, load_config, reset_load_config_cache
 
 
 @pytest.fixture(autouse=True)
@@ -33,8 +33,8 @@ include-tags = ["smoke"]
 exclude-tags = ["slow"]
 keyword = "chatbot"
 otel = true
-otel-output = "traces/from-config.jsonl"
 otel-content = false
+reporters = ["ConsoleReporter", "OtelReporter"]
 db-path = ".rue/custom.db"
 db-enabled = false
 """.strip()
@@ -50,8 +50,8 @@ db-enabled = false
     assert config.verbosity == 1
     assert config.addopts == ["-q"]
     assert config.otel is True
-    assert config.otel_output == "traces/from-config.jsonl"
     assert config.otel_content is False
+    assert config.reporters == ["ConsoleReporter", "OtelReporter"]
     assert config.db_path == ".rue/custom.db"
     assert config.db_enabled is False
 
@@ -67,7 +67,6 @@ def test_load_config_defaults_when_missing(tmp_path: Path, monkeypatch: pytest.M
     assert config.verbosity == 0
     assert config.addopts == []
     assert config.otel is False
-    assert config.otel_output is None
     assert config.otel_content is True
     assert config.db_path is None
     assert config.db_enabled is True
@@ -84,7 +83,6 @@ def test_load_config_defaults_when_missing(tmp_path: Path, monkeypatch: pytest.M
         ("verbosity", 0),
         ("addopts", []),
         ("otel", False),
-        ("otel_output", None),
         ("otel_content", True),
         ("db_path", None),
         ("db_enabled", True),

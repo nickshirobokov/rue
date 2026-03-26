@@ -16,8 +16,8 @@ def test_parametrize_decorator_records_modifier():
     assert len(modifiers) == 1
     assert isinstance(modifiers[0], ParametrizeModifier)
     assert len(modifiers[0].parameter_sets) == 2
-    assert modifiers[0].parameter_sets[0].id_suffix == "one"
-    assert modifiers[0].parameter_sets[1].id_suffix == "two"
+    assert modifiers[0].parameter_sets[0].suffix == "one"
+    assert modifiers[0].parameter_sets[1].suffix == "two"
 
 
 def test_parametrize_stacking_creates_multiple_modifiers():
@@ -63,7 +63,7 @@ def test_runner_applies_parameter_values(null_reporter):
     # Create a parametrize modifier with one parameter set
     modifier = ParametrizeModifier(
         parameter_sets=(
-            ParameterSet(values={"param_a": "from_param"}, id_suffix="param_a=from_param"),
+            ParameterSet(values={"param_a": "from_param"}, suffix="param_a=from_param"),
         )
     )
 
@@ -99,9 +99,9 @@ def test_runner_runs_all_parameter_sets(null_reporter):
 
     modifier = ParametrizeModifier(
         parameter_sets=(
-            ParameterSet(values={"x": 1}, id_suffix="x=1"),
-            ParameterSet(values={"x": 2}, id_suffix="x=2"),
-            ParameterSet(values={"x": 3}, id_suffix="x=3"),
+            ParameterSet(values={"x": 1}, suffix="x=1"),
+            ParameterSet(values={"x": 2}, suffix="x=2"),
+            ParameterSet(values={"x": 3}, suffix="x=3"),
         )
     )
 

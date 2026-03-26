@@ -14,10 +14,7 @@ from rue.testing.models.result import TestExecution, TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
 
 
-def test_sqlite_store_save_and_get_run(tmp_path: Path) -> None:
-    db_path = tmp_path / "rue.db"
-    store = SQLiteStore(db_path)
-
+def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     case_id = uuid4()
     execution_id = uuid4()
     sub_execution_id = uuid4()
@@ -53,7 +50,6 @@ def test_sqlite_store_save_and_get_run(tmp_path: Path) -> None:
             error=Exception("boom"),
         ),
         execution_id=execution_id,
-        otel_trace_id="trace-1",
         sub_executions=[sub_execution],
     )
 
@@ -98,8 +94,8 @@ def test_sqlite_store_save_and_get_run(tmp_path: Path) -> None:
         ),
     )
 
-    store.save_run(run)
-    loaded = store.get_run(run.run_id)
+    sqlite_store.save_run(run)
+    loaded = sqlite_store.get_run(run.run_id)
 
     assert loaded is not None
     assert loaded.run_id == run.run_id
@@ -111,7 +107,6 @@ def test_sqlite_store_save_and_get_run(tmp_path: Path) -> None:
     assert loaded.result.failed == 1
     assert loaded.result.total == 1
     assert len(loaded.result.executions) == 1
-    assert loaded.result.executions[0].otel_trace_id == "trace-1"
     assert loaded.result.executions[0].definition.suffix == "{'slug': 'sample'}"
     assert loaded.result.executions[0].definition.case_id == case_id
     assert len(loaded.result.executions[0].sub_executions) == 1
@@ -121,10 +116,7 @@ def test_sqlite_store_save_and_get_run(tmp_path: Path) -> None:
     assert loaded.result.metric_results[0].metadata.scope == Scope.CASE
 
 
-def test_sqlite_store_list_runs(tmp_path: Path) -> None:
-    db_path = tmp_path / "rue.db"
-    store = SQLiteStore(db_path)
-
+def test_sqlite_store_list_runs(sqlite_store: SQLiteStore) -> None:
     run_one = Run(
         run_id=uuid4(),
         start_time=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
@@ -140,19 +132,16 @@ def test_sqlite_store_list_runs(tmp_path: Path) -> None:
         result=RunResult(),
     )
 
-    store.save_run(run_one)
-    store.save_run(run_two)
+    sqlite_store.save_run(run_one)
+    sqlite_store.save_run(run_two)
 
-    runs = store.list_runs(limit=1)
+    runs = sqlite_store.list_runs(limit=1)
 
     assert len(runs) == 1
     assert runs[0].run_id == run_two.run_id
 
 
-def test_sqlite_store_assertions_and_predicates(tmp_path: Path) -> None:
-    db_path = tmp_path / "rue.db"
-    store = SQLiteStore(db_path)
-
+def test_sqlite_store_assertions_and_predicates(sqlite_store: SQLiteStore) -> None:
     execution_id = uuid4()
     predicate_result = PredicateResult(
         actual="actual",
@@ -221,28 +210,25 @@ def test_sqlite_store_assertions_and_predicates(tmp_path: Path) -> None:
         ),
     )
 
-    store.save_run(run)
+    sqlite_store.save_run(run)
 
-    assertions = store.get_assertions_for_execution(execution_id)
+    assertions = sqlite_store.get_assertions_for_execution(execution_id)
     assert len(assertions) == 1
     assertion_repr = json.loads(assertions[0]["expression_repr"])
     assert assertion_repr["expr"] == "x == y"
 
-    predicates = store.get_predicates_for_assertion(assertions[0]["id"])
+    predicates = sqlite_store.get_predicates_for_assertion(assertions[0]["id"])
     assert len(predicates) == 1
     assert predicates[0]["predicate_name"] == "equals"
 
-    run_assertions = store.get_assertions_for_run(run.run_id)
+    run_assertions = sqlite_store.get_assertions_for_run(run.run_id)
     assert any(row["metric_id"] is not None for row in run_assertions)
     assert any(row["test_execution_id"] == str(execution_id) for row in run_assertions)
     assert any(json.loads(row["expression_repr"])["expr"] == "metric > 0" for row in run_assertions)
 
 
-def test_sqlite_store_prunes_old_runs(tmp_path: Path) -> None:
+def test_sqlite_store_prunes_old_runs(sqlite_store: SQLiteStore) -> None:
     """Store should keep only MAX_STORED_RUNS most recent runs."""
-    db_path = tmp_path / "rue.db"
-    store = SQLiteStore(db_path)
-
     runs_to_create = MAX_STORED_RUNS + 3
     created_run_ids = []
 
@@ -255,9 +241,9 @@ def test_sqlite_store_prunes_old_runs(tmp_path: Path) -> None:
             result=RunResult(),
         )
         created_run_ids.append(run.run_id)
-        store.save_run(run)
+        sqlite_store.save_run(run)
 
-    stored_runs = store.list_runs(limit=100)
+    stored_runs = sqlite_store.list_runs(limit=100)
 
     assert len(stored_runs) == MAX_STORED_RUNS
 

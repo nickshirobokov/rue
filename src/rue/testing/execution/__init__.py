@@ -12,7 +12,6 @@ from rue.testing.execution.parametrized import ParametrizedTest, ParametrizedRue
 from rue.testing.execution.repeated import RepeatedTest, RepeatedRueTest
 from rue.testing.execution.result_builder import ResultBuilder
 from rue.testing.execution.single import SingleTest, SingleRueTest
-from rue.telemetry.otel.test_span_manager import OtelTestSpanManager
 
 
 __all__ = [
@@ -31,5 +30,4 @@ __all__ = [
     "ResultBuilder",
     "SingleRueTest",
     "TestFactory",
-    "OtelTestSpanManager",
 ]

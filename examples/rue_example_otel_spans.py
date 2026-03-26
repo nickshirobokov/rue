@@ -8,7 +8,8 @@ This example shows how to:
 Run with OpenTelemetry enabled:
     rue test examples/rue_example_otel_spans.py --otel
 
-Rue writes OpenTelemetry spans to `.rue/otel-spans.jsonl` by default.
+Persist local trace files too:
+    rue test examples/rue_example_otel_spans.py --otel --reporter ConsoleReporter --reporter OtelReporter
 """
 
 from collections.abc import Callable

@@ -4,7 +4,11 @@ The `otel_trace` resource provides access to OpenTelemetry span data
 captured during test execution, enabling assertions on LLM calls, SUT
 behavior, and custom span attributes.
 
-Run with: uv run rue examples/rue_example_otel_trace.py --otel
+Run with capture only:
+    uv run rue test examples/rue_example_otel_trace.py --otel
+
+Persist local trace files too:
+    uv run rue test examples/rue_example_otel_trace.py --otel --reporter ConsoleReporter --reporter OtelReporter
 """
 
 from collections.abc import Callable
@@ -67,18 +71,13 @@ def test_query_child_spans(multi_step_pipeline, otel_trace):
     assert "test query" in result
 
 
-# Check if OpenTelemetry is enabled
-def test_check_otel_enabled(simple_pipeline, otel_trace):
-    """Demonstrate checking if OpenTelemetry capture is enabled."""
+# Inspect spans from the injected OpenTelemetry trace
+def test_inspect_injected_otel_trace(simple_pipeline, otel_trace):
+    """Demonstrate inspecting spans from an injected OpenTelemetry trace."""
     result = simple_pipeline("check OpenTelemetry")
 
-    if otel_trace.is_enabled:
-        # OpenTelemetry is on, so we can query spans
-        spans = otel_trace.get_child_spans()
-        otel_trace.set_attribute("spans.count", len(spans))
-    else:
-        # OpenTelemetry is off, so this branch would skip inspection
-        pass
+    spans = otel_trace.get_child_spans()
+    otel_trace.set_attribute("spans.count", len(spans))
 
     assert result is not None
 

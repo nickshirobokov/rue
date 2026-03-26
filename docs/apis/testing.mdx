@@ -555,7 +555,6 @@ class Runner:
         concurrency: int = 1,
         timeout: float | None = None,
         otel_enabled: bool = False,
-        otel_output: Path | str | None = None,
         otel_content: bool = True,
         capture_output: bool = True,
         db_enabled: bool = True,
@@ -589,11 +588,12 @@ class Runner:
 ```python
 from uuid import UUID
 
-from rue.reports import ConsoleReporter
+from rue.reports import ConsoleReporter, OtelReporter
 from rue.testing import Runner
 
 runner = Runner(
-    reporters=[ConsoleReporter()],
+    reporters=[ConsoleReporter(), OtelReporter()],
+    otel_enabled=True,
     db_path=".rue/rue.db",
     run_id=UUID("00000000-0000-0000-0000-000000000001"),
 )
@@ -610,6 +610,8 @@ result = await runner.run(
     run_id="00000000-0000-0000-0000-000000000002",
 )
 ```
+
+OpenTelemetry persistence is configured through reporters. Add `OtelReporter` for local `.rue/traces` storage or implement `Reporter.on_trace_collected()` in a custom reporter.
 
 ---
 

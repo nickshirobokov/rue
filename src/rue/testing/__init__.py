@@ -47,7 +47,6 @@ from rue.testing.models import (
 )
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest, fail, skip, xfail
 from rue.testing.runner import Runner
-from rue.telemetry.otel.test_span_manager import OtelTestSpanManager
 
 
 # Backwards compatibility alias
@@ -90,7 +89,6 @@ __all__ = [
     "TestItem",  # alias
     "TestResult",
     "TestStatus",
-    "OtelTestSpanManager",
     "XFailTest",
     "capture_environment",
     "collect",

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from rue.predicates.models import PredicateResult
     from rue.testing.models import TestDefinition
     from rue.testing.runner import Runner
-    from rue.telemetry.otel.runtime import OtelTraceSession
+    from rue.testing.tracing import TestTracer
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +36,6 @@ class TestContext:
 
     item: TestDefinition
     execution_id: UUID | None = None
-    otel_trace_session: OtelTraceSession | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,20 +63,20 @@ METRIC_RESULTS_COLLECTOR: ContextVar[list[MetricResult] | None] = ContextVar(
 )
 
 TEST_CONTEXT: ContextVar[TestContext | None] = ContextVar("test_context", default=None)
+TEST_TRACER: ContextVar[TestTracer | None] = ContextVar("test_tracer", default=None)
 RESOLVER_CONTEXT: ContextVar[ResolverContext | None] = ContextVar("resolver_context", default=None)
 METRIC_CONTEXT: ContextVar[list[Metric] | None] = ContextVar("metric_context", default=None)
 RUNNER_CONTEXT: ContextVar[Runner | None] = ContextVar("runner_context", default=None)
 
 
+def get_test_tracer() -> TestTracer | None:
+    """Get the current test tracer, or None if tracing is inactive."""
+    return TEST_TRACER.get()
+
+
 def get_test_context() -> TestContext | None:
     """Get the current test context, or None if not in a test."""
     return TEST_CONTEXT.get()
-
-
-def get_otel_trace_session() -> OtelTraceSession | None:
-    """Get the active OpenTelemetry session from the current test context."""
-    ctx = get_test_context()
-    return ctx.otel_trace_session if ctx is not None else None
 
 
 def get_runner() -> Runner | None:
@@ -126,6 +125,19 @@ def test_context_scope(ctx: TestContext) -> Iterator[None]:
         yield
     finally:
         TEST_CONTEXT.reset(token)
+
+
+@contextmanager
+def test_tracer_scope(tracer: TestTracer) -> Iterator[None]:
+    """Temporarily set `TEST_TRACER` for the duration of the ``with`` block."""
+    token = TEST_TRACER.set(tracer)
+    try:
+        yield
+    finally:
+        TEST_TRACER.reset(token)
+
+
+test_tracer_scope.__test__ = False
 
 
 @contextmanager

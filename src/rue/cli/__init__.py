@@ -7,7 +7,7 @@ import asyncio
 import shlex
 import sqlite3
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, TypeVar
@@ -102,12 +102,6 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_false",
         default=None,
         help="Disable OpenTelemetry spans for tests and SUT calls",
-    )
-    test_parser.add_argument(
-        "--otel-output",
-        type=str,
-        default=None,
-        help="Output path for OpenTelemetry span data (default: .rue/otel-spans.jsonl)",
     )
     test_parser.add_argument(
         "--otel-content",
@@ -353,13 +347,6 @@ def _resolve_otel(args: argparse.Namespace, config: Config) -> bool:
         return args.otel
     return config.otel
 
-
-def _resolve_otel_output(args: argparse.Namespace, config: Config) -> str | None:
-    if args.otel_output is not None:
-        return args.otel_output
-    return config.otel_output
-
-
 def _resolve_otel_content(args: argparse.Namespace, config: Config) -> bool:
     if args.otel_content is not None:
         return args.otel_content
@@ -374,7 +361,7 @@ def _resolve_reporters(
     Priority:
     1. CLI --reporter flags (if provided, replaces config)
     2. Config reporters list
-    3. Default ConsoleReporter
+    3. Default ConsoleReporter and OtelReporter
     """
     reporter_names: list[str] = []
 
@@ -384,7 +371,7 @@ def _resolve_reporters(
         reporter_names = config.reporters
 
     if not reporter_names:
-        reporter_names = ["ConsoleReporter"]
+        reporter_names = ["ConsoleReporter", "OtelReporter"]
 
     options = dict(config.reporter_options)
     if "ConsoleReporter" in reporter_names:
@@ -449,7 +436,6 @@ async def _run_tests(args: argparse.Namespace, config: Config) -> int:
     concurrency = _resolve_concurrency(args, config)
     timeout = _resolve_timeout(args, config)
     otel_enabled = _resolve_otel(args, config)
-    otel_output = _resolve_otel_output(args, config)
     otel_content = _resolve_otel_content(args, config)
     db_path = args.db_path or config.db_path
     db_enabled = config.db_enabled
@@ -464,7 +450,6 @@ async def _run_tests(args: argparse.Namespace, config: Config) -> int:
         concurrency=concurrency,
         timeout=timeout,
         otel_enabled=otel_enabled,
-        otel_output=otel_output,
         otel_content=otel_content,
         fail_fast=args.fail_fast,
         capture_output=not args.show_output,

@@ -2,7 +2,6 @@
 
 import asyncio
 import inspect
-import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,14 +25,6 @@ def clean_registry():
     clear_registry()
 
 
-def _span_from_output(otel_output_path: Path, name: str) -> dict[str, object]:
-    for line in otel_output_path.read_text().splitlines():
-        span = json.loads(line)
-        if span["name"] == name:
-            return span
-    raise AssertionError(f"Missing span {name!r}")
-
-
 def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
     mod_name = f"rue_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
@@ -44,22 +35,22 @@ def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
 async def _run_module_with_tracing(
     *,
     tmp_path: Path,
-    null_reporter,
+    trace_reporter,
+    monkeypatch: pytest.MonkeyPatch,
     source: str,
-    trace_name: str = "sut_traces.jsonl",
 ):
     mod_name, mod_path = _write_temp_module(tmp_path, source)
-    trace_path = tmp_path / trace_name
 
     try:
+        monkeypatch.chdir(tmp_path)
         items = collect(mod_path)
-        run = await Runner(
-            reporters=[null_reporter],
+        runner = Runner(
+            reporters=[trace_reporter],
             otel_enabled=True,
-            otel_output=trace_path,
             db_enabled=False,
-        ).run(items=items)
-        return mod_name, run, trace_path
+        )
+        run = await runner.run(items=items)
+        return mod_name, run, trace_reporter.sessions
     finally:
         sys.modules.pop(mod_name, None)
 
@@ -320,11 +311,11 @@ class TestSutResolution:
 
 class TestSutOpenTelemetry:
     @pytest.mark.asyncio
-    async def test_callable_sut_creates_span(self, tmp_path: Path, null_reporter):
-        mod_name, run, otel_output_path = await _run_module_with_tracing(
-            tmp_path=tmp_path,
-            null_reporter=null_reporter,
-            source="""
+    @pytest.mark.parametrize(
+        ("source", "span_name", "expected_attrs"),
+        [
+            (
+                """
 import rue
 
 @rue.sut
@@ -336,19 +327,11 @@ def traced_sut():
 def test_sample(traced_sut):
     assert traced_sut(5) == 10
 """,
-        )
-
-        assert run.result.passed == 1
-        span_names = {json.loads(line)["name"] for line in otel_output_path.read_text().splitlines()}
-        assert "sut.traced_sut" in span_names
-        assert f"test.{mod_name}::test_sample" in span_names
-
-    @pytest.mark.asyncio
-    async def test_instance_method_sut_creates_span(self, tmp_path: Path, null_reporter):
-        _, run, otel_output_path = await _run_module_with_tracing(
-            tmp_path=tmp_path,
-            null_reporter=null_reporter,
-            source="""
+                "sut.traced_sut",
+                {"rue.sut": True, "rue.sut.name": "traced_sut"},
+            ),
+            (
+                """
 import rue
 
 class Service:
@@ -362,52 +345,56 @@ def traced_service():
 def test_sample(traced_service):
     assert traced_service.run("hello") == "ok:hello"
 """,
-            trace_name="sut_instance_traces.jsonl",
-        )
-
-        assert run.result.passed == 1
-        span_names = {json.loads(line)["name"] for line in otel_output_path.read_text().splitlines()}
-        assert "sut.traced_service" in span_names
-
-    @pytest.mark.asyncio
-    async def test_sut_spans_have_rue_attributes(self, tmp_path: Path, null_reporter):
-        _, run, otel_output_path = await _run_module_with_tracing(
+                "sut.traced_service",
+                {"rue.sut": True, "rue.sut.name": "traced_service"},
+            ),
+        ],
+    )
+    async def test_sut_creates_span(
+        self,
+        tmp_path: Path,
+        trace_reporter,
+        monkeypatch: pytest.MonkeyPatch,
+        source: str,
+        span_name: str,
+        expected_attrs: dict[str, object],
+    ):
+        mod_name, run, sessions = await _run_module_with_tracing(
             tmp_path=tmp_path,
-            null_reporter=null_reporter,
-            source="""
-import rue
-
-@rue.sut
-def my_test_function():
-    def run(x: int) -> int:
-        return x
-    return run
-
-def test_sample(my_test_function):
-    assert my_test_function(1) == 1
-""",
-            trace_name="sut_attrs_traces.jsonl",
+            trace_reporter=trace_reporter,
+            monkeypatch=monkeypatch,
+            source=source,
         )
 
         assert run.result.passed == 1
-        span = _span_from_output(otel_output_path, "sut.my_test_function")
-        assert span["attributes"].get("rue.sut") is True
-        assert span["attributes"].get("rue.sut.name") == "my_test_function"
+        payloads = [session.serialize() for session in sessions]
+        span = next(
+            span
+            for payload in payloads
+            for span in payload["spans"]
+            if span["name"] == span_name
+        )
+        assert f"test.{mod_name}::test_sample" in {
+            inner_span["name"] for payload in payloads for inner_span in payload["spans"]
+        }
+        for key, value in expected_attrs.items():
+            assert span["attributes"].get(key) == value
 
     @pytest.mark.asyncio
     async def test_sut_does_not_trace_outside_runner_even_after_runtime_configured(
         self,
         tmp_path: Path,
-        null_reporter,
+        trace_reporter,
+        monkeypatch: pytest.MonkeyPatch,
     ):
-        _, _, otel_output_path = await _run_module_with_tracing(
+        _, _, sessions = await _run_module_with_tracing(
             tmp_path=tmp_path,
-            null_reporter=null_reporter,
+            trace_reporter=trace_reporter,
+            monkeypatch=monkeypatch,
             source="""
 def test_sample():
     assert True
 """,
-            trace_name="outside_runner_sut_traces.jsonl",
         )
 
         @sut
@@ -419,9 +406,9 @@ def test_sample():
 
         resolver = ResourceResolver(get_registry())
         resolved = await resolver.resolve("adder")
-        before = otel_output_path.read_text()
+        before = [session.serialize() for session in sessions]
 
         assert resolved(2, 3) == 5
 
-        after = otel_output_path.read_text()
+        after = [session.serialize() for session in sessions]
         assert before == after

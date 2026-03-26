@@ -115,7 +115,6 @@ class Config(BaseSettings):
     concurrency: Annotated[int, Field(ge=0)] = 1
     timeout: Annotated[float, Field(gt=0)] | None = None
     otel: bool = False
-    otel_output: str | None = None
     otel_content: bool = True
     db_path: str | None = None
     db_enabled: bool = True

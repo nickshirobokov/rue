@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ParamSpec, TypeVar
 
-from rue.context import ResolverContext, get_otel_trace_session, resolver_context_scope
+from rue.context import ResolverContext, get_test_tracer, resolver_context_scope
 from rue.context.output_capture import OutputBuffer, get_current_capture
 from rue.telemetry.otel import OtelTrace
 
@@ -339,11 +339,10 @@ class ResourceResolver:
 @resource(scope=Scope.CASE)
 def otel_trace() -> Generator[OtelTrace, None, None]:
     """Provide access to OpenTelemetry data for the current test."""
-    session = get_otel_trace_session()
-    if session is None:
+    tracer = get_test_tracer()
+    if tracer is None or tracer.otel_trace_session is None:
         raise RuntimeError("OpenTelemetry is not enabled; cannot resolve otel_trace resource.")
-    ctx = OtelTrace.from_session(session)
-    yield ctx
+    yield OtelTrace(_session=tracer.otel_trace_session)
 
 
 _builtin_registry["otel_trace"] = _registry["otel_trace"]

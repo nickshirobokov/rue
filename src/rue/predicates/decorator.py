@@ -6,7 +6,7 @@ from functools import wraps
 from inspect import BoundArguments, Parameter, signature
 from typing import Any, Protocol, TypeVar, overload, ParamSpec, Concatenate
 
-from rue.context import PREDICATE_RESULTS_COLLECTOR
+from rue.context import PREDICATE_RESULTS_COLLECTOR, get_test_tracer
 from rue.predicates.models import PredicateResult
 from rue.telemetry.otel.runtime import otel_runtime
 
@@ -133,7 +133,8 @@ def predicate(
             async def async_wrapper(*args: Any, **kwargs: Any) -> bool:
                 bound = sig.bind(*args, **kwargs)
                 bound.apply_defaults()
-                if not otel_runtime.is_otel_trace_active():
+                tracer = get_test_tracer()
+                if tracer is None or tracer.otel_trace_session is None:
                     predicate_result = _normalize_result(
                         await f(*args, **kwargs),
                         predicate_name,
@@ -158,7 +159,8 @@ def predicate(
         def sync_wrapper(*args: Any, **kwargs: Any) -> bool:
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
-            if not otel_runtime.is_otel_trace_active():
+            tracer = get_test_tracer()
+            if tracer is None or tracer.otel_trace_session is None:
                 predicate_result = _normalize_result(
                     f(*args, **kwargs),
                     predicate_name,
@@ -231,7 +233,8 @@ def _set_trace_attributes(
     span.set_attribute("predicate.strict", result.strict)
     span.set_attribute("predicate.confidence", result.confidence)
 
-    if not otel_runtime.is_otel_content_enabled():
+    tracer = get_test_tracer()
+    if tracer is None or tracer.otel_trace_session is None or not tracer.otel_content:
         return
 
     span.set_attribute("predicate.input.actual", repr(bound.arguments["actual"]))
