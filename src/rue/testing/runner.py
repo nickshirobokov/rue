@@ -10,11 +10,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from rue.context import (
-    metric_results_collector,
-    runner_scope,
+from rue.context.collectors import CURRENT_METRIC_RESULTS
+from rue.context.runtime import (
+    CURRENT_RUNNER,
+    bind,
 )
-from rue.context.output_capture import sys_output_capture
 from rue.metrics_.base import MetricResult
 from rue.reports.base import Reporter
 from rue.reports.registry import resolve_reporters
@@ -31,6 +31,7 @@ from rue.testing.models import (
     TestResult,
     TestStatus,
 )
+from rue.context.output import sys_output_capture
 from rue.testing.tracing import TestTracer
 
 UUID_STRING_PATTERN = re.compile(
@@ -250,9 +251,9 @@ class Runner:
         start = time.perf_counter()
 
         with (
-            runner_scope(self),
+            bind(CURRENT_RUNNER, self),
             sys_output_capture(swallow=self.capture_output),
-            metric_results_collector(metric_results),
+            bind(CURRENT_METRIC_RESULTS, metric_results),
         ):
             await self._notify_collection_complete(items)
 

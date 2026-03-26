@@ -24,9 +24,14 @@ class InjectAssertionDependenciesTransformer(ast.NodeTransformer):
                 level=0,
             ),
             ast.ImportFrom(
-                module="rue.context",
+                module="rue.context.runtime",
+                names=[ast.alias(name="bind", asname=None)],
+                level=0,
+            ),
+            ast.ImportFrom(
+                module="rue.context.collectors",
                 names=[
-                    ast.alias(name="predicate_results_collector", asname=None),
+                    ast.alias(name="CURRENT_PREDICATE_RESULTS", asname=None),
                 ],
                 level=0,
             ),
@@ -182,10 +187,12 @@ class AssertTransformer(ast.NodeTransformer):
             items=[
                 ast.withitem(
                     context_expr=ast.Call(
-                        func=ast.Name(
-                            id="predicate_results_collector", ctx=ast.Load()
-                        ),
+                        func=ast.Name(id="bind", ctx=ast.Load()),
                         args=[
+                            ast.Name(
+                                id="CURRENT_PREDICATE_RESULTS",
+                                ctx=ast.Load(),
+                            ),
                             ast.Name(
                                 id=self.PREDICATE_RESULTS_VAR_NAME,
                                 ctx=ast.Load(),

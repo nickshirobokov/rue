@@ -3,14 +3,13 @@ from uuid import uuid4
 
 import pytest
 
+from rue import metrics as metrics_scope_ctx
 from rue.assertions.base import AssertionResult
-from rue.context import (
-    TestContext,
-    assertions_collector,
-    metric_results_collector,
-    metrics as metrics_scope_ctx,
-    test_context_scope as context_scope_ctx,
+from rue.context.collectors import (
+    CURRENT_ASSERTION_RESULTS,
+    CURRENT_METRIC_RESULTS,
 )
+from rue.context.runtime import CURRENT_TEST, TestContext, bind
 from rue.metrics_.base import Metric, MetricResult
 from rue.resources import ResourceResolver, clear_registry
 from rue.testing.discovery import collect
@@ -39,7 +38,9 @@ def test_sample():
         [item] = collect(mod_path)
         assertion_results: list[AssertionResult] = []
         ctx = TestContext(item=item)
-        with context_scope_ctx(ctx), assertions_collector(assertion_results):
+        with bind(CURRENT_TEST, ctx), bind(
+            CURRENT_ASSERTION_RESULTS, assertion_results
+        ):
             item.fn()
 
         assert len(assertion_results) == 1
@@ -74,7 +75,9 @@ def test_fail():
         [item] = collect(mod_path)
         assertion_results: list[AssertionResult] = []
         ctx = TestContext(item=item)
-        with context_scope_ctx(ctx), assertions_collector(assertion_results):
+        with bind(CURRENT_TEST, ctx), bind(
+            CURRENT_ASSERTION_RESULTS, assertion_results
+        ):
             item.fn()
 
         assert len(assertion_results) == 1
@@ -109,9 +112,9 @@ def test_metric_capture_multi():
         ctx = TestContext(item=item)
         m = Metric(name="assert_outcomes")
         with (
-            context_scope_ctx(ctx),
+            bind(CURRENT_TEST, ctx),
             metrics_scope_ctx(m),
-            assertions_collector(assertion_results),
+            bind(CURRENT_ASSERTION_RESULTS, assertion_results),
         ):
             item.fn()
 
@@ -151,7 +154,7 @@ def test_dummy():
         [item] = collect(mod_path)
         resolver = ResourceResolver()
         metric_results: list[MetricResult] = []
-        with metric_results_collector(metric_results):
+        with bind(CURRENT_METRIC_RESULTS, metric_results):
             await resolver.resolve("my_metric")
             await resolver.teardown()
 
@@ -197,7 +200,7 @@ def test_repr_cases():
     try:
         [item] = collect(mod_path)
         assertion_results: list[AssertionResult] = []
-        with assertions_collector(assertion_results):
+        with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
             item.fn()
 
         assert len(assertion_results) == 5
@@ -241,7 +244,7 @@ def test_compare_cases():
     try:
         [item] = collect(mod_path)
         assertion_results: list[AssertionResult] = []
-        with assertions_collector(assertion_results):
+        with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
             item.fn()
 
         assert len(assertion_results) == 3
@@ -284,7 +287,7 @@ def test_complex_compare_cases():
     try:
         [item] = collect(mod_path)
         assertion_results: list[AssertionResult] = []
-        with assertions_collector(assertion_results):
+        with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
             item.fn()
 
         assert len(assertion_results) == 1
@@ -323,7 +326,7 @@ def test_multiline_assert():
     try:
         [item] = collect(mod_path)
         assertion_results: list[AssertionResult] = []
-        with assertions_collector(assertion_results):
+        with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
             item.fn()
 
         assert len(assertion_results) == 1

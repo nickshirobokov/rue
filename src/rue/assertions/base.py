@@ -3,11 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from rue.context import (
-    ASSERTION_RESULTS_COLLECTOR,
-    METRIC_CONTEXT,
-    TEST_CONTEXT,
-)
+from rue.context.collectors import CURRENT_ASSERTION_RESULTS
+from rue.context.runtime import CURRENT_TEST
+from rue.metrics_.scope import ACTIVE_ASSERTION_METRICS
 
 
 if TYPE_CHECKING:
@@ -66,16 +64,16 @@ class AssertionResult:
     predicate_results: list[PredicateResult] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        collector = ASSERTION_RESULTS_COLLECTOR.get()
+        collector = CURRENT_ASSERTION_RESULTS.get()
         if collector is not None:
             collector.append(self)
 
-        metrics = METRIC_CONTEXT.get()
+        metrics = ACTIVE_ASSERTION_METRICS.get()
         if metrics is not None:
             for metric in metrics:
                 metric.add_record(self.passed)
 
-        test_ctx = TEST_CONTEXT.get()
+        test_ctx = CURRENT_TEST.get()
         if test_ctx is not None:
             if test_ctx.item.fail_fast and not self.passed:
                 msg = (

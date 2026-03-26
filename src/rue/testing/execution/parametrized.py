@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 from uuid import uuid4
 
-from rue.context import get_runner
+from rue.context.runtime import CURRENT_RUNNER
 from rue.resources import ResourceResolver
 from rue.testing.execution.interfaces import Test, TestFactory
 from rue.testing.models import (
@@ -61,7 +61,7 @@ class ParametrizedTest(Test):
         sub_executions: list[TestExecution | None] = [None] * len(
             self.parameter_sets
         )
-        runner = get_runner()
+        runner = CURRENT_RUNNER.get()
         try:
             for completed_task in asyncio.as_completed(tasks):
                 index, sub_execution = await completed_task

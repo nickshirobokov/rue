@@ -6,14 +6,14 @@ from uuid import UUID
 
 import pytest
 
+from rue import metrics
 from rue.assertions.base import AssertionRepr, AssertionResult
-from rue.context import (
-    ResolverContext,
+from rue.context.collectors import CURRENT_METRIC_RESULTS
+from rue.context.runtime import (
+    CURRENT_RESOURCE_CONSUMER,
+    CURRENT_TEST,
     TestContext as Ctx,
-    metric_results_collector,
-    metrics,
-    resolver_context_scope,
-    test_context_scope as context_scope,
+    bind,
 )
 from rue.metrics_.base import Metric, MetricMetadata, MetricResult, metric
 from rue.resources import ResourceResolver, Scope, clear_registry
@@ -140,7 +140,7 @@ def test_metric_records_case_id_before_suffix():
         )
     )
 
-    with context_scope(test_ctx):
+    with bind(CURRENT_TEST, test_ctx):
         m.add_record(1)
 
     assert m.metadata.collected_from_cases == {
@@ -152,7 +152,7 @@ def test_metric_records_suffix_when_case_id_missing():
     m = Metric("test_case_suffix")
     test_ctx = Ctx(item=_make_item("test_case", suffix="{'slug': 'example'}"))
 
-    with context_scope(test_ctx):
+    with bind(CURRENT_TEST, test_ctx):
         m.add_record(1)
 
     assert m.metadata.collected_from_cases == {"{'slug': 'example'}"}
@@ -188,7 +188,7 @@ def test_metric_percentiles_with_single_value_returns_nans():
 
 def test_metric_result_is_collected_when_collector_is_active():
     results = []
-    with metric_results_collector(results):
+    with bind(CURRENT_METRIC_RESULTS, results):
         MetricResult(
             name="x",
             metadata=MetricMetadata(),
@@ -243,10 +243,8 @@ async def test_metric_on_injection_hook_with_context():
 
     resolver = ResourceResolver()
     ctx = Ctx(item=_make_item("my_merit"))
-    with context_scope(ctx):
-        with resolver_context_scope(
-            ResolverContext(consumer_name="some_resource")
-        ):
+    with bind(CURRENT_TEST, ctx):
+        with bind(CURRENT_RESOURCE_CONSUMER, "some_resource"):
             m = await resolver.resolve("test_ctx_metric")
             # injection hook attribution
             assert "some_resource" in m.metadata.collected_from_resources
@@ -271,13 +269,13 @@ async def test_metric_on_injection_cumulative_metadata():
     resolver = ResourceResolver()
 
     # First resolution with context A
-    with context_scope(Ctx(item=_make_item("test_a"))):
+    with bind(CURRENT_TEST, Ctx(item=_make_item("test_a"))):
         m1 = await resolver.resolve("shared_metric")
         m1.add_record(1)
     assert "test_a" in m1.metadata.collected_from_tests
 
     # Second resolution with context B
-    with context_scope(Ctx(item=_make_item("test_b"))):
+    with bind(CURRENT_TEST, Ctx(item=_make_item("test_b"))):
         m2 = await resolver.resolve("shared_metric")
         m2.add_record(2)
 
@@ -317,7 +315,7 @@ async def test_metric_decorator_emits_metric_result_on_teardown_with_assertions_
 
     resolver = ResourceResolver()
     metric_results = []
-    with metric_results_collector(metric_results):
+    with bind(CURRENT_METRIC_RESULTS, metric_results):
         m = await resolver.resolve("scored_metric")
         assert m.name == "scored_metric"
         await resolver.teardown()
@@ -345,7 +343,7 @@ async def test_metric_decorator_emits_nan_when_generator_returns_value_but_does_
 
     resolver = ResourceResolver()
     metric_results = []
-    with metric_results_collector(metric_results):
+    with bind(CURRENT_METRIC_RESULTS, metric_results):
         await resolver.resolve("return_only_metric")
         await resolver.teardown()
 
@@ -365,7 +363,7 @@ async def test_metric_decorator_uses_second_yield_value_and_ignores_return_value
 
     resolver = ResourceResolver()
     metric_results = []
-    with metric_results_collector(metric_results):
+    with bind(CURRENT_METRIC_RESULTS, metric_results):
         await resolver.resolve("yield_and_return_metric")
         await resolver.teardown()
 

@@ -2,10 +2,10 @@
 
 import sys
 
-from rue.context.output_capture import (
+from rue.context.output import (
+    CURRENT_OUTPUT_CAPTURE,
     OutputBuffer,
     SysOutputCapture,
-    get_current_capture,
     sys_output_capture,
 )
 
@@ -133,12 +133,12 @@ class TestSysOutputCapture:
 
 class TestSysOutputCaptureContextManager:
     def test_sets_current_capture(self):
-        assert get_current_capture() is None
+        assert CURRENT_OUTPUT_CAPTURE.get() is None
 
         with sys_output_capture(swallow=True) as capture:
-            assert get_current_capture() is capture
+            assert CURRENT_OUTPUT_CAPTURE.get() is capture
 
-        assert get_current_capture() is None
+        assert CURRENT_OUTPUT_CAPTURE.get() is None
 
     def test_nested_captures_isolate_output(self):
         with sys_output_capture(swallow=True) as outer_capture:

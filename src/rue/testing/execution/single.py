@@ -12,14 +12,14 @@ from typing import Any
 from uuid import uuid4
 
 from rue.assertions.base import AssertionResult
-from rue.context import (
-    ResolverContext,
+from rue.context.collectors import CURRENT_ASSERTION_RESULTS
+from rue.context.runtime import (
+    CURRENT_RUNNER,
+    CURRENT_RESOURCE_CONSUMER,
+    CURRENT_TEST,
+    CURRENT_TEST_TRACER,
     TestContext,
-    assertions_collector,
-    get_runner,
-    resolver_context_scope,
-    test_context_scope,
-    test_tracer_scope,
+    bind,
 )
 from rue.resources import ResourceResolver
 from rue.resources.resolver import Scope
@@ -53,7 +53,7 @@ class SingleTest(Test):
 
     async def execute(self, resolver: ResourceResolver) -> TestExecution:
         """Execute the test and return result."""
-        runner = get_runner()
+        runner = CURRENT_RUNNER.get()
 
         if runner is not None and runner.stop_flag:
             return TestExecution(
@@ -89,7 +89,7 @@ class SingleTest(Test):
             otel_content=runner.otel_content if runner is not None else True,
         )
 
-        with test_tracer_scope(tracer):
+        with bind(CURRENT_TEST_TRACER, tracer):
             tracer.start_otel_root_span(self.definition)
             if tracer.otel_enabled:
                 assert runner is not None
@@ -106,8 +106,8 @@ class SingleTest(Test):
             imperative_outcome: TestStatus | None = None
 
             with (
-                test_context_scope(ctx),
-                assertions_collector(assertion_results),
+                bind(CURRENT_TEST, ctx),
+                bind(CURRENT_ASSERTION_RESULTS, assertion_results),
             ):
                 try:
                     semaphore = (
@@ -140,7 +140,7 @@ class SingleTest(Test):
 
             duration_ms = (time.perf_counter() - start) * 1000
 
-            with test_context_scope(ctx):
+            with bind(CURRENT_TEST, ctx):
                 try:
                     await forked_resolver.teardown_scope(Scope.CASE)
                 except Exception as teardown_err:
@@ -182,9 +182,7 @@ class SingleTest(Test):
     ) -> dict[str, Any]:
         """Resolve test parameters from resources."""
         kwargs = dict(self.params)
-        with resolver_context_scope(
-            ResolverContext(consumer_name=self.definition.name)
-        ):
+        with bind(CURRENT_RESOURCE_CONSUMER, self.definition.name):
             for param in self.definition.params:
                 if param not in kwargs:
                     kwargs[param] = await resolver.resolve(param)

@@ -1,19 +1,21 @@
+import asyncio
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from rue import metrics
 from rue.assertions.base import AssertionRepr, AssertionResult
-from rue.context import (
-    PREDICATE_RESULTS_COLLECTOR,
-    ResolverContext,
+from rue.context.collectors import (
+    CURRENT_ASSERTION_RESULTS,
+    CURRENT_PREDICATE_RESULTS,
+)
+from rue.context.runtime import (
+    CURRENT_RESOURCE_CONSUMER,
+    CURRENT_TEST,
     TestContext as Ctx,
-    assertions_collector,
-    metrics,
-    predicate_results_collector,
-    resolver_context_scope,
-    test_context_scope as context_scope,
+    bind,
 )
 from rue.metrics_.base import Metric, metric
 from rue.predicates.models import PredicateResult
@@ -48,7 +50,7 @@ def clean_registry():
 def test_assertionresult_appends_to_test_context():
     assertion_results: list[AssertionResult] = []
 
-    with assertions_collector(assertion_results):
+    with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
         ar = AssertionResult(
             passed=True,
             expression_repr=AssertionRepr(
@@ -82,8 +84,8 @@ def test_assertion_context_collects_recorded_predicate_results():
     predicate_results_list: list[PredicateResult] = []
 
     with (
-        context_scope(test_ctx),
-        predicate_results_collector(predicate_results_list),
+        bind(CURRENT_TEST, test_ctx),
+        bind(CURRENT_PREDICATE_RESULTS, predicate_results_list),
     ):
         pr = PredicateResult(
             actual="a",
@@ -95,7 +97,7 @@ def test_assertion_context_collects_recorded_predicate_results():
         assert pr.value is True
         assert predicate_results_list == []
 
-        c = PREDICATE_RESULTS_COLLECTOR.get()
+        c = CURRENT_PREDICATE_RESULTS.get()
         assert c is not None
         c.append(pr)
 
@@ -121,7 +123,7 @@ def test_metrics_records_assertion_passed_and_reads_test_context_for_metadata():
     m1 = Metric(name="m1")
     m2 = Metric(name="m2")
 
-    with context_scope(test_ctx), metrics(m1, m2):
+    with bind(CURRENT_TEST, test_ctx), metrics(m1, m2):
         # AssertionResult.__post_init__ calls metric.add_record(self.passed)
         ar1 = AssertionResult(
             passed=True,
@@ -156,7 +158,32 @@ async def test_metric_injection_reads_resolver_context():
         yield Metric(name="ignored_by_on_resolve")
 
     resolver = ResourceResolver()
-    with resolver_context_scope(ResolverContext(consumer_name="consumer_a")):
+    with bind(CURRENT_RESOURCE_CONSUMER, "consumer_a"):
         m = await resolver.resolve("injected_metric")
 
     assert "consumer_a" in m.metadata.collected_from_resources
+
+
+def test_bind_restores_previous_value():
+    assert CURRENT_RESOURCE_CONSUMER.get() is None
+
+    with bind(CURRENT_RESOURCE_CONSUMER, "outer"):
+        assert CURRENT_RESOURCE_CONSUMER.get() == "outer"
+        with bind(CURRENT_RESOURCE_CONSUMER, "inner"):
+            assert CURRENT_RESOURCE_CONSUMER.get() == "inner"
+        assert CURRENT_RESOURCE_CONSUMER.get() == "outer"
+
+    assert CURRENT_RESOURCE_CONSUMER.get() is None
+
+
+@pytest.mark.asyncio
+async def test_bind_isolates_values_between_tasks():
+    async def read_value(name: str) -> str | None:
+        with bind(CURRENT_RESOURCE_CONSUMER, name):
+            await asyncio.sleep(0)
+            return CURRENT_RESOURCE_CONSUMER.get()
+
+    values = await asyncio.gather(read_value("left"), read_value("right"))
+
+    assert values == ["left", "right"]
+    assert CURRENT_RESOURCE_CONSUMER.get() is None
