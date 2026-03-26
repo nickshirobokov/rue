@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from rue.context import (
-    RESOLVER_CONTEXT,
-    TEST_CONTEXT,
+from rue.context.runtime import (
+    CURRENT_RESOURCE_CONSUMER,
+    CURRENT_TEST,
     TestContext as Ctx,
-    test_context_scope as context_scope,
+    bind,
 )
 from rue.resources import (
     ResourceResolver,
@@ -547,7 +547,7 @@ class TestResourceHooks:
 
         def hook(value):
             nonlocal received_name
-            if test_ctx := TEST_CONTEXT.get():
+            if test_ctx := CURRENT_TEST.get():
                 received_name = test_ctx.item.name
             else:
                 received_name = "unknown"
@@ -558,7 +558,7 @@ class TestResourceHooks:
             return 42
 
         resolver = ResourceResolver(get_registry())
-        with context_scope(Ctx(item=_make_item("my_test"))):
+        with bind(CURRENT_TEST, Ctx(item=_make_item("my_test"))):
             await resolver.resolve("simple")
         assert received_name == "my_test"
 
@@ -567,8 +567,8 @@ class TestResourceHooks:
         contexts = {}
 
         def hook(value):
-            if resolver_ctx := RESOLVER_CONTEXT.get():
-                contexts[resolver_ctx.consumer_name] = value
+            if consumer_name := CURRENT_RESOURCE_CONSUMER.get():
+                contexts[consumer_name] = value
             else:
                 contexts[("unknown", value)] = value
             return value
@@ -592,8 +592,8 @@ class TestResourceHooks:
         history = []
 
         def hook(value):
-            if resolver_ctx := RESOLVER_CONTEXT.get():
-                history.append((resolver_ctx.consumer_name, value))
+            if consumer_name := CURRENT_RESOURCE_CONSUMER.get():
+                history.append((consumer_name, value))
             else:
                 history.append(("unknown", value))
             return value

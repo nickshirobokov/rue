@@ -14,6 +14,8 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import TextIO
 
+from rue.context.runtime import bind
+
 
 @dataclass
 class OutputBuffer:
@@ -69,16 +71,11 @@ class _SysStreamDispatcher(io.TextIOBase):
         return len(s)
 
     def flush(self) -> None:
-        # Always flush the original stream because `write()` may have
-        # forwarded data to `_original` even when `_swallow` is True
         try:
             self._original.flush()
         except Exception:
-            # Best-effort flush; ignore errors from underlying stream
             pass
 
-        # If we're swallowing and a buffer is active, also flush the
-        # buffer destination so buffered output is emitted promptly.
         buf = self._buffer_var.get()
         if self._swallow and buf is not None and not buf._disabled:
             target = buf.stdout if self._is_stdout else buf.stderr
@@ -154,29 +151,16 @@ class SysOutputCapture:
             self._buffer.reset(token)
 
 
-_current_capture: ContextVar[SysOutputCapture | None] = ContextVar(
-    "current_capture", default=None
+CURRENT_OUTPUT_CAPTURE: ContextVar[SysOutputCapture | None] = ContextVar(
+    "current_output_capture", default=None
 )
-
-
-def get_current_capture() -> SysOutputCapture | None:
-    """Get the active capture instance."""
-    return _current_capture.get()
 
 
 @contextmanager
 def sys_output_capture(swallow: bool = True) -> Iterator[SysOutputCapture]:
-    """Context manager for sys-level output capture.
-
-    Args:
-        swallow: If True, output is captured only. If False, output is
-                 captured AND passed through to real stdout/stderr.
-    """
+    """Context manager for sys-level output capture."""
     capture = SysOutputCapture(swallow=swallow)
     capture.install()
-    token: Token[SysOutputCapture | None] = _current_capture.set(capture)
-    try:
+    with bind(CURRENT_OUTPUT_CAPTURE, capture):
         yield capture
-    finally:
-        _current_capture.reset(token)
-        capture.uninstall()
+    capture.uninstall()

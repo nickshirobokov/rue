@@ -6,7 +6,8 @@ from functools import wraps
 from inspect import BoundArguments, Parameter, signature
 from typing import Any, Protocol, TypeVar, overload, ParamSpec, Concatenate
 
-from rue.context import PREDICATE_RESULTS_COLLECTOR, get_test_tracer
+from rue.context.collectors import CURRENT_PREDICATE_RESULTS
+from rue.context.runtime import CURRENT_TEST_TRACER
 from rue.predicates.models import PredicateResult
 from rue.telemetry.otel.runtime import otel_runtime
 
@@ -133,8 +134,8 @@ def predicate(
             async def async_wrapper(*args: Any, **kwargs: Any) -> bool:
                 bound = sig.bind(*args, **kwargs)
                 bound.apply_defaults()
-                tracer = get_test_tracer()
-                if tracer is None or tracer.otel_trace_session is None:
+                tracer = CURRENT_TEST_TRACER.get()
+                if tracer is None or not tracer.has_otel_trace:
                     predicate_result = _normalize_result(
                         await f(*args, **kwargs),
                         predicate_name,
@@ -161,8 +162,8 @@ def predicate(
         def sync_wrapper(*args: Any, **kwargs: Any) -> bool:
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
-            tracer = get_test_tracer()
-            if tracer is None or tracer.otel_trace_session is None:
+            tracer = CURRENT_TEST_TRACER.get()
+            if tracer is None or not tracer.has_otel_trace:
                 predicate_result = _normalize_result(
                     f(*args, **kwargs),
                     predicate_name,
@@ -220,7 +221,7 @@ def _normalize_result(
 
 
 def _record_result(result: PredicateResult) -> None:
-    collector = PREDICATE_RESULTS_COLLECTOR.get()
+    collector = CURRENT_PREDICATE_RESULTS.get()
     if collector is not None:
         collector.append(result)
 
@@ -237,12 +238,8 @@ def _set_trace_attributes(
     span.set_attribute("predicate.strict", result.strict)
     span.set_attribute("predicate.confidence", result.confidence)
 
-    tracer = get_test_tracer()
-    if (
-        tracer is None
-        or tracer.otel_trace_session is None
-        or not tracer.otel_content
-    ):
+    tracer = CURRENT_TEST_TRACER.get()
+    if tracer is None or not tracer.records_otel_content:
         return
 
     span.set_attribute(

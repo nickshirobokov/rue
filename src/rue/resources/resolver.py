@@ -12,10 +12,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ParamSpec, TypeVar
 
-from rue.context import ResolverContext, get_test_tracer, resolver_context_scope
-from rue.context.output_capture import OutputBuffer, get_current_capture
-from rue.telemetry.otel import OtelTrace
-
+from rue.context.runtime import (
+    CURRENT_RESOURCE_CONSUMER,
+    bind,
+)
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -53,7 +53,6 @@ class ResourceDef:
 
 _registry: dict[str, ResourceDef] = {}
 _builtin_registry: dict[str, ResourceDef] = {}
-
 
 def resource(
     fn: Callable[P, T] | None = None,
@@ -101,6 +100,8 @@ def get_registry() -> dict[str, ResourceDef]:
     """Get the global resource registry."""
     return _registry
 
+def register_builtin(name: str) -> None:
+    _builtin_registry[name] = _registry[name]
 
 def clear_registry() -> None:
     """Clear all registered resources."""
@@ -158,8 +159,7 @@ class ResourceResolver:
         cache_key: tuple[Scope, str],
     ) -> Any:
         kwargs = {}
-        resolver_ctx = ResolverContext(consumer_name=name)
-        with resolver_context_scope(resolver_ctx):
+        with bind(CURRENT_RESOURCE_CONSUMER, name):
             for dep in defn.dependencies:
                 kwargs[dep] = await self.resolve(dep)
 
@@ -356,36 +356,3 @@ class ResourceResolver:
                 raise RuntimeError(teardown_errors[0])
             raise ExceptionGroup("Teardown errors occurred", teardown_errors)
 
-
-@resource(scope=Scope.CASE)
-def otel_trace() -> Generator[OtelTrace, None, None]:
-    """Provide access to OpenTelemetry data for the current test."""
-    tracer = get_test_tracer()
-    if tracer is None or tracer.otel_trace_session is None:
-        raise RuntimeError(
-            "OpenTelemetry is not enabled; cannot resolve otel_trace resource."
-        )
-    yield OtelTrace(_session=tracer.otel_trace_session)
-
-
-_builtin_registry["otel_trace"] = _registry["otel_trace"]
-
-
-@resource(scope=Scope.CASE)
-def captured_output() -> Generator[OutputBuffer, None, None]:
-    """Provide access to captured stdout/stderr for the current test.
-
-    Usage:
-        def test_my_test(captured_output):
-            print("hello")
-            out, err = captured_output.readouterr()
-            assert out == "hello\\n"
-    """
-    capture = get_current_capture()
-    if capture is None:
-        raise RuntimeError("Output capture not enabled")
-    with capture.capture() as buf:
-        yield buf
-
-
-_builtin_registry["captured_output"] = _registry["captured_output"]

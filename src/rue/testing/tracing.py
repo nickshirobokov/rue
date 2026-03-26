@@ -26,6 +26,14 @@ class TestTracer:
     _otel_root_span_scope: Any = field(default=None, init=False, repr=False)
 
     @property
+    def has_otel_trace(self) -> bool:
+        return self.otel_trace_session is not None
+
+    @property
+    def records_otel_content(self) -> bool:
+        return self.has_otel_trace and self.otel_content
+
+    @property
     def otel_trace_id(self) -> str | None:
         span = self.completed_otel_trace_session
         if span is not None:

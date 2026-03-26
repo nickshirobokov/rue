@@ -22,7 +22,7 @@ from opentelemetry.sdk.trace.export import (
 )
 from opentelemetry.trace import INVALID_SPAN, Span
 
-from rue.context import get_test_tracer
+from rue.context.runtime import CURRENT_TEST_TRACER
 
 
 @dataclass(slots=True)
@@ -141,8 +141,8 @@ class OtelRuntime:
     @contextmanager
     def otel_span(self, name: str, attributes: dict[str, Any] | None = None):
         """Create a child span when inside an active OpenTelemetry-enabled test."""
-        tracer = get_test_tracer()
-        if tracer is None or tracer.otel_trace_session is None:
+        tracer = CURRENT_TEST_TRACER.get()
+        if tracer is None or not tracer.has_otel_trace:
             yield INVALID_SPAN
             return
 

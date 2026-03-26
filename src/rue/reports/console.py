@@ -22,7 +22,7 @@ from rich.text import Text
 from rich.traceback import Frame, Stack, Trace, Traceback
 from rich.tree import Tree
 
-from rue.context import get_runner
+from rue.context.runtime import CURRENT_RUNNER
 from rue.reports.base import Reporter
 from rue.testing.models.run import RunEnvironment
 
@@ -518,7 +518,7 @@ class ConsoleReporter(Reporter):
             self._current_module = None
             self._reset_live_state(total_tests=len(items))
 
-            runner = get_runner()
+            runner = CURRENT_RUNNER.get()
             environment = (
                 runner.current_run.environment
                 if runner and runner.current_run

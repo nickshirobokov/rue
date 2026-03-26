@@ -1,6 +1,5 @@
 import rue
-from rue import Metric
-from rue.context import metrics
+from rue import Metric, metrics
 
 
 # Use dependency injection to stack metrics

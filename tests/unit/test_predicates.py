@@ -5,7 +5,8 @@ from uuid import uuid4
 
 import pytest
 
-from rue.context import predicate_results_collector
+from rue.context.collectors import CURRENT_PREDICATE_RESULTS
+from rue.context.runtime import bind
 from rue.predicates import PredicateResult, predicate
 from rue.testing.discovery import collect
 from rue.testing.runner import Runner
@@ -98,7 +99,7 @@ async def _run_module_with_tracing(
 def test_sync_predicate_collects_normalized_result():
     results: list[PredicateResult] = []
 
-    with predicate_results_collector(results):
+    with bind(CURRENT_PREDICATE_RESULTS, results):
         verdict = equals(
             "a",
             "b",
@@ -124,7 +125,7 @@ def test_sync_predicate_collects_normalized_result():
 async def test_async_predicate_collects_returned_result_without_normalizing():
     results: list[PredicateResult] = []
 
-    with predicate_results_collector(results):
+    with bind(CURRENT_PREDICATE_RESULTS, results):
         verdict = await async_returns_result(
             "left",
             "right",

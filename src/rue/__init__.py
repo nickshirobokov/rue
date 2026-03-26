@@ -1,7 +1,7 @@
 """Rue - Testing framework for AI agents."""
 
-from .context import metrics
 from .metrics_ import Metric, metric
+from .metrics_.scope import metrics
 from .predicates import PredicateResult, predicate
 from .reports import Reporter, reporter
 from .testing import (

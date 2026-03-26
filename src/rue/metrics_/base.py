@@ -23,12 +23,11 @@ from uuid import UUID
 
 from pydantic import validate_call
 
-from rue.context import (
-    METRIC_RESULTS_COLLECTOR,
-    RESOLVER_CONTEXT,
-    TEST_CONTEXT,
-    assertions_collector,
+from rue.context.collectors import (
+    CURRENT_ASSERTION_RESULTS,
+    CURRENT_METRIC_RESULTS,
 )
+from rue.context.runtime import CURRENT_RESOURCE_CONSUMER, CURRENT_TEST, bind
 from rue.resources import Scope, resource
 
 
@@ -176,7 +175,7 @@ class Metric:
             The value(s) to add to the metric.
         """
         with self._values_lock:
-            test_ctx = TEST_CONTEXT.get()
+            test_ctx = CURRENT_TEST.get()
             if test_ctx is not None:
                 if test_ctx.item.name:
                     self.metadata.collected_from_tests.add(test_ctx.item.name)
@@ -517,10 +516,10 @@ class MetricResult:
 
     def __post_init__(self) -> None:
         if self.execution_id is None:
-            test_ctx = TEST_CONTEXT.get()
+            test_ctx = CURRENT_TEST.get()
             if test_ctx is not None:
                 self.execution_id = test_ctx.execution_id
-        collector = METRIC_RESULTS_COLLECTOR.get()
+        collector = CURRENT_METRIC_RESULTS.get()
         if collector is not None:
             collector.append(self)
 
@@ -567,12 +566,9 @@ def metric(
         return m
 
     def on_injection_hook(m: Metric) -> Metric:
-        resolver_ctx = RESOLVER_CONTEXT.get()
-        if resolver_ctx is not None:
-            if resolver_ctx.consumer_name:
-                m.metadata.collected_from_resources.add(
-                    resolver_ctx.consumer_name
-                )
+        consumer_name = CURRENT_RESOURCE_CONSUMER.get()
+        if consumer_name:
+            m.metadata.collected_from_resources.add(consumer_name)
         return m
 
     if is_generator:
@@ -583,13 +579,13 @@ def metric(
         ) -> Generator[Metric, Any, Any]:
             assertions_results = []
 
-            with assertions_collector(assertions_results):
+            with bind(CURRENT_ASSERTION_RESULTS, assertions_results):
                 gen = fn(*args, **kwargs)
                 metric_instance: Metric = next(gen)
 
             yield metric_instance
 
-            with assertions_collector(assertions_results):
+            with bind(CURRENT_ASSERTION_RESULTS, assertions_results):
                 final_value = None
                 while True:
                     try:
@@ -622,13 +618,13 @@ def metric(
         async def wrapped_async_gen(*args: Any, **kwargs: Any):
             assertions_results = []
 
-            with assertions_collector(assertions_results):
+            with bind(CURRENT_ASSERTION_RESULTS, assertions_results):
                 gen = fn(*args, **kwargs)
                 metric_instance: Metric = await gen.__anext__()
 
             yield metric_instance
 
-            with assertions_collector(assertions_results):
+            with bind(CURRENT_ASSERTION_RESULTS, assertions_results):
                 final_value = None
                 while True:
                     try:
