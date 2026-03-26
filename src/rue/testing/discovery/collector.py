@@ -1,9 +1,8 @@
 """Test discovery for rue_* files and pytest-style test names."""
 
 import ast
-import importlib.util
 import inspect
-import sys
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,8 +10,8 @@ from types import ModuleType
 from typing import Any
 
 from rue.testing.decorators.tags import TagData, get_tag_data, merge_tag_data
-from rue.testing.discovery.loader import RueModuleLoader
-from rue.testing.models import TestDefinition, Modifier
+from rue.testing.discovery.loader import RueImportSession
+from rue.testing.models import Modifier, TestDefinition
 
 
 @dataclass(frozen=True)
@@ -48,6 +47,12 @@ def _iter_rue_files(path: Path) -> list[Path]:
     if path.is_dir():
         return sorted(path.rglob("rue_*.py"))
     return []
+
+
+def _iter_rueconf_files(path: Path) -> list[Path]:
+    if not path.is_dir():
+        return []
+    return sorted(path.glob("rueconf_*.py"))
 
 
 def _is_tag_root(expr: ast.expr) -> bool:
@@ -139,23 +144,68 @@ def collect_static(path: Path | str | None = None) -> list[StaticTestReference]:
     return refs
 
 
-def _load_module(path: Path) -> ModuleType:
-    """Dynamically load a Python module from path."""
-    # Use unique module name to avoid collisions
-    module_name = f"rue_discovery.{path.stem}_{hash(path)}"
-    spec = importlib.util.spec_from_file_location(
-        module_name,
-        path,
-        loader=RueModuleLoader(fullname=module_name, path=path),
-    )
-    if spec is None or spec.loader is None:
-        msg = f"Cannot load module from {path}"
-        raise ImportError(msg)
+def _resolve_suite_root(explicit_root: Path) -> Path:
+    for candidate in [explicit_root, *explicit_root.parents]:
+        if (candidate / "pyproject.toml").exists():
+            return candidate
+    return explicit_root
 
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+
+def _resolve_collect_root(paths: list[Path]) -> Path:
+    bases = [path.parent for path in paths]
+    if len(bases) == 1:
+        return bases[0]
+    return Path(os.path.commonpath([str(base) for base in bases]))
+
+
+def _iter_ancestor_dirs(root: Path, directory: Path) -> list[Path]:
+    relative = directory.relative_to(root)
+    current = root
+    directories = [root]
+    for part in relative.parts:
+        current /= part
+        directories.append(current)
+    return directories
+
+
+def _config_chain_for(path: Path, suite_root: Path) -> list[Path]:
+    configs: list[Path] = []
+    for directory in _iter_ancestor_dirs(suite_root, path.parent):
+        configs.extend(_iter_rueconf_files(directory))
+    return configs
+
+
+def _collect_paths(
+    paths: list[Path], *, explicit_root: Path | None
+) -> list[TestDefinition]:
+    if not paths:
+        return []
+
+    resolved_paths = sorted({path.resolve() for path in paths})
+    collect_root = (
+        explicit_root.resolve()
+        if explicit_root is not None
+        else _resolve_collect_root(resolved_paths)
+    )
+    suite_root = _resolve_suite_root(collect_root)
+    session = RueImportSession(suite_root)
+
+    config_chains: dict[Path, list[Path]] = {}
+    for file_path in resolved_paths:
+        session.register_path(file_path)
+        config_paths = _config_chain_for(file_path, suite_root)
+        config_chains[file_path] = config_paths
+        for config_path in config_paths:
+            session.register_path(config_path)
+
+    items: list[TestDefinition] = []
+    for file_path in resolved_paths:
+        for config_path in config_chains[file_path]:
+            session.load_module(config_path)
+        module = session.load_module(file_path)
+        items.extend(_collect_from_module(module, file_path))
+
+    return items
 
 
 def _extract_test_params(fn: Callable[..., Any]) -> list[str]:
@@ -242,10 +292,15 @@ def collect(path: Path | str | None = None) -> list[TestDefinition]:
         items = collect("./tests/")  # Directory
     """
     path = _resolve_path(path)
-    items: list[TestDefinition] = []
+    file_paths = _iter_rue_files(path)
+    explicit_root = path if path.is_dir() else path.parent
+    return _collect_paths(file_paths, explicit_root=explicit_root)
 
-    for file_path in _iter_rue_files(path):
-        module = _load_module(file_path)
-        items.extend(_collect_from_module(module, file_path))
 
-    return items
+def collect_paths(paths: list[Path | str]) -> list[TestDefinition]:
+    """Collect tests from multiple explicit module paths in one session."""
+    resolved = [
+        Path(path).resolve() if isinstance(path, str) else path.resolve()
+        for path in paths
+    ]
+    return _collect_paths(resolved, explicit_root=None)

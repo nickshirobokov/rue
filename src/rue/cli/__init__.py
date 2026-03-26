@@ -10,7 +10,7 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, TypeVar, Callable
+from typing import Callable, Protocol, TypeVar
 from uuid import UUID
 
 from rich.console import Console
@@ -22,8 +22,12 @@ from rue.storage.sqlite.store import (
     MAX_STORED_RUNS,
     find_project_root,
 )
-from rue.testing import TestDefinition, collect
-from rue.testing.discovery import StaticTestReference, collect_static
+from rue.testing import TestDefinition
+from rue.testing.discovery import (
+    StaticTestReference,
+    collect_paths,
+    collect_static,
+)
 from rue.testing.runner import Runner
 
 
@@ -396,9 +400,7 @@ def _resolve_otel_content(args: argparse.Namespace, config: Config) -> bool:
     return config.otel_content
 
 
-def _resolve_reporters(
-    args: argparse.Namespace, config: Config
-) -> list[str]:
+def _resolve_reporters(args: argparse.Namespace, config: Config) -> list[str]:
     """Resolve reporter names from CLI args and config.
 
     Priority:
@@ -429,10 +431,7 @@ def _collect_items(
 
     selected_paths = sorted({ref.module_path for ref in selected_refs})
 
-    items: list[TestItem] = []
-    for module_path in selected_paths:
-        items.extend(collect(module_path))
-
+    items = collect_paths(selected_paths)
     return _filter_items(items, include_tags, exclude_tags, keyword)
 
 
