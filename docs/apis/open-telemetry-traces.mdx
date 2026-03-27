@@ -9,7 +9,7 @@ Rue OpenTelemetry capture is **Runner-managed**, while persistence is **reporter
 ### CLI
 
 ```bash
-# Enable OpenTelemetry (default reporters also write local trace files)
+# Enable OpenTelemetry (the usual registered reporters also write local trace files)
 uv run rue test --otel
 
 # Disable OpenTelemetry explicitly, even if config enables it
@@ -42,17 +42,17 @@ CLI flags override config and environment.
 ### Runner
 
 ```python
+from rue.config import RueConfig
 from rue.reports import ConsoleReporter, OtelReporter
 from rue.testing import Runner
 
 runner = Runner(
+    config=RueConfig(otel=True, otel_content=True),
     reporters=[ConsoleReporter(), OtelReporter()],
-    otel_enabled=True,
-    otel_content=True,
 )
 ```
 
-If you instantiate `Runner(otel_enabled=True)` without `reporters=...`, Rue uses `ConsoleReporter()` and `OtelReporter()` by default.
+If `config.reporters` is empty and you omit `reporters=...`, `Runner` uses all currently registered reporter instances. In a normal fresh process, that includes the built-in `ConsoleReporter` and `OtelReporter`.
 
 ## Public APIs
 
@@ -107,8 +107,8 @@ Available properties and methods:
 
 ## Storage
 
-- `otel_enabled=True` enables capture; persistence happens only when an `OtelReporter` is attached
-- Rue's default CLI and `Runner()` reporter set includes `OtelReporter`, so `uv run rue test --otel` writes `.rue/traces/<run_id>/<execution_id>.json`
+- Enable capture with `RueConfig(otel=True)`, `--otel`, or config files; persistence still happens only when an `OtelReporter` is attached
+- In the usual fresh-process setup, `uv run rue test --otel` writes `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is registered by default
 - `OtelReporter` stores compact JSON payloads under `.rue/traces/<run_id>/<execution_id>.json`
 - `OtelReporter` keeps only the 5 most recent run directories under `.rue/traces`
 - Custom OTEL persistence or forwarding belongs in custom reporters via `Reporter.on_trace_collected()`

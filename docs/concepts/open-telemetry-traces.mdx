@@ -34,7 +34,7 @@ OpenTelemetry capture is disabled by default. Enable it from the CLI:
 uv run rue test --otel
 ```
 
-With Rue's default reporters, `uv run rue test --otel` also writes local JSON traces under `.rue/traces/<run_id>/<execution_id>.json`. Those files are separate from SQLite storage.
+In the usual fresh-process setup, `uv run rue test --otel` also writes local JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is registered by default. Those files are separate from SQLite storage.
 
 If you override the reporter list, keep `OtelReporter` attached when you still want local trace files:
 

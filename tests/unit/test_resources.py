@@ -108,10 +108,7 @@ class TestResourceDecorator:
         assert defn.scope == Scope.CASE
         assert defn.is_async == expected_flags["is_async"]
         assert defn.is_generator == expected_flags["is_generator"]
-        assert (
-            defn.is_async_generator
-            == expected_flags["is_async_generator"]
-        )
+        assert defn.is_async_generator == expected_flags["is_async_generator"]
 
     @pytest.mark.parametrize(
         ("name", "register", "expected_flags"),
@@ -158,10 +155,7 @@ class TestResourceDecorator:
         assert defn is not None
         assert defn.is_async == expected_flags["is_async"]
         assert defn.is_generator == expected_flags["is_generator"]
-        assert (
-            defn.is_async_generator
-            == expected_flags["is_async_generator"]
-        )
+        assert defn.is_async_generator == expected_flags["is_async_generator"]
 
     @pytest.mark.parametrize(
         ("scope_value", "expected_scope", "name"),
@@ -1020,11 +1014,15 @@ class TestResourceResolutionErrors:
             raise RuntimeError("generator teardown failed")
 
         resolver = ResourceResolver(registry)
-        assert await resolver.resolve("resource_with_teardown_errors") == "value"
+        assert (
+            await resolver.resolve("resource_with_teardown_errors") == "value"
+        )
 
         with pytest.raises(ExceptionGroup) as exc_info:
             await resolver.teardown_scope(Scope.CASE)
 
         messages = {str(error) for error in exc_info.value.exceptions}
-        assert any("generator teardown failed" in message for message in messages)
+        assert any(
+            "generator teardown failed" in message for message in messages
+        )
         assert any("hook teardown failed" in message for message in messages)

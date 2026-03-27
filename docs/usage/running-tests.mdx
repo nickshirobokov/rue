@@ -175,7 +175,7 @@ uv run rue test --otel
 uv run rue test --otel --reporter ConsoleReporter --reporter OtelReporter
 ```
 
-With Rue's default reporter set, `uv run rue test --otel` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json`.
+In the usual fresh-process setup, `uv run rue test --otel` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is registered by default.
 
 **Use OpenTelemetry spans for**:
 - Asserting tool calls in agent tests
@@ -316,6 +316,10 @@ All reporters implement the `Reporter` ABC from `src/rue/reports/base.py`:
 ```python
 class Reporter(ABC):
     @abstractmethod
+    def configure(self, config: RueConfig) -> None:
+        """Adjust reporter parameters from runtime config."""
+
+    @abstractmethod
     async def on_no_tests_found(self) -> None:
         """Called when test collection finds no tests."""
 
@@ -351,7 +355,7 @@ class Reporter(ABC):
 
 ### Built-in Reporters
 
-If you do not specify reporters, Rue attaches both `ConsoleReporter` and `OtelReporter` by default.
+If `config.reporters` is empty and you do not pass `reporters=[...]`, `Runner` uses all currently registered reporter instances. In a normal fresh process, that includes the built-in `ConsoleReporter` and `OtelReporter`.
 
 **ConsoleReporter**: Outputs to terminal with Rich formatting.
 
@@ -378,6 +382,7 @@ Override `on_test_start` if you need live in-flight state:
 import json
 from pathlib import Path
 
+from rue.config import RueConfig
 from rue.reports.base import Reporter
 from rue.testing import Run, TestDefinition, TestExecution
 
@@ -387,6 +392,10 @@ class JsonFileReporter(Reporter):
     def __init__(self, output_path: str):
         self.output_path = Path(output_path)
         self.results = []
+        self.verbosity = 0
+
+    def configure(self, config: RueConfig) -> None:
+        self.verbosity = config.verbosity
 
     async def on_no_tests_found(self) -> None:
         print("No tests found")
@@ -436,6 +445,7 @@ Use multiple reporters simultaneously with the programmatic API:
 
 ```python
 import asyncio
+from rue.config import RueConfig
 from rue.testing import Runner
 from rue.reports import ConsoleReporter, OtelReporter
 from my_reporters import JsonFileReporter, SlackReporter
@@ -448,7 +458,10 @@ async def main():
     slack = SlackReporter(webhook_url="https://...")
 
     # Pass all reporters to runner
-    runner = Runner(reporters=[console, otel, json_reporter, slack], otel_enabled=True)
+    runner = Runner(
+        config=RueConfig(otel=True),
+        reporters=[console, otel, json_reporter, slack],
+    )
 
     # Run tests - all reporters receive events
     result = await runner.run(path="tests/")

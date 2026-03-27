@@ -196,7 +196,7 @@ def database():
 
 @rue.resource(scope="session")
 def ml_model():
-    return load_model()  # Shared across entire run
+    return load_model()  # Shared across the run for the selected provider
 
 def test_query(database, ml_model):
     # Both injected automatically
@@ -206,6 +206,8 @@ def test_query(database, ml_model):
 ```
 
 Scopes: `"case"` (default), `"suite"`, `"session"`.
+
+`SESSION` resources are hierarchical: same-name providers can coexist, and Rue selects the nearest ancestor provider relative to the requesting test module. Without an active test context, resolution falls back to the flat/latest registered definition.
 
 **`@rue.metric(scope="session")`** - Define a metric as a scoped, injectable measurement object
 

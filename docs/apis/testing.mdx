@@ -513,7 +513,7 @@ Enum defining resource lifecycle scopes.
 |-------|-------------|
 | `Scope.CASE` | Fresh instance per parametrized test case |
 | `Scope.SUITE` | Shared within a single test file/module |
-| `Scope.SESSION` | Shared across entire test run |
+| `Scope.SESSION` | Shared across the run for the selected provider |
 
 **Example:**
 ```python
@@ -522,7 +522,7 @@ from rue.resources import Scope
 
 @resource(scope=Scope.SESSION)
 def expensive_model():
-    return load_model()  # Loaded once
+    return load_model()  # Loaded once for the selected provider
 
 @resource(scope=Scope.SUITE)
 def api_client():
@@ -536,6 +536,8 @@ def temp_dir():
     shutil.rmtree(tmpdir)  # Fresh per case
 ```
 
+If multiple `SESSION` resources share the same name, Rue keeps them side by side and selects the nearest ancestor provider relative to the requesting test module. Without an active test context, resolution falls back to the flat/latest registered definition.
+
 ---
 
 ### Runner
@@ -548,18 +550,12 @@ class Runner:
     def __init__(
         self,
         *,
+        config: RueConfig | None = None,
         reporters: list[Reporter] | None = None,
-        maxfail: int | None = None,
         fail_fast: bool = False,
-        verbosity: int = 0,
-        concurrency: int = 1,
-        timeout: float | None = None,
-        otel_enabled: bool = False,
-        otel_content: bool = True,
         capture_output: bool = True,
-        db_enabled: bool = True,
-        db_path: Path | str | None = None,
         run_id: UUID | str | None = None,
+        resource_registry: ResourceRegistry | None = None,
     ) -> None: ...
 
     async def run(
@@ -571,6 +567,13 @@ class Runner:
 
     def run_id_exists(self, run_id: UUID | str) -> bool: ...
 ```
+
+**Constructor behavior:**
+- `Runner` is config-driven. OpenTelemetry, DB, timeout, concurrency, verbosity, and reporter-name settings come from `RueConfig`.
+- If `config.reporters` contains names, `Runner` resolves those names from `Reporter.REGISTRY` and ignores any `reporters=[...]` instances you pass in.
+- If `config.reporters` is empty and `reporters=[...]` is provided, `Runner` uses those instances.
+- If both are omitted, `Runner` uses all currently registered reporter instances.
+- `resource_registry` lets you replace the default global resource registry.
 
 **Timeout behavior (`timeout`):**
 - `timeout` is a run-level limit (not per-test).
@@ -588,13 +591,13 @@ class Runner:
 ```python
 from uuid import UUID
 
+from rue.config import RueConfig
 from rue.reports import ConsoleReporter, OtelReporter
 from rue.testing import Runner
 
 runner = Runner(
+    config=RueConfig(otel=True, db_path=".rue/rue.db"),
     reporters=[ConsoleReporter(), OtelReporter()],
-    otel_enabled=True,
-    db_path=".rue/rue.db",
     run_id=UUID("00000000-0000-0000-0000-000000000001"),
 )
 
@@ -611,7 +614,7 @@ result = await runner.run(
 )
 ```
 
-OpenTelemetry persistence is configured through reporters. The default `Runner()` reporter set already includes `OtelReporter`; if you supply your own reporters, keep it attached for local `.rue/traces` storage or implement `Reporter.on_trace_collected()` in a custom reporter.
+OpenTelemetry persistence is configured through reporters. In a normal fresh process, the registered reporter set includes `OtelReporter`; if you supply your own reporters, keep it attached for local `.rue/traces` storage or implement `Reporter.on_trace_collected()` in a custom reporter.
 
 ---
 

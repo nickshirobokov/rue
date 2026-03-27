@@ -74,7 +74,9 @@ def test_runner_reports_invalid_parametrize_as_error(null_reporter):
         is_async=False,
         params=["value"],
         modifiers=getattr(test_invalid, "__rue_modifiers__", []),
-        definition_error=getattr(test_invalid, "__rue_definition_error__", None),
+        definition_error=getattr(
+            test_invalid, "__rue_definition_error__", None
+        ),
     )
 
     run_result = asyncio.run(

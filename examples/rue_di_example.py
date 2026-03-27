@@ -7,6 +7,7 @@ import rue
 
 # === Resources (similar to pytest fixtures) ===
 
+
 @rue.resource
 def config():
     """Simple sync resource."""
@@ -32,7 +33,9 @@ async def async_db():
     yield db
     db["connected"] = False  # Teardown
 
+
 # === Test Functions ===
+
 
 def test_config_has_url(config):
     """Test that config resource provides api_url."""

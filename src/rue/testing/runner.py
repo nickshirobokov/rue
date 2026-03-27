@@ -76,9 +76,7 @@ class Runner:
         self.fail_fast = fail_fast
         self.capture_output = capture_output
         self._default_run_id = self._normalize_run_id(run_id)
-        self.resource_registry = (
-            resource_registry or default_resource_registry
-        )
+        self.resource_registry = resource_registry or default_resource_registry
         self.reporters = self._resolve_reporters(reporters)
         for reporter in self.reporters:
             reporter.configure(self.config)
