@@ -18,7 +18,11 @@ from rue.context.runtime import (
 )
 from rue.metrics_.base import MetricResult
 from rue.reports.base import Reporter
-from rue.resources import ResourceResolver, get_registry
+from rue.resources import (
+    ResourceRegistry,
+    ResourceResolver,
+    registry as default_resource_registry,
+)
 from rue.storage import SQLiteStore
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.discovery import collect
@@ -66,11 +70,15 @@ class Runner:
         fail_fast: bool = False,
         capture_output: bool = True,
         run_id: UUID | str | None = None,
+        resource_registry: ResourceRegistry | None = None,
     ) -> None:
         self.config = config or load_config()
         self.fail_fast = fail_fast
         self.capture_output = capture_output
         self._default_run_id = self._normalize_run_id(run_id)
+        self.resource_registry = (
+            resource_registry or default_resource_registry
+        )
         self.reporters = self._resolve_reporters(reporters)
         for reporter in self.reporters:
             reporter.configure(self.config)
@@ -267,7 +275,7 @@ class Runner:
         ):
             await self._notify_collection_complete(items)
 
-            resolver = ResourceResolver(get_registry())
+            resolver = ResourceResolver(self.resource_registry)
 
             self.semaphore = asyncio.Semaphore(self._concurrency_limit())
             self.stop_flag = False

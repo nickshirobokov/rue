@@ -15,7 +15,7 @@ from rue.config import RueConfig
 from rue.reports import ConsoleReporter, OtelReporter
 from rue.reports.base import Reporter
 from rue.reports.otel import DEFAULT_OTEL_OUTPUT_ROOT, MAX_STORED_OTEL_RUNS
-from rue.resources import clear_registry, resource
+from rue.resources import ResourceRegistry, registry, resource
 from rue.telemetry.otel import otel_span
 from rue.telemetry.otel.runtime import OtelTraceSession
 from rue.testing.environment import _filter_env_vars, capture_environment
@@ -40,9 +40,9 @@ from rue.testing.runner import Runner
 @pytest.fixture(autouse=True)
 def clean_registry():
     """Clear the global registry before and after each test."""
-    clear_registry()
+    registry.reset()
     yield
-    clear_registry()
+    registry.reset()
 
 
 def make_item(
@@ -235,7 +235,9 @@ class TestRunner:
     """Tests for Runner class."""
 
     def test_defaults_to_all_registered_reporters(self):
-        runner = Runner(config=make_runner_config(db_enabled=False, verbosity=2))
+        runner = Runner(
+            config=make_runner_config(db_enabled=False, verbosity=2)
+        )
 
         assert len(runner.reporters) == 2
         assert isinstance(runner.reporters[0], ConsoleReporter)
@@ -244,7 +246,9 @@ class TestRunner:
 
     def test_uses_all_registered_reporters_when_not_specified(self):
         extra = EventReporter()
-        runner = Runner(config=make_runner_config(db_enabled=False, verbosity=4))
+        runner = Runner(
+            config=make_runner_config(db_enabled=False, verbosity=4)
+        )
 
         assert runner.reporters[:2] == [
             Reporter.REGISTRY["ConsoleReporter"],
@@ -270,7 +274,9 @@ class TestRunner:
 
         selected = SelectedReporter()
         other = OtherReporter()
-        config = make_runner_config(db_enabled=False, reporters=["SelectedReporter"])
+        config = make_runner_config(
+            db_enabled=False, reporters=["SelectedReporter"]
+        )
 
         runner = Runner(config=config, reporters=[other])
 
@@ -499,6 +505,28 @@ class TestResourceInjection:
         await runner.run(items=[item])
 
         assert captured == ["injected_value"]
+
+    @pytest.mark.asyncio
+    async def test_uses_provided_resource_registry(self, null_reporter):
+        custom_resource_registry = ResourceRegistry()
+
+        @custom_resource_registry.resource
+        def injected():
+            return "custom_value"
+
+        captured = []
+
+        def test_with_resource(injected):
+            captured.append(injected)
+
+        item = make_item(test_with_resource, params=["injected"])
+        runner = Runner(
+            reporters=[null_reporter],
+            resource_registry=custom_resource_registry,
+        )
+        await runner.run(items=[item])
+
+        assert captured == ["custom_value"]
 
     @pytest.mark.asyncio
     async def test_otel_trace_requires_trace_flag(self, null_reporter):

@@ -14,10 +14,10 @@ from rue.context.runtime import (
     bind,
 )
 from rue.resources import (
+    ResourceRegistry,
     ResourceResolver,
     Scope,
-    clear_registry,
-    get_registry,
+    registry,
     resource,
 )
 from rue.testing.discovery import TestItem
@@ -40,17 +40,22 @@ def _make_item(
     )
 
 
-def _register_resource_source(path: Path, source: str) -> None:
-    namespace = {"resource": resource, "Scope": Scope}
+def _register_resource_source(
+    path: Path,
+    source: str,
+    *,
+    resource_decorator=resource,
+) -> None:
+    namespace = {"resource": resource_decorator, "Scope": Scope}
     exec(compile(dedent(source), str(path.resolve()), "exec"), namespace)
 
 
 @pytest.fixture(autouse=True)
 def clean_registry():
     """Clear the global registry before and after each test."""
-    clear_registry()
+    registry.reset()
     yield
-    clear_registry()
+    registry.reset()
 
 
 class TestResourceDecorator:
@@ -61,9 +66,8 @@ class TestResourceDecorator:
         def my_resource():
             return "value"
 
-        registry = get_registry()
-        assert "my_resource" in registry
-        defn = registry["my_resource"]
+        defn = registry.get("my_resource")
+        assert defn is not None
         assert defn.name == "my_resource"
         assert defn.scope == Scope.CASE
         assert not defn.is_async
@@ -74,7 +78,8 @@ class TestResourceDecorator:
         async def async_resource():
             return "async_value"
 
-        defn = get_registry()["async_resource"]
+        defn = registry.get("async_resource")
+        assert defn is not None
         assert defn.is_async
         assert not defn.is_generator
 
@@ -83,7 +88,8 @@ class TestResourceDecorator:
         def gen_resource():
             yield "gen_value"
 
-        defn = get_registry()["gen_resource"]
+        defn = registry.get("gen_resource")
+        assert defn is not None
         assert defn.is_generator
         assert not defn.is_async
 
@@ -92,7 +98,8 @@ class TestResourceDecorator:
         async def async_gen_resource():
             yield "async_gen_value"
 
-        defn = get_registry()["async_gen_resource"]
+        defn = registry.get("async_gen_resource")
+        assert defn is not None
         assert defn.is_async_generator
         assert defn.is_async
 
@@ -101,7 +108,8 @@ class TestResourceDecorator:
         def suite_resource():
             return "suite"
 
-        defn = get_registry()["suite_resource"]
+        defn = registry.get("suite_resource")
+        assert defn is not None
         assert defn.scope == Scope.SUITE
 
     def test_scope_as_enum(self):
@@ -109,7 +117,8 @@ class TestResourceDecorator:
         def session_resource():
             return "session"
 
-        defn = get_registry()["session_resource"]
+        defn = registry.get("session_resource")
+        assert defn is not None
         assert defn.scope == Scope.SESSION
 
     def test_detects_dependencies(self):
@@ -121,12 +130,149 @@ class TestResourceDecorator:
         def dependent(base, other):
             return base + other
 
-        defn = get_registry()["dependent"]
+        defn = registry.get("dependent")
+        assert defn is not None
         assert defn.dependencies == ["base", "other"]
+
+
+class TestResourceRegistry:
+    def test_registers_definitions_and_session_index(self, tmp_path):
+        custom_registry = ResourceRegistry()
+        root = tmp_path / "project"
+        child = root / "tests" / "child"
+        root.mkdir(parents=True)
+        child.mkdir(parents=True)
+
+        _register_resource_source(
+            root / "confrue_root.py",
+            """
+            @resource(scope=Scope.SESSION)
+            def shared():
+                return "root"
+            """,
+            resource_decorator=custom_registry.resource,
+        )
+        _register_resource_source(
+            child / "confrue_child.py",
+            """
+            @resource(scope=Scope.SESSION)
+            def shared():
+                return "child"
+            """,
+            resource_decorator=custom_registry.resource,
+        )
+
+        definition = custom_registry.get("shared")
+        assert definition is not None
+        assert definition.scope == Scope.SESSION
+        assert definition.origin_dir == child.resolve()
+
+    def test_select_picks_nearest_ancestor_session_definition(self, tmp_path):
+        custom_registry = ResourceRegistry()
+        root = tmp_path / "project"
+        child = root / "tests" / "child"
+        sibling = root / "tests" / "sibling"
+        child.mkdir(parents=True)
+        sibling.mkdir(parents=True)
+
+        _register_resource_source(
+            root / "confrue_root.py",
+            """
+            @resource(scope=Scope.SESSION)
+            def shared():
+                return "root"
+            """,
+            resource_decorator=custom_registry.resource,
+        )
+        _register_resource_source(
+            child / "confrue_child.py",
+            """
+            @resource(scope=Scope.SESSION)
+            def shared():
+                return "child"
+            """,
+            resource_decorator=custom_registry.resource,
+        )
+
+        child_selected = custom_registry.select(
+            "shared", child / "rue_child.py"
+        )
+        sibling_selected = custom_registry.select(
+            "shared",
+            sibling / "rue_sibling.py",
+        )
+
+        assert child_selected.definition.origin_dir == child.resolve()
+        assert child_selected.provider_dir == child.resolve()
+        assert sibling_selected.definition.origin_dir == root.resolve()
+        assert sibling_selected.provider_dir == root.resolve()
+
+    def test_non_session_definition_wins_over_session_definition(
+        self, tmp_path
+    ):
+        custom_registry = ResourceRegistry()
+        root = tmp_path / "project"
+        root.mkdir(parents=True)
+
+        _register_resource_source(
+            root / "confrue_root.py",
+            """
+            @resource(scope=Scope.SESSION)
+            def shared():
+                return "session"
+            """,
+            resource_decorator=custom_registry.resource,
+        )
+
+        @custom_registry.resource(scope=Scope.SUITE)
+        def shared():
+            return "suite"
+
+        selected = custom_registry.select("shared", root / "rue_test.py")
+
+        assert selected.definition.scope == Scope.SUITE
+        assert selected.provider_dir is None
+
+    def test_reset_restores_builtin_resources(self):
+        custom_registry = ResourceRegistry()
+
+        @custom_registry.resource
+        def builtin_resource():
+            return "builtin"
+
+        @custom_registry.resource(scope=Scope.SESSION)
+        def builtin_session():
+            return "builtin-session"
+
+        custom_registry.mark_builtin("builtin_resource")
+        custom_registry.mark_builtin("builtin_session")
+
+        @custom_registry.resource
+        def extra_resource():
+            return "extra"
+
+        @custom_registry.resource(scope=Scope.SESSION)
+        def builtin_session():
+            return "override"
+
+        custom_registry.reset()
+
+        builtin_resource_def = custom_registry.get("builtin_resource")
+        builtin_session_def = custom_registry.get("builtin_session")
+        extra_resource_def = custom_registry.get("extra_resource")
+
+        assert builtin_resource_def is not None
+        assert builtin_session_def is not None
+        assert extra_resource_def is None
+        assert builtin_session_def.fn() == "builtin-session"
 
 
 class TestResourceResolver:
     """Tests for ResourceResolver."""
+
+    def test_requires_explicit_registry(self):
+        with pytest.raises(TypeError):
+            ResourceResolver()  # type: ignore[call-arg]
 
     @pytest.mark.asyncio
     async def test_resolves_sync_resource(self):
@@ -134,7 +280,7 @@ class TestResourceResolver:
         def simple():
             return 42
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         value = await resolver.resolve("simple")
         assert value == 42
 
@@ -144,7 +290,7 @@ class TestResourceResolver:
         async def async_simple():
             return "async_result"
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         value = await resolver.resolve("async_simple")
         assert value == "async_result"
 
@@ -158,7 +304,7 @@ class TestResourceResolver:
             call_count += 1
             return call_count
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         v1 = await resolver.resolve("counted")
         v2 = await resolver.resolve("counted")
         assert v1 == v2 == 1
@@ -174,13 +320,13 @@ class TestResourceResolver:
         def derived(base_val):
             return base_val * 2
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         value = await resolver.resolve("derived")
         assert value == 20
 
     @pytest.mark.asyncio
     async def test_unknown_resource_raises(self):
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         with pytest.raises(ValueError, match="Unknown resource: unknown"):
             await resolver.resolve("unknown")
 
@@ -194,7 +340,7 @@ class TestResourceResolver:
         def res_b():
             return "b"
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         values = await resolver.resolve_many(["res_a", "res_b"])
         assert values == {"res_a": "a", "res_b": "b"}
 
@@ -212,7 +358,7 @@ class TestResourceTeardown:
             nonlocal teardown_called
             teardown_called = True
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         value = await resolver.resolve("gen_res")
         assert value == "value"
         assert not teardown_called
@@ -230,7 +376,7 @@ class TestResourceTeardown:
             nonlocal teardown_called
             teardown_called = True
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         value = await resolver.resolve("async_gen_res")
         assert value == "async_value"
 
@@ -254,7 +400,7 @@ class TestResourceTeardown:
             nonlocal suite_torn
             suite_torn = True
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         await resolver.resolve("case_res")
         await resolver.resolve("suite_res")
 
@@ -275,7 +421,7 @@ class TestResourceTeardown:
             call_count += 1
             return call_count
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         v1 = await resolver.resolve("counted_case")
         assert v1 == 1
 
@@ -294,7 +440,7 @@ class TestForkForCase:
         def suite_val():
             return "shared"
 
-        parent = ResourceResolver(get_registry())
+        parent = ResourceResolver(registry)
         await parent.resolve("suite_val")
 
         child = parent.fork_for_case()
@@ -311,7 +457,7 @@ class TestForkForCase:
             call_count += 1
             return call_count
 
-        parent = ResourceResolver(get_registry())
+        parent = ResourceResolver(registry)
         parent_val = await parent.resolve("case_val")
         assert parent_val == 1
 
@@ -329,7 +475,7 @@ class TestForkForCase:
             nonlocal teardown_called
             teardown_called = True
 
-        parent = ResourceResolver(get_registry())
+        parent = ResourceResolver(registry)
         child = parent.fork_for_case()
 
         # Resolve in child - should register teardown with parent
@@ -349,7 +495,7 @@ class TestForkForCase:
         def suite_new():
             return "new_suite"
 
-        parent = ResourceResolver(get_registry())
+        parent = ResourceResolver(registry)
         child = parent.fork_for_case()
 
         # Child resolves a new suite resource
@@ -373,7 +519,7 @@ class TestForkForCase:
             call_count += 1
             return call_count
 
-        parent = ResourceResolver(get_registry())
+        parent = ResourceResolver(registry)
 
         # First resolve in parent to populate cache
         parent_val = await parent.resolve("shared_suite")
@@ -402,7 +548,7 @@ class TestForkForCase:
             yield f"suite_{create_count}"
             teardown_count += 1
 
-        parent = ResourceResolver(get_registry())
+        parent = ResourceResolver(registry)
         children = [parent.fork_for_case() for _ in range(8)]
         values = await asyncio.gather(
             *[child.resolve("shared_suite") for child in children]
@@ -427,7 +573,7 @@ class TestForkForCase:
             yield f"session_{create_count}"
             teardown_count += 1
 
-        parent = ResourceResolver(get_registry())
+        parent = ResourceResolver(registry)
         children = [parent.fork_for_case() for _ in range(8)]
         values = await asyncio.gather(
             *[child.resolve("shared_session") for child in children]
@@ -467,7 +613,7 @@ class TestHierarchicalSessionResources:
             """,
         )
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
 
         with bind(
             CURRENT_TEST,
@@ -506,7 +652,7 @@ class TestHierarchicalSessionResources:
             """,
         )
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         with bind(
             CURRENT_TEST,
             Ctx(item=_make_item(module_path=sibling / "rue_sibling.py")),
@@ -544,7 +690,7 @@ class TestHierarchicalSessionResources:
             """,
         )
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         with bind(
             CURRENT_TEST,
             Ctx(item=_make_item(module_path=child / "rue_child.py")),
@@ -578,7 +724,7 @@ class TestHierarchicalSessionResources:
             """,
         )
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         assert await resolver.resolve("shared") == "child"
 
     @pytest.mark.parametrize("scope", [Scope.CASE, Scope.SUITE])
@@ -604,9 +750,11 @@ class TestHierarchicalSessionResources:
         def shared():
             return scope.value
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         assert await resolver.resolve("shared") == scope.value
-        assert get_registry()["shared"].scope == scope
+        definition = registry.get("shared")
+        assert definition is not None
+        assert definition.scope == scope
 
     @pytest.mark.asyncio
     async def test_hierarchical_session_resources_use_distinct_cache_keys(
@@ -645,7 +793,7 @@ class TestHierarchicalSessionResources:
             """,
         )
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
 
         with bind(
             CURRENT_TEST,
@@ -700,7 +848,7 @@ class TestResourceHooks:
         def simple():
             return 42
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         value = await resolver.resolve("simple")
 
         assert value == 42
@@ -712,7 +860,7 @@ class TestResourceHooks:
         def doubled():
             return 10
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         value = await resolver.resolve("doubled")
 
         assert value == 20
@@ -729,7 +877,7 @@ class TestResourceHooks:
         def simple():
             return 42
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         await resolver.resolve("simple")
         await resolver.resolve("simple")
 
@@ -747,7 +895,7 @@ class TestResourceHooks:
             yield "value"
             call_order.append(("generator_teardown",))
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         await resolver.resolve("gen_res")
         await resolver.teardown()
 
@@ -765,7 +913,7 @@ class TestResourceHooks:
         def case_gen():
             yield "case_value"
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         await resolver.resolve("case_gen")
 
         assert not teardown_hook_called
@@ -790,7 +938,7 @@ class TestResourceHooks:
         async def async_gen():
             yield "async_value"
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         value = await resolver.resolve("async_gen")
 
         assert value == "async_value"
@@ -815,7 +963,7 @@ class TestResourceHooks:
         def simple():
             return 42
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         with bind(CURRENT_TEST, Ctx(item=_make_item("my_test"))):
             await resolver.resolve("simple")
         assert received_name == "my_test"
@@ -839,7 +987,7 @@ class TestResourceHooks:
         def consumer(dependency):
             return f"got {dependency}"
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         await resolver.resolve("consumer")
 
         # dependency's hook should have been called with consumer_name="consumer"
@@ -868,7 +1016,7 @@ class TestResourceHooks:
         def top(middle):
             return f"top({middle})"
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         await resolver.resolve("top")
 
         assert history == [
@@ -889,7 +1037,7 @@ class TestResourceHooks:
         def cached_res():
             return "val"
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         await resolver.resolve("cached_res")
         await resolver.resolve("cached_res")
 
@@ -908,7 +1056,7 @@ class TestResourceResolutionErrors:
         def failing_resource():
             raise RuntimeError("Resource failed to initialize")
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         with pytest.raises(RuntimeError, match="Resource failed to initialize"):
             await resolver.resolve("failing_resource")
 
@@ -920,7 +1068,7 @@ class TestResourceResolutionErrors:
         async def async_failing_resource():
             raise ValueError("Async resource initialization failed")
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         with pytest.raises(
             ValueError, match="Async resource initialization failed"
         ):
@@ -938,7 +1086,7 @@ class TestResourceResolutionErrors:
         def dependent_resource(base_resource):
             return f"dependent: {base_resource}"
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         with pytest.raises(RuntimeError, match="Base resource failed"):
             await resolver.resolve("dependent_resource")
 
@@ -952,7 +1100,7 @@ class TestResourceResolutionErrors:
         async def shared_right(shared_left):
             return shared_left
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         with pytest.raises(
             RuntimeError, match="Circular resource dependency detected"
         ):
@@ -967,7 +1115,7 @@ class TestResourceResolutionErrors:
             yield "before_error"
             raise RuntimeError("Generator resource failed after first yield")
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         value = await resolver.resolve("gen_resource")
         assert value == "before_error"
 
@@ -985,7 +1133,7 @@ class TestResourceResolutionErrors:
         def resource_with_injection():
             return "value"
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         with pytest.raises(RuntimeError, match="on_injection hook failed"):
             await resolver.resolve("resource_with_injection")
 
@@ -998,7 +1146,7 @@ class TestResourceResolutionErrors:
             yield "value"
             raise RuntimeError("Teardown error")
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         value = await resolver.resolve("resource_with_teardown")
         assert value == "value"
 
@@ -1020,7 +1168,7 @@ class TestResourceResolutionErrors:
         def resource_with_teardown_hook():
             yield "value"
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
         value = await resolver.resolve("resource_with_teardown_hook")
         assert value == "value"
 
@@ -1046,7 +1194,7 @@ class TestResourceResolutionErrors:
         def bad_resource():
             raise RuntimeError("Bad resource")
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(registry)
 
         good_value = await resolver.resolve("good_resource")
         assert good_value == "good"

@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 
-from rue.resources import clear_registry, resource
+from rue.resources import registry, resource
 from rue.testing import Runner
 from rue.testing.decorators import parametrize
 from rue.testing.models import ParameterSet, ParametrizeModifier, TestItem
@@ -81,7 +81,7 @@ def test_runner_applies_parameter_values(null_reporter):
     try:
         run_result = asyncio.run(runner.run(items=[item]))
     finally:
-        clear_registry()
+        registry.reset()
 
     # The result should have sub_executions for parametrize
     assert run_result.result.executions[0].sub_executions is not None

@@ -16,7 +16,7 @@ from rue.context.runtime import (
     bind,
 )
 from rue.metrics_.base import Metric, MetricMetadata, MetricResult, metric
-from rue.resources import ResourceResolver, Scope, clear_registry
+from rue.resources import ResourceResolver, Scope, registry
 from rue.testing.discovery import TestItem
 
 
@@ -219,14 +219,14 @@ def test_metrics_context_accepts_legacy_list_argument():
 @pytest.mark.asyncio
 async def test_metric_decorator_no_args():
     """Test @metric decorator without explicit arguments."""
-    clear_registry()
+    registry.reset()
 
     @metric
     def default_metric():
         yield Metric("default")
         return 0
 
-    resolver = ResourceResolver()
+    resolver = ResourceResolver(registry)
     m = await resolver.resolve("default_metric")
     assert m.name == "default_metric"
 
@@ -234,14 +234,14 @@ async def test_metric_decorator_no_args():
 @pytest.mark.asyncio
 async def test_metric_on_injection_hook_with_context():
     """Rue/case attribution happens in add_record; resource attribution happens on injection."""
-    clear_registry()
+    registry.reset()
 
     @metric(scope=Scope.CASE)
     def test_ctx_metric():
         yield Metric("ctx")
         return 0
 
-    resolver = ResourceResolver()
+    resolver = ResourceResolver(registry)
     ctx = Ctx(item=_make_item("my_merit"))
     with bind(CURRENT_TEST, ctx):
         with bind(CURRENT_RESOURCE_CONSUMER, "some_resource"):
@@ -259,14 +259,14 @@ async def test_metric_on_injection_hook_with_context():
 @pytest.mark.asyncio
 async def test_metric_on_injection_cumulative_metadata():
     """Rue attribution accumulates via add_record across multiple contexts."""
-    clear_registry()
+    registry.reset()
 
     @metric(scope=Scope.SESSION)
     def shared_metric():
         yield Metric("shared")
         return 0
 
-    resolver = ResourceResolver()
+    resolver = ResourceResolver(registry)
 
     # First resolution with context A
     with bind(CURRENT_TEST, Ctx(item=_make_item("test_a"))):
@@ -287,7 +287,7 @@ async def test_metric_on_injection_cumulative_metadata():
 
 @pytest.mark.asyncio
 async def test_metric_decorator_emits_metric_result_on_teardown_with_assertions_and_return_value():
-    clear_registry()
+    registry.reset()
 
     @metric(scope=Scope.CASE)
     def scored_metric():
@@ -313,7 +313,7 @@ async def test_metric_decorator_emits_metric_result_on_teardown_with_assertions_
         yield 123
         return 999  # ignored: metric final value comes from the second yield
 
-    resolver = ResourceResolver()
+    resolver = ResourceResolver(registry)
     metric_results = []
     with bind(CURRENT_METRIC_RESULTS, metric_results):
         m = await resolver.resolve("scored_metric")
@@ -334,14 +334,14 @@ async def test_metric_decorator_emits_metric_result_on_teardown_with_assertions_
 
 @pytest.mark.asyncio
 async def test_metric_decorator_emits_nan_when_generator_returns_value_but_does_not_yield_final_value():
-    clear_registry()
+    registry.reset()
 
     @metric(scope=Scope.CASE)
     def return_only_metric():
         yield Metric("ignored")
         return 123  # ignored: no second yield -> NaN
 
-    resolver = ResourceResolver()
+    resolver = ResourceResolver(registry)
     metric_results = []
     with bind(CURRENT_METRIC_RESULTS, metric_results):
         await resolver.resolve("return_only_metric")
@@ -353,7 +353,7 @@ async def test_metric_decorator_emits_nan_when_generator_returns_value_but_does_
 
 @pytest.mark.asyncio
 async def test_metric_decorator_uses_second_yield_value_and_ignores_return_value():
-    clear_registry()
+    registry.reset()
 
     @metric(scope=Scope.CASE)
     def yield_and_return_metric():
@@ -361,7 +361,7 @@ async def test_metric_decorator_uses_second_yield_value_and_ignores_return_value
         yield 111
         return 222  # ignored
 
-    resolver = ResourceResolver()
+    resolver = ResourceResolver(registry)
     metric_results = []
     with bind(CURRENT_METRIC_RESULTS, metric_results):
         await resolver.resolve("yield_and_return_metric")

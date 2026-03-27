@@ -5,16 +5,16 @@ import pytest
 
 from rue.cli import _collect_items
 from rue.config import RueConfig
-from rue.resources import clear_registry
+from rue.resources import registry
 from rue.testing.discovery import collect
 from rue.testing.runner import Runner
 
 
 @pytest.fixture(autouse=True)
 def clean_registry():
-    clear_registry()
+    registry.reset()
     yield
-    clear_registry()
+    registry.reset()
 
 
 def test_collect_supports_same_dir_confrue_imports_without_pyproject(

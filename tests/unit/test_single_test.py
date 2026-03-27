@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from rue.resources import ResourceResolver
+from rue.resources import ResourceResolver, registry
 from rue.testing.execution.result_builder import ResultBuilder
 from rue.testing.execution.single import SingleTest
 from rue.testing.models import RepeatModifier, TestItem, TestStatus
@@ -31,7 +31,7 @@ async def test_single_test_executes_without_runner():
         result_builder=ResultBuilder(),
     )
 
-    execution = await test.execute(ResourceResolver())
+    execution = await test.execute(ResourceResolver(registry))
 
     assert execution.result.status == TestStatus.PASSED
     assert called == ["called"]

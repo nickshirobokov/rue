@@ -15,8 +15,7 @@ from rue.config import RueConfig
 from rue.resources import (
     ResourceResolver,
     Scope,
-    clear_registry,
-    get_registry,
+    registry as resources_registry,
     resource,
 )
 from rue.testing.discovery import collect
@@ -27,9 +26,9 @@ from rue.testing.sut import sut
 
 @pytest.fixture(autouse=True)
 def clean_registry():
-    clear_registry()
+    resources_registry.reset()
     yield
-    clear_registry()
+    resources_registry.reset()
 
 
 def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
@@ -71,17 +70,18 @@ class TestSutDecorator:
         def my_sut():
             return lambda x: x * 2
 
-        registry = get_registry()
-        assert "my_sut" in registry
-        assert registry["my_sut"].scope == Scope.CASE
+        definition = resources_registry.get("my_sut")
+        assert definition is not None
+        assert definition.scope == Scope.CASE
 
     def test_scope_is_user_defined(self):
         @sut(scope=Scope.SESSION)
         def my_session_sut():
             return lambda x: x
 
-        registry = get_registry()
-        assert registry["my_session_sut"].scope == Scope.SESSION
+        definition = resources_registry.get("my_session_sut")
+        assert definition is not None
+        assert definition.scope == Scope.SESSION
 
     def test_resource_dependencies_are_captured_from_factory_signature(self):
         @resource
@@ -92,16 +92,16 @@ class TestSutDecorator:
         def my_sut(dep):
             return lambda x: x + dep
 
-        registry = get_registry()
-        assert registry["my_sut"].dependencies == ["dep"]
+        definition = resources_registry.get("my_sut")
+        assert definition is not None
+        assert definition.dependencies == ["dep"]
 
     def test_registry_key_is_factory_function_name(self):
         @sut
         def original_name():
             return lambda: "ok"
 
-        registry = get_registry()
-        assert "original_name" in registry
+        assert resources_registry.get("original_name") is not None
 
 
 class TestSutResolution:
@@ -114,7 +114,7 @@ class TestSutResolution:
 
             return run
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(resources_registry)
         resolved = await resolver.resolve("adder")
 
         assert callable(resolved)
@@ -131,7 +131,7 @@ class TestSutResolution:
 
             return run
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(resources_registry)
         resolved = await resolver.resolve("async_adder")
         assert await resolved(2, 3) == 5
 
@@ -148,7 +148,7 @@ class TestSutResolution:
         def pipeline():
             return Pipeline()
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(resources_registry)
         resolved = await resolver.resolve("pipeline")
 
         assert isinstance(resolved, Pipeline)
@@ -161,7 +161,7 @@ class TestSutResolution:
         def bad_sut():
             return None
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(resources_registry)
         with pytest.raises(RuntimeError, match="Hook on_resolve failed"):
             await resolver.resolve("bad_sut")
 
@@ -174,7 +174,7 @@ class TestSutResolution:
         def no_run():
             return NoRun()
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(resources_registry)
         with pytest.raises(RuntimeError, match="resolved to unsupported type"):
             await resolver.resolve("no_run")
 
@@ -189,7 +189,7 @@ class TestSutResolution:
 
             return run
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(resources_registry)
         resolved = await resolver.resolve("adder")
 
         assert resolved(2, 3) == 5
@@ -211,7 +211,7 @@ class TestSutResolution:
 
             return run
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(resources_registry)
         resolved = await resolver.resolve("adder")
 
         assert resolved(**cases[0].inputs.model_dump()) == 3
@@ -234,7 +234,7 @@ class TestSutResolution:
 
             return run
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(resources_registry)
         resolved = await resolver.resolve("adder")
 
         assert resolved(x=cases[0].inputs.x, y=cases[0].inputs.y) == 3
@@ -250,7 +250,7 @@ class TestSutResolution:
 
             return run
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(resources_registry)
         with pytest.raises(RuntimeError, match="Hook on_resolve failed") as exc:
             await resolver.resolve("increment")
 
@@ -275,7 +275,7 @@ class TestSutResolution:
 
             return run
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(resources_registry)
         with pytest.raises(RuntimeError, match="Hook on_resolve failed") as exc:
             await resolver.resolve("increment")
 
@@ -299,7 +299,7 @@ class TestSutResolution:
 
             return run
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(resources_registry)
         with pytest.raises(RuntimeError, match="Hook on_resolve failed") as exc:
             await resolver.resolve("increment")
 
@@ -317,7 +317,7 @@ class TestSutResolution:
         def pipeline():
             return Pipeline()
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(resources_registry)
         resolved = await resolver.resolve("pipeline")
 
         assert resolved.run(3) == 6
@@ -420,7 +420,7 @@ def test_sample():
 
             return run
 
-        resolver = ResourceResolver(get_registry())
+        resolver = ResourceResolver(resources_registry)
         resolved = await resolver.resolve("adder")
         before = [session.serialize() for session in sessions]
 

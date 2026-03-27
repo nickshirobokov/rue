@@ -19,7 +19,7 @@ from rue.context.runtime import (
 )
 from rue.metrics_.base import Metric, metric
 from rue.predicates.models import PredicateResult
-from rue.resources import ResourceResolver, Scope, clear_registry
+from rue.resources import ResourceResolver, Scope, registry
 from rue.testing.discovery import TestItem
 
 
@@ -42,9 +42,9 @@ def _make_item(
 @pytest.fixture(autouse=True)
 def clean_registry():
     """Avoid cross-test leakage of globally-registered metric resources."""
-    clear_registry()
+    registry.reset()
     yield
-    clear_registry()
+    registry.reset()
 
 
 def test_assertionresult_appends_to_test_context():
@@ -157,7 +157,7 @@ async def test_metric_injection_reads_resolver_context():
     def injected_metric() -> Generator[Metric, Any, Any]:
         yield Metric(name="ignored_by_on_resolve")
 
-    resolver = ResourceResolver()
+    resolver = ResourceResolver(registry)
     with bind(CURRENT_RESOURCE_CONSUMER, "consumer_a"):
         m = await resolver.resolve("injected_metric")
 

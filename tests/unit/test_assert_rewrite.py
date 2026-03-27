@@ -11,7 +11,7 @@ from rue.context.collectors import (
 )
 from rue.context.runtime import CURRENT_TEST, TestContext, bind
 from rue.metrics_.base import Metric, MetricResult
-from rue.resources import ResourceResolver, clear_registry
+from rue.resources import ResourceResolver, registry
 from rue.testing.discovery import collect
 
 
@@ -38,8 +38,9 @@ def test_sample():
         [item] = collect(mod_path)
         assertion_results: list[AssertionResult] = []
         ctx = TestContext(item=item)
-        with bind(CURRENT_TEST, ctx), bind(
-            CURRENT_ASSERTION_RESULTS, assertion_results
+        with (
+            bind(CURRENT_TEST, ctx),
+            bind(CURRENT_ASSERTION_RESULTS, assertion_results),
         ):
             item.fn()
 
@@ -75,8 +76,9 @@ def test_fail():
         [item] = collect(mod_path)
         assertion_results: list[AssertionResult] = []
         ctx = TestContext(item=item)
-        with bind(CURRENT_TEST, ctx), bind(
-            CURRENT_ASSERTION_RESULTS, assertion_results
+        with (
+            bind(CURRENT_TEST, ctx),
+            bind(CURRENT_ASSERTION_RESULTS, assertion_results),
         ):
             item.fn()
 
@@ -131,7 +133,7 @@ def test_metric_capture_multi():
 async def test_rewritten_asserts_inside_metric_functions_are_collected(
     tmp_path,
 ):
-    clear_registry()
+    registry.reset()
     mod_name = f"rue_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(
@@ -152,7 +154,7 @@ def test_dummy():
 
     try:
         [item] = collect(mod_path)
-        resolver = ResourceResolver()
+        resolver = ResourceResolver(registry)
         metric_results: list[MetricResult] = []
         with bind(CURRENT_METRIC_RESULTS, metric_results):
             await resolver.resolve("my_metric")
@@ -165,7 +167,7 @@ def test_dummy():
         assert ar.passed is False
         assert ar.error_message == "nope"
     finally:
-        clear_registry()
+        registry.reset()
         sys.modules.pop(mod_name, None)
 
 
