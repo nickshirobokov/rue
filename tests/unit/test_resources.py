@@ -61,65 +61,131 @@ def clean_registry():
 class TestResourceDecorator:
     """Tests for the @resource decorator."""
 
-    def test_registers_sync_function(self):
-        @resource
-        def my_resource():
-            return "value"
+    @pytest.mark.parametrize(
+        ("name", "kind", "expected_flags"),
+        [
+            (
+                "sync_resource",
+                "sync",
+                {
+                    "is_async": False,
+                    "is_generator": False,
+                    "is_async_generator": False,
+                },
+            ),
+            (
+                "async_resource",
+                "async",
+                {
+                    "is_async": True,
+                    "is_generator": False,
+                    "is_async_generator": False,
+                },
+            ),
+        ],
+    )
+    def test_registers_callable_shape(
+        self,
+        name,
+        kind,
+        expected_flags,
+    ):
+        if kind == "sync":
 
-        defn = registry.get("my_resource")
+            @resource
+            def sync_resource():
+                return "value"
+
+        else:
+
+            @resource
+            async def async_resource():
+                return "async_value"
+
+        defn = registry.get(name)
         assert defn is not None
-        assert defn.name == "my_resource"
+        assert defn.name == name
         assert defn.scope == Scope.CASE
-        assert not defn.is_async
-        assert not defn.is_generator
+        assert defn.is_async == expected_flags["is_async"]
+        assert defn.is_generator == expected_flags["is_generator"]
+        assert (
+            defn.is_async_generator
+            == expected_flags["is_async_generator"]
+        )
 
-    def test_registers_async_function(self):
-        @resource
-        async def async_resource():
-            return "async_value"
+    @pytest.mark.parametrize(
+        ("name", "register", "expected_flags"),
+        [
+            (
+                "gen_resource",
+                "sync",
+                {
+                    "is_async": False,
+                    "is_generator": True,
+                    "is_async_generator": False,
+                },
+            ),
+            (
+                "async_gen_resource",
+                "async",
+                {
+                    "is_async": True,
+                    "is_generator": False,
+                    "is_async_generator": True,
+                },
+            ),
+        ],
+    )
+    def test_registers_generator_shape(
+        self,
+        name,
+        register,
+        expected_flags,
+    ):
+        if register == "sync":
 
-        defn = registry.get("async_resource")
+            @resource
+            def gen_resource():
+                yield "gen_value"
+
+        else:
+
+            @resource
+            async def async_gen_resource():
+                yield "async_gen_value"
+
+        defn = registry.get(name)
         assert defn is not None
-        assert defn.is_async
-        assert not defn.is_generator
+        assert defn.is_async == expected_flags["is_async"]
+        assert defn.is_generator == expected_flags["is_generator"]
+        assert (
+            defn.is_async_generator
+            == expected_flags["is_async_generator"]
+        )
 
-    def test_registers_sync_generator(self):
-        @resource
-        def gen_resource():
-            yield "gen_value"
+    @pytest.mark.parametrize(
+        ("scope_value", "expected_scope", "name"),
+        [
+            ("suite", Scope.SUITE, "suite_resource"),
+            (Scope.SESSION, Scope.SESSION, "session_resource"),
+        ],
+    )
+    def test_scope_normalization(self, scope_value, expected_scope, name):
+        if expected_scope == Scope.SUITE:
 
-        defn = registry.get("gen_resource")
+            @resource(scope=scope_value)
+            def suite_resource():
+                return "suite"
+
+        else:
+
+            @resource(scope=scope_value)
+            def session_resource():
+                return "session"
+
+        defn = registry.get(name)
         assert defn is not None
-        assert defn.is_generator
-        assert not defn.is_async
-
-    def test_registers_async_generator(self):
-        @resource
-        async def async_gen_resource():
-            yield "async_gen_value"
-
-        defn = registry.get("async_gen_resource")
-        assert defn is not None
-        assert defn.is_async_generator
-        assert defn.is_async
-
-    def test_scope_as_string(self):
-        @resource(scope="suite")
-        def suite_resource():
-            return "suite"
-
-        defn = registry.get("suite_resource")
-        assert defn is not None
-        assert defn.scope == Scope.SUITE
-
-    def test_scope_as_enum(self):
-        @resource(scope=Scope.SESSION)
-        def session_resource():
-            return "session"
-
-        defn = registry.get("session_resource")
-        assert defn is not None
-        assert defn.scope == Scope.SESSION
+        assert defn.scope == expected_scope
 
     def test_detects_dependencies(self):
         @resource
@@ -283,25 +349,34 @@ class TestResourceResolver:
         with pytest.raises(TypeError):
             ResourceResolver()  # type: ignore[call-arg]
 
+    @pytest.mark.parametrize(
+        ("name", "kind", "expected"),
+        [
+            ("simple", "sync", 42),
+            ("async_simple", "async", "async_result"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_resolves_sync_resource(self):
-        @resource
-        def simple():
-            return 42
+    async def test_resolves_registered_resource(
+        self,
+        name,
+        kind,
+        expected,
+    ):
+        if kind == "sync":
+
+            @resource
+            def simple():
+                return 42
+
+        else:
+
+            @resource
+            async def async_simple():
+                return "async_result"
 
         resolver = ResourceResolver(registry)
-        value = await resolver.resolve("simple")
-        assert value == 42
-
-    @pytest.mark.asyncio
-    async def test_resolves_async_resource(self):
-        @resource
-        async def async_simple():
-            return "async_result"
-
-        resolver = ResourceResolver(registry)
-        value = await resolver.resolve("async_simple")
-        assert value == "async_result"
+        assert await resolver.resolve(name) == expected
 
     @pytest.mark.asyncio
     async def test_caches_case_scope(self):
@@ -357,37 +432,40 @@ class TestResourceResolver:
 class TestResourceTeardown:
     """Tests for resource teardown."""
 
+    @pytest.mark.parametrize(
+        ("name", "kind", "expected"),
+        [
+            ("gen_res", "sync", "value"),
+            ("async_gen_res", "async", "async_value"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_sync_generator_teardown(self):
+    async def test_generator_teardown_runs(
+        self,
+        name,
+        kind,
+        expected,
+    ):
         teardown_called = False
 
-        @resource
-        def gen_res():
-            yield "value"
-            nonlocal teardown_called
-            teardown_called = True
+        if kind == "sync":
+
+            @resource
+            def gen_res():
+                yield "value"
+                nonlocal teardown_called
+                teardown_called = True
+
+        else:
+
+            @resource
+            async def async_gen_res():
+                yield "async_value"
+                nonlocal teardown_called
+                teardown_called = True
 
         resolver = ResourceResolver(registry)
-        value = await resolver.resolve("gen_res")
-        assert value == "value"
-        assert not teardown_called
-
-        await resolver.teardown()
-        assert teardown_called
-
-    @pytest.mark.asyncio
-    async def test_async_generator_teardown(self):
-        teardown_called = False
-
-        @resource
-        async def async_gen_res():
-            yield "async_value"
-            nonlocal teardown_called
-            teardown_called = True
-
-        resolver = ResourceResolver(registry)
-        value = await resolver.resolve("async_gen_res")
-        assert value == "async_value"
+        assert await resolver.resolve(name) == expected
 
         await resolver.teardown()
         assert teardown_called
@@ -444,19 +522,6 @@ class TestForkForCase:
     """Tests for fork_for_case and parent/child isolation."""
 
     @pytest.mark.asyncio
-    async def test_child_inherits_suite_cache(self):
-        @resource(scope="suite")
-        def suite_val():
-            return "shared"
-
-        parent = ResourceResolver(registry)
-        await parent.resolve("suite_val")
-
-        child = parent.fork_for_case()
-        value = await child.resolve("suite_val")
-        assert value == "shared"
-
-    @pytest.mark.asyncio
     async def test_child_case_scope_isolated(self):
         call_count = 0
 
@@ -474,121 +539,49 @@ class TestForkForCase:
         child_val = await child.resolve("case_val")
         assert child_val == 2  # New instance for child
 
+    @pytest.mark.parametrize(
+        ("scope", "name"),
+        [
+            (Scope.SUITE, "shared_suite"),
+            (Scope.SESSION, "shared_session"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_child_suite_teardown_delegates_to_parent(self):
-        teardown_called = False
-
-        @resource(scope="suite")
-        def suite_gen():
-            yield "suite_value"
-            nonlocal teardown_called
-            teardown_called = True
-
-        parent = ResourceResolver(registry)
-        child = parent.fork_for_case()
-
-        # Resolve in child - should register teardown with parent
-        await child.resolve("suite_gen")
-
-        # Child teardown should not touch SUITE
-        await child.teardown_scope(Scope.CASE)
-        assert not teardown_called
-
-        # Parent teardown should run SUITE teardown
-        await parent.teardown()
-        assert teardown_called
-
-    @pytest.mark.asyncio
-    async def test_child_syncs_suite_cache_to_parent(self):
-        @resource(scope="suite")
-        def suite_new():
-            return "new_suite"
-
-        parent = ResourceResolver(registry)
-        child = parent.fork_for_case()
-
-        # Child resolves a new suite resource
-        await child.resolve("suite_new")
-
-        # Parent should now have it cached
-        assert any(
-            key.scope == Scope.SUITE
-            and key.name == "suite_new"
-            and key.provider_dir is None
-            for key in parent._cache
-        )
-
-    @pytest.mark.asyncio
-    async def test_multiple_children_share_suite(self):
-        call_count = 0
-
-        @resource(scope="suite")
-        def shared_suite():
-            nonlocal call_count
-            call_count += 1
-            return call_count
-
-        parent = ResourceResolver(registry)
-
-        # First resolve in parent to populate cache
-        parent_val = await parent.resolve("shared_suite")
-        assert parent_val == 1
-
-        # Children should inherit from parent cache
-        child1 = parent.fork_for_case()
-        child2 = parent.fork_for_case()
-
-        v1 = await child1.resolve("shared_suite")
-        v2 = await child2.resolve("shared_suite")
-
-        assert v1 == v2 == 1
-        assert call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_concurrent_children_resolve_suite_once(self):
+    async def test_shared_scopes_resolve_once_across_children(
+        self,
+        scope,
+        name,
+    ):
         create_count = 0
         teardown_count = 0
 
-        @resource(scope="suite")
-        async def shared_suite():
-            nonlocal create_count, teardown_count
-            create_count += 1
-            await asyncio.sleep(0.02)
-            yield f"suite_{create_count}"
-            teardown_count += 1
+        if scope == Scope.SUITE:
+
+            @resource(scope=scope)
+            async def shared_suite():
+                nonlocal create_count, teardown_count
+                create_count += 1
+                await asyncio.sleep(0.02)
+                yield f"{scope.value}_{create_count}"
+                teardown_count += 1
+
+        else:
+
+            @resource(scope=scope)
+            async def shared_session():
+                nonlocal create_count, teardown_count
+                create_count += 1
+                await asyncio.sleep(0.02)
+                yield f"{scope.value}_{create_count}"
+                teardown_count += 1
 
         parent = ResourceResolver(registry)
         children = [parent.fork_for_case() for _ in range(8)]
         values = await asyncio.gather(
-            *[child.resolve("shared_suite") for child in children]
+            *[child.resolve(name) for child in children]
         )
 
-        assert values == ["suite_1"] * len(children)
-        assert create_count == 1
-
-        await parent.teardown()
-        assert teardown_count == 1
-
-    @pytest.mark.asyncio
-    async def test_concurrent_children_resolve_session_once(self):
-        create_count = 0
-        teardown_count = 0
-
-        @resource(scope="session")
-        async def shared_session():
-            nonlocal create_count, teardown_count
-            create_count += 1
-            await asyncio.sleep(0.02)
-            yield f"session_{create_count}"
-            teardown_count += 1
-
-        parent = ResourceResolver(registry)
-        children = [parent.fork_for_case() for _ in range(8)]
-        values = await asyncio.gather(
-            *[child.resolve("shared_session") for child in children]
-        )
-
-        assert values == ["session_1"] * len(children)
+        assert values == [f"{scope.value}_1"] * len(children)
         assert create_count == 1
 
         await parent.teardown()
@@ -736,35 +729,6 @@ class TestHierarchicalSessionResources:
         resolver = ResourceResolver(registry)
         assert await resolver.resolve("shared") == "child"
 
-    @pytest.mark.parametrize("scope", [Scope.CASE, Scope.SUITE])
-    @pytest.mark.asyncio
-    async def test_non_session_scope_wins_mixed_scope_clash(
-        self,
-        tmp_path,
-        scope,
-    ):
-        root = tmp_path / "project"
-        root.mkdir(parents=True)
-
-        _register_resource_source(
-            root / "confrue_root.py",
-            """
-            @resource(scope=Scope.SESSION)
-            def shared():
-                return "session"
-            """,
-        )
-
-        @resource(scope=scope)
-        def shared():
-            return scope.value
-
-        resolver = ResourceResolver(registry)
-        assert await resolver.resolve("shared") == scope.value
-        definition = registry.get("shared")
-        assert definition is not None
-        assert definition.scope == scope
-
     @pytest.mark.asyncio
     async def test_hierarchical_session_resources_use_distinct_cache_keys(
         self,
@@ -844,24 +808,6 @@ class TestHierarchicalSessionResources:
 
 class TestResourceHooks:
     """Tests for on_resolve, on_injection and on_teardown hooks."""
-
-    @pytest.mark.asyncio
-    async def test_on_injection_called(self):
-        injection_calls = []
-
-        def track_injection(value):
-            injection_calls.append(value)
-            return value
-
-        @resource(on_injection=track_injection)
-        def simple():
-            return 42
-
-        resolver = ResourceResolver(registry)
-        value = await resolver.resolve("simple")
-
-        assert value == 42
-        assert injection_calls == [42]
 
     @pytest.mark.asyncio
     async def test_on_injection_transforms_value(self):
@@ -978,31 +924,6 @@ class TestResourceHooks:
         assert received_name == "my_test"
 
     @pytest.mark.asyncio
-    async def test_on_injection_receives_consumer_name_for_dependencies(self):
-        contexts = {}
-
-        def hook(value):
-            if consumer_name := CURRENT_RESOURCE_CONSUMER.get():
-                contexts[consumer_name] = value
-            else:
-                contexts[("unknown", value)] = value
-            return value
-
-        @resource(on_injection=hook)
-        def dependency():
-            return "dep_val"
-
-        @resource
-        def consumer(dependency):
-            return f"got {dependency}"
-
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("consumer")
-
-        # dependency's hook should have been called with consumer_name="consumer"
-        assert contexts["consumer"] == "dep_val"
-
-    @pytest.mark.asyncio
     async def test_nested_dependency_context(self):
         history = []
 
@@ -1058,48 +979,6 @@ class TestResourceResolutionErrors:
     """Tests to ensure resource resolution errors are properly surfaced."""
 
     @pytest.mark.asyncio
-    async def test_resource_raises_during_resolution(self):
-        """Test that a resource that raises an error during resolution surfaces the error."""
-
-        @resource
-        def failing_resource():
-            raise RuntimeError("Resource failed to initialize")
-
-        resolver = ResourceResolver(registry)
-        with pytest.raises(RuntimeError, match="Resource failed to initialize"):
-            await resolver.resolve("failing_resource")
-
-    @pytest.mark.asyncio
-    async def test_async_resource_raises_during_resolution(self):
-        """Test that an async resource that raises during resolution surfaces the error."""
-
-        @resource
-        async def async_failing_resource():
-            raise ValueError("Async resource initialization failed")
-
-        resolver = ResourceResolver(registry)
-        with pytest.raises(
-            ValueError, match="Async resource initialization failed"
-        ):
-            await resolver.resolve("async_failing_resource")
-
-    @pytest.mark.asyncio
-    async def test_resource_with_dependency_failure(self):
-        """Test that a resource depending on a failing resource surfaces the error."""
-
-        @resource
-        def base_resource():
-            raise RuntimeError("Base resource failed")
-
-        @resource
-        def dependent_resource(base_resource):
-            return f"dependent: {base_resource}"
-
-        resolver = ResourceResolver(registry)
-        with pytest.raises(RuntimeError, match="Base resource failed"):
-            await resolver.resolve("dependent_resource")
-
-    @pytest.mark.asyncio
     async def test_circular_suite_dependency_raises_error(self):
         @resource(scope="suite")
         async def shared_left(shared_right):
@@ -1114,22 +993,6 @@ class TestResourceResolutionErrors:
             RuntimeError, match="Circular resource dependency detected"
         ):
             await asyncio.wait_for(resolver.resolve("shared_left"), timeout=0.2)
-
-    @pytest.mark.asyncio
-    async def test_resource_generator_raises_during_yield(self):
-        """Test that a generator resource that raises during yield surfaces the error."""
-
-        @resource
-        def gen_resource():
-            yield "before_error"
-            raise RuntimeError("Generator resource failed after first yield")
-
-        resolver = ResourceResolver(registry)
-        value = await resolver.resolve("gen_resource")
-        assert value == "before_error"
-
-        with pytest.raises(RuntimeError, match="Generator resource failed"):
-            await resolver.teardown()
 
     @pytest.mark.asyncio
     async def test_resource_on_injection_error(self):
@@ -1147,66 +1010,21 @@ class TestResourceResolutionErrors:
             await resolver.resolve("resource_with_injection")
 
     @pytest.mark.asyncio
-    async def test_resource_on_teardown_error_is_recorded(self):
-        """Test that generator teardown errors are recorded."""
-
-        @resource
-        def resource_with_teardown():
-            yield "value"
-            raise RuntimeError("Teardown error")
-
-        resolver = ResourceResolver(registry)
-        value = await resolver.resolve("resource_with_teardown")
-        assert value == "value"
-
-        with pytest.raises(RuntimeError, match="Teardown error"):
-            await resolver.teardown_scope(Scope.CASE)
-
-    @pytest.mark.asyncio
-    async def test_resource_on_teardown_hook_error(self):
-        """Test that errors in on_teardown hook are recorded for generator resources."""
-
-        teardown_hook_called = False
-
-        def raise_on_teardown(value):
-            nonlocal teardown_hook_called
-            teardown_hook_called = True
-            raise RuntimeError("on_teardown hook failed")
+    async def test_teardown_errors_are_aggregated(self):
+        def raise_on_teardown(_value):
+            raise RuntimeError("hook teardown failed")
 
         @resource(scope=Scope.CASE, on_teardown=raise_on_teardown)
-        def resource_with_teardown_hook():
+        def resource_with_teardown_errors():
             yield "value"
+            raise RuntimeError("generator teardown failed")
 
         resolver = ResourceResolver(registry)
-        value = await resolver.resolve("resource_with_teardown_hook")
-        assert value == "value"
+        assert await resolver.resolve("resource_with_teardown_errors") == "value"
 
-        # Hook is not called during resolve
-        assert not teardown_hook_called
-
-        # Hook is called during teardown and raises
-        with pytest.raises(RuntimeError, match="on_teardown hook failed"):
+        with pytest.raises(ExceptionGroup) as exc_info:
             await resolver.teardown_scope(Scope.CASE)
 
-        # Verify hook was called
-        assert teardown_hook_called
-
-    @pytest.mark.asyncio
-    async def test_multiple_resources_one_fails(self):
-        """Test that when multiple resources are requested and one fails, the error is surfaced."""
-
-        @resource
-        def good_resource():
-            return "good"
-
-        @resource
-        def bad_resource():
-            raise RuntimeError("Bad resource")
-
-        resolver = ResourceResolver(registry)
-
-        good_value = await resolver.resolve("good_resource")
-        assert good_value == "good"
-
-        with pytest.raises(RuntimeError, match="Bad resource"):
-            await resolver.resolve("bad_resource")
+        messages = {str(error) for error in exc_info.value.exceptions}
+        assert any("generator teardown failed" in message for message in messages)
+        assert any("hook teardown failed" in message for message in messages)

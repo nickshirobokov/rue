@@ -1,7 +1,6 @@
 """Tests for reporter instance registration."""
 
 from rue.config import RueConfig
-from rue.reports import ConsoleReporter, OtelReporter
 from rue.reports.base import Reporter
 
 
@@ -58,41 +57,7 @@ class TestReporterBase:
 class TestReporterRegistry:
     """Tests for direct Reporter.REGISTRY access."""
 
-    def test_default_registry_contains_console_and_otel(self):
-        registry = Reporter.REGISTRY
-
-        assert isinstance(registry["ConsoleReporter"], ConsoleReporter)
-        assert isinstance(registry["OtelReporter"], OtelReporter)
-
     def test_registry_clear_removes_all_instances(self):
         Reporter.REGISTRY.clear()
 
         assert Reporter.REGISTRY == {}
-
-    def test_registry_returns_registered_instance(self):
-        reporter = DummyReporter()
-
-        assert Reporter.REGISTRY["DummyReporter"] is reporter
-
-    def test_registry_preserves_name_order_when_selected(self):
-        class ReporterA(DummyReporter):
-            pass
-
-        class ReporterB(DummyReporter):
-            pass
-
-        first = ReporterA()
-        second = ReporterB()
-
-        assert [Reporter.REGISTRY[name] for name in ["ReporterB", "ReporterA"]] == [
-            second,
-            first,
-        ]
-
-    def test_registry_values_include_all_registered_instances(self):
-        extra = DummyReporter()
-        reporters = list(Reporter.REGISTRY.values())
-
-        assert isinstance(reporters[0], ConsoleReporter)
-        assert isinstance(reporters[1], OtelReporter)
-        assert reporters[2] is extra

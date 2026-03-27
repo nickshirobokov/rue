@@ -183,6 +183,43 @@ async def test_confrue_session_resources_resolve_hierarchically(
     assert run.result.passed == 3
 
 
+@pytest.mark.asyncio
+async def test_collect_runs_class_based_tests_with_resource_injection(
+    tmp_path,
+    null_reporter,
+):
+    (tmp_path / "confrue_shared.py").write_text(
+        dedent(
+            """
+            import rue
+
+            @rue.resource
+            def shared_value():
+                return 7
+            """
+        )
+    )
+    module_path = tmp_path / "rue_class_sample.py"
+    module_path.write_text(
+        dedent(
+            """
+            class TestMath:
+                def test_value(self, shared_value):
+                    assert shared_value == 7
+            """
+        )
+    )
+
+    items = collect(module_path)
+    run = await Runner(reporters=[null_reporter]).run(items=items)
+
+    assert [item.full_name for item in items] == [
+        "rue_class_sample::TestMath::test_value"
+    ]
+    assert run.result.passed == 1
+    assert run.result.executions[0].item.class_name == "TestMath"
+
+
 def test_collect_items_share_confrue_session_across_selected_modules(
     tmp_path,
     monkeypatch,
@@ -222,3 +259,34 @@ def test_collect_does_not_discover_confrue_modules(tmp_path):
     (tmp_path / "confrue_only.py").write_text("VALUE = 1\n")
 
     assert collect(tmp_path) == []
+
+
+def test_collect_uses_fresh_import_session_after_file_changes(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(builtins, "collected_values", [], raising=False)
+    (tmp_path / "confrue_shared.py").write_text("VALUE = 1\n")
+    module_path = tmp_path / "rue_sample.py"
+    module_path.write_text(
+        dedent(
+            """
+            import builtins
+            from .confrue_shared import VALUE
+
+            def test_value():
+                builtins.collected_values.append(VALUE)
+            """
+        )
+    )
+
+    [first_item] = collect(tmp_path)
+    first_item.fn()
+    assert builtins.collected_values == [1]
+
+    builtins.collected_values.clear()
+    (tmp_path / "confrue_shared.py").write_text("VALUE = 2\n")
+
+    [second_item] = collect(tmp_path)
+    second_item.fn()
+    assert builtins.collected_values == [2]

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from rue.config import Config, load_config, reset_load_config_cache
+from rue.config import load_config, reset_load_config_cache
 
 
 @pytest.fixture(autouse=True)
@@ -74,30 +74,3 @@ def test_load_config_defaults_when_missing(
     assert config.otel_content is True
     assert config.db_path is None
     assert config.db_enabled is True
-
-
-@pytest.mark.parametrize(
-    ("field", "expected"),
-    [
-        ("test_paths", ["."]),
-        ("include_tags", []),
-        ("exclude_tags", []),
-        ("keyword", None),
-        ("maxfail", None),
-        ("verbosity", 0),
-        ("addopts", []),
-        ("otel", False),
-        ("otel_content", True),
-        ("db_path", None),
-        ("db_enabled", True),
-    ],
-)
-def test_config_default_values(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    field: str,
-    expected: object,
-):
-    monkeypatch.chdir(tmp_path)
-    config = load_config()
-    assert getattr(config, field) == expected

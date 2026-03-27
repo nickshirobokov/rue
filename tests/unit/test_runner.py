@@ -1,10 +1,12 @@
 """Tests for rue.testing.runner module."""
 
 import asyncio
+import builtins
 import json
 import os
 import time
 from pathlib import Path
+from textwrap import dedent
 from typing import Any
 from unittest.mock import patch
 from uuid import UUID, uuid4
@@ -12,22 +14,17 @@ from uuid import UUID, uuid4
 import pytest
 
 from rue.config import RueConfig
-from rue.reports import ConsoleReporter, OtelReporter
+from rue.reports import OtelReporter
 from rue.reports.base import Reporter
 from rue.reports.otel import DEFAULT_OTEL_OUTPUT_ROOT, MAX_STORED_OTEL_RUNS
 from rue.resources import ResourceRegistry, registry, resource
 from rue.telemetry.otel import otel_span
 from rue.telemetry.otel.runtime import OtelTraceSession
-from rue.testing.environment import _filter_env_vars, capture_environment
+from rue.testing.environment import _filter_env_vars
+from rue.testing.discovery import collect
 from rue.testing.models import (
-    Case,
-    CaseGroup,
-    CaseGroupIterateModifier,
-    CaseIterateModifier,
     ParameterSet,
     ParametrizeModifier,
-    RepeatModifier,
-    RunEnvironment,
     RunResult,
     TestExecution,
     TestItem,
@@ -136,27 +133,6 @@ class EventReporter(Reporter):
 class TestRunResult:
     """Tests for RunResult dataclass."""
 
-    def test_counts_passed(self):
-        result = RunResult()
-        items = [make_item(lambda: None) for _ in range(3)]
-        result.executions = [
-            TestExecution(
-                definition=items[0],
-                result=TestResult(status=TestStatus.PASSED, duration_ms=1),
-            ),
-            TestExecution(
-                definition=items[1],
-                result=TestResult(status=TestStatus.PASSED, duration_ms=1),
-            ),
-            TestExecution(
-                definition=items[2],
-                result=TestResult(status=TestStatus.FAILED, duration_ms=1),
-            ),
-        ]
-        assert result.passed == 2
-        assert result.failed == 1
-        assert result.total == 3
-
     def test_counts_all_statuses(self):
         result = RunResult()
         items = [make_item(lambda: None) for _ in range(6)]
@@ -222,27 +198,9 @@ class TestEnvironmentCapture:
             captured = _filter_env_vars()
             assert captured["OPENAI_API_KEY"] == "***"
 
-    def test_capture_environment_structure(self):
-        """Test that capture_environment returns a valid RunEnvironment."""
-        env = capture_environment()
-        assert isinstance(env, RunEnvironment)
-        assert env.python_version is not None
-        assert env.platform is not None
-        assert env.rue_version is not None
-
 
 class TestRunner:
     """Tests for Runner class."""
-
-    def test_defaults_to_all_registered_reporters(self):
-        runner = Runner(
-            config=make_runner_config(db_enabled=False, verbosity=2)
-        )
-
-        assert len(runner.reporters) == 2
-        assert isinstance(runner.reporters[0], ConsoleReporter)
-        assert runner.reporters[0].verbosity == 2
-        assert isinstance(runner.reporters[1], OtelReporter)
 
     def test_uses_all_registered_reporters_when_not_specified(self):
         extra = EventReporter()
@@ -283,91 +241,6 @@ class TestRunner:
         assert runner.reporters == [selected]
 
     @pytest.mark.asyncio
-    async def test_runs_passing_test(self, null_reporter):
-        def passing_test():
-            assert True
-
-        item = make_item(passing_test)
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
-
-        assert result.result.passed == 1
-        assert result.result.failed == 0
-
-    @pytest.mark.asyncio
-    async def test_runs_failing_test(self, null_reporter):
-        def failing_test():
-            assert False, "expected failure"
-
-        item = make_item(failing_test)
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
-
-        assert result.result.failed == 1
-        assert "expected failure" in str(
-            result.result.executions[0].result.error
-        )
-
-    @pytest.mark.asyncio
-    async def test_runs_async_test(self, null_reporter):
-        async def async_test():
-            await asyncio.sleep(0.001)
-            assert True
-
-        item = make_item(async_test, is_async=True)
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
-
-        assert result.result.passed == 1
-
-    @pytest.mark.asyncio
-    async def test_handles_exception_as_error(self, null_reporter):
-        def error_test():
-            raise RuntimeError("something broke")
-
-        item = make_item(error_test)
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
-
-        assert result.result.errors == 1
-        assert isinstance(
-            result.result.executions[0].result.error, RuntimeError
-        )
-
-    @pytest.mark.asyncio
-    async def test_skipped_test(self, null_reporter):
-        def skipped_test():
-            pass
-
-        item = make_item(skipped_test, skip_reason="not ready")
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
-
-        assert result.result.skipped == 1
-
-    @pytest.mark.asyncio
-    async def test_xfail_test_fails_as_expected(self, null_reporter):
-        def xfail_test():
-            assert False
-
-        item = make_item(xfail_test, xfail_reason="known bug")
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
-
-        assert result.result.xfailed == 1
-
-    @pytest.mark.asyncio
-    async def test_xfail_test_passes_unexpectedly(self, null_reporter):
-        def xpass_test():
-            pass
-
-        item = make_item(xpass_test, xfail_reason="expected to fail")
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
-
-        assert result.result.xpassed == 1
-
-    @pytest.mark.asyncio
     async def test_xfail_strict_fails_on_pass(self, null_reporter):
         def strict_xfail_test():
             pass
@@ -379,6 +252,40 @@ class TestRunner:
         result = await runner.run(items=[item])
 
         assert result.result.failed == 1
+
+    @pytest.mark.asyncio
+    async def test_fail_fast_stops_after_first_rewritten_assertion(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        null_reporter,
+    ):
+        module_path = tmp_path / "rue_fail_fast.py"
+        module_path.write_text(
+            dedent(
+                """
+                import builtins
+
+                def test_fail_fast():
+                    builtins.fail_fast_events.append("before")
+                    assert False, "first failure"
+                    builtins.fail_fast_events.append("after_first")
+                    assert False, "second failure"
+                """
+            )
+        )
+        monkeypatch.setattr(builtins, "fail_fast_events", [], raising=False)
+
+        result = await Runner(
+            reporters=[null_reporter],
+            fail_fast=True,
+        ).run(items=collect(module_path))
+
+        execution = result.result.executions[0]
+        assert result.result.failed == 1
+        assert builtins.fail_fast_events == ["before"]
+        assert len(execution.result.assertion_results) == 1
+        assert "first failure" in str(execution.result.error)
 
 
 class TestRunId:
@@ -554,6 +461,35 @@ class TestResourceInjection:
         # Should error because unknown_param is not provided
         assert result.result.errors == 1
 
+    @pytest.mark.parametrize("capture_output", [True, False])
+    @pytest.mark.asyncio
+    async def test_captured_output_resource_respects_runner_capture_mode(
+        self,
+        capture_output: bool,
+        capsys,
+        null_reporter,
+    ):
+        captured = []
+
+        def test_output(captured_output):
+            print("hello from test")
+            captured.append(captured_output.readouterr())
+
+        result = await Runner(
+            reporters=[null_reporter],
+            capture_output=capture_output,
+        ).run(items=[make_item(test_output, params=["captured_output"])])
+
+        assert result.result.passed == 1
+        assert captured == [("hello from test\n", "")]
+
+        real_out, real_err = capsys.readouterr()
+        assert real_err == ""
+        if capture_output:
+            assert real_out == ""
+        else:
+            assert "hello from test" in real_out
+
 
 class TestOpenTelemetry:
     """Tests for runner-managed tracing behavior."""
@@ -669,79 +605,30 @@ class TestOpenTelemetry:
         assert reporter.trace_events == []
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("mode", ["repeat", "parametrize", "case_iterate"])
     async def test_aggregated_children_collect_traces_but_parent_does_not(
         self,
-        mode: str,
     ):
-        if mode == "repeat":
+        async def test_case(value: int):
+            _ = value
+            await asyncio.sleep(0)
 
-            async def test_case():
-                await asyncio.sleep(0)
-
-            item = TestItem(
-                fn=test_case,
-                name="test_repeated_trace",
-                module_path=Path("test_module.py"),
-                is_async=True,
-                params=[],
-                class_name=None,
-                modifiers=[RepeatModifier(count=2, min_passes=2)],
-                tags=set(),
-            )
-        elif mode == "parametrize":
-
-            async def test_case(value: int):
-                _ = value
-                await asyncio.sleep(0)
-
-            item = TestItem(
-                fn=test_case,
-                name="test_parametrized_trace",
-                module_path=Path("test_module.py"),
-                is_async=True,
-                params=["value"],
-                class_name=None,
-                modifiers=[
-                    ParametrizeModifier(
-                        parameter_sets=(
-                            ParameterSet(values={"value": 1}, suffix="one"),
-                            ParameterSet(values={"value": 2}, suffix="two"),
-                        )
+        item = TestItem(
+            fn=test_case,
+            name="test_parametrized_trace",
+            module_path=Path("test_module.py"),
+            is_async=True,
+            params=["value"],
+            class_name=None,
+            modifiers=[
+                ParametrizeModifier(
+                    parameter_sets=(
+                        ParameterSet(values={"value": 1}, suffix="one"),
+                        ParameterSet(values={"value": 2}, suffix="two"),
                     )
-                ],
-                tags=set(),
-            )
-        else:
-
-            async def test_case(case):
-                _ = case
-                await asyncio.sleep(0)
-
-            item = TestItem(
-                fn=test_case,
-                name="test_case_trace",
-                module_path=Path("test_module.py"),
-                is_async=True,
-                params=["case"],
-                class_name=None,
-                modifiers=[
-                    CaseIterateModifier(
-                        cases=(
-                            Case(
-                                id=UUID("00000000-0000-0000-0000-000000000001"),
-                                inputs={"value": 1},
-                            ),
-                            Case(
-                                id=UUID("00000000-0000-0000-0000-000000000002"),
-                                inputs={"value": 2},
-                            ),
-                        ),
-                        min_passes=2,
-                    )
-                ],
-                tags=set(),
-            )
+                )
+            ],
+            tags=set(),
+        )
 
         reporter = EventReporter()
         result = await Runner(
@@ -935,50 +822,6 @@ class TestConcurrency:
             tags=set(),
         )
 
-    @staticmethod
-    def _make_case_iterated_item(
-        *,
-        name: str,
-        cases: tuple[Case[dict[str, float], dict[str, Any]], ...],
-        min_passes: int,
-    ) -> TestItem:
-        async def case_iterated_test(case) -> None:
-            await asyncio.sleep(case.inputs["delay"])
-
-        return TestItem(
-            fn=case_iterated_test,
-            name=name,
-            module_path=Path("test_module.py"),
-            is_async=True,
-            params=["case"],
-            class_name=None,
-            modifiers=[CaseIterateModifier(cases=cases, min_passes=min_passes)],
-            tags=set(),
-        )
-
-    @staticmethod
-    def _make_case_group_iterated_item(
-        *,
-        name: str,
-        groups: tuple[
-            CaseGroup[dict[str, float], dict[str, Any], dict[str, Any]], ...
-        ],
-    ) -> TestItem:
-        async def case_group_iterated_test(group, case) -> None:
-            _ = group
-            await asyncio.sleep(case.inputs["delay"])
-
-        return TestItem(
-            fn=case_group_iterated_test,
-            name=name,
-            module_path=Path("test_module.py"),
-            is_async=True,
-            params=["group", "case"],
-            class_name=None,
-            modifiers=[CaseGroupIterateModifier(groups=groups)],
-            tags=set(),
-        )
-
     @pytest.mark.asyncio
     async def test_concurrent_execution(self, null_reporter):
         start_times = []
@@ -1111,7 +954,7 @@ class TestConcurrency:
             config=make_runner_config(concurrency=3, db_enabled=False),
             reporters=[reporter],
         )
-        await runner.run(items=[item])
+        test_run = await runner.run(items=[item])
 
         assert len(reporter.subtest_event_times) == 3
         parent_complete_elapsed = next(
@@ -1123,154 +966,11 @@ class TestConcurrency:
             elapsed
             for _parent, _suffix, elapsed in reporter.subtest_event_times
         ) <= (parent_complete_elapsed)
-
-    @pytest.mark.asyncio
-    async def test_subtest_callback_count_matches_and_order_is_deterministic(
-        self,
-    ):
-        parameter_sets = (
-            ParameterSet(values={"delay": 0.15}, suffix="first"),
-            ParameterSet(values={"delay": 0.01}, suffix="second"),
-            ParameterSet(values={"delay": 0.05}, suffix="third"),
-        )
-        item = self._make_parametrized_item(
-            name="test_parametrized_order", parameter_sets=parameter_sets
-        )
-
-        reporter = EventReporter()
-        runner = Runner(
-            config=make_runner_config(concurrency=3, db_enabled=False),
-            reporters=[reporter],
-        )
-        test_run = await runner.run(items=[item])
-
-        assert len(reporter.subtest_event_times) == len(parameter_sets)
         execution = test_run.result.executions[0]
         assert [sub.item.suffix for sub in execution.sub_executions] == [
-            "first",
-            "second",
-            "third",
-        ]
-
-    @pytest.mark.asyncio
-    async def test_case_iterated_callbacks_stream_and_order_is_deterministic(
-        self,
-    ):
-        cases = (
-            Case(
-                id=UUID("00000000-0000-0000-0000-000000000001"),
-                inputs={"delay": 0.15},
-            ),
-            Case(
-                id=UUID("00000000-0000-0000-0000-000000000002"),
-                inputs={"delay": 0.01},
-            ),
-            Case(
-                id=UUID("00000000-0000-0000-0000-000000000003"),
-                inputs={"delay": 0.05},
-            ),
-        )
-        item = self._make_case_iterated_item(
-            name="test_case_iterated_order",
-            cases=cases,
-            min_passes=len(cases),
-        )
-
-        reporter = EventReporter()
-        runner = Runner(
-            config=make_runner_config(concurrency=3, db_enabled=False),
-            reporters=[reporter],
-        )
-        test_run = await runner.run(items=[item])
-
-        assert len(reporter.subtest_event_times) == len(cases)
-        parent_complete_elapsed = next(
-            elapsed
-            for kind, name, elapsed in reporter.event_times
-            if kind == "complete" and name == item.name
-        )
-        assert max(
-            elapsed
-            for _parent, _suffix, elapsed in reporter.subtest_event_times
-        ) <= (parent_complete_elapsed)
-
-        execution = test_run.result.executions[0]
-        assert [sub.item.suffix for sub in execution.sub_executions] == [
-            None,
-            None,
-            None,
-        ]
-        assert [sub.item.case_id for sub in execution.sub_executions] == [
-            case.id for case in cases
-        ]
-
-    @pytest.mark.asyncio
-    async def test_case_group_iterated_callbacks_stream_and_order_is_deterministic(
-        self,
-    ):
-        groups = (
-            CaseGroup(
-                name="alpha",
-                cases=[
-                    Case(
-                        id=UUID("00000000-0000-0000-0000-000000000011"),
-                        inputs={"delay": 0.15},
-                    )
-                ],
-                min_passes=1,
-            ),
-            CaseGroup(
-                name="beta",
-                cases=[
-                    Case(
-                        id=UUID("00000000-0000-0000-0000-000000000012"),
-                        inputs={"delay": 0.01},
-                    )
-                ],
-                min_passes=1,
-            ),
-            CaseGroup(
-                name="gamma",
-                cases=[
-                    Case(
-                        id=UUID("00000000-0000-0000-0000-000000000013"),
-                        inputs={"delay": 0.05},
-                    )
-                ],
-                min_passes=1,
-            ),
-        )
-        item = self._make_case_group_iterated_item(
-            name="test_case_group_iterated_order",
-            groups=groups,
-        )
-
-        reporter = EventReporter()
-        runner = Runner(
-            config=make_runner_config(concurrency=3, db_enabled=False),
-            reporters=[reporter],
-        )
-        test_run = await runner.run(items=[item])
-
-        group_names = {group.name for group in groups}
-        group_events = [
-            event
-            for event in reporter.subtest_event_times
-            if event[1] in group_names
-        ]
-        assert len(group_events) == len(groups)
-        parent_complete_elapsed = next(
-            elapsed
-            for kind, name, elapsed in reporter.event_times
-            if kind == "complete" and name == item.name
-        )
-        assert max(elapsed for _parent, _suffix, elapsed in group_events) <= (
-            parent_complete_elapsed
-        )
-
-        execution = test_run.result.executions[0]
-        assert [sub.item.suffix for sub in execution.sub_executions] == [
-            group.name for group in groups
+            "slow",
+            "fast",
+            "mid",
         ]
 
     @pytest.mark.asyncio

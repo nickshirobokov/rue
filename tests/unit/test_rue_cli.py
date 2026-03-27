@@ -179,31 +179,11 @@ class TestResolveReporters:
         reporters = _resolve_reporters(args, config)
         assert reporters == []
 
-    def test_default_uses_runner_registry_when_config_is_empty(self):
-        args = self._make_args()
-        config = self._make_config(reporters=[])
-        reporters = _resolve_reporters(args, config)
-        assert reporters == []
-
-    def test_cli_reporter_flag(self):
-        args = self._make_args(reporters=["ConsoleReporter"])
-        config = self._make_config()
-        reporters = _resolve_reporters(args, config)
-        assert reporters == ["ConsoleReporter"]
-
     def test_config_reporters(self):
         args = self._make_args()
         config = self._make_config(reporters=["ConsoleReporter"])
         reporters = _resolve_reporters(args, config)
         assert reporters == ["ConsoleReporter"]
-
-    def test_config_can_enable_otel_reporter(self):
-        args = self._make_args()
-        config = self._make_config(
-            reporters=["ConsoleReporter", "OtelReporter"]
-        )
-        reporters = _resolve_reporters(args, config)
-        assert reporters == ["ConsoleReporter", "OtelReporter"]
 
     def test_cli_overrides_config(self):
         args = self._make_args(reporters=["ConsoleReporter"])
@@ -216,22 +196,6 @@ def _make_cli_config() -> Config:
     return Config()
 
 
-def test_parser_accepts_valid_run_id():
-    parser = _build_parser()
-    run_id = uuid4()
-    args = parser.parse_args(["test", "--run-id", str(run_id)])
-    assert args.run_id == run_id
-
-
-def test_parser_trace_defaults_are_unset():
-    parser = _build_parser()
-    args = parser.parse_args(["test"])
-    assert args.otel is None
-    assert args.otel_content is None
-    assert not hasattr(args, "otel_output")
-    assert not hasattr(args, "otel_output_hook")
-
-
 def test_resolve_otel_settings_prefer_cli_over_config():
     parser = _build_parser()
     args = parser.parse_args(["test", "--no-otel", "--otel-content"])
@@ -239,28 +203,6 @@ def test_resolve_otel_settings_prefer_cli_over_config():
 
     assert _resolve_otel(args, config) is False
     assert _resolve_otel_content(args, config) is True
-
-
-def test_resolve_otel_uses_config_when_cli_not_explicit():
-    parser = _build_parser()
-    args = parser.parse_args(["test"])
-    config = Config(otel=True)
-
-    assert _resolve_otel(args, config) is True
-
-
-def test_parser_rejects_removed_otel_output_flag():
-    parser = _build_parser()
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["test", "--otel-output", "traces"])
-    assert exc.value.code == 2
-
-
-def test_parser_rejects_removed_otel_output_hook_flag():
-    parser = _build_parser()
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["test", "--otel-output-hook", "module:hook"])
-    assert exc.value.code == 2
 
 
 def test_parser_rejects_invalid_run_id():

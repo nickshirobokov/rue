@@ -6,7 +6,7 @@ import pytest
 
 from rue.testing import TestStatus, fail, skip, xfail
 from rue.testing.models import TestDefinition
-from rue.testing.outcomes import SkipTest, XFailTest
+from rue.testing.outcomes import FailTest, SkipTest, XFailTest
 from rue.testing.runner import Runner
 
 
@@ -25,163 +25,76 @@ def make_item(
     )
 
 
-class TestImperativeSkip:
-    @pytest.mark.asyncio
-    async def test_skip_marks_test_as_skipped(self, null_reporter):
-        def skipping_test():
-            skip("not ready")
+@pytest.mark.parametrize(
+    ("outcome_fn", "status", "count_attr", "error_type", "reason"),
+    [
+        (skip, TestStatus.SKIPPED, "skipped", SkipTest, "missing dependency"),
+        (fail, TestStatus.FAILED, "failed", FailTest, "explicit failure"),
+        (xfail, TestStatus.XFAILED, "xfailed", XFailTest, "known bug"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_imperative_outcome_sets_status_and_reason(
+    null_reporter,
+    outcome_fn,
+    status,
+    count_attr: str,
+    error_type,
+    reason: str,
+):
+    def outcome_test():
+        outcome_fn(reason)
 
-        item = make_item(skipping_test)
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
+    result = await Runner(reporters=[null_reporter]).run(
+        items=[make_item(outcome_test)]
+    )
+    execution = result.result.executions[0]
 
-        assert result.result.skipped == 1
-        assert result.result.executions[0].result.status == TestStatus.SKIPPED
-
-    @pytest.mark.asyncio
-    async def test_skip_with_reason(self, null_reporter):
-        def skipping_test():
-            skip("missing dependency")
-
-        item = make_item(skipping_test)
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
-
-        assert result.result.skipped == 1
-        assert "missing dependency" in str(
-            result.result.executions[0].result.error
-        )
-
-    @pytest.mark.asyncio
-    async def test_skip_without_reason(self, null_reporter):
-        def skipping_test():
-            skip()
-
-        item = make_item(skipping_test)
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
-
-        assert result.result.skipped == 1
-        assert isinstance(result.result.executions[0].result.error, SkipTest)
-
-    @pytest.mark.asyncio
-    async def test_skip_stops_execution(self, null_reporter):
-        executed = []
-
-        def skipping_test():
-            executed.append("before")
-            skip("stopping")
-            executed.append("after")
-
-        item = make_item(skipping_test)
-        runner = Runner(reporters=[null_reporter])
-        await runner.run(items=[item])
-
-        assert executed == ["before"]
+    assert getattr(result.result, count_attr) == 1
+    assert execution.result.status == status
+    assert isinstance(execution.result.error, error_type)
+    assert reason in str(execution.result.error)
 
 
-class TestImperativeFail:
-    @pytest.mark.asyncio
-    async def test_fail_marks_test_as_failed(self, null_reporter):
-        def failing_test():
-            fail("explicit failure")
+@pytest.mark.parametrize(
+    ("outcome_fn", "count_attr", "error_type"),
+    [
+        (skip, "skipped", SkipTest),
+        (fail, "failed", FailTest),
+        (xfail, "xfailed", XFailTest),
+    ],
+)
+@pytest.mark.asyncio
+async def test_imperative_outcome_without_reason_uses_expected_error_type(
+    null_reporter,
+    outcome_fn,
+    count_attr: str,
+    error_type,
+):
+    def outcome_test():
+        outcome_fn()
 
-        item = make_item(failing_test)
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
+    result = await Runner(reporters=[null_reporter]).run(
+        items=[make_item(outcome_test)]
+    )
 
-        assert result.result.failed == 1
-        assert result.result.executions[0].result.status == TestStatus.FAILED
-
-    @pytest.mark.asyncio
-    async def test_fail_with_reason(self, null_reporter):
-        def failing_test():
-            fail("something went wrong")
-
-        item = make_item(failing_test)
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
-
-        assert result.result.failed == 1
-        assert "something went wrong" in str(
-            result.result.executions[0].result.error
-        )
-
-    @pytest.mark.asyncio
-    async def test_fail_without_reason(self, null_reporter):
-        def failing_test():
-            fail()
-
-        item = make_item(failing_test)
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
-
-        assert result.result.failed == 1
-
-    @pytest.mark.asyncio
-    async def test_fail_stops_execution(self, null_reporter):
-        executed = []
-
-        def failing_test():
-            executed.append("before")
-            fail("stopping")
-            executed.append("after")
-
-        item = make_item(failing_test)
-        runner = Runner(reporters=[null_reporter])
-        await runner.run(items=[item])
-
-        assert executed == ["before"]
+    assert getattr(result.result, count_attr) == 1
+    assert isinstance(result.result.executions[0].result.error, error_type)
 
 
-class TestImperativeXFail:
-    @pytest.mark.asyncio
-    async def test_xfail_marks_test_as_xfailed(self, null_reporter):
-        def xfailing_test():
-            xfail("known bug")
+@pytest.mark.parametrize("outcome_fn", [skip, fail, xfail])
+@pytest.mark.asyncio
+async def test_imperative_outcome_stops_execution(
+    null_reporter,
+    outcome_fn,
+):
+    executed = []
 
-        item = make_item(xfailing_test)
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
+    def outcome_test():
+        executed.append("before")
+        outcome_fn("stopping")
+        executed.append("after")
 
-        assert result.result.xfailed == 1
-        assert result.result.executions[0].result.status == TestStatus.XFAILED
+    await Runner(reporters=[null_reporter]).run(items=[make_item(outcome_test)])
 
-    @pytest.mark.asyncio
-    async def test_xfail_with_reason(self, null_reporter):
-        def xfailing_test():
-            xfail("issue #123")
-
-        item = make_item(xfailing_test)
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
-
-        assert result.result.xfailed == 1
-        assert "issue #123" in str(result.result.executions[0].result.error)
-
-    @pytest.mark.asyncio
-    async def test_xfail_without_reason(self, null_reporter):
-        def xfailing_test():
-            xfail()
-
-        item = make_item(xfailing_test)
-        runner = Runner(reporters=[null_reporter])
-        result = await runner.run(items=[item])
-
-        assert result.result.xfailed == 1
-        assert isinstance(result.result.executions[0].result.error, XFailTest)
-
-    @pytest.mark.asyncio
-    async def test_xfail_stops_execution(self, null_reporter):
-        executed = []
-
-        def xfailing_test():
-            executed.append("before")
-            xfail("stopping")
-            executed.append("after")
-
-        item = make_item(xfailing_test)
-        runner = Runner(reporters=[null_reporter])
-        await runner.run(items=[item])
-
-        assert executed == ["before"]
+    assert executed == ["before"]
