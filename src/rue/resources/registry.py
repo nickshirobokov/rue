@@ -9,6 +9,7 @@ from typing import Any, ParamSpec, TypeVar
 
 P = ParamSpec("P")
 T = TypeVar("T")
+_RECEIVER_PARAMETER_NAMES = {"self", "cls"}
 
 
 class Scope(Enum):
@@ -106,7 +107,7 @@ class ResourceRegistry:
             dependencies = [
                 parameter
                 for parameter in signature.parameters
-                if parameter != "self"
+                if parameter not in _RECEIVER_PARAMETER_NAMES
             ]
             is_async = inspect.iscoroutinefunction(fn)
             is_async_generator = inspect.isasyncgenfunction(fn)

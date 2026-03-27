@@ -134,6 +134,15 @@ class TestResourceDecorator:
         assert defn is not None
         assert defn.dependencies == ["base", "other"]
 
+    def test_ignores_self_and_cls_in_dependencies(self):
+        @resource
+        def dependent(self, cls, base, other):
+            return base + other
+
+        defn = registry.get("dependent")
+        assert defn is not None
+        assert defn.dependencies == ["base", "other"]
+
 
 class TestResourceRegistry:
     def test_registers_definitions_and_session_index(self, tmp_path):
