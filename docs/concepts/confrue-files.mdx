@@ -1,0 +1,93 @@
+---
+title: "confrue Files"
+---
+
+`confrue_*.py` files are Rue's shared setup modules. Use them for resources, helpers, and directory-scoped overrides that should apply to nearby tests. Put actual tests in `rue_*.py` files.
+
+## What `confrue_*` Files Are For
+
+- Shared `SESSION` resources
+- Shared setup helpers and constants
+- Directory-specific overrides of same-name `SESSION` resources
+
+`confrue_*.py` files are not collected as tests.
+
+## Loading Behavior
+
+For each selected `rue_*.py` test module, Rue loads matching `confrue_*.py` files before importing the test module itself.
+
+Loading rules:
+1. Rue walks from the suite root down to the selected test module's directory.
+2. In each directory on that path, Rue loads matching `confrue_*.py` files.
+3. Multiple `confrue_*.py` files in the same directory load in lexicographic order.
+4. The selected `rue_*.py` module loads last.
+
+```text
+project/
+├── confrue_a.py
+├── confrue_b.py
+└── api/
+    ├── confrue_api.py
+    └── rue_orders.py
+```
+
+When Rue imports `api/rue_orders.py`, it loads:
+1. `confrue_a.py`
+2. `confrue_b.py`
+3. `api/confrue_api.py`
+4. `api/rue_orders.py`
+
+Because Rue imports these modules together, relative imports between `confrue_*` files and nearby `rue_*.py` files work normally.
+
+## How They Affect Resources
+
+`confrue_*.py` files are the recommended home for shared `SESSION` resources.
+
+If multiple `SESSION` resources share the same name:
+- Rue picks the nearest ancestor provider for the requesting test module.
+- Child directories can override parent directories.
+- Sibling branches do not see each other's child overrides.
+- Different directory-specific providers do not share cached state.
+
+```python
+# confrue_root.py
+import rue
+
+@rue.resource(scope="session")
+def api_base_url():
+    return "https://public.example.com"
+```
+
+```python
+# admin/confrue_admin.py
+import rue
+
+@rue.resource(scope="session")
+def api_base_url():
+    return "https://admin.example.com"
+```
+
+```python
+# admin/rue_admin.py
+def test_admin_api(api_base_url):
+    assert api_base_url == "https://admin.example.com"
+```
+
+```python
+# rue_public.py
+def test_public_api(api_base_url):
+    assert api_base_url == "https://public.example.com"
+```
+
+If a `SESSION` resource is resolved outside an active test context, Rue falls back to the latest active registration. During normal test runs, the requesting test module decides which provider is active.
+
+## Recommendations
+
+- Put tests in `rue_*.py`.
+- Put shared setup in `confrue_*.py`.
+- Use `confrue_*.py` for `SESSION` resources that should follow directory hierarchy.
+- Keep the files focused on reusable setup, not assertions.
+
+<Info>
+  **Related docs**: [Test (Concept)](/concepts/test), [Resource (Concept)](/concepts/resource), [Writing Tests](/usage/writing-tests)
+</Info>

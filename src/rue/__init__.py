@@ -3,7 +3,7 @@
 from .metrics_ import Metric, metric
 from .metrics_.scope import metrics
 from .predicates import PredicateResult, predicate
-from .reports import Reporter, reporter
+from .reports import Reporter
 from .testing import (
     Case,
     CaseGroup,
@@ -46,7 +46,6 @@ __all__ = [
     "metrics",
     # Reporters
     "Reporter",
-    "reporter",
     # OpenTelemetry
     "otel_span",
     "OtelTrace",

@@ -1,23 +1,21 @@
 """Resource injection system."""
 
-from rue.resources.resolver import (
+from rue.resources.registry import (
     ResourceDef,
-    ResourceResolver,
     Scope,
-    clear_registry,
-    get_registry,
+    ResourceRegistry,
+    registry,
     resource,
-    register_builtin,
 )
+from rue.resources.resolver import ResourceResolver
 
 
 __all__ = [
     "ResourceDef",
+    "ResourceRegistry",
     "ResourceResolver",
     "Scope",
-    "clear_registry",
-    "get_registry",
-    "register_builtin",
+    "registry",
     "resource",
 ]
 

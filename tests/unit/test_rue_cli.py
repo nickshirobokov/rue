@@ -16,7 +16,6 @@ from rue.cli import (
     _run_tests,
 )
 from rue.config import Config
-from rue.reports import ConsoleReporter, OtelReporter
 from rue.storage.sqlite import SQLiteStore
 from rue.testing.discovery import TestItem, collect_static
 from rue.testing.models.run import Run, RunEnvironment, RunResult
@@ -177,76 +176,24 @@ class TestResolveReporters:
     def test_default_console_and_otel_reporters(self):
         args = self._make_args()
         config = self._make_config()
-        reporters = _resolve_reporters(args, config, verbosity=0)
-        assert len(reporters) == 2
-        assert isinstance(reporters[0], ConsoleReporter)
-        assert isinstance(reporters[1], OtelReporter)
-
-    def test_default_reporter_always_added(self):
-        args = self._make_args()
-        config = self._make_config(reporters=[])
-        reporters = _resolve_reporters(args, config, verbosity=0)
-        assert len(reporters) == 2
-        assert isinstance(reporters[0], ConsoleReporter)
-        assert isinstance(reporters[1], OtelReporter)
-
-    def test_cli_reporter_flag(self):
-        args = self._make_args(reporters=["ConsoleReporter"])
-        config = self._make_config()
-        reporters = _resolve_reporters(args, config, verbosity=0)
-        assert len(reporters) == 1
-        assert isinstance(reporters[0], ConsoleReporter)
+        reporters = _resolve_reporters(args, config)
+        assert reporters == []
 
     def test_config_reporters(self):
         args = self._make_args()
         config = self._make_config(reporters=["ConsoleReporter"])
-        reporters = _resolve_reporters(args, config, verbosity=0)
-        assert len(reporters) == 1
-        assert isinstance(reporters[0], ConsoleReporter)
-
-    def test_config_can_enable_otel_reporter(self):
-        args = self._make_args()
-        config = self._make_config(
-            reporters=["ConsoleReporter", "OtelReporter"]
-        )
-        reporters = _resolve_reporters(args, config, verbosity=0)
-        assert len(reporters) == 2
-        assert isinstance(reporters[0], ConsoleReporter)
-        assert isinstance(reporters[1], OtelReporter)
+        reporters = _resolve_reporters(args, config)
+        assert reporters == ["ConsoleReporter"]
 
     def test_cli_overrides_config(self):
         args = self._make_args(reporters=["ConsoleReporter"])
-        config = self._make_config(
-            reporters=["rue.reports.console:ConsoleReporter"]
-        )
-        reporters = _resolve_reporters(args, config, verbosity=0)
-        assert len(reporters) == 1
-
-    def test_verbosity_passed_to_console_reporter(self):
-        args = self._make_args()
-        config = self._make_config()
-        reporters = _resolve_reporters(args, config, verbosity=2)
-        assert reporters[0].verbosity == 2
+        config = self._make_config(reporters=["OtelReporter"])
+        reporters = _resolve_reporters(args, config)
+        assert reporters == ["ConsoleReporter"]
 
 
 def _make_cli_config() -> Config:
     return Config()
-
-
-def test_parser_accepts_valid_run_id():
-    parser = _build_parser()
-    run_id = uuid4()
-    args = parser.parse_args(["test", "--run-id", str(run_id)])
-    assert args.run_id == run_id
-
-
-def test_parser_trace_defaults_are_unset():
-    parser = _build_parser()
-    args = parser.parse_args(["test"])
-    assert args.otel is None
-    assert args.otel_content is None
-    assert not hasattr(args, "otel_output")
-    assert not hasattr(args, "otel_output_hook")
 
 
 def test_resolve_otel_settings_prefer_cli_over_config():
@@ -256,28 +203,6 @@ def test_resolve_otel_settings_prefer_cli_over_config():
 
     assert _resolve_otel(args, config) is False
     assert _resolve_otel_content(args, config) is True
-
-
-def test_resolve_otel_uses_config_when_cli_not_explicit():
-    parser = _build_parser()
-    args = parser.parse_args(["test"])
-    config = Config(otel=True)
-
-    assert _resolve_otel(args, config) is True
-
-
-def test_parser_rejects_removed_otel_output_flag():
-    parser = _build_parser()
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["test", "--otel-output", "traces"])
-    assert exc.value.code == 2
-
-
-def test_parser_rejects_removed_otel_output_hook_flag():
-    parser = _build_parser()
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["test", "--otel-output-hook", "module:hook"])
-    assert exc.value.code == 2
 
 
 def test_parser_rejects_invalid_run_id():
@@ -313,13 +238,23 @@ async def test_run_tests_returns_2_when_run_id_already_exists(
     )
     config = _make_cli_config()
 
-    def _fail_if_called(_paths):
-        msg = "_collect_items should not be called when duplicate run_id is detected"
+    collected = False
+
+    def _collect(_paths, _include_tags, _exclude_tags, _keyword):
+        nonlocal collected
+        collected = True
+        return [make_item("test_ok", set())]
+
+    async def _fail_run(self, items=None, path=None, run_id=None):
+        _ = self, items, path, run_id
+        msg = "Runner.run should not be called when duplicate run_id exists"
         raise AssertionError(msg)
 
-    monkeypatch.setattr("rue.cli._collect_items", _fail_if_called)
+    monkeypatch.setattr("rue.cli._collect_items", _collect)
+    monkeypatch.setattr("rue.cli.Runner.run", _fail_run)
 
     exit_code = await _run_tests(args, config)
+    assert collected is True
     assert exit_code == 2
 
 

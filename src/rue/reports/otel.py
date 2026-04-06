@@ -12,6 +12,7 @@ from uuid import UUID
 from rue.reports.base import Reporter
 
 if TYPE_CHECKING:
+    from rue.config import RueConfig
     from rue.testing import TestDefinition
     from rue.testing.models.result import TestExecution
     from rue.testing.models.run import Run
@@ -30,6 +31,9 @@ class OtelReporter(Reporter):
 
     def __init__(self) -> None:
         self._prepared_run_ids: set[UUID] = set()
+
+    def configure(self, config: RueConfig) -> None:
+        _ = config
 
     async def on_no_tests_found(self) -> None:
         return None
@@ -91,3 +95,6 @@ class OtelReporter(Reporter):
         )
         for run_dir in run_dirs[MAX_STORED_OTEL_RUNS:]:
             shutil.rmtree(run_dir)
+
+
+otel_reporter = OtelReporter()

@@ -1,9 +1,9 @@
 from typing import Generator
 
-from rue.resources import resource, Scope, register_builtin
-from rue.telemetry.otel import OtelTrace
 from rue.context.runtime import CURRENT_TEST_TRACER
 from rue.context.output import CURRENT_OUTPUT_CAPTURE, OutputBuffer
+from rue.resources.registry import Scope, registry, resource
+from rue.telemetry.otel import OtelTrace
 
 
 @resource(scope=Scope.CASE)
@@ -17,7 +17,7 @@ def otel_trace() -> Generator[OtelTrace, None, None]:
     yield OtelTrace(_session=tracer.otel_trace_session)
 
 
-register_builtin("otel_trace")
+registry.mark_builtin("otel_trace")
 
 
 @resource(scope=Scope.CASE)
@@ -37,4 +37,4 @@ def captured_output() -> Generator[OutputBuffer, None, None]:
         yield buf
 
 
-register_builtin("captured_output")
+registry.mark_builtin("captured_output")

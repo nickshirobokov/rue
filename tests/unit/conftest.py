@@ -5,13 +5,31 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rue.reports.console import ConsoleReporter
+from rue.reports.otel import OtelReporter
 from rue.reports.base import Reporter
 from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.migrations import MigrationRunner
 
 
+def _reset_reporters() -> None:
+    Reporter.REGISTRY.clear()
+    ConsoleReporter()
+    OtelReporter()
+
+
+@pytest.fixture(autouse=True)
+def clear_reporter_instances():
+    _reset_reporters()
+    yield
+    _reset_reporters()
+
+
 class NullReporter(Reporter):
     """Silent reporter for testing."""
+
+    def configure(self, config) -> None:
+        _ = config
 
     async def on_no_tests_found(self) -> None:
         pass

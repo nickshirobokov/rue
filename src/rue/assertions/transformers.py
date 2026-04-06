@@ -196,7 +196,7 @@ class AssertTransformer(ast.NodeTransformer):
                             ast.Name(
                                 id=self.PREDICATE_RESULTS_VAR_NAME,
                                 ctx=ast.Load(),
-                            )
+                            ),
                         ],
                         keywords=[],
                     ),

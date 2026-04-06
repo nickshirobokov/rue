@@ -22,6 +22,7 @@ Follow pytest habits...
 - Create 'rue_*.py' files
 - Write 'def test_*' functions
 - Use 'rue.resource' instead of 'pytest.fixture'
+- Put shared suite setup, shared resources, and directory-specific overrides in `confrue_*.py` files. See [confrue files](docs/concepts/confrue-files.mdx)
 - Add 'assert' expressions within the functions
 - Run 'uv run rue test'
 
@@ -44,8 +45,8 @@ from rue.predicates import has_unsupported_facts, follows_policy
 from pydantic import BaseModel
 
 @rue.sut
-def store_chatbot(prompt: str) -> str:
-    return call_llm(prompt)
+def store_chatbot():
+    return call_llm
 
 @rue.metric
 def accuracy():
@@ -71,7 +72,7 @@ async def test_chatbot_no_hallucinations(
     case: Case[dict[str, str], Refs],
     store_chatbot,
     accuracy: Metric,
-    trace_context):
+    otel_trace):
     """AI agent relies on knowledge base and tool calls for transactional questions"""
     response = store_chatbot(**case.inputs)
 
@@ -81,10 +82,10 @@ async def test_chatbot_no_hallucinations(
 
     # Verify tool was called when expected
     if expected_tool := case.references.expected_tool:
-        sut_spans = trace_context.get_sut_spans(name="store_chatbot")
+        sut_spans = otel_trace.get_sut_spans(name="store_chatbot")
         tool_names = [
             s.attributes.get("llm.request.functions.0.name")
-            for s in trace_context.get_llm_calls()
+            for s in otel_trace.get_llm_calls()
             if s.attributes
         ]
         assert expected_tool in tool_names
@@ -93,13 +94,13 @@ async def test_chatbot_no_hallucinations(
 Run it:
 
 ```bash
-rue test --trace
+uv run rue test --otel
 ```
 
 Use a custom run UUID when you need stable correlation IDs:
 
 ```bash
-rue test --trace --run-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
+uv run rue test --otel --run-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
 ```
 
 Output:

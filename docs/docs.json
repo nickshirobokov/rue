@@ -63,6 +63,7 @@
         "group": "Concepts",
         "pages": [
           "concepts/test",
+          "concepts/confrue-files",
           "concepts/resource",
           "concepts/sut",
           "concepts/open-telemetry-traces",

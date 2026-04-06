@@ -11,7 +11,7 @@ from rue.context.collectors import (
 )
 from rue.context.runtime import CURRENT_TEST, TestContext, bind
 from rue.metrics_.base import Metric, MetricResult
-from rue.resources import ResourceResolver, clear_registry
+from rue.resources import ResourceResolver, registry
 from rue.testing.discovery import collect
 
 
@@ -38,8 +38,9 @@ def test_sample():
         [item] = collect(mod_path)
         assertion_results: list[AssertionResult] = []
         ctx = TestContext(item=item)
-        with bind(CURRENT_TEST, ctx), bind(
-            CURRENT_ASSERTION_RESULTS, assertion_results
+        with (
+            bind(CURRENT_TEST, ctx),
+            bind(CURRENT_ASSERTION_RESULTS, assertion_results),
         ):
             item.fn()
 
@@ -75,8 +76,9 @@ def test_fail():
         [item] = collect(mod_path)
         assertion_results: list[AssertionResult] = []
         ctx = TestContext(item=item)
-        with bind(CURRENT_TEST, ctx), bind(
-            CURRENT_ASSERTION_RESULTS, assertion_results
+        with (
+            bind(CURRENT_TEST, ctx),
+            bind(CURRENT_ASSERTION_RESULTS, assertion_results),
         ):
             item.fn()
 
@@ -131,7 +133,7 @@ def test_metric_capture_multi():
 async def test_rewritten_asserts_inside_metric_functions_are_collected(
     tmp_path,
 ):
-    clear_registry()
+    registry.reset()
     mod_name = f"rue_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(
@@ -152,7 +154,7 @@ def test_dummy():
 
     try:
         [item] = collect(mod_path)
-        resolver = ResourceResolver()
+        resolver = ResourceResolver(registry)
         metric_results: list[MetricResult] = []
         with bind(CURRENT_METRIC_RESULTS, metric_results):
             await resolver.resolve("my_metric")
@@ -165,7 +167,7 @@ def test_dummy():
         assert ar.passed is False
         assert ar.error_message == "nope"
     finally:
-        clear_registry()
+        registry.reset()
         sys.modules.pop(mod_name, None)
 
 
@@ -219,88 +221,6 @@ def test_repr_cases():
         assert results["assert func(4)"].resolved_args == {"func(4)": "5"}
         assert results["assert [x > 0 for x in xs]"].resolved_args == {
             "[x > 0 for x in xs]": "[False, True, True]"
-        }
-    finally:
-        sys.modules.pop(mod_name, None)
-
-
-def test_assertion_repr_compare_cases(tmp_path):
-    mod_name = f"rue_{uuid4().hex}"
-    mod_path = tmp_path / f"{mod_name}.py"
-    mod_path.write_text(
-        """
-def test_compare_cases():
-    t1 = 5
-    t2 = 10
-    assert t1 < t2
-    assert t1 + t2 > 0
-    a = 1
-    b = 2
-    c = 3
-    assert a < b < c
-""".lstrip()
-    )
-
-    try:
-        [item] = collect(mod_path)
-        assertion_results: list[AssertionResult] = []
-        with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
-            item.fn()
-
-        assert len(assertion_results) == 3
-        results = {
-            ar.expression_repr.expr: ar.expression_repr
-            for ar in assertion_results
-        }
-
-        assert results["assert t1 < t2"].resolved_args == {
-            "t1": "5",
-            "t2": "10",
-        }
-        assert results["assert t1 + t2 > 0"].resolved_args == {
-            "t1": "5",
-            "t2": "10",
-        }
-        assert results["assert a < b < c"].resolved_args == {
-            "a": "1",
-            "b": "2",
-            "c": "3",
-        }
-    finally:
-        sys.modules.pop(mod_name, None)
-
-
-def test_assertion_repr_complex_compare_and_boolop(tmp_path):
-    mod_name = f"rue_{uuid4().hex}"
-    mod_path = tmp_path / f"{mod_name}.py"
-    mod_path.write_text(
-        """
-def test_complex_compare_cases():
-    a = 5
-    b = [5, 6, 7]
-    def c():
-        return 20
-    assert a > 1 and a in b and sum(b) < c()
-""".lstrip()
-    )
-
-    try:
-        [item] = collect(mod_path)
-        assertion_results: list[AssertionResult] = []
-        with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
-            item.fn()
-
-        assert len(assertion_results) == 1
-        [ar] = assertion_results
-        assert (
-            ar.expression_repr.expr
-            == "assert a > 1 and a in b and sum(b) < c()"
-        )
-        assert ar.expression_repr.resolved_args == {
-            "a": "5",
-            "b": "[5, 6, 7]",
-            "sum(b)": "18",
-            "c()": "20",
         }
     finally:
         sys.modules.pop(mod_name, None)

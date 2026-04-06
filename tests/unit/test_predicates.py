@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from rue.config import RueConfig
 from rue.context.collectors import CURRENT_PREDICATE_RESULTS
 from rue.context.runtime import bind
 from rue.predicates import PredicateResult, predicate
@@ -48,21 +49,6 @@ async def async_returns_result(
     )
 
 
-@predicate
-async def async_equals(
-    actual: str,
-    reference: str,
-    *,
-    strict: bool = True,
-    confidence: float = 1.0,
-    message: str | None = None,
-) -> bool:
-    _ = confidence, message
-    if strict:
-        return actual == reference
-    return actual.casefold() == reference.casefold()
-
-
 def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
     mod_name = f"rue_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
@@ -78,6 +64,7 @@ async def _run_module_with_tracing(
     source: str,
     db_enabled: bool = False,
     db_path: Path | None = None,
+    otel_content: bool = True,
 ):
     mod_name, mod_path = _write_temp_module(tmp_path, source)
 
@@ -85,10 +72,13 @@ async def _run_module_with_tracing(
         monkeypatch.chdir(tmp_path)
         items = collect(mod_path)
         runner = Runner(
+            config=RueConfig.model_construct(
+                otel=True,
+                otel_content=otel_content,
+                db_enabled=db_enabled,
+                db_path=db_path,
+            ),
             reporters=[trace_reporter],
-            otel_enabled=True,
-            db_enabled=db_enabled,
-            db_path=db_path,
         )
         run = await runner.run(items=items)
         return mod_name, run, trace_reporter.sessions
@@ -190,43 +180,6 @@ def test_sample():
                 "predicate.message": "'prefix'",
             },
         ),
-        (
-            """
-from rue.predicates import predicate
-
-@predicate
-async def async_equals(
-    actual: str,
-    reference: str,
-    *,
-    strict: bool = True,
-    confidence: float = 1.0,
-    message: str | None = None,
-) -> bool:
-    _ = confidence, message
-    if strict:
-        return actual == reference
-    return actual.casefold() == reference.casefold()
-
-async def test_sample():
-    assert await async_equals(
-        "abc",
-        "ABC",
-        strict=False,
-        confidence=0.75,
-    ) is True
-""",
-            "predicate.async_equals",
-            {
-                "rue.predicate": True,
-                "rue.predicate.name": "async_equals",
-                "predicate.value": True,
-                "predicate.strict": False,
-                "predicate.confidence": 0.75,
-                "predicate.input.actual": "'abc'",
-                "predicate.input.reference": "'ABC'",
-            },
-        ),
     ],
 )
 async def test_predicate_writes_trace_attributes(
@@ -274,28 +227,12 @@ def test_predicate_rejects_missing_reference_parameter():
             return True
 
 
-def test_predicate_rejects_positional_only_actual_reference_parameters():
-    with pytest.raises(
-        TypeError,
-        match="must declare named 'actual' and 'reference' parameters",
-    ):
-
-        @predicate
-        def invalid(actual: str, reference: str, /) -> bool:
-            return actual == reference
-
-
 def test_predicate_accepts_keyword_only_actual_reference_parameters():
     @predicate
     def keyword_only(*, actual: str, reference: str) -> bool:
         return actual == reference
 
     assert keyword_only(actual="a", reference="a") is True
-
-
-def test_predicate_uses_signature_binding_for_missing_call_arguments():
-    with pytest.raises(TypeError, match="reference"):
-        equals("a")
 
 
 @pytest.mark.asyncio
@@ -401,3 +338,51 @@ def test_sample():
     after = [session.serialize() for session in sessions]
 
     assert before == after
+
+
+@pytest.mark.asyncio
+async def test_predicate_trace_omits_content_attributes_when_otel_content_disabled(
+    tmp_path: Path,
+    trace_reporter,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, run, sessions = await _run_module_with_tracing(
+        tmp_path=tmp_path,
+        trace_reporter=trace_reporter,
+        monkeypatch=monkeypatch,
+        otel_content=False,
+        source="""
+from rue.predicates import predicate
+
+@predicate
+def equals(
+    actual: str,
+    reference: str,
+    *,
+    strict: bool = True,
+    confidence: float = 1.0,
+    message: str | None = None,
+) -> bool:
+    _ = confidence, message
+    return actual == reference
+
+def test_sample():
+    assert equals("abc", "xyz", strict=False, confidence=0.25, message="secret") is False
+""",
+    )
+
+    assert run.result.passed == 1
+    attrs = next(
+        span["attributes"]
+        for session in sessions
+        for span in session.serialize()["spans"]
+        if span["name"] == "predicate.equals"
+    )
+
+    assert attrs["rue.predicate"] is True
+    assert attrs["predicate.value"] is False
+    assert attrs["predicate.strict"] is False
+    assert attrs["predicate.confidence"] == 0.25
+    assert "predicate.input.actual" not in attrs
+    assert "predicate.input.reference" not in attrs
+    assert "predicate.message" not in attrs

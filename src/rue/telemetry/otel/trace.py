@@ -56,7 +56,8 @@ class OtelTrace:
             spans = [
                 span
                 for span in spans
-                if span.attributes.get("rue.sut.name") == name
+                if span.attributes
+                and span.attributes.get("rue.sut.name") == name
             ]
         return spans
 

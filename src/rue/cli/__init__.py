@@ -10,21 +10,24 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, TypeVar
+from typing import Callable, Protocol, TypeVar
 from uuid import UUID
 
 from rich.console import Console
 
 from rue.config import Config, load_config
-from rue.reports import Reporter, resolve_reporters
 from rue.storage.sqlite.migrations import MigrationRunner
 from rue.storage.sqlite.store import (
     DEFAULT_DB_NAME,
     MAX_STORED_RUNS,
     find_project_root,
 )
-from rue.testing import TestDefinition, collect
-from rue.testing.discovery import StaticTestReference, collect_static
+from rue.testing import TestDefinition
+from rue.testing.discovery import (
+    StaticTestReference,
+    collect_paths,
+    collect_static,
+)
 from rue.testing.runner import Runner
 
 
@@ -397,32 +400,17 @@ def _resolve_otel_content(args: argparse.Namespace, config: Config) -> bool:
     return config.otel_content
 
 
-def _resolve_reporters(
-    args: argparse.Namespace, config: Config, verbosity: int
-) -> list[Reporter]:
-    """Resolve reporters from CLI args and config.
+def _resolve_reporters(args: argparse.Namespace, config: Config) -> list[str]:
+    """Resolve reporter names from CLI args and config.
 
     Priority:
     1. CLI --reporter flags (if provided, replaces config)
     2. Config reporters list
-    3. Default ConsoleReporter and OtelReporter
+    3. Empty list, which lets Runner use all registered reporters
     """
-    reporter_names: list[str] = []
-
     if args.reporters:
-        reporter_names = args.reporters
-    elif config.reporters:
-        reporter_names = config.reporters
-
-    if not reporter_names:
-        reporter_names = ["ConsoleReporter", "OtelReporter"]
-
-    options = dict(config.reporter_options)
-    if "ConsoleReporter" in reporter_names:
-        console_opts = options.get("ConsoleReporter", {})
-        options["ConsoleReporter"] = {"verbosity": verbosity, **console_opts}
-
-    return resolve_reporters(reporter_names, options)
+        return args.reporters
+    return config.reporters
 
 
 def _collect_items(
@@ -443,10 +431,7 @@ def _collect_items(
 
     selected_paths = sorted({ref.module_path for ref in selected_refs})
 
-    items: list[TestItem] = []
-    for module_path in selected_paths:
-        items.extend(collect(module_path))
-
+    items = collect_paths(selected_paths)
     return _filter_items(items, include_tags, exclude_tags, keyword)
 
 
@@ -488,29 +473,34 @@ async def _run_tests(args: argparse.Namespace, config: Config) -> int:
     if args.no_db:
         db_enabled = False
 
-    reporters = _resolve_reporters(args, config, verbosity)
-    runner = Runner(
-        reporters=reporters,
-        maxfail=maxfail,
-        verbosity=verbosity,
-        concurrency=concurrency,
-        timeout=timeout,
-        otel_enabled=otel_enabled,
-        otel_content=otel_content,
-        fail_fast=args.fail_fast,
-        capture_output=not args.show_output,
-        db_enabled=db_enabled,
-        db_path=db_path,
+    reporter_names = _resolve_reporters(args, config)
+    runner_config = config.model_copy(
+        update={
+            "maxfail": maxfail,
+            "verbosity": verbosity,
+            "concurrency": concurrency,
+            "timeout": timeout,
+            "otel": otel_enabled,
+            "otel_content": otel_content,
+            "db_enabled": db_enabled,
+            "db_path": db_path,
+            "reporters": reporter_names,
+        }
     )
-
-    if db_enabled and args.run_id and runner.run_id_exists(args.run_id):
-        Console().print(f"[red]run_id '{args.run_id}' already exists[/red]")
-        return 2
-
     try:
         items = _collect_items(paths, include_tags, exclude_tags, keyword)
     except ValueError as exc:
         Console().print(f"[red]{exc}[/red]")
+        return 2
+
+    runner = Runner(
+        config=runner_config,
+        fail_fast=args.fail_fast,
+        capture_output=not args.show_output,
+    )
+
+    if db_enabled and args.run_id and runner.run_id_exists(args.run_id):
+        Console().print(f"[red]run_id '{args.run_id}' already exists[/red]")
         return 2
 
     run = await runner.run(items=items, run_id=args.run_id)
