@@ -2,7 +2,7 @@
 title: "Test"
 ---
 
-**Tests** are the core building blocks of your AI system evaluations. Like pytest, Rue discovers and runs `test_*` functions, each one checking how well your AI system performs.
+**Tests** are the core building blocks of your AI system evaluations. Like pytest, Rue discovers and runs `test_*` functions and `Test*` class methods in `rue_*.py` files, each one checking how well your AI system performs.
 
 ## Basic Usage
 
@@ -55,6 +55,21 @@ Rue discovers Python files matching `rue_*.py`:
   </Tree.Folder>
 </Tree>
 
+Rue also loads `confrue_*.py` files as setup modules, not as tests. These files are the right place for shared helpers, shared resources, and directory-specific overrides:
+
+<Tree>
+  <Tree.Folder name="project" defaultOpen>
+    <Tree.File name="confrue_shared.py ✓ Loaded as setup" />
+    <Tree.File name="rue_chatbot.py ✓ Discovered as tests" />
+    <Tree.Folder name="admin" defaultOpen>
+      <Tree.File name="confrue_admin.py ✓ Loaded as setup" />
+      <Tree.File name="rue_admin.py ✓ Discovered as tests" />
+    </Tree.Folder>
+  </Tree.Folder>
+</Tree>
+
+For each selected `rue_*.py` module, Rue loads matching ancestor `confrue_*.py` files before importing the test module. Ancestors load from the suite root down to the test directory, and multiple `confrue_*.py` files in one directory load in lexicographic order.
+
 ### Functions
 
 Within discovered files, Rue collects functions starting with `test_`:
@@ -93,6 +108,19 @@ class TestCustomerSupport:    # ✓ Class discovered
 class SupportBotSuite:         # ✗ Not discovered (missing Test prefix)
     pass
 ```
+
+## `confrue_*` Files
+
+Use `confrue_*.py` files for setup that should apply to nearby tests:
+- shared `SESSION` resources
+- reusable helpers and constants
+- directory-scoped overrides of same-name `SESSION` resources
+
+Keep test definitions in `rue_*.py` files. Keep shared setup in `confrue_*.py` files.
+
+<Info>
+  **Related docs**: [confrue Files (Concept)](/concepts/confrue-files), [Resource (Concept)](/concepts/resource)
+</Info>
 
 ## Dependency Injection
 

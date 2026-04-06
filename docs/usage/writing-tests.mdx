@@ -30,6 +30,13 @@ Rue follows pytest-style discovery patterns to find test functions in your codeb
 - `rue_agent.py` ✓
 - `helpers.py` ✗
 
+Rue also recognizes `confrue_*.py` files as shared setup modules:
+- `confrue_shared.py` ✓ Loaded as setup
+- `confrue_db.py` ✓ Loaded as setup
+- `confrue_shared.py` ✗ Not collected as a test module
+
+For each selected test module, Rue loads matching ancestor `confrue_*.py` files before importing the `rue_*.py` file itself. Ancestors load from the suite root down to the test directory, and multiple `confrue_*.py` files in the same directory load in lexicographic order.
+
 **Functions**: Inside discovered files, Rue collects functions starting with `test_`:
 
 ```python
@@ -50,6 +57,30 @@ class TestCustomerSupport:     # ✓ Discovered
     def helper(self):            # ✗ Not collected
         pass
 ```
+
+### Shared Setup With `confrue_*`
+
+Use `confrue_*.py` files for reusable setup that should apply to a directory tree, especially shared helpers and `SESSION` resources.
+
+```text
+project/
+├── confrue_root.py
+├── rue_smoke.py
+└── api/
+    ├── confrue_api.py
+    └── rue_orders.py
+```
+
+When Rue imports `api/rue_orders.py`, it loads:
+- `confrue_root.py`
+- `api/confrue_api.py`
+- `api/rue_orders.py`
+
+Keep actual tests in `rue_*.py` files. Keep shared setup and directory-specific overrides in `confrue_*.py` files.
+
+<Info>
+  **Related docs**: [confrue Files (Concept)](/concepts/confrue-files), [Resource (Concept)](/concepts/resource)
+</Info>
 
 ## Modifiers
 
@@ -196,7 +227,7 @@ def database():
 
 @rue.resource(scope="session")
 def ml_model():
-    return load_model()  # Shared across the run for the selected provider
+    return load_model()  # Shared across the run for the active provider
 
 def test_query(database, ml_model):
     # Both injected automatically
@@ -208,6 +239,8 @@ def test_query(database, ml_model):
 Scopes: `"case"` (default), `"suite"`, `"session"`.
 
 `SESSION` resources are hierarchical: same-name providers can coexist, and Rue selects the nearest ancestor provider relative to the requesting test module. Without an active test context, resolution falls back to the flat/latest registered definition.
+
+In practice, put shared `SESSION` resources in `confrue_*.py` files so directory structure controls which override is active.
 
 **`@rue.metric(scope="session")`** - Define a metric as a scoped, injectable measurement object
 

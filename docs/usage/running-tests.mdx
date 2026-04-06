@@ -175,7 +175,9 @@ uv run rue test --otel
 uv run rue test --otel --reporter ConsoleReporter --reporter OtelReporter
 ```
 
-In the usual fresh-process setup, `uv run rue test --otel` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is registered by default.
+In the usual fresh-process setup, `uv run rue test --otel` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set.
+
+If you override the reporter list and leave out `OtelReporter`, Rue still captures traces for the run, but it does not write local `.rue/traces/...` files.
 
 **Use OpenTelemetry spans for**:
 - Asserting tool calls in agent tests
@@ -353,9 +355,20 @@ class Reporter(ABC):
         """Called when a test finishes with collected trace data."""
 ```
 
+### Reporter Precedence
+
+Reporter selection follows this public precedence order:
+- CLI `--reporter` flags replace the configured reporter list
+- `config.reporters` replaces the programmatic `Runner(reporters=[...])` fallback list
+- if no explicit reporter list is set, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`
+
+In practice:
+- use CLI/config reporter names for the built-in reporters
+- use `Runner(reporters=[...])` when supplying custom reporter instances directly
+
 ### Built-in Reporters
 
-If `config.reporters` is empty and you do not pass `reporters=[...]`, `Runner` uses all currently registered reporter instances. In a normal fresh process, that includes the built-in `ConsoleReporter` and `OtelReporter`.
+In a normal fresh process, Rue's default reporter set includes `ConsoleReporter` and `OtelReporter`.
 
 **ConsoleReporter**: Outputs to terminal with Rich formatting.
 
@@ -471,7 +484,7 @@ async def main():
 asyncio.run(main())
 ```
 
-**Note:** `ConsoleReporter` and `OtelReporter` are built-in. Create custom reporters for JSON, HTML, databases, or external service integrations.
+**Note:** `ConsoleReporter` and `OtelReporter` are built-in. Custom reporters are mainly a programmatic API feature. If you supply `Runner(reporters=[...])`, that list replaces the normal default reporter set unless `config.reporters` names are set.
 
 ## Examples
 

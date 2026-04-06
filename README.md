@@ -22,6 +22,7 @@ Follow pytest habits...
 - Create 'rue_*.py' files
 - Write 'def test_*' functions
 - Use 'rue.resource' instead of 'pytest.fixture'
+- Put shared suite setup, shared resources, and directory-specific overrides in `confrue_*.py` files. See [confrue files](docs/concepts/confrue-files.mdx)
 - Add 'assert' expressions within the functions
 - Run 'uv run rue test'
 

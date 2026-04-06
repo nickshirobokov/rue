@@ -52,7 +52,9 @@ runner = Runner(
 )
 ```
 
-If `config.reporters` is empty and you omit `reporters=...`, `Runner` uses all currently registered reporter instances. In a normal fresh process, that includes the built-in `ConsoleReporter` and `OtelReporter`.
+If you do not set an explicit reporter list, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`.
+
+If you set `config.reporters` or pass `--reporter` and leave out `OtelReporter`, OpenTelemetry capture still runs, but local `.rue/traces/...` files are not written.
 
 ## Public APIs
 
@@ -108,7 +110,8 @@ Available properties and methods:
 ## Storage
 
 - Enable capture with `RueConfig(otel=True)`, `--otel`, or config files; persistence still happens only when an `OtelReporter` is attached
-- In the usual fresh-process setup, `uv run rue test --otel` writes `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is registered by default
+- In the usual fresh-process setup, `uv run rue test --otel` writes `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set
+- If you override the reporter list and omit `OtelReporter`, Rue captures traces but does not persist local trace files
 - `OtelReporter` stores compact JSON payloads under `.rue/traces/<run_id>/<execution_id>.json`
 - `OtelReporter` keeps only the 5 most recent run directories under `.rue/traces`
 - Custom OTEL persistence or forwarding belongs in custom reporters via `Reporter.on_trace_collected()`
