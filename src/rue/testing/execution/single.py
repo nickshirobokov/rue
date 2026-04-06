@@ -217,6 +217,3 @@ class SingleTest(Test):
             call()
         else:
             await asyncio.to_thread(call)
-
-
-SingleRueTest = SingleTest

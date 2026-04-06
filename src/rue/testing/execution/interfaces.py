@@ -28,6 +28,3 @@ class TestFactory(ABC):
         params: dict[str, Any] | None = None,
     ) -> Test:
         """Build appropriate executable test from definition."""
-
-
-RueTest = Test

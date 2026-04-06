@@ -93,6 +93,3 @@ class ParametrizedTest(Test):
             execution_id=uuid4(),
             sub_executions=ordered_sub_executions,
         )
-
-
-ParametrizedRueTest = ParametrizedTest

@@ -95,6 +95,3 @@ class RepeatedTest(Test):
             execution_id=uuid4(),
             sub_executions=ordered_sub_executions,
         )
-
-
-RepeatedRueTest = RepeatedTest
