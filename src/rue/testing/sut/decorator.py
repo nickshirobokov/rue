@@ -4,7 +4,7 @@ import types
 from collections.abc import Callable
 from typing import Any
 
-from rue.context.runtime import CURRENT_TEST
+from rue.context.runtime import CURRENT_TEST, CURRENT_TEST_TRACER
 from rue.resources import Scope, resource
 from rue.testing.sut.base import SUT
 
@@ -39,9 +39,13 @@ def sut(
     def on_injection(sut_instance: SUT) -> SUT:
         test_ctx = CURRENT_TEST.get()
         execution_id = None if test_ctx is None else test_ctx.execution_id
-        if sut_instance._otel_execution_id.get() != execution_id:
-            sut_instance._otel_execution_id.set(execution_id)
-            sut_instance._otel_span_ids.set(())
+        sut_instance.reset_trace_state(execution_id)
+        tracer = CURRENT_TEST_TRACER.get()
+        if tracer is not None and tracer.otel_trace_session is not None:
+            sut_instance.activate_trace(
+                tracer.otel_trace_session,
+                otel_content=tracer.records_otel_content,
+            )
         return sut_instance
 
     return resource(
