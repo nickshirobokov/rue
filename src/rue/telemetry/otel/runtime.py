@@ -16,7 +16,7 @@ from opentelemetry.sdk.trace import (
     ReadableSpan,
     Span,
     SpanProcessor,
-    TracerProvider,
+    TracerProvider as SdkTracerProvider,
 )
 from rue.context.runtime import CURRENT_SUT_SPAN_IDS
 
@@ -115,15 +115,20 @@ class OtelRuntime:
 
     def configure(self, *, service_name: str = "rue") -> None:
         with self._init_lock:
-            if not self._initialized:
-                self._processor = SessionAwareSpanProcessor()
-                provider = TracerProvider(
+            if self._initialized:
+                return
+            self._processor = SessionAwareSpanProcessor()
+            existing = trace.get_tracer_provider()
+            if isinstance(existing, SdkTracerProvider):
+                existing.add_span_processor(self._processor)
+            else:
+                provider = SdkTracerProvider(
                     resource=Resource.create({"service.name": service_name})
                 )
                 provider.add_span_processor(self._processor)
                 trace.set_tracer_provider(provider)
-                self._instrument_llm_clients()
-                self._initialized = True
+            self._instrument_llm_clients()
+            self._initialized = True
 
     def start_otel_trace(
         self,

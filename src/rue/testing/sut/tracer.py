@@ -9,7 +9,8 @@ from contextvars import ContextVar
 from typing import Any, cast
 from uuid import UUID, uuid4
 
-from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry import trace
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider as SdkTracerProvider
 from opentelemetry.trace import Span
 
 from rue.context.runtime import (
@@ -77,7 +78,7 @@ class SUTTracer:
             async def async_wrapped(
                 *args: object, **kwargs: object
             ) -> object:
-                if not self._has_active_trace():
+                if not self._should_trace():
                     return await cast(
                         Awaitable[object],
                         original_callable(*args, **kwargs),
@@ -93,7 +94,7 @@ class SUTTracer:
 
         @functools.wraps(original_callable)
         def sync_wrapped(*args: object, **kwargs: object) -> object:
-            if not self._has_active_trace():
+            if not self._should_trace():
                 return original_callable(*args, **kwargs)
             return self._trace_sync(
                 method_name,
@@ -162,11 +163,15 @@ class SUTTracer:
             )
         return self._session
 
-    def _has_active_trace(self) -> bool:
-        return self._session is not None
+    def _should_trace(self) -> bool:
+        if self._session is not None:
+            return True
+        return isinstance(trace.get_tracer_provider(), SdkTracerProvider)
 
     def _records_content(self) -> bool:
-        return self._session is not None and self._otel_content
+        if self._session is not None:
+            return self._otel_content
+        return self._should_trace() and self._otel_content
 
     def _trace_sync(
         self,
