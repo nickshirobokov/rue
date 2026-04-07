@@ -70,7 +70,7 @@ def my_agent():
     return rue.SUT(call_agent)
 
 def test_agent_workflow(my_agent):
-    result = my_agent("hello")
+    result = my_agent.instance("hello")
 
     assert result
     assert my_agent.get_sut_spans()

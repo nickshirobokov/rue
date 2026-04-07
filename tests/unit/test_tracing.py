@@ -69,12 +69,12 @@ def test_sample(traced_pipeline):
     assert traced_pipeline.get_child_spans() == []
     assert traced_pipeline.get_llm_calls() == []
 
-    assert traced_pipeline() == "ok"
+    assert traced_pipeline.instance() == "ok"
     assert {span.name for span in traced_pipeline.get_sut_spans()} == {
-        "sut.traced_pipeline"
+        "sut.traced_pipeline.__call__"
     }
     assert {span.name for span in traced_pipeline.get_child_spans()} == {
-        "sut.traced_pipeline",
+        "sut.traced_pipeline.__call__",
         "child_step",
         "openai.responses.create",
         "predicate.is_ok",
@@ -108,12 +108,12 @@ async def test_sample(traced_pipeline):
     assert traced_pipeline.get_child_spans() == []
     assert traced_pipeline.get_llm_calls() == []
 
-    assert await traced_pipeline() == "ok"
+    assert await traced_pipeline.instance() == "ok"
     assert {span.name for span in traced_pipeline.get_sut_spans()} == {
-        "sut.traced_pipeline"
+        "sut.traced_pipeline.__call__"
     }
     assert {span.name for span in traced_pipeline.get_child_spans()} == {
-        "sut.traced_pipeline",
+        "sut.traced_pipeline.__call__",
         "child_step",
         "openai.responses.create",
         "predicate.is_ok",
@@ -140,11 +140,10 @@ async def test_sut_trace_accessors_work_inside_runner(
 
     assert run.result.passed == 1
     payloads = [session.serialize() for session in sessions]
-    root_span = next(
-        span
+    assert any(
+        span["name"] == f"test.{mod_name}::test_sample"
         for payload in payloads
         for span in payload["spans"]
-        if span["name"] == f"test.{mod_name}::test_sample"
     )
     child_span = next(
         span

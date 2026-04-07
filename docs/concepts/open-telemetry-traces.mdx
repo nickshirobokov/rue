@@ -21,7 +21,7 @@ When OpenTelemetry is enabled, Rue wraps each concrete test execution in a root 
 - `test.<full_name>`
 
 Inside that test span, you’ll typically see:
-- **SUT spans**: created by [`@rue.sut`](/concepts/sut), named `sut.<sut_name>`
+- **SUT spans**: created by [`@rue.sut`](/concepts/sut), named `sut.<sut_name>.<method_name>`
 - **Predicate spans**: created by [`@predicate`](/apis/predicates), named `predicate.<predicate_name>`
 - **LLM spans**: auto-instrumented spans whose names usually start with `openai.`, `anthropic.`, or `gen_ai.`
 
@@ -63,7 +63,7 @@ def weather_agent():
 
 
 def test_can_inspect_trace(weather_agent):
-    out = weather_agent("What's the weather in SF?")
+    out = weather_agent.instance("What's the weather in SF?")
 
     sut_spans = weather_agent.get_sut_spans()
     assert sut_spans[0].attributes.get("rue.sut.name") == "weather_agent"
@@ -84,7 +84,7 @@ Example contract: “if we called `search`, we must also call `cite_sources`”.
 
 ```python
 def test_tool_dependency(my_agent):
-    my_agent("Find the policy and cite sources")
+    my_agent.instance("Find the policy and cite sources")
 
     tools: list[str] = []
     for span in my_agent.get_llm_calls():
@@ -103,7 +103,7 @@ This catches common failure modes like calling the same 2–3 tools in a tight c
 
 ```python
 def test_no_tool_loops(my_agent):
-    my_agent("Solve the task with tools, but don't loop.")
+    my_agent.instance("Solve the task with tools, but don't loop.")
 
     tools: list[str] = []
     for span in my_agent.get_llm_calls():
@@ -124,7 +124,7 @@ If your SUT triggers instrumented LLM clients, you can locate those spans:
 
 ```python
 def test_llm_calls_are_captured(my_agent):
-    my_agent("hello")
+    my_agent.instance("hello")
 
     llm_spans = my_agent.get_llm_calls()
 ```

@@ -7,7 +7,6 @@ import os
 import time
 from pathlib import Path
 from textwrap import dedent
-from typing import Any
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -20,8 +19,8 @@ from rue.reports.base import Reporter
 from rue.reports.otel import DEFAULT_OTEL_OUTPUT_ROOT, MAX_STORED_OTEL_RUNS
 from rue.resources import ResourceRegistry, registry, resource
 from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
-from rue.testing.environment import _filter_env_vars
 from rue.testing.discovery import collect
+from rue.testing.environment import _filter_env_vars
 from rue.testing.models import (
     ParameterSet,
     ParametrizeModifier,
@@ -123,9 +122,7 @@ class EventReporter(Reporter):
     async def on_run_stopped_early(self, failure_count: int) -> None:
         pass
 
-    async def on_trace_collected(
-        self, tracer, execution_id: UUID
-    ) -> None:
+    async def on_trace_collected(self, tracer, execution_id: UUID) -> None:
         if tracer.completed_otel_trace_session is not None:
             self.trace_events.append(
                 (execution_id, tracer.completed_otel_trace_session)
@@ -508,7 +505,7 @@ class TestOpenTelemetry:
                     await asyncio.sleep(0.01)
 
             first_agent = SUT(run, name="first_agent")
-            await first_agent()
+            await first_agent.instance()
             captured["first"] = {
                 span.name for span in first_agent.get_child_spans()
             }
@@ -519,7 +516,7 @@ class TestOpenTelemetry:
                     await asyncio.sleep(0.01)
 
             second_agent = SUT(run, name="second_agent")
-            await second_agent()
+            await second_agent.instance()
             captured["second"] = {
                 span.name for span in second_agent.get_child_spans()
             }
@@ -541,8 +538,11 @@ class TestOpenTelemetry:
         result = await runner.run(items=items)
 
         assert result.result.passed == 2
-        assert captured["first"] == {"sut.first_agent", "first_step"}
-        assert captured["second"] == {"sut.second_agent", "second_step"}
+        assert captured["first"] == {"sut.first_agent.__call__", "first_step"}
+        assert captured["second"] == {
+            "sut.second_agent.__call__",
+            "second_step",
+        }
 
         trace_ids = {
             session.root_span.get_span_context().trace_id
@@ -567,9 +567,9 @@ class TestOpenTelemetry:
             assert {span["name"] for span in payload["spans"]} == {
                 f"test.{execution.item.full_name}",
                 (
-                    "sut.first_agent"
+                    "sut.first_agent.__call__"
                     if execution.item.name == "test_first"
-                    else "sut.second_agent"
+                    else "sut.second_agent.__call__"
                 ),
                 expected_child,
             }

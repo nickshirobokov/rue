@@ -141,7 +141,7 @@ music = CaseGroup(
 
 @rue.iter_case_groups(geography, music)
 def test_chatbot(group: CaseGroup, case: Case, chatbot):
-    response = chatbot(**case.inputs)
+    response = chatbot.instance(**case.inputs)
     assert case.references["expected"] in response
 ```
 
@@ -273,7 +273,7 @@ Scopes: `"session"` (default), `"suite"`, `"case"`.
 A SUT is the thing you’re actually evaluating (an agent function, a pipeline, a classifier, a client wrapper, etc.). Declaring a factory with `@rue.sut` makes a resolved `SUT` object injectable and traceable, so you can assert not only on the output, but also on how it behaved internally (for example: tool calls).
 
 <Note>
-  The decorated function is a factory. It should return or yield `SUT(...)`. Pass `method="..."` to `SUT` when you want to invoke an instance method instead of `__call__`.
+  The decorated function is a factory. It should return or yield `SUT(...)`. Call `sut.instance(...)` for wrapped callables, or configure `methods=[...]` and call `sut.instance.method(...)` for traced instance methods.
 </Note>
 
 ```python
@@ -285,7 +285,7 @@ def weather_agent():
     return SUT(lambda prompt: agent(prompt, tools=["get_weather"]))
 
 def test_agent_uses_tools(weather_agent):
-    result = weather_agent("What's the weather?")
+    result = weather_agent.instance("What's the weather?")
 
     # Access OpenTelemetry spans for assertions
     sut_spans = weather_agent.get_sut_spans()

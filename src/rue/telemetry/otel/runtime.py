@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass, field
 from threading import Lock
 from uuid import UUID
+from typing import Any
 
 from opentelemetry import trace
 from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor

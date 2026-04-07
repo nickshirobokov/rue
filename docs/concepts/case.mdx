@@ -175,7 +175,7 @@ smoke_cases = [c for c in cases if "smoke" in c.tags]
 
 ### Validating cases for a SUT
 
-If cases come from files/APIs, validate them against your SUT's signature by passing them to `SUT(..., validate_cases=...)`:
+If cases come from files/APIs, validate them against your SUT's signature by calling `sut.validate_cases(cases, method_name)`:
 
 ```python
 import rue
@@ -193,12 +193,14 @@ def my_agent():
     def run(prompt: str, temperature: float = 0.7) -> str:
         return f"{prompt} @ {temperature}"
 
-    return SUT(run, validate_cases=cases)
+    sut = SUT(run)
+    sut.validate_cases(cases, "__call__")
+    return sut
 
 
 @rue.iter_cases(*cases)
 def test_my_agent(case: Case, my_agent):
-    my_agent(**case.inputs)
+    my_agent.instance(**case.inputs)
 ```
 
 ## CaseGroup
@@ -237,7 +239,7 @@ music = CaseGroup(
 
 @rue.iter_case_groups(geography, music)
 def test_chatbot(group: CaseGroup, case: Case, chatbot):
-    response = chatbot(**case.inputs)
+    response = chatbot.instance(**case.inputs)
     assert case.references["expected"] in response
 ```
 
@@ -311,10 +313,12 @@ all_groups = [geography, music]
 
 @rue.sut
 def chatbot():
-    return SUT(
-        my_chatbot_fn,
-        validate_cases=[case for group in all_groups for case in group.cases],
+    sut = SUT(my_chatbot_fn)
+    sut.validate_cases(
+        [case for group in all_groups for case in group.cases],
+        "__call__",
     )
+    return sut
 ```
 
 ## Recommendations
@@ -347,7 +351,7 @@ def test_simple(x, add_one):
     assert result
 ```
 
-When loading cases from JSON/APIs, prefer typed cases such as `Case[YourInputs, YourRefs]` when structure matters, and validate inputs up-front with `SUT(..., validate_cases=...)`.
+When loading cases from JSON/APIs, prefer typed cases such as `Case[YourInputs, YourRefs]` when structure matters, and validate inputs up-front with `sut.validate_cases(cases, method_name)`.
 
 ### 2. Use tags and metadata for dynamic case selection
 

@@ -101,7 +101,7 @@ def rag():
 
 @rue.sut
 def agent():
-    return SUT(Agent(tools="all"), method="run")
+    return SUT(Agent(tools="all"), methods=["run"])
 
 cases = [
     rue.Case(inputs={"query": "Privacy policy"}),
@@ -110,12 +110,17 @@ cases = [
 
 @rue.sut
 def search_agent():
-    return SUT(retrieve, validate_cases=cases)
+    sut = SUT(retrieve)
+    sut.validate_cases(cases, "__call__")
+    return sut
 
 def test_test(agent, rag):
-    # Injected values are SUT objects and are called directly
+    # Injected values are SUT objects. Call the traced instance or wrapped methods.
     context = retrieve("Privacy policy")
-    output = agent("How do you store my data?", context=context)
+    output = agent.instance.run(
+        "How do you store my data?",
+        context=context,
+    )
 ```
 
 ---
@@ -855,7 +860,7 @@ music = CaseGroup(
 
 @rue.iter_case_groups(geography, music)
 def test_chatbot(group: CaseGroup, case: Case, chatbot):
-    response = chatbot(**case.inputs)
+    response = chatbot.instance(**case.inputs)
     assert case.references["expected"] in response
 ```
 
@@ -863,7 +868,7 @@ def test_chatbot(group: CaseGroup, case: Case, chatbot):
 
 ### SUT case validation
 
-Validate case inputs by passing them to `SUT(..., validate_cases=...)`. Validation runs when the `SUT` object is created and raises if any case does not match the resolved callable or method signature.
+Validate case inputs by calling `sut.validate_cases(cases, method_name)`. Validation runs when you call the method and raises if any case does not match the resolved callable or method signature.
 
 ```python
 import rue
@@ -879,5 +884,7 @@ def my_agent():
     def run(prompt: str, temperature: float = 0.7) -> str:
         return f"{prompt} @ {temperature}"
 
-    return SUT(run, validate_cases=cases)
+    sut = SUT(run)
+    sut.validate_cases(cases, "__call__")
+    return sut
 ```

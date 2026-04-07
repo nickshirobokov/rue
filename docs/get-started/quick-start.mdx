@@ -25,7 +25,7 @@ def store_chatbot():
 
 async def test_chatbot_no_hallucinations(store_chatbot):
     context = "Store hours: 9 AM - 6 PM, Monday-Saturday. Closed Sundays."
-    response = store_chatbot("When are you open?")
+    response = store_chatbot.instance("When are you open?")
 
     assert not await has_unsupported_facts(response, context)
 
@@ -68,7 +68,7 @@ cases = [
 
 @rue.iter_cases(*cases)
 async def test_chatbot_no_hallucinations(case: Case, store_chatbot):
-    response = store_chatbot(**case.inputs)
+    response = store_chatbot.instance(**case.inputs)
 
     assert not await has_unsupported_facts(response, case.references["context"])
 
@@ -121,7 +121,7 @@ async def test_chatbot_no_hallucinations(
     store_chatbot,
     accuracy: Metric,
 ):
-    response = store_chatbot(**case.inputs)
+    response = store_chatbot.instance(**case.inputs)
 
     with metrics(accuracy):
         assert not await has_unsupported_facts(
@@ -181,7 +181,7 @@ async def test_chatbot_no_hallucinations(
     store_chatbot,
     accuracy: Metric,
 ):
-    response = store_chatbot(**case.inputs)
+    response = store_chatbot.instance(**case.inputs)
 
     with metrics(accuracy):
         assert not await has_unsupported_facts(

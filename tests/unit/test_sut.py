@@ -1,7 +1,9 @@
 """Tests for rue.testing.sut module."""
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import assert_type
 from uuid import uuid4
 
 import pytest
@@ -58,23 +60,34 @@ async def _resolve(name: str) -> object:
 
 
 class TestSutObject:
+    def test_preserves_callable_type_for_type_checking(self) -> None:
+        def run(x: int, y: int) -> int:
+            return x + y
+
+        target: SUT[Callable[[int, int], int]] = SUT(run)
+
+        assert_type(target.instance, Callable[[int, int], int])
+        assert target.instance(2, 3) == 5
+
     def test_calls_callable(self):
         def run(x: int, y: int) -> int:
             return x + y
 
         target = SUT(run)
 
-        assert target(2, 3) == 5
+        assert target.instance(2, 3) == 5
+        assert not callable(target)
         assert target.name == "run"
 
-    def test_uses_call_for_callable_objects(self):
+    def test_uses_call_for_callable_objects(self) -> None:
         class Pipeline:
             def __call__(self, value: int) -> int:
                 return value * 4
 
-        target = SUT(Pipeline())
+        target: SUT[Pipeline] = SUT(Pipeline())
 
-        assert target(3) == 12
+        assert_type(target.instance, Pipeline)
+        assert target.instance(3) == 12
 
     def test_allows_bound_methods(self):
         class Service:
@@ -83,18 +96,22 @@ class TestSutObject:
 
         target = SUT(Service().run)
 
-        assert target("hello") == "ok:hello"
+        assert target.instance("hello") == "ok:hello"
         assert target.name == "run"
 
     @pytest.mark.asyncio
-    async def test_calls_async_method(self):
+    async def test_wraps_sync_and_async_methods(self):
         class Service:
             async def run(self, value: str) -> str:
                 return f"ok:{value}"
 
-        target = SUT(Service(), method="run")
+            def predict(self, value: int) -> int:
+                return value * 2
 
-        assert await target("hello") == "ok:hello"
+        target = SUT(Service(), methods=["run", "predict"])
+
+        assert await target.instance.run("hello") == "ok:hello"
+        assert target.instance.predict(3) == 6
 
     def test_explicit_name_wins(self):
         def run(value: int) -> int:
@@ -104,35 +121,37 @@ class TestSutObject:
 
         assert target.name == "custom"
 
-    def test_validates_cases_in_init(self):
+    def test_validates_cases_for_selected_method(self):
         class Pipeline:
             def run(self, x: int) -> int:
                 return x * 2
 
-        target = SUT(
-            Pipeline(),
-            method="run",
-            validate_cases=[Case(inputs={"x": 7})],
-        )
+        target = SUT(Pipeline(), methods=["run"])
+        target.validate_cases([Case(inputs={"x": 7})], "run")
 
-        assert target(3) == 6
-        assert target.args_schema is not None
-        assert target.validator is not None
+        assert target.instance.run(3) == 6
 
     def test_validation_raises_on_invalid_case(self):
         class Pipeline:
             def run(self, x: int) -> int:
                 return x * 2
 
+        target = SUT(Pipeline(), methods=["run"])
+
         with pytest.raises(ValidationError):
-            SUT(
-                Pipeline(),
-                method="run",
-                validate_cases=[Case(inputs={"x": "bad"})],
-            )
+            target.validate_cases([Case(inputs={"x": "bad"})], "run")
+
+    def test_validation_raises_on_unknown_method(self):
+        def run(x: int) -> int:
+            return x * 2
+
+        target = SUT(run)
+
+        with pytest.raises(ValueError, match="Method 'run' not found in SUT"):
+            target.validate_cases([Case(inputs={"x": 1})], "run")
 
     @pytest.mark.parametrize(
-        "method, expected_match",
+        ("method", "expected_match"),
         [
             ("run", r"Method 'run' not found"),
             ("value", r"Method 'value' is not a callable"),
@@ -145,7 +164,7 @@ class TestSutObject:
             value = 1
 
         with pytest.raises(ValueError, match=expected_match):
-            SUT(Service(), method=method)
+            SUT(Service(), methods=[method])
 
 
 class TestSutDecorator:
@@ -155,7 +174,7 @@ class TestSutDecorator:
 
     @pytest.mark.parametrize(
         "kwargs",
-        [{"method": "run"}, {"validate_cases": [Case(inputs={"x": 1})]}],
+        [{"methods": ["run"]}, {"validate_cases": [Case(inputs={"x": 1})]}],
     )
     def test_removed_decorator_kwargs_raise(self, kwargs):
         with pytest.raises(TypeError, match="unexpected keyword argument"):
@@ -182,13 +201,13 @@ class TestSutDecorator:
 
         @sut
         def pipeline():
-            return SUT(Pipeline(), method="run")
+            return SUT(Pipeline(), methods=["run"])
 
         resolved = await _resolve("pipeline")
 
         assert isinstance(resolved, SUT)
         assert resolved.name == "pipeline"
-        assert resolved(3) == 6
+        assert resolved.instance.run(3) == 6
 
 
 class TestSutOpenTelemetry:
@@ -207,10 +226,36 @@ def traced_sut():
     return rue.SUT(run)
 
 def test_sample(traced_sut):
-    assert traced_sut(5) == 10
+    assert traced_sut.instance(5) == 10
 """,
-                "sut.traced_sut",
-                {"rue.sut": True, "rue.sut.name": "traced_sut"},
+                "sut.traced_sut.__call__",
+                {
+                    "rue.sut": True,
+                    "rue.sut.name": "traced_sut",
+                    "rue.sut.method": "__call__",
+                },
+            ),
+            (
+                """
+import rue
+
+class Pipeline:
+    def __call__(self, value: int) -> int:
+        return value * 4
+
+@rue.sut
+def traced_callable_object():
+    return rue.SUT(Pipeline())
+
+def test_sample(traced_callable_object):
+    assert traced_callable_object.instance(3) == 12
+""",
+                "sut.traced_callable_object.__call__",
+                {
+                    "rue.sut": True,
+                    "rue.sut.name": "traced_callable_object",
+                    "rue.sut.method": "__call__",
+                },
             ),
             (
                 """
@@ -222,13 +267,17 @@ class Service:
 
 @rue.sut
 def traced_service():
-    return rue.SUT(Service(), method="run")
+    return rue.SUT(Service(), methods=["run"])
 
 async def test_sample(traced_service):
-    assert await traced_service("hello") == "ok:hello"
+    assert await traced_service.instance.run("hello") == "ok:hello"
 """,
-                "sut.traced_service",
-                {"rue.sut": True, "rue.sut.name": "traced_service"},
+                "sut.traced_service.run",
+                {
+                    "rue.sut": True,
+                    "rue.sut.name": "traced_service",
+                    "rue.sut.method": "run",
+                },
             ),
         ],
     )
@@ -287,7 +336,7 @@ def test_sample():
         target = SUT(run)
         before = [session.serialize() for session in sessions]
 
-        assert target(2, 3) == 5
+        assert target.instance(2, 3) == 5
 
         after = [session.serialize() for session in sessions]
         assert before == after
@@ -323,12 +372,12 @@ async def test_sample(traced_pipeline):
     assert traced_pipeline.get_child_spans() == []
     assert traced_pipeline.get_llm_calls() == []
 
-    assert await traced_pipeline() == "ok"
+    assert await traced_pipeline.instance() == "ok"
     assert {span.name for span in traced_pipeline.get_sut_spans()} == {
-        "sut.traced_pipeline"
+        "sut.traced_pipeline.__call__"
     }
     assert {span.name for span in traced_pipeline.get_child_spans()} == {
-        "sut.traced_pipeline",
+        "sut.traced_pipeline.__call__",
         "child_step",
         "openai.responses.create",
     }
@@ -351,6 +400,7 @@ async def test_sample(traced_pipeline):
         scope: str,
         concurrency: int,
     ):
+        _ = concurrency
         _, run, _ = await _run_module_with_tracing(
             tmp_path=tmp_path,
             trace_reporter=trace_reporter,
@@ -372,17 +422,17 @@ def shared_pipeline():
 
 async def test_first(shared_pipeline):
     assert shared_pipeline.get_child_spans() == []
-    assert await shared_pipeline("first_step") == "first_step"
+    assert await shared_pipeline.instance("first_step") == "first_step"
     assert {{span.name for span in shared_pipeline.get_child_spans()}} == {{
-        "sut.shared_pipeline",
+        "sut.shared_pipeline.__call__",
         "first_step",
     }}
 
 async def test_second(shared_pipeline):
     assert shared_pipeline.get_child_spans() == []
-    assert await shared_pipeline("second_step") == "second_step"
+    assert await shared_pipeline.instance("second_step") == "second_step"
     assert {{span.name for span in shared_pipeline.get_child_spans()}} == {{
-        "sut.shared_pipeline",
+        "sut.shared_pipeline.__call__",
         "second_step",
     }}
 """,

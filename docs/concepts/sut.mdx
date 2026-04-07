@@ -5,8 +5,8 @@ title: "SUT"
 <Note>SUT stands for *System Under Test*.</Note>
 <Note>`@rue.sut` is optional. It exists to make your agent/workflow callable injectable and OpenTelemetry-observable.</Note>
 
-`@rue.sut` registers a **SUT factory function** as an injectable **resource**. The factory must return (or yield) a `rue.SUT(...)` object, and each invocation of that object is wrapped in an OpenTelemetry span. This gives you two things:
-- A clean dependency injection (DI) boundary in your tests (you call the injected parameter, not a global).
+`@rue.sut` registers a **SUT factory function** as an injectable **resource**. The factory must return (or yield) a `rue.SUT(...)` object, and each invocation of `sut.instance` (or a wrapped method on it) is wrapped in an OpenTelemetry span. This gives you two things:
+- A clean dependency injection (DI) boundary in your tests (you call the injected parameter's `instance`, not a global).
 - OpenTelemetry spans you can query from that `SUT` inside a test (when OpenTelemetry is enabled).
 
 ```python
@@ -20,7 +20,7 @@ def chatbot():
     return SUT(prod_chatbot)
 
 def test_chatbot_works(chatbot):
-    out = chatbot("hello")
+    out = chatbot.instance("hello")
     assert "hello" in out
 ```
 
@@ -52,7 +52,7 @@ def weather_agent():
 # tests/rue_agent.py
 
 def test_weather_agent_calls_tools(weather_agent):
-    out = weather_agent("What's the weather in SF?")
+    out = weather_agent.instance("What's the weather in SF?")
 
     spans = weather_agent.get_sut_spans()
     assert spans
@@ -79,14 +79,14 @@ def weather_agent():
     return SUT(prod_weather_agent)
 ```
 
-That’s why you should call the injected `chatbot` parameter inside `test_chatbot_works(chatbot)`, not the decorated global name.
+That’s why you should call the injected `chatbot.instance` inside `test_chatbot_works(chatbot)`, not the decorated global name.
 
 ### Naming rules (important for DI and tracing)
 - **SUT name**: the factory function name (`def weather_agent(): ...` → `"weather_agent"`).
-  - Pick your factory name intentionally, since it’s used for dependency injection *and* the `sut.<sut_name>` span name.
+  - Pick your factory name intentionally, since it’s used for dependency injection *and* the `sut.<sut_name>.<method_name>` span name.
 
 ### Instance-based SUTs (span a method)
-Use `SUT(instance, method="run")` when the thing you want to exercise is an instance method instead of `__call__`:
+Use `SUT(instance, methods=["run"])` when the thing you want to exercise is an instance method instead of `__call__`:
 
 ```python
 import rue
@@ -96,17 +96,18 @@ from demo_app.agents import WeatherAgent
 
 @rue.sut
 def weather_agent():
-    return SUT(WeatherAgent(), method="run")
+    return SUT(WeatherAgent(), methods=["run"])
 
 def test_custom_method(weather_agent):
-    out = weather_agent("task")
+    out = weather_agent.instance.run("task")
     assert out
 ```
 
 ## SUT span attributes
-Each SUT call creates a span named `sut.<sut_name>` and sets:
+Each SUT call creates a span named `sut.<sut_name>.<method_name>` and sets:
 - `rue.sut=true`
 - `rue.sut.name=<sut_name>`
+- `rue.sut.method=<method_name>`
 
 If `RUE_OTEL_CONTENT=true` (default), Rue also records:
 - `sut.input.args` / `sut.input.kwargs` (`repr(...)`)
@@ -149,7 +150,7 @@ def marketing_agent():
     return SUT(partial(prod_agent, domain="marketing"))
 
 def test_marketing_agent_invokes(marketing_agent):
-    out = marketing_agent("What's CAC?")
+    out = marketing_agent.instance("What's CAC?")
     assert out
 ```
 
@@ -170,7 +171,7 @@ def chatbot():
 def test_chatbot_runs():
     # This is the resource factory, not the injected callable
     sut = chatbot()
-    out = sut("Hello!")
+    out = sut.instance("Hello!")
     assert out
 ```
 
@@ -185,6 +186,6 @@ def chatbot():
     return SUT(prod_chatbot)
 
 def test_chatbot_runs(chatbot):
-    out = chatbot("Hello!")
+    out = chatbot.instance("Hello!")
     assert out
 ```

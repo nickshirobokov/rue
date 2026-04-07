@@ -1,39 +1,80 @@
+"""System-under-test wrapper for traced call surfaces."""
+
 from __future__ import annotations
 
 import functools
 import inspect
 import types
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextvars import ContextVar
-from dataclasses import fields, is_dataclass
-from typing import Any
+from dataclasses import dataclass, fields, is_dataclass
+from typing import Any, Generic, cast
 from uuid import UUID
 
 from opentelemetry.sdk.trace import ReadableSpan
-
+from opentelemetry.trace import Span
 from pydantic import BaseModel
 from pydantic.experimental.arguments_schema import generate_arguments_schema
+from pydantic_ai import ModelRequest, ModelResponse
 from pydantic_core import ArgsKwargs, SchemaValidator
+from typing_extensions import TypeVar
 
 from rue.context.runtime import (
     CURRENT_SUT_SPAN_IDS,
     CURRENT_TEST_TRACER,
     bind,
 )
-from rue.testing.models.case import Case
 from rue.telemetry.otel.runtime import otel_runtime
+from rue.testing.models.case import Case
 
 
-class SUT:
+Message = ModelRequest | ModelResponse
+InstanceT = TypeVar("InstanceT", default=object)
+
+_BARE_CALLABLE_TYPES = (
+    types.FunctionType,
+    types.MethodType,
+    types.MethodWrapperType,
+    functools.partial,
+)
+
+
+@dataclass(slots=True)
+class _MethodSpec:
+    name: str
+    original_callable: Callable[..., object]
+    validator: SchemaValidator
+    is_async: bool
+    
+
+class _CallableProxy:
+    _target: object
+    _call_wrapper: Callable[..., object]
+
+    def __init__(
+        self, target: object, call_wrapper: Callable[..., object]
+    ) -> None:
+        object.__setattr__(self, "_target", target)
+        object.__setattr__(self, "_call_wrapper", call_wrapper)
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        return self._call_wrapper(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._target, name)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        setattr(self._target, name, value)
+
+
+class SUT(Generic[InstanceT]):
     def __init__(
         self,
-        instance: object,
-        method: str = "__call__",
+        instance: InstanceT,
+        methods: Sequence[str] | None = None,
         name: str | None = None,
-        validate_cases: Sequence[Case[Any, Any]] | None = None,
-    ):
-        self.instance = instance
-        self.method = method
+    ) -> None:
+        self.methods = tuple(dict.fromkeys(methods or ["__call__"]))
         self._otel_execution_id: ContextVar[UUID | None] = ContextVar(
             f"sut_{id(self)}_otel_execution_id",
             default=None,
@@ -42,76 +83,38 @@ class SUT:
             f"sut_{id(self)}_otel_span_ids",
             default=(),
         )
-
-        match self.method, self.instance, getattr(
-            self.instance, self.method, None
-        ):
-            case "__call__", (
-                types.FunctionType()
-                | types.MethodType()
-                | types.MethodWrapperType()
-                | functools.partial()
-            ) as target, _:
-                # Wrap plain callable inputs directly.
-                self.target_callable = target
-            case _, _, (
-                types.FunctionType()
-                | types.MethodType()
-                | types.MethodWrapperType()
-                | functools.partial()
-            ) as target:
-                # Wrap the named callable attribute on the instance.
-                self.target_callable = target
-            case _, _, None:
-                # Fail when the requested method does not exist.
-                raise ValueError(f"Method '{self.method}' not found in instance")
-            case _:
-                # Fail when the resolved attribute is not callable.
-                raise ValueError(f"Method '{self.method}' is not a callable")
-
-        assert self.target_callable is not None
-
-        # Check if the target callable is asynchronous
-        self.is_async = inspect.iscoroutinefunction(self.target_callable)
-
-        # Generate the arguments schema
-        self.args_schema = generate_arguments_schema(
-            self.target_callable,
-            parameters_callback=(
-                lambda index, name, annotation: (
-                    "skip" if name in {"self", "cls"} else None
-                )
-            ),
-        )
-
-        # Create the validator
-        self.validator = SchemaValidator(self.args_schema)
-
-        # Resolve the name
-        match name, getattr(instance, "__name__", None), getattr(self.target_callable, "__name__", None):
-            case (str() as n, _, _):
-                self.name = n
-            case (None, str() as n, _):
-                self.name = n
-            case (None, _, str() as n):
-                self.name = n
+        self._method_specs = {
+            method_name: self._create_method_spec(instance, method_name)
+            for method_name in self.methods
+        }
+        match name, getattr(instance, "__name__", None):
+            case (str() as resolved_name, _):
+                self.name = resolved_name
+            case (None, str() as resolved_name):
+                self.name = resolved_name
             case _:
                 self.name = type(instance).__name__
+        self.instance: InstanceT = self._wrap_instance(instance)
 
-        # Validate the cases
-        if validate_cases:
-            self.validate_cases(validate_cases)
+    def get_ai_requests(self) -> list[ModelRequest]:
+        raise NotImplementedError("Not implemented")
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        tracer = CURRENT_TEST_TRACER.get()
-        if tracer is None or not tracer.has_otel_trace:
-            return self.target_callable(*args, **kwargs)
+    def get_ai_responses(self) -> list[ModelResponse]:
+        raise NotImplementedError("Not implemented")
 
-        if self.is_async:
-            return self._call_async(*args, **kwargs)
-        return self._call_sync(*args, **kwargs)
+    def get_message_history(self) -> list[Message]:
+        raise NotImplementedError("Not implemented")
 
-    def validate_cases(self, cases: Sequence[Case[Any, Any]]) -> None:
+    def get_tool_calls(self) -> list[object]:
+        raise NotImplementedError("Not implemented")
+
+    def validate_cases(
+        self, cases: Sequence[Case[Any, Any]], method_name: str
+    ) -> None:
+        spec = self._method_specs.get(method_name)
+        if spec is None:
+            raise ValueError(f"Method '{method_name}' not found in SUT")
+
         for case in cases:
             match case.inputs:
                 case dict() as input_values:
@@ -120,7 +123,9 @@ class SUT:
                     input_values = dict(model)
                 case Mapping() as mapping:
                     input_values = dict(mapping)
-                case value if is_dataclass(value) and not isinstance(value, type):
+                case value if is_dataclass(value) and not isinstance(
+                    value, type
+                ):
                     input_values = {
                         field.name: getattr(value, field.name)
                         for field in fields(value)
@@ -131,7 +136,7 @@ class SUT:
                         f"Got: {type(value).__name__}"
                     )
             parsed_args = ArgsKwargs(args=(), kwargs=input_values)
-            self.validator.validate_python(parsed_args)
+            spec.validator.validate_python(parsed_args)
 
     def get_sut_spans(self) -> list[ReadableSpan]:
         tracer = CURRENT_TEST_TRACER.get()
@@ -169,7 +174,10 @@ class SUT:
                 span_id = span.context.span_id
                 if span_id in descendant_ids:
                     continue
-                if span.parent is not None and span.parent.span_id in descendant_ids:
+                if (
+                    span.parent is not None
+                    and span.parent.span_id in descendant_ids
+                ):
                     descendant_ids.add(span_id)
                     changed = True
                     continue
@@ -179,9 +187,7 @@ class SUT:
                     changed = True
 
         return [
-            span
-            for span in spans
-            if span.context.span_id in descendant_ids
+            span for span in spans if span.context.span_id in descendant_ids
         ]
 
     def get_llm_calls(self) -> list[ReadableSpan]:
@@ -191,63 +197,140 @@ class SUT:
             if span.name.startswith(("openai.", "anthropic.", "gen_ai."))
         ]
 
-    def _call_sync(self, *args: Any, **kwargs: Any) -> Any:
-        with otel_runtime.start_as_current_span(f"sut.{self.name}") as span:
-            span.set_attribute("rue.sut", True)
-            span.set_attribute("rue.sut.name", self.name)
-            self._otel_span_ids.set(
-                (
-                    *self._otel_span_ids.get(),
-                    span.get_span_context().span_id,
+    def _create_method_spec(
+        self, instance: object, method_name: str
+    ) -> _MethodSpec:
+        target_callable: Callable[..., object]
+        if method_name == "__call__" and isinstance(instance, _BARE_CALLABLE_TYPES):
+            target_callable = instance
+        else:
+            missing = object()
+            raw_callable = getattr(cast(Any, instance), method_name, missing)
+            if raw_callable is missing:
+                raise ValueError(
+                    f"Method '{method_name}' not found in instance"
                 )
-            )
-            with bind(
-                CURRENT_SUT_SPAN_IDS,
-                (*CURRENT_SUT_SPAN_IDS.get(), span.get_span_context().span_id),
-            ):
-                _set_input_attrs(span, args, kwargs)
-                result = self.target_callable(*args, **kwargs)
-                _set_output_attrs(span, result)
+            if not callable(raw_callable):
+                raise ValueError(f"Method '{method_name}' is not a callable")
+            target_callable = cast(Callable[..., object], raw_callable)
+
+        args_schema = generate_arguments_schema(
+            target_callable,
+            parameters_callback=lambda _, param_name, __: (
+                "skip" if param_name in {"self", "cls"} else None
+            ),
+        )
+        return _MethodSpec(
+            name=method_name,
+            original_callable=target_callable,
+            validator=SchemaValidator(args_schema),
+            is_async=inspect.iscoroutinefunction(target_callable),
+        )
+
+    def _wrap_instance(self, instance: InstanceT) -> InstanceT:
+        wrapped_instance: object = instance
+        for method_name in self.methods:
+            spec = self._method_specs[method_name]
+            wrapped_callable = self._make_traced_callable(spec)
+
+            if method_name == "__call__":
+                if isinstance(instance, _BARE_CALLABLE_TYPES):
+                    wrapped_instance = wrapped_callable
+                    continue
+                wrapped_instance = _CallableProxy(instance, wrapped_callable)
+                continue
+
+            setattr(instance, method_name, wrapped_callable)
+
+        return cast("InstanceT", wrapped_instance)
+
+    def _make_traced_callable(self, spec: _MethodSpec) -> Callable[..., object]:
+        if spec.is_async:
+
+            @functools.wraps(spec.original_callable)
+            async def async_wrapped(
+                *args: object, **kwargs: object
+            ) -> object:
+                tracer = CURRENT_TEST_TRACER.get()
+                if tracer is None or not tracer.has_otel_trace:
+                    return await cast(
+                        Awaitable[object],
+                        spec.original_callable(*args, **kwargs),
+                    )
+                return await self._trace_async(spec, *args, **kwargs)
+
+            return async_wrapped
+
+        @functools.wraps(spec.original_callable)
+        def sync_wrapped(*args: object, **kwargs: object) -> object:
+            tracer = CURRENT_TEST_TRACER.get()
+            if tracer is None or not tracer.has_otel_trace:
+                return spec.original_callable(*args, **kwargs)
+            return self._trace_sync(spec, *args, **kwargs)
+
+        return sync_wrapped
+
+    def _trace_sync(
+        self, spec: _MethodSpec, *args: object, **kwargs: object
+    ) -> object:
+        tracer = CURRENT_TEST_TRACER.get()
+        record_content = tracer is not None and tracer.records_otel_content
+        with otel_runtime.start_as_current_span(
+            f"sut.{self.name}.{spec.name}"
+        ) as span:
+            span_id = self._set_span_attrs(span, spec.name)
+            span_ids = (*CURRENT_SUT_SPAN_IDS.get(), span_id)
+            with bind(CURRENT_SUT_SPAN_IDS, span_ids):
+                _set_input_attrs(span, args, kwargs, record_content)
+                result = spec.original_callable(*args, **kwargs)
+                _set_output_attrs(span, result, record_content)
                 return result
 
-    async def _call_async(self, *args: Any, **kwargs: Any) -> Any:
-        with otel_runtime.start_as_current_span(f"sut.{self.name}") as span:
-            span.set_attribute("rue.sut", True)
-            span.set_attribute("rue.sut.name", self.name)
-            self._otel_span_ids.set(
-                (
-                    *self._otel_span_ids.get(),
-                    span.get_span_context().span_id,
+    async def _trace_async(
+        self, spec: _MethodSpec, *args: object, **kwargs: object
+    ) -> object:
+        tracer = CURRENT_TEST_TRACER.get()
+        record_content = tracer is not None and tracer.records_otel_content
+        with otel_runtime.start_as_current_span(
+            f"sut.{self.name}.{spec.name}"
+        ) as span:
+            span_id = self._set_span_attrs(span, spec.name)
+            span_ids = (*CURRENT_SUT_SPAN_IDS.get(), span_id)
+            with bind(CURRENT_SUT_SPAN_IDS, span_ids):
+                _set_input_attrs(span, args, kwargs, record_content)
+                result = await cast(
+                    Awaitable[object],
+                    spec.original_callable(*args, **kwargs),
                 )
-            )
-            with bind(
-                CURRENT_SUT_SPAN_IDS,
-                (*CURRENT_SUT_SPAN_IDS.get(), span.get_span_context().span_id),
-            ):
-                _set_input_attrs(span, args, kwargs)
-                result = await self.target_callable(*args, **kwargs)
-                _set_output_attrs(span, result)
+                _set_output_attrs(span, result, record_content)
                 return result
+
+    def _set_span_attrs(self, span: Span, method_name: str) -> int:
+        span.set_attribute("rue.sut", True)
+        span.set_attribute("rue.sut.name", self.name)
+        span.set_attribute("rue.sut.method", method_name)
+        span_id = span.get_span_context().span_id
+        self._otel_span_ids.set((*self._otel_span_ids.get(), span_id))
+        return span_id
 
 
 def _set_input_attrs(
-    span: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
+    span: Span,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+    record_content: bool,
 ) -> None:
-    tracer = CURRENT_TEST_TRACER.get()
-    if tracer is None or not tracer.records_otel_content:
+    if not record_content:
         span.set_attribute("sut.input.count", len(args) + len(kwargs))
         return
-
     if args:
         span.set_attribute("sut.input.args", repr(args))
     if kwargs:
         span.set_attribute("sut.input.kwargs", repr(kwargs))
 
 
-def _set_output_attrs(span: Any, result: Any) -> None:
-    tracer = CURRENT_TEST_TRACER.get()
-    if tracer is None or not tracer.records_otel_content:
+def _set_output_attrs(span: Span, result: object, record_content: bool) -> None:
+    if not record_content:
         span.set_attribute("sut.output.type", type(result).__name__)
         return
-
     span.set_attribute("sut.output", repr(result))
