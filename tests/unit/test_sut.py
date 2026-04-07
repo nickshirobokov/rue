@@ -291,3 +291,101 @@ def test_sample():
 
         after = [session.serialize() for session in sessions]
         assert before == after
+
+    @pytest.mark.asyncio
+    async def test_async_sut_accessors_include_child_and_llm_spans(
+        self,
+        tmp_path: Path,
+        trace_reporter,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        _, run, _ = await _run_module_with_tracing(
+            tmp_path=tmp_path,
+            trace_reporter=trace_reporter,
+            monkeypatch=monkeypatch,
+            source="""
+import rue
+from rue.telemetry.otel.runtime import otel_runtime
+
+@rue.sut
+def traced_pipeline():
+    async def run() -> str:
+        with otel_runtime.start_as_current_span("child_step"):
+            pass
+        with otel_runtime.start_as_current_span("openai.responses.create"):
+            pass
+        return "ok"
+
+    return rue.SUT(run)
+
+async def test_sample(traced_pipeline):
+    assert traced_pipeline.get_sut_spans() == []
+    assert traced_pipeline.get_child_spans() == []
+    assert traced_pipeline.get_llm_calls() == []
+
+    assert await traced_pipeline() == "ok"
+    assert {span.name for span in traced_pipeline.get_sut_spans()} == {
+        "sut.traced_pipeline"
+    }
+    assert {span.name for span in traced_pipeline.get_child_spans()} == {
+        "sut.traced_pipeline",
+        "child_step",
+        "openai.responses.create",
+    }
+    assert [span.name for span in traced_pipeline.get_llm_calls()] == [
+        "openai.responses.create"
+    ]
+""",
+        )
+
+        assert run.result.passed == 1
+
+    @pytest.mark.parametrize("scope", ["suite", "session"])
+    @pytest.mark.parametrize("concurrency", [1, 2])
+    @pytest.mark.asyncio
+    async def test_shared_scope_sut_trace_state_stays_isolated(
+        self,
+        tmp_path: Path,
+        trace_reporter,
+        monkeypatch: pytest.MonkeyPatch,
+        scope: str,
+        concurrency: int,
+    ):
+        _, run, _ = await _run_module_with_tracing(
+            tmp_path=tmp_path,
+            trace_reporter=trace_reporter,
+            monkeypatch=monkeypatch,
+            source=f"""
+import asyncio
+
+import rue
+from rue.telemetry.otel.runtime import otel_runtime
+
+@rue.sut(scope="{scope}")
+def shared_pipeline():
+    async def run(step: str) -> str:
+        with otel_runtime.start_as_current_span(step):
+            await asyncio.sleep(0.01)
+        return step
+
+    return rue.SUT(run)
+
+async def test_first(shared_pipeline):
+    assert shared_pipeline.get_child_spans() == []
+    assert await shared_pipeline("first_step") == "first_step"
+    assert {{span.name for span in shared_pipeline.get_child_spans()}} == {{
+        "sut.shared_pipeline",
+        "first_step",
+    }}
+
+async def test_second(shared_pipeline):
+    assert shared_pipeline.get_child_spans() == []
+    assert await shared_pipeline("second_step") == "second_step"
+    assert {{span.name for span in shared_pipeline.get_child_spans()}} == {{
+        "sut.shared_pipeline",
+        "second_step",
+    }}
+""",
+        )
+
+        assert run.result.passed == 2

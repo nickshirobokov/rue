@@ -13,13 +13,13 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from rue import SUT
 from rue.config import RueConfig
 from rue.reports import OtelReporter
 from rue.reports.base import Reporter
 from rue.reports.otel import DEFAULT_OTEL_OUTPUT_ROOT, MAX_STORED_OTEL_RUNS
 from rue.resources import ResourceRegistry, registry, resource
-from rue.telemetry.otel import otel_span
-from rue.telemetry.otel.runtime import OtelTraceSession
+from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
 from rue.testing.environment import _filter_env_vars
 from rue.testing.discovery import collect
 from rue.testing.models import (
@@ -123,7 +123,9 @@ class EventReporter(Reporter):
     async def on_run_stopped_early(self, failure_count: int) -> None:
         pass
 
-    async def on_trace_collected(self, tracer, execution_id: UUID) -> None:
+    async def on_trace_collected(
+        self, tracer, execution_id: UUID
+    ) -> None:
         if tracer.completed_otel_trace_session is not None:
             self.trace_events.append(
                 (execution_id, tracer.completed_otel_trace_session)
@@ -436,7 +438,7 @@ class TestResourceInjection:
         assert captured == ["custom_value"]
 
     @pytest.mark.asyncio
-    async def test_otel_trace_requires_trace_flag(self, null_reporter):
+    async def test_removed_otel_trace_resource_errors(self, null_reporter):
         def test_needs_trace(otel_trace):
             pass
 
@@ -445,7 +447,7 @@ class TestResourceInjection:
         result = await runner.run(items=[item])
 
         assert result.result.errors == 1
-        assert "OpenTelemetry is not enabled" in str(
+        assert "Unknown resource: otel_trace" in str(
             result.result.executions[0].result.error
         )
 
@@ -500,27 +502,31 @@ class TestOpenTelemetry:
     ):
         captured: dict[str, set[str]] = {}
 
-        async def first(otel_trace):
-            with otel_span("first_step"):
-                await asyncio.sleep(0.01)
+        async def first():
+            async def run() -> None:
+                with otel_runtime.start_as_current_span("first_step"):
+                    await asyncio.sleep(0.01)
+
+            first_agent = SUT(run, name="first_agent")
+            await first_agent()
             captured["first"] = {
-                span.name for span in otel_trace.get_child_spans()
+                span.name for span in first_agent.get_child_spans()
             }
 
-        async def second(otel_trace):
-            with otel_span("second_step"):
-                await asyncio.sleep(0.01)
+        async def second():
+            async def run() -> None:
+                with otel_runtime.start_as_current_span("second_step"):
+                    await asyncio.sleep(0.01)
+
+            second_agent = SUT(run, name="second_agent")
+            await second_agent()
             captured["second"] = {
-                span.name for span in otel_trace.get_child_spans()
+                span.name for span in second_agent.get_child_spans()
             }
 
         items = [
-            make_item(
-                first, name="test_first", is_async=True, params=["otel_trace"]
-            ),
-            make_item(
-                second, name="test_second", is_async=True, params=["otel_trace"]
-            ),
+            make_item(first, name="test_first", is_async=True),
+            make_item(second, name="test_second", is_async=True),
         ]
 
         reporter = EventReporter()
@@ -535,8 +541,8 @@ class TestOpenTelemetry:
         result = await runner.run(items=items)
 
         assert result.result.passed == 2
-        assert captured["first"] == {"first_step"}
-        assert captured["second"] == {"second_step"}
+        assert captured["first"] == {"sut.first_agent", "first_step"}
+        assert captured["second"] == {"sut.second_agent", "second_step"}
 
         trace_ids = {
             session.root_span.get_span_context().trace_id
@@ -560,6 +566,11 @@ class TestOpenTelemetry:
             )
             assert {span["name"] for span in payload["spans"]} == {
                 f"test.{execution.item.full_name}",
+                (
+                    "sut.first_agent"
+                    if execution.item.name == "test_first"
+                    else "sut.second_agent"
+                ),
                 expected_child,
             }
 
@@ -570,7 +581,7 @@ class TestOpenTelemetry:
         monkeypatch: pytest.MonkeyPatch,
     ):
         async def traced():
-            with otel_span("session_step"):
+            with otel_runtime.start_as_current_span("session_step"):
                 await asyncio.sleep(0)
 
         monkeypatch.chdir(tmp_path)
@@ -658,7 +669,7 @@ class TestOpenTelemetry:
         monkeypatch: pytest.MonkeyPatch,
     ):
         async def traced():
-            with otel_span("default_step"):
+            with otel_runtime.start_as_current_span("default_step"):
                 await asyncio.sleep(0)
 
         monkeypatch.chdir(tmp_path)
@@ -690,11 +701,11 @@ class TestOpenTelemetry:
         monkeypatch: pytest.MonkeyPatch,
     ):
         async def first_trace():
-            with otel_span("first_step"):
+            with otel_runtime.start_as_current_span("first_step"):
                 await asyncio.sleep(0)
 
         async def second_trace():
-            with otel_span("second_step"):
+            with otel_runtime.start_as_current_span("second_step"):
                 await asyncio.sleep(0)
 
         run_id = UUID("00000000-0000-0000-0000-000000000010")
@@ -738,7 +749,7 @@ class TestOpenTelemetry:
         monkeypatch: pytest.MonkeyPatch,
     ):
         async def traced():
-            with otel_span("prune_step"):
+            with otel_runtime.start_as_current_span("prune_step"):
                 await asyncio.sleep(0)
 
         monkeypatch.chdir(tmp_path)

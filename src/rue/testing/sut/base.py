@@ -4,14 +4,22 @@ import functools
 import inspect
 import types
 from collections.abc import Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import fields, is_dataclass
 from typing import Any
+from uuid import UUID
+
+from opentelemetry.sdk.trace import ReadableSpan
 
 from pydantic import BaseModel
 from pydantic.experimental.arguments_schema import generate_arguments_schema
 from pydantic_core import ArgsKwargs, SchemaValidator
 
-from rue.context.runtime import CURRENT_TEST_TRACER
+from rue.context.runtime import (
+    CURRENT_SUT_SPAN_IDS,
+    CURRENT_TEST_TRACER,
+    bind,
+)
 from rue.testing.models.case import Case
 from rue.telemetry.otel.runtime import otel_runtime
 
@@ -26,15 +34,39 @@ class SUT:
     ):
         self.instance = instance
         self.method = method
+        self._otel_execution_id: ContextVar[UUID | None] = ContextVar(
+            f"sut_{id(self)}_otel_execution_id",
+            default=None,
+        )
+        self._otel_span_ids: ContextVar[tuple[int, ...]] = ContextVar(
+            f"sut_{id(self)}_otel_span_ids",
+            default=(),
+        )
 
-        # Resolve the target callable
-        target = getattr(self.instance, self.method, None)
-        match target:
-            case types.FunctionType() | types.MethodType() | types.MethodWrapperType() | functools.partial():
+        match self.method, self.instance, getattr(
+            self.instance, self.method, None
+        ):
+            case "__call__", (
+                types.FunctionType()
+                | types.MethodType()
+                | types.MethodWrapperType()
+                | functools.partial()
+            ) as target, _:
+                # Wrap plain callable inputs directly.
                 self.target_callable = target
-            case None:
+            case _, _, (
+                types.FunctionType()
+                | types.MethodType()
+                | types.MethodWrapperType()
+                | functools.partial()
+            ) as target:
+                # Wrap the named callable attribute on the instance.
+                self.target_callable = target
+            case _, _, None:
+                # Fail when the requested method does not exist.
                 raise ValueError(f"Method '{self.method}' not found in instance")
             case _:
+                # Fail when the resolved attribute is not callable.
                 raise ValueError(f"Method '{self.method}' is not a callable")
 
         assert self.target_callable is not None
@@ -101,23 +133,101 @@ class SUT:
             parsed_args = ArgsKwargs(args=(), kwargs=input_values)
             self.validator.validate_python(parsed_args)
 
+    def get_sut_spans(self) -> list[ReadableSpan]:
+        tracer = CURRENT_TEST_TRACER.get()
+        if tracer is None or tracer.otel_trace_session is None:
+            raise RuntimeError(
+                "OpenTelemetry is not enabled or this SUT has not been traced yet."
+            )
+        span_ids = set(self._otel_span_ids.get())
+        if not span_ids:
+            return []
+        return [
+            span
+            for span in tracer.otel_trace_session.get_spans()
+            if span.context.span_id in span_ids
+        ]
+
+    def get_child_spans(self) -> list[ReadableSpan]:
+        tracer = CURRENT_TEST_TRACER.get()
+        if tracer is None or tracer.otel_trace_session is None:
+            raise RuntimeError(
+                "OpenTelemetry is not enabled or this SUT has not been traced yet."
+            )
+        sut_spans = self.get_sut_spans()
+        if not sut_spans:
+            return []
+
+        root_ids = {span.context.span_id for span in sut_spans}
+        descendant_ids = set(root_ids)
+        spans = tracer.otel_trace_session.get_spans()
+
+        changed = True
+        while changed:
+            changed = False
+            for span in spans:
+                span_id = span.context.span_id
+                if span_id in descendant_ids:
+                    continue
+                if span.parent is not None and span.parent.span_id in descendant_ids:
+                    descendant_ids.add(span_id)
+                    changed = True
+                    continue
+                owner_span_id = tracer.otel_trace_session.get_sut_owner(span_id)
+                if owner_span_id in root_ids:
+                    descendant_ids.add(span_id)
+                    changed = True
+
+        return [
+            span
+            for span in spans
+            if span.context.span_id in descendant_ids
+        ]
+
+    def get_llm_calls(self) -> list[ReadableSpan]:
+        return [
+            span
+            for span in self.get_child_spans()
+            if span.name.startswith(("openai.", "anthropic.", "gen_ai."))
+        ]
+
     def _call_sync(self, *args: Any, **kwargs: Any) -> Any:
         with otel_runtime.start_as_current_span(f"sut.{self.name}") as span:
             span.set_attribute("rue.sut", True)
             span.set_attribute("rue.sut.name", self.name)
-            _set_input_attrs(span, args, kwargs)
-            result = self.target_callable(*args, **kwargs)
-            _set_output_attrs(span, result)
-            return result
+            self._otel_span_ids.set(
+                (
+                    *self._otel_span_ids.get(),
+                    span.get_span_context().span_id,
+                )
+            )
+            with bind(
+                CURRENT_SUT_SPAN_IDS,
+                (*CURRENT_SUT_SPAN_IDS.get(), span.get_span_context().span_id),
+            ):
+                _set_input_attrs(span, args, kwargs)
+                result = self.target_callable(*args, **kwargs)
+                _set_output_attrs(span, result)
+                return result
 
     async def _call_async(self, *args: Any, **kwargs: Any) -> Any:
         with otel_runtime.start_as_current_span(f"sut.{self.name}") as span:
             span.set_attribute("rue.sut", True)
             span.set_attribute("rue.sut.name", self.name)
-            _set_input_attrs(span, args, kwargs)
-            result = await self.target_callable(*args, **kwargs)
-            _set_output_attrs(span, result)
-            return result
+            self._otel_span_ids.set(
+                (
+                    *self._otel_span_ids.get(),
+                    span.get_span_context().span_id,
+                )
+            )
+            with bind(
+                CURRENT_SUT_SPAN_IDS,
+                (*CURRENT_SUT_SPAN_IDS.get(), span.get_span_context().span_id),
+            ):
+                _set_input_attrs(span, args, kwargs)
+                result = await self.target_callable(*args, **kwargs)
+                _set_output_attrs(span, result)
+                return result
 
 
 def _set_input_attrs(

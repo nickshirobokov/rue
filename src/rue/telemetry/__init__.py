@@ -1,10 +1,8 @@
 """Telemetry backends and public telemetry APIs."""
 
-from rue.telemetry.otel import OtelTrace, OtelTraceSession, otel_span
+from rue.telemetry.otel import OtelTraceSession
 
 
 __all__ = [
-    "OtelTrace",
     "OtelTraceSession",
-    "otel_span",
 ]

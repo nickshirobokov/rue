@@ -284,18 +284,18 @@ from demo_app import agent
 def weather_agent():
     return SUT(lambda prompt: agent(prompt, tools=["get_weather"]))
 
-def test_agent_uses_tools(weather_agent, otel_trace):
+def test_agent_uses_tools(weather_agent):
     result = weather_agent("What's the weather?")
 
     # Access OpenTelemetry spans for assertions
-    sut_spans = otel_trace.get_sut_spans(name="weather_agent")
+    sut_spans = weather_agent.get_sut_spans()
     assert sut_spans
 
     # If you want to assert on tool calls, query LLM spans explicitly.
     # Note: attribute keys come from OpenTelemetry LLM instrumentations.
     tool_names = [
         s.attributes.get("llm.request.functions.0.name")
-        for s in otel_trace.get_llm_calls()
+        for s in weather_agent.get_llm_calls()
         if s.attributes
     ]
     assert "get_weather" in tool_names

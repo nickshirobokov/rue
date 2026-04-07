@@ -7,7 +7,7 @@ title: "SUT"
 
 `@rue.sut` registers a **SUT factory function** as an injectable **resource**. The factory must return (or yield) a `rue.SUT(...)` object, and each invocation of that object is wrapped in an OpenTelemetry span. This gives you two things:
 - A clean dependency injection (DI) boundary in your tests (you call the injected parameter, not a global).
-- OpenTelemetry spans you can query inside a test via `otel_trace` (when OpenTelemetry is enabled).
+- OpenTelemetry spans you can query from that `SUT` inside a test (when OpenTelemetry is enabled).
 
 ```python
 import rue
@@ -28,7 +28,7 @@ def test_chatbot_works(chatbot):
 The most common use case for `@rue.sut` is asserting on the SUT call span(s).
 
 <Note>
-`otel_trace` is only available when OpenTelemetry is enabled. From the CLI, run `uv run rue test --otel`.
+SUT trace accessors work only when OpenTelemetry is enabled. From the CLI, run `uv run rue test --otel`.
 </Note>
 
 <Steps>
@@ -51,15 +51,13 @@ def weather_agent():
 ```python
 # tests/rue_agent.py
 
-def test_weather_agent_calls_tools(weather_agent, otel_trace):
+def test_weather_agent_calls_tools(weather_agent):
     out = weather_agent("What's the weather in SF?")
 
-    # Retrieve spans for this SUT by name (defaults to the function name)
-    spans = otel_trace.get_sut_spans(name="weather_agent")
-
-    # Assert on SUT span attributes emitted by Rue
+    spans = weather_agent.get_sut_spans()
     assert spans
     assert spans[0].attributes.get("rue.sut.name") == "weather_agent"
+    assert weather_agent.get_child_spans()
 ```
 </Step>
 </Steps>
@@ -83,7 +81,7 @@ def weather_agent():
 
 That’s why you should call the injected `chatbot` parameter inside `test_chatbot_works(chatbot)`, not the decorated global name.
 
-### Naming rules (important for DI and `get_sut_spans`)
+### Naming rules (important for DI and tracing)
 - **SUT name**: the factory function name (`def weather_agent(): ...` → `"weather_agent"`).
   - Pick your factory name intentionally, since it’s used for dependency injection *and* the `sut.<sut_name>` span name.
 

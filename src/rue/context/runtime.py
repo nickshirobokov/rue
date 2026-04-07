@@ -31,6 +31,9 @@ CURRENT_TEST: ContextVar[TestContext | None] = ContextVar(
 CURRENT_TEST_TRACER: ContextVar[TestTracer | None] = ContextVar(
     "current_test_tracer", default=None
 )
+CURRENT_SUT_SPAN_IDS: ContextVar[tuple[int, ...]] = ContextVar(
+    "current_sut_span_ids", default=()
+)
 CURRENT_RUNNER: ContextVar[Runner | None] = ContextVar(
     "current_runner", default=None
 )
