@@ -3,9 +3,9 @@ title: "SUT"
 ---
 
 <Note>SUT stands for *System Under Test*.</Note>
-<Note>`@rue.sut` is optional. It exists to make your agent/workflow callable injectable and OpenTelemetry-observable.</Note>
+<Note>`@rue.resource.sut` is optional. It exists to make your agent/workflow callable injectable and OpenTelemetry-observable.</Note>
 
-`@rue.sut` registers a **SUT factory function** as an injectable **resource**. The factory must return (or yield) a `rue.SUT(...)` object, and each invocation of `sut.instance` (or a wrapped method on it) is wrapped in an OpenTelemetry span. This gives you two things:
+`@rue.resource.sut` registers a **SUT factory function** as an injectable **resource**. The factory must return (or yield) a `rue.SUT(...)` object, and each invocation of `sut.instance` (or a wrapped method on it) is wrapped in an OpenTelemetry span. This gives you two things:
 - A clean dependency injection (DI) boundary in your tests (you call the injected parameter's `instance`, not a global).
 - OpenTelemetry spans you can query from that `SUT` inside a test (when OpenTelemetry is enabled).
 
@@ -15,7 +15,7 @@ from rue import SUT
 
 from demo_app.chatbot import chatbot as prod_chatbot
 
-@rue.sut
+@rue.resource.sut
 def chatbot():
     return SUT(prod_chatbot)
 
@@ -25,7 +25,7 @@ def test_chatbot_works(chatbot):
 ```
 
 ## Basic Usage
-The most common use case for `@rue.sut` is asserting on the SUT call span(s).
+The most common use case for `@rue.resource.sut` is asserting on the SUT call span(s).
 
 <Note>
 SUT trace accessors work only when OpenTelemetry is enabled. From the CLI, run `uv run rue test --otel`.
@@ -41,7 +41,7 @@ from rue import SUT
 
 from demo_app.weather import weather_agent as prod_weather_agent
 
-@rue.sut
+@rue.resource.sut
 def weather_agent():
     return SUT(prod_weather_agent)
 ```
@@ -62,10 +62,10 @@ def test_weather_agent_calls_tools(weather_agent):
 </Step>
 </Steps>
 
-## What `@rue.sut` actually does
+## What `@rue.resource.sut` actually does
 
 ### Injection semantics
-`@rue.sut` registers a resource factory so the Rue runner can inject it into tests by parameter name (by default, a **case-scoped** resource). The injected value is a `SUT` object.
+`@rue.resource.sut` registers a resource factory so the Rue runner can inject it into tests by parameter name (by default, a **case-scoped** resource). The injected value is a `SUT` object.
 
 If constructing your SUT is expensive, you can widen its lifecycle using `scope` (the same values as `@rue.resource`):
 
@@ -74,7 +74,7 @@ import rue
 from rue import SUT
 from demo_app.weather import weather_agent as prod_weather_agent
 
-@rue.sut(scope="session")
+@rue.resource.sut(scope="session")
 def weather_agent():
     return SUT(prod_weather_agent)
 ```
@@ -94,7 +94,7 @@ from rue import SUT
 
 from demo_app.agents import WeatherAgent
 
-@rue.sut
+@rue.resource.sut
 def weather_agent():
     return SUT(WeatherAgent(), methods=["run"])
 
@@ -129,7 +129,7 @@ Many evaluation frameworks require developers to modify their production codebas
 import rue
 from typing import Literal
 
-@rue.sut
+@rue.resource.sut
 def agent():
     # Don't decorate production entrypoints; wrap them in your tests layer instead.
     ...
@@ -144,7 +144,7 @@ from rue import SUT
 from functools import partial
 from app import agent as prod_agent
 
-@rue.sut
+@rue.resource.sut
 def marketing_agent():
     """Q&A system that answers questions about marketing concepts."""
     return SUT(partial(prod_agent, domain="marketing"))
@@ -156,7 +156,7 @@ def test_marketing_agent_invokes(marketing_agent):
 
 ### 2. Pass using Dependency Injection; don't call directly
 
-`@rue.sut` registers a resource factory for injection. Calling the decorated global directly is the wrong pattern (and may not work the way you expect). Always call the injected parameter.
+`@rue.resource.sut` registers a resource factory for injection. Calling the decorated global directly is the wrong pattern (and may not work the way you expect). Always call the injected parameter.
 
 **Don't do this:**
 ```python
@@ -164,7 +164,7 @@ import rue
 from rue import SUT
 from demo_app.chatbot import chatbot as prod_chatbot
 
-@rue.sut
+@rue.resource.sut
 def chatbot():
     return SUT(prod_chatbot)
 
@@ -181,7 +181,7 @@ import rue
 from rue import SUT
 from demo_app.chatbot import chatbot as prod_chatbot
 
-@rue.sut
+@rue.resource.sut
 def chatbot():
     return SUT(prod_chatbot)
 

@@ -30,7 +30,7 @@ from rue.testing.models.run import RunEnvironment
 if TYPE_CHECKING:
     from rue.assertions.base import AssertionResult
     from rue.config import RueConfig
-    from rue.metrics_.base import MetricResult
+    from rue.resources.metrics.base import MetricResult
     from rue.testing import TestDefinition
     from rue.testing.models.result import TestExecution, TestResult
     from rue.testing.models.run import Run

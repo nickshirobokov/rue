@@ -52,7 +52,7 @@ from rue.telemetry.otel.runtime import otel_runtime
 def is_ok(actual: str, reference: str) -> bool:
     return actual == reference
 
-@rue.sut
+@rue.resource.sut
 def traced_pipeline():
     def run() -> str:
         with otel_runtime.start_as_current_span("child_step") as span:
@@ -91,7 +91,7 @@ from rue.telemetry.otel.runtime import otel_runtime
 def is_ok(actual: str, reference: str) -> bool:
     return actual == reference
 
-@rue.sut
+@rue.resource.sut
 def traced_pipeline():
     async def run() -> str:
         with otel_runtime.start_as_current_span("child_step") as span:

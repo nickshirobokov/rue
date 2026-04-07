@@ -19,7 +19,7 @@ The most common pattern is to define a metric as a generator function, yield a `
 import rue
 from rue import Metric, metrics
 
-@rue.metric
+@rue.resource.metric
 def accuracy():
     metric = Metric()
     yield metric
@@ -48,7 +48,7 @@ When you use `with metrics(metric1, metric2):`, any assertions inside that block
 The `Metric` class provides statistical calculations on demand:
 
 ```python
-@rue.metric
+@rue.resource.metric
 def latency():
     metric = Metric()
     yield metric
@@ -76,7 +76,7 @@ Available properties:
 While `metrics()` automatically records assertion results, you can also manually record data:
 
 ```python
-@rue.metric
+@rue.resource.metric
 def response_time():
     metric = Metric()
     yield metric
@@ -99,7 +99,7 @@ Metrics can be scoped to different lifecycle levels. This enables tracking both 
 
 ```python
 # Session scope: collects data across the entire test run
-@rue.metric(scope="session")
+@rue.resource.metric(scope="session")
 def average_hallucinations_per_case():
     metric = Metric()
     yield metric
@@ -108,7 +108,7 @@ def average_hallucinations_per_case():
     assert metric.mean < 2  # Average hallucinations should be less than 2
 
 # Case scope: creates a new metric instance for each test case
-@rue.metric(scope="case")
+@rue.resource.metric(scope="case")
 def case_hallucinations_count(average_hallucinations_per_case: Metric):
     metric = Metric()
     yield metric
@@ -143,7 +143,7 @@ Metrics can depend on other metrics, enabling hierarchical analysis. This patter
 import rue
 from rue import Metric, metrics
 
-@rue.metric
+@rue.resource.metric
 def accuracy():
     """Overall accuracy from both false positives and negatives"""
     metric = Metric()
@@ -152,7 +152,7 @@ def accuracy():
     # After child metrics write their data, check overall accuracy
     assert metric.distribution[True] >= 0.8  # 80% correct
 
-@rue.metric
+@rue.resource.metric
 def false_positives(accuracy: Metric):
     """Track false positives and contribute to overall accuracy"""
     metric = Metric()
@@ -164,7 +164,7 @@ def false_positives(accuracy: Metric):
     # Check this specific metric
     assert metric.counter[False] < 5  # Less than 5 false positives
 
-@rue.metric
+@rue.resource.metric
 def false_negatives(accuracy: Metric):
     """Track false negatives and contribute to overall accuracy"""
     metric = Metric()
@@ -204,7 +204,7 @@ The `metrics()` context manager automatically records assertion results, elimina
 
 **Don't do this:**
 ```python
-@rue.metric
+@rue.resource.metric
 def accuracy():
     metric = Metric()
     yield metric
@@ -220,7 +220,7 @@ def test_test(accuracy: Metric):
 
 **Do this:**
 ```python
-@rue.metric
+@rue.resource.metric
 def accuracy():
     metric = Metric()
     yield metric
@@ -239,7 +239,7 @@ Choose scope based on what you're measuring. Use case-level metrics for per-test
 
 ```python
 # Case scope: Track each test case individually
-@rue.metric(scope="case")
+@rue.resource.metric(scope="case")
 def case_latency():
     metric = Metric()
     yield metric
@@ -248,7 +248,7 @@ def case_latency():
     assert metric.p95 < 1000  # Each case's p95 under 1 second
 
 # Session scope: Track overall system performance
-@rue.metric(scope="session")
+@rue.resource.metric(scope="session")
 def overall_latency():
     metric = Metric()
     yield metric
@@ -262,14 +262,14 @@ def overall_latency():
 Use dependency injection to create parent-child metric relationships. This enables drilling down from aggregate metrics to specific failure modes.
 
 ```python
-@rue.metric
+@rue.resource.metric
 def overall_quality():
     """Top-level quality metric"""
     metric = Metric()
     yield metric
     assert metric.mean > 0.9
 
-@rue.metric
+@rue.resource.metric
 def accuracy(overall_quality: Metric):
     """Tracks correctness, contributes to quality"""
     metric = Metric()
@@ -277,7 +277,7 @@ def accuracy(overall_quality: Metric):
     overall_quality.add_record(metric.mean)
     yield metric.mean  # Optionally yield final value for reports
 
-@rue.metric
+@rue.resource.metric
 def fluency(overall_quality: Metric):
     """Tracks readability, contributes to quality"""
     metric = Metric()
@@ -291,7 +291,7 @@ def fluency(overall_quality: Metric):
 After the metric completes, you can yield a final calculated value that will be captured in `MetricResult` for reports.
 
 ```python
-@rue.metric
+@rue.resource.metric
 def error_rate():
     metric = Metric()
     yield metric
@@ -312,7 +312,7 @@ def error_rate():
 Access `raw_values` to perform calculations beyond the built-in statistical properties.
 
 ```python
-@rue.metric
+@rue.resource.metric
 def custom_analysis():
     metric = Metric()
     yield metric

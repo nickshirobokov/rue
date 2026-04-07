@@ -106,7 +106,7 @@ def test_iter_cases_only_geography(
 
 
 # Fail early if any case has invalid input
-@rue.sut(validate_cases=all_cases)
+@rue.resource.sut(validate_cases=all_cases)
 def chatbot():
     return simple_chatbot
 

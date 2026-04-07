@@ -8,7 +8,7 @@ import types
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
-from typing import Any, Generic, cast
+from typing import TYPE_CHECKING, Any, Generic, cast
 from uuid import UUID
 
 from opentelemetry.sdk.trace import ReadableSpan
@@ -19,9 +19,11 @@ from pydantic_core import ArgsKwargs, SchemaValidator
 from typing_extensions import TypeVar
 
 from rue.context.runtime import CURRENT_TEST_TRACER
+from rue.resources.sut.tracer import SUTTracer
 from rue.telemetry.otel.runtime import OtelTraceSession
-from rue.testing.models.case import Case
-from rue.testing.sut.tracer import SUTTracer
+
+if TYPE_CHECKING:
+    from rue.testing.models.case import Case
 
 
 Message = ModelRequest | ModelResponse
@@ -178,9 +180,7 @@ class SUT(Generic[InstanceT]):
             missing = object()
             raw_callable = getattr(cast(Any, instance), method_name, missing)
             if raw_callable is missing:
-                raise ValueError(
-                    f"Method '{method_name}' not found in instance"
-                )
+                raise ValueError(f"Method '{method_name}' not found in instance")
             if not callable(raw_callable):
                 raise ValueError(f"Method '{method_name}' is not a callable")
             target_callable = cast(Callable[..., object], raw_callable)

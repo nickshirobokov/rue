@@ -20,7 +20,7 @@ def band_quality_classifier(query: str) -> bool:
     raise ValueError(f"Unknown query: {query}")
 
 
-@rue.metric
+@rue.resource.metric
 def accuracy():
     metric = Metric()
     yield metric
@@ -30,7 +30,7 @@ def accuracy():
     yield metric.distribution[True]
 
 
-@rue.metric
+@rue.resource.metric
 def false_positives(accuracy: Metric):
     metric = Metric()
     yield metric
@@ -43,7 +43,7 @@ def false_positives(accuracy: Metric):
     yield metric.counter[False]
 
 
-@rue.metric
+@rue.resource.metric
 def false_negatives(accuracy: Metric):
     metric = Metric()
     yield metric
@@ -104,7 +104,7 @@ def geography_bot(query: str) -> str:
     raise ValueError(f"Unknown query: {query}")
 
 
-@rue.metric(scope="session")
+@rue.resource.metric(scope="session")
 def average_hallucinations_per_case():
     metric = Metric()
     yield metric
@@ -114,7 +114,7 @@ def average_hallucinations_per_case():
     yield metric.mean
 
 
-@rue.metric(scope="case")
+@rue.resource.metric(scope="case")
 def case_hallucinations_count(average_hallucinations_per_case: Metric):
     metric = Metric()
     yield metric

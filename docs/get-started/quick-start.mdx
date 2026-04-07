@@ -19,7 +19,7 @@ import rue
 from rue import SUT
 from rue.predicates import has_unsupported_facts, follows_policy
 
-@rue.sut
+@rue.resource.sut
 def store_chatbot():
     return SUT(call_llm)
 
@@ -43,7 +43,7 @@ import rue
 from rue import Case, SUT
 from rue.predicates import has_unsupported_facts, follows_policy
 
-@rue.sut
+@rue.resource.sut
 def store_chatbot():
     return SUT(call_llm)
 
@@ -86,11 +86,11 @@ import rue
 from rue import Case, Metric, SUT, metrics
 from rue.predicates import has_unsupported_facts, follows_policy
 
-@rue.sut
+@rue.resource.sut
 def store_chatbot():
     return SUT(call_llm)
 
-@rue.metric
+@rue.resource.metric
 def accuracy():
     metric = Metric()
     yield metric
@@ -143,11 +143,11 @@ import rue
 from rue import Case, Metric, SUT, metrics
 from rue.predicates import has_unsupported_facts, follows_policy
 
-@rue.sut
+@rue.resource.sut
 def store_chatbot():
     return SUT(call_llm)
 
-@rue.metric
+@rue.resource.metric
 def accuracy():
     metric = Metric()
     yield metric

@@ -1,9 +1,9 @@
 """Rue - Testing framework for AI agents."""
 
-from .metrics_ import Metric, metric
-from .metrics_.scope import metrics
 from .predicates import PredicateResult, predicate
 from .reports import Reporter
+from .resources.metrics import Metric, metric, metrics
+from .resources.sut import SUT, sut
 from .testing import (
     Case,
     CaseGroup,
@@ -18,9 +18,10 @@ from .testing import (
     tag,
     xfail,
 )
-from .testing.sut import SUT, sut
 from .telemetry import OtelTraceSession
 
+resource.sut = sut
+resource.metric = metric
 
 __all__ = [
     # Core testing
@@ -37,13 +38,11 @@ __all__ = [
     "fail",
     "xfail",
     "SUT",
-    "sut",
     # Predicates
     "predicate",
     "PredicateResult",
     # Metrics
     "Metric",
-    "metric",
     "metrics",
     # Reporters
     "Reporter",

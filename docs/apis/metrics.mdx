@@ -36,7 +36,7 @@ Register a metric resource that yields a Metric instance and optionally a final 
 import rue
 from rue import Metric, metrics
 
-@rue.metric
+@rue.resource.metric
 def accuracy():
     """Track accuracy across all test cases."""
     metric = Metric()
@@ -49,7 +49,7 @@ def accuracy():
     # Assert on aggregate quality
     assert metric.mean > 0.8, f"Accuracy too low: {metric.mean}"
 
-@rue.metric(scope="suite")
+@rue.resource.metric(scope="suite")
 def latency_ms():
     """Track latency within a suite."""
     metric = Metric()
@@ -119,7 +119,7 @@ All properties are computed lazily and cached. Recording happens when you call `
 
 **Example:**
 ```python
-from rue import Metric, metric, metrics
+from rue import Metric, metrics
 
 @metric
 def response_quality():
@@ -249,7 +249,7 @@ def metrics(*metrics: Metric) -> Iterator[None]
 
 **Example:**
 ```python
-from rue import Metric, metric, metrics
+from rue import Metric, metrics
 
 @metric
 def accuracy():
@@ -286,7 +286,7 @@ async def test_bot_quality(question, context, bot, accuracy: Metric, hallucinati
 ### Basic Metric Collection
 
 ```python
-from rue import Metric, metric, metrics
+from rue import Metric, metrics
 
 @metric
 def latency_ms():
@@ -313,7 +313,7 @@ def test_performance(api_client, latency_ms: Metric):
 ### Assertion-Based Collection
 
 ```python
-from rue import Metric, metric, metrics
+from rue import Metric, metrics
 
 @metric
 def accuracy():
@@ -333,7 +333,7 @@ def test_classifier(input, expected, classifier, accuracy: Metric):
 ### Multiple Metrics
 
 ```python
-from rue import Metric, metric, metrics
+from rue import Metric, metrics
 
 @metric
 def precision():
@@ -365,7 +365,7 @@ def test_evaluation(model, precision: Metric, recall: Metric):
 ### Distribution Analysis
 
 ```python
-from rue import Metric, metric, metrics
+from rue import Metric, metrics
 
 SENTIMENT_TO_SCORE = {"negative": -1, "neutral": 0, "positive": 1}
 
@@ -399,7 +399,7 @@ def test_sentiment(text, classifier, sentiment_score_distribution: Metric):
 ### Percentile Analysis
 
 ```python
-from rue import Metric, metric, metrics
+from rue import Metric, metrics
 
 @metric
 def response_time():
@@ -428,7 +428,7 @@ def test_latency_test(api, response_time: Metric):
 ### Confidence Intervals
 
 ```python
-from rue import Metric, metric, metrics
+from rue import Metric, metrics
 
 @metric
 def success_rate():

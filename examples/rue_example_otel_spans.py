@@ -19,14 +19,14 @@ import rue
 # === System Under Test Examples ===
 
 
-@rue.sut
+@rue.resource.sut
 def simple_sut() -> Callable:
     """Simple sync SUT with OpenTelemetry span capture."""
     # In a real scenario, this would call an LLM
     return lambda prompt: f"Response to: {prompt}"
 
 
-@rue.sut
+@rue.resource.sut
 async def async_sut() -> Callable:
     """Async SUT - works the same way."""
 
@@ -40,7 +40,7 @@ async def async_sut() -> Callable:
     return slow_response
 
 
-@rue.sut
+@rue.resource.sut
 def pipeline_sut() -> Callable:
     class PipelineSUT:
         """Class-based SUT with automatic OpenTelemetry root spans."""
@@ -115,7 +115,7 @@ def test_multiple_sut_calls(simple_sut, pipeline_sut):
 # === Example with external client (would be captured if real) ===
 
 
-@rue.sut
+@rue.resource.sut
 def agent_with_external_client() -> Callable:
     """SUT that would use an externally instantiated client.
 

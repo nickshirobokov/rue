@@ -5,7 +5,7 @@ import pytest
 from opentelemetry.trace import ProxyTracerProvider
 
 from rue.context.runtime import CURRENT_SUT_SPAN_IDS, bind
-from rue.testing.sut.tracer import SUTTracer
+from rue.resources.sut.tracer import SUTTracer
 
 
 class FakeSpan:
@@ -74,7 +74,7 @@ def make_span_factory(span_ids: list[int]):
 def test_wraps_sync_calls_with_content(monkeypatch: pytest.MonkeyPatch):
     created, names, start_as_current_span = make_span_factory([101])
     monkeypatch.setattr(
-        "rue.testing.sut.tracer.otel_runtime.start_as_current_span",
+        "rue.resources.sut.tracer.otel_runtime.start_as_current_span",
         start_as_current_span,
     )
     session = FakeSession()
@@ -109,7 +109,7 @@ async def test_wraps_async_calls_without_content(
 ):
     created, names, start_as_current_span = make_span_factory([202])
     monkeypatch.setattr(
-        "rue.testing.sut.tracer.otel_runtime.start_as_current_span",
+        "rue.resources.sut.tracer.otel_runtime.start_as_current_span",
         start_as_current_span,
     )
     session = FakeSession()
@@ -142,11 +142,11 @@ def test_skips_tracing_without_active_trace(monkeypatch: pytest.MonkeyPatch):
         raise AssertionError("unexpected span creation")
 
     monkeypatch.setattr(
-        "rue.testing.sut.tracer.otel_runtime.start_as_current_span",
+        "rue.resources.sut.tracer.otel_runtime.start_as_current_span",
         fail_start,
     )
     monkeypatch.setattr(
-        "rue.testing.sut.tracer.trace.get_tracer_provider",
+        "rue.resources.sut.tracer.trace.get_tracer_provider",
         lambda: ProxyTracerProvider(),
     )
     tracer = SUTTracer("plain")
@@ -168,11 +168,11 @@ def test_traces_with_sdk_provider_and_no_session(monkeypatch: pytest.MonkeyPatch
 
     created, names, start_as_current_span = make_span_factory([501])
     monkeypatch.setattr(
-        "rue.testing.sut.tracer.otel_runtime.start_as_current_span",
+        "rue.resources.sut.tracer.otel_runtime.start_as_current_span",
         start_as_current_span,
     )
     monkeypatch.setattr(
-        "rue.testing.sut.tracer.trace.get_tracer_provider",
+        "rue.resources.sut.tracer.trace.get_tracer_provider",
         lambda: SdkTracerProvider(),
     )
     tracer = SUTTracer("standalone")
@@ -195,7 +195,7 @@ def test_resolves_child_and_llm_spans_and_resets_per_execution(
 ):
     created, _, start_as_current_span = make_span_factory([301])
     monkeypatch.setattr(
-        "rue.testing.sut.tracer.otel_runtime.start_as_current_span",
+        "rue.resources.sut.tracer.otel_runtime.start_as_current_span",
         start_as_current_span,
     )
     session = FakeSession()

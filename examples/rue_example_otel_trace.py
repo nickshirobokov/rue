@@ -16,7 +16,7 @@ from collections.abc import Callable
 import rue
 
 
-@rue.sut
+@rue.resource.sut
 def simple_pipeline() -> Callable:
     """A simple SUT that processes a query."""
 
@@ -27,7 +27,7 @@ def simple_pipeline() -> Callable:
     return process
 
 
-@rue.sut
+@rue.resource.sut
 def multi_step_pipeline() -> Callable:
     """A pipeline with multiple trace steps."""
 
@@ -99,10 +99,10 @@ def test_access_otel_trace_ids(simple_pipeline, otel_trace):
 
 # Filter for SUT spans specifically
 def test_get_sut_spans(multi_step_pipeline, otel_trace):
-    """Demonstrate filtering for @rue.sut decorated function spans."""
+    """Demonstrate filtering for @rue.resource.sut decorated function spans."""
     result = multi_step_pipeline("sut test")
 
-    # Get spans from @rue.sut functions (marked with rue.sut attribute)
+    # Get spans from @rue.resource.sut functions (marked with rue.sut attribute)
     sut_spans = otel_trace.get_sut_spans()
 
     # Note: otel_span spans are not SUT spans

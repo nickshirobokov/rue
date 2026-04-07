@@ -6,17 +6,14 @@ import functools
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, cast
+from typing import cast
 from uuid import UUID, uuid4
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider as SdkTracerProvider
 from opentelemetry.trace import Span
 
-from rue.context.runtime import (
-    CURRENT_SUT_SPAN_IDS,
-    bind,
-)
+from rue.context.runtime import CURRENT_SUT_SPAN_IDS, bind
 from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
 
 
@@ -75,9 +72,7 @@ class SUTTracer:
         if is_async:
 
             @functools.wraps(original_callable)
-            async def async_wrapped(
-                *args: object, **kwargs: object
-            ) -> object:
+            async def async_wrapped(*args: object, **kwargs: object) -> object:
                 if not self._should_trace():
                     return await cast(
                         Awaitable[object],
@@ -111,9 +106,7 @@ class SUTTracer:
         if not span_ids:
             return []
         return [
-            span
-            for span in session.get_spans()
-            if span.context.span_id in span_ids
+            span for span in session.get_spans() if span.context.span_id in span_ids
         ]
 
     def get_child_spans(self) -> list[ReadableSpan]:
@@ -133,10 +126,7 @@ class SUTTracer:
                 span_id = span.context.span_id
                 if span_id in descendant_ids:
                     continue
-                if (
-                    span.parent is not None
-                    and span.parent.span_id in descendant_ids
-                ):
+                if span.parent is not None and span.parent.span_id in descendant_ids:
                     descendant_ids.add(span_id)
                     changed = True
                     continue
@@ -145,9 +135,7 @@ class SUTTracer:
                     descendant_ids.add(span_id)
                     changed = True
 
-        return [
-            span for span in spans if span.context.span_id in descendant_ids
-        ]
+        return [span for span in spans if span.context.span_id in descendant_ids]
 
     def get_llm_calls(self) -> list[ReadableSpan]:
         return [
@@ -181,9 +169,7 @@ class SUTTracer:
         **kwargs: object,
     ) -> object:
         record_content = self._records_content()
-        with otel_runtime.start_as_current_span(
-            f"sut.{self.name}.{method_name}"
-        ) as span:
+        with otel_runtime.start_as_current_span(f"sut.{self.name}.{method_name}") as span:
             span_id = self._set_span_attrs(span, method_name)
             span_ids = (*CURRENT_SUT_SPAN_IDS.get(), span_id)
             with bind(CURRENT_SUT_SPAN_IDS, span_ids):
@@ -200,9 +186,7 @@ class SUTTracer:
         **kwargs: object,
     ) -> object:
         record_content = self._records_content()
-        with otel_runtime.start_as_current_span(
-            f"sut.{self.name}.{method_name}"
-        ) as span:
+        with otel_runtime.start_as_current_span(f"sut.{self.name}.{method_name}") as span:
             span_id = self._set_span_attrs(span, method_name)
             span_ids = (*CURRENT_SUT_SPAN_IDS.get(), span_id)
             with bind(CURRENT_SUT_SPAN_IDS, span_ids):

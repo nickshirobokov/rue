@@ -242,7 +242,7 @@ Scopes: `"case"` (default), `"suite"`, `"session"`.
 
 In practice, put shared `SESSION` resources in `confrue_*.py` files so directory structure controls which override is active.
 
-**`@rue.metric(scope="session")`** - Define a metric as a scoped, injectable measurement object
+**`@rue.resource.metric(scope="session")`** - Define a metric as a scoped, injectable measurement object
 
 Metrics behave like resources, but they’re intended to accumulate measurements across many cases and then assert on aggregates at the end of their scope.
 
@@ -251,7 +251,7 @@ The most common pattern is to inject a `Metric` into your tests and use the `met
 ```python
 from rue import Metric, metrics
 
-@rue.metric
+@rue.resource.metric
 def accuracy():
     metric = Metric()
     yield metric
@@ -268,9 +268,9 @@ def test_classifier(input, expected, classifier, accuracy: Metric):
 
 Scopes: `"session"` (default), `"suite"`, `"case"`.
 
-**`@rue.sut`** - Register a System Under Test (SUT) factory as an injectable, traceable resource
+**`@rue.resource.sut`** - Register a System Under Test (SUT) factory as an injectable, traceable resource
 
-A SUT is the thing you’re actually evaluating (an agent function, a pipeline, a classifier, a client wrapper, etc.). Declaring a factory with `@rue.sut` makes a resolved `SUT` object injectable and traceable, so you can assert not only on the output, but also on how it behaved internally (for example: tool calls).
+A SUT is the thing you’re actually evaluating (an agent function, a pipeline, a classifier, a client wrapper, etc.). Declaring a factory with `@rue.resource.sut` makes a resolved `SUT` object injectable and traceable, so you can assert not only on the output, but also on how it behaved internally (for example: tool calls).
 
 <Note>
   The decorated function is a factory. It should return or yield `SUT(...)`. Call `sut.instance(...)` for wrapped callables, or configure `methods=[...]` and call `sut.instance.method(...)` for traced instance methods.
@@ -280,7 +280,7 @@ A SUT is the thing you’re actually evaluating (an agent function, a pipeline, 
 from rue import SUT
 from demo_app import agent
 
-@rue.sut
+@rue.resource.sut
 def weather_agent():
     return SUT(lambda prompt: agent(prompt, tools=["get_weather"]))
 
@@ -333,7 +333,7 @@ When assertions are evaluated inside a `metrics()` context manager, Rue automati
 ```python
 from rue import Metric, metrics
 
-@rue.metric
+@rue.resource.metric
 def accuracy():
     metric = Metric()
     yield metric

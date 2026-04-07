@@ -21,7 +21,7 @@ When OpenTelemetry is enabled, Rue wraps each concrete test execution in a root 
 - `test.<full_name>`
 
 Inside that test span, you’ll typically see:
-- **SUT spans**: created by [`@rue.sut`](/concepts/sut), named `sut.<sut_name>.<method_name>`
+- **SUT spans**: created by [`@rue.resource.sut`](/concepts/sut), named `sut.<sut_name>.<method_name>`
 - **Predicate spans**: created by [`@predicate`](/apis/predicates), named `predicate.<predicate_name>`
 - **LLM spans**: auto-instrumented spans whose names usually start with `openai.`, `anthropic.`, or `gen_ai.`
 
@@ -57,7 +57,7 @@ from rue import SUT
 from demo_app.weather import weather_agent as prod_weather_agent
 
 
-@rue.sut
+@rue.resource.sut
 def weather_agent():
     return SUT(prod_weather_agent)
 

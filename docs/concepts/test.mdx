@@ -135,7 +135,7 @@ from rue import Metric, metrics
 def chatbot():
     return ChatBot(model="gpt-4")
 
-@rue.metric
+@rue.resource.metric
 def accuracy():
     metric = Metric()
     yield metric

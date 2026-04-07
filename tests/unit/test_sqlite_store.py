@@ -4,9 +4,9 @@ from pathlib import Path
 from uuid import uuid4
 
 from rue.assertions.base import AssertionRepr, AssertionResult
-from rue.metrics_.base import MetricMetadata, MetricResult
 from rue.predicates.models import PredicateResult
 from rue.resources import Scope
+from rue.resources.metrics.base import MetricMetadata, MetricResult
 from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.store import MAX_STORED_RUNS
 from rue.testing.models.definition import TestDefinition

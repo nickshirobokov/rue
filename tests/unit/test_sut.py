@@ -1,4 +1,4 @@
-"""Tests for rue.testing.sut module."""
+"""Tests for rue.resources.sut module."""
 
 import sys
 from collections.abc import Callable
@@ -12,10 +12,10 @@ from pydantic_core import ValidationError
 from rue import SUT
 from rue.config import RueConfig
 from rue.resources import ResourceResolver, registry as resources_registry
+from rue.resources.sut import sut
 from rue.testing.discovery import collect
 from rue.testing.models import Case
 from rue.testing.runner import Runner
-from rue.testing.sut import sut
 
 
 @pytest.fixture(autouse=True)
@@ -219,7 +219,7 @@ class TestSutOpenTelemetry:
                 """
 import rue
 
-@rue.sut
+@rue.resource.sut
 def traced_sut():
     def run(x: int) -> int:
         return x * 2
@@ -243,7 +243,7 @@ class Pipeline:
     def __call__(self, value: int) -> int:
         return value * 4
 
-@rue.sut
+@rue.resource.sut
 def traced_callable_object():
     return rue.SUT(Pipeline())
 
@@ -265,7 +265,7 @@ class Service:
     async def run(self, value: str) -> str:
         return f"ok:{value}"
 
-@rue.sut
+@rue.resource.sut
 def traced_service():
     return rue.SUT(Service(), methods=["run"])
 
@@ -356,7 +356,7 @@ def test_sample():
 import rue
 from rue.telemetry.otel.runtime import otel_runtime
 
-@rue.sut
+@rue.resource.sut
 def traced_pipeline():
     async def run() -> str:
         with otel_runtime.start_as_current_span("child_step"):
@@ -411,7 +411,7 @@ import asyncio
 import rue
 from rue.telemetry.otel.runtime import otel_runtime
 
-@rue.sut(scope="{scope}")
+@rue.resource.sut(scope="{scope}")
 def shared_pipeline():
     async def run(step: str) -> str:
         with otel_runtime.start_as_current_span(step):

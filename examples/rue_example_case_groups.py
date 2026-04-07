@@ -117,7 +117,7 @@ all_groups = [geography_group, music_group]
 # =============================== Run tests ===============================
 
 
-@rue.sut(validate_cases=[case for group in all_groups for case in group.cases])
+@rue.resource.sut(validate_cases=[case for group in all_groups for case in group.cases])
 def chatbot():
     return simple_chatbot
 
