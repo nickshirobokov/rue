@@ -270,18 +270,19 @@ Scopes: `"session"` (default), `"suite"`, `"case"`.
 
 **`@rue.sut`** - Register a System Under Test (SUT) factory as an injectable, traceable resource
 
-A SUT is the thing you’re actually evaluating (an agent function, a pipeline, a classifier, a client wrapper, etc.). Declaring a factory with `@rue.sut` makes the resolved callable or instance injectable and traceable, so you can assert not only on the output, but also on how it behaved internally (for example: tool calls).
+A SUT is the thing you’re actually evaluating (an agent function, a pipeline, a classifier, a client wrapper, etc.). Declaring a factory with `@rue.sut` makes a resolved `SUT` object injectable and traceable, so you can assert not only on the output, but also on how it behaved internally (for example: tool calls).
 
 <Note>
-  The decorated function is a factory. It should return either a callable, or an instance whose `method=` should be traced. Rue injects that resolved object into your test.
+  The decorated function is a factory. It should return or yield `SUT(...)`. Pass `method="..."` to `SUT` when you want to invoke an instance method instead of `__call__`.
 </Note>
 
 ```python
+from rue import SUT
 from demo_app import agent
 
 @rue.sut
 def weather_agent():
-    return lambda prompt: agent(prompt, tools=["get_weather"])
+    return SUT(lambda prompt: agent(prompt, tools=["get_weather"]))
 
 def test_agent_uses_tools(weather_agent, otel_trace):
     result = weather_agent("What's the weather?")

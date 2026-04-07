@@ -1,23 +1,15 @@
 """Tests for rue.testing.sut module."""
 
-import asyncio
-import inspect
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from pydantic import BaseModel
 from pydantic_core import ValidationError
 
+from rue import SUT
 from rue.config import RueConfig
-from rue.resources import (
-    ResourceResolver,
-    Scope,
-    registry as resources_registry,
-    resource,
-)
+from rue.resources import ResourceResolver, registry as resources_registry
 from rue.testing.discovery import collect
 from rue.testing.models import Case
 from rue.testing.runner import Runner
@@ -60,267 +52,143 @@ async def _run_module_with_tracing(
         sys.modules.pop(mod_name, None)
 
 
+async def _resolve(name: str) -> object:
+    resolver = ResourceResolver(resources_registry)
+    return await resolver.resolve(name)
+
+
+class TestSutObject:
+    def test_calls_callable(self):
+        def run(x: int, y: int) -> int:
+            return x + y
+
+        target = SUT(run)
+
+        assert target(2, 3) == 5
+        assert target.name == "run"
+
+    def test_uses_call_for_callable_objects(self):
+        class Pipeline:
+            def __call__(self, value: int) -> int:
+                return value * 4
+
+        target = SUT(Pipeline())
+
+        assert target(3) == 12
+
+    def test_allows_bound_methods(self):
+        class Service:
+            def run(self, value: str) -> str:
+                return f"ok:{value}"
+
+        target = SUT(Service().run)
+
+        assert target("hello") == "ok:hello"
+        assert target.name == "run"
+
+    @pytest.mark.asyncio
+    async def test_calls_async_method(self):
+        class Service:
+            async def run(self, value: str) -> str:
+                return f"ok:{value}"
+
+        target = SUT(Service(), method="run")
+
+        assert await target("hello") == "ok:hello"
+
+    def test_explicit_name_wins(self):
+        def run(value: int) -> int:
+            return value * 2
+
+        target = SUT(run, name="custom")
+
+        assert target.name == "custom"
+
+    def test_validates_cases_in_init(self):
+        class Pipeline:
+            def run(self, x: int) -> int:
+                return x * 2
+
+        target = SUT(
+            Pipeline(),
+            method="run",
+            validate_cases=[Case(inputs={"x": 7})],
+        )
+
+        assert target(3) == 6
+        assert target.args_schema is not None
+        assert target.validator is not None
+
+    def test_validation_raises_on_invalid_case(self):
+        class Pipeline:
+            def run(self, x: int) -> int:
+                return x * 2
+
+        with pytest.raises(ValidationError):
+            SUT(
+                Pipeline(),
+                method="run",
+                validate_cases=[Case(inputs={"x": "bad"})],
+            )
+
+    @pytest.mark.parametrize(
+        "method, expected_match",
+        [
+            ("run", r"Method 'run' not found"),
+            ("value", r"Method 'value' is not a callable"),
+        ],
+    )
+    def test_rejects_missing_and_non_callable_methods(
+        self, method: str, expected_match: str
+    ):
+        class Service:
+            value = 1
+
+        with pytest.raises(ValueError, match=expected_match):
+            SUT(Service(), method=method)
+
+
 class TestSutDecorator:
     def test_rejects_classes(self):
         with pytest.raises(TypeError, match="only decorate functions"):
             sut(type("MySUT", (), {}))
 
-    def test_registers_resource_with_case_scope_by_default(self):
-        @sut
-        def my_sut():
-            return lambda x: x * 2
-
-        definition = resources_registry.get("my_sut")
-        assert definition is not None
-        assert definition.scope == Scope.CASE
-
-    def test_scope_is_user_defined(self):
-        @sut(scope=Scope.SESSION)
-        def my_session_sut():
-            return lambda x: x
-
-        definition = resources_registry.get("my_session_sut")
-        assert definition is not None
-        assert definition.scope == Scope.SESSION
-
-    def test_resource_dependencies_are_captured_from_factory_signature(self):
-        @resource
-        def dep():
-            return 3
-
-        @sut
-        def my_sut(dep):
-            return lambda x: x + dep
-
-        definition = resources_registry.get("my_sut")
-        assert definition is not None
-        assert definition.dependencies == ["dep"]
-
-    def test_registry_key_is_factory_function_name(self):
-        @sut
-        def original_name():
-            return lambda: "ok"
-
-        assert resources_registry.get("original_name") is not None
-
-
-class TestSutResolution:
-    @pytest.mark.asyncio
-    async def test_wraps_returned_callable(self):
-        @sut
-        def adder():
-            def run(x: int, y: int) -> int:
-                return x + y
-
-            return run
-
-        resolver = ResourceResolver(resources_registry)
-        resolved = await resolver.resolve("adder")
-
-        assert callable(resolved)
-        assert resolved(2, 3) == 5
-        assert inspect.signature(resolved) == inspect.signature(adder())
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{"method": "run"}, {"validate_cases": [Case(inputs={"x": 1})]}],
+    )
+    def test_removed_decorator_kwargs_raise(self, kwargs):
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            sut(**kwargs)
 
     @pytest.mark.asyncio
-    async def test_wraps_returned_async_callable(self):
-        @sut
-        def async_adder():
-            async def run(x: int, y: int) -> int:
-                await asyncio.sleep(0.001)
-                return x + y
-
-            return run
-
-        resolver = ResourceResolver(resources_registry)
-        resolved = await resolver.resolve("async_adder")
-        assert await resolved(2, 3) == 5
-
-    @pytest.mark.asyncio
-    async def test_wraps_returned_instance_method_in_place(self):
-        class Pipeline:
-            def __init__(self) -> None:
-                self.factor = 4
-
-            def run(self, x: int) -> int:
-                return x * self.factor
-
-        @sut(method="run")
-        def pipeline():
-            return Pipeline()
-
-        resolver = ResourceResolver(resources_registry)
-        resolved = await resolver.resolve("pipeline")
-
-        assert isinstance(resolved, Pipeline)
-        assert resolved.factor == 4
-        assert resolved.run(3) == 12
-
-    @pytest.mark.asyncio
-    async def test_raises_on_none_return(self):
+    async def test_requires_explicit_sut_return(self):
         @sut
         def bad_sut():
-            return None
+            return lambda x: x + 1
 
-        resolver = ResourceResolver(resources_registry)
-        with pytest.raises(RuntimeError, match="Hook on_resolve failed"):
-            await resolver.resolve("bad_sut")
+        with pytest.raises(
+            RuntimeError, match="@sut factories must return or yield a SUT"
+        ) as exc:
+            await _resolve("bad_sut")
 
-    @pytest.mark.asyncio
-    async def test_raises_when_method_missing_for_non_callable_instance(self):
-        class NoRun:
-            value = 1
-
-        @sut(method="run")
-        def no_run():
-            return NoRun()
-
-        resolver = ResourceResolver(resources_registry)
-        with pytest.raises(RuntimeError, match="resolved to unsupported type"):
-            await resolver.resolve("no_run")
+        assert isinstance(exc.value.__cause__, TypeError)
 
     @pytest.mark.asyncio
-    async def test_validate_cases_applies_to_resolved_callable_signature(self):
-        cases = [Case(inputs={"x": 1, "y": 2})]
-
-        @sut(validate_cases=cases)
-        def adder():
-            def run(x: int, y: int) -> int:
-                return x + y
-
-            return run
-
-        resolver = ResourceResolver(resources_registry)
-        resolved = await resolver.resolve("adder")
-
-        assert resolved(2, 3) == 5
-
-    @pytest.mark.asyncio
-    async def test_validate_cases_applies_to_typed_inputs(self):
-        class AdderInputs(BaseModel):
-            x: int
-            y: int
-
-        cases = [
-            Case[AdderInputs, dict[str, int]](inputs=AdderInputs(x=1, y=2)),
-        ]
-
-        @sut(validate_cases=cases)
-        def adder():
-            def run(x: int, y: int) -> int:
-                return x + y
-
-            return run
-
-        resolver = ResourceResolver(resources_registry)
-        resolved = await resolver.resolve("adder")
-
-        assert resolved(**cases[0].inputs.model_dump()) == 3
-
-    @pytest.mark.asyncio
-    async def test_validate_cases_applies_to_dataclass_inputs(self):
-        @dataclass
-        class AdderInputs:
-            x: int
-            y: int
-
-        cases = [
-            Case[AdderInputs, dict[str, int]](inputs=AdderInputs(x=1, y=2))
-        ]
-
-        @sut(validate_cases=cases)
-        def adder():
-            def run(x: int, y: int) -> int:
-                return x + y
-
-            return run
-
-        resolver = ResourceResolver(resources_registry)
-        resolved = await resolver.resolve("adder")
-
-        assert resolved(x=cases[0].inputs.x, y=cases[0].inputs.y) == 3
-
-    @pytest.mark.asyncio
-    async def test_validate_cases_raises_on_invalid_case(self):
-        cases = [Case(inputs={"x": "not-an-int"})]
-
-        @sut(validate_cases=cases)
-        def increment():
-            def run(x: int) -> int:
-                return x + 1
-
-            return run
-
-        resolver = ResourceResolver(resources_registry)
-        with pytest.raises(RuntimeError, match="Hook on_resolve failed") as exc:
-            await resolver.resolve("increment")
-
-        assert isinstance(exc.value.__cause__, ValidationError)
-
-    @pytest.mark.asyncio
-    async def test_validate_cases_raises_on_invalid_dataclass_case(self):
-        @dataclass
-        class IncrementInputs:
-            x: int
-
-        cases = [
-            Case[IncrementInputs, dict[str, int]](
-                inputs=IncrementInputs(x="bad")
-            ),
-        ]
-
-        @sut(validate_cases=cases)
-        def increment():
-            def run(x: int) -> int:
-                return x + 1
-
-            return run
-
-        resolver = ResourceResolver(resources_registry)
-        with pytest.raises(RuntimeError, match="Hook on_resolve failed") as exc:
-            await resolver.resolve("increment")
-
-        assert isinstance(exc.value.__cause__, ValidationError)
-
-    @pytest.mark.asyncio
-    async def test_validate_cases_raises_on_invalid_typed_case(self):
-        class IncrementInputs(BaseModel):
-            x: str
-
-        cases = [
-            Case[IncrementInputs, dict[str, int]](
-                inputs=IncrementInputs(x="not-an-int")
-            )
-        ]
-
-        @sut(validate_cases=cases)
-        def increment():
-            def run(x: int) -> int:
-                return x + 1
-
-            return run
-
-        resolver = ResourceResolver(resources_registry)
-        with pytest.raises(RuntimeError, match="Hook on_resolve failed") as exc:
-            await resolver.resolve("increment")
-
-        assert isinstance(exc.value.__cause__, ValidationError)
-
-    @pytest.mark.asyncio
-    async def test_validate_cases_targets_instance_method_signature(self):
+    async def test_sets_name_from_factory(self):
         class Pipeline:
             def run(self, x: int) -> int:
                 return x * 2
 
-        cases = [Case(inputs={"x": 7})]
-
-        @sut(method="run", validate_cases=cases)
+        @sut
         def pipeline():
-            return Pipeline()
+            return SUT(Pipeline(), method="run")
 
-        resolver = ResourceResolver(resources_registry)
-        resolved = await resolver.resolve("pipeline")
+        resolved = await _resolve("pipeline")
 
-        assert resolved.run(3) == 6
+        assert isinstance(resolved, SUT)
+        assert resolved.name == "pipeline"
+        assert resolved(3) == 6
 
 
 class TestSutOpenTelemetry:
@@ -336,7 +204,7 @@ import rue
 def traced_sut():
     def run(x: int) -> int:
         return x * 2
-    return run
+    return rue.SUT(run)
 
 def test_sample(traced_sut):
     assert traced_sut(5) == 10
@@ -349,15 +217,15 @@ def test_sample(traced_sut):
 import rue
 
 class Service:
-    def run(self, value: str) -> str:
+    async def run(self, value: str) -> str:
         return f"ok:{value}"
 
-@rue.sut(method="run")
+@rue.sut
 def traced_service():
-    return Service()
+    return rue.SUT(Service(), method="run")
 
-def test_sample(traced_service):
-    assert traced_service.run("hello") == "ok:hello"
+async def test_sample(traced_service):
+    assert await traced_service("hello") == "ok:hello"
 """,
                 "sut.traced_service",
                 {"rue.sut": True, "rue.sut.name": "traced_service"},
@@ -413,18 +281,13 @@ def test_sample():
 """,
         )
 
-        @sut
-        def adder():
-            def run(x: int, y: int) -> int:
-                return x + y
+        def run(x: int, y: int) -> int:
+            return x + y
 
-            return run
-
-        resolver = ResourceResolver(resources_registry)
-        resolved = await resolver.resolve("adder")
+        target = SUT(run)
         before = [session.serialize() for session in sessions]
 
-        assert resolved(2, 3) == 5
+        assert target(2, 3) == 5
 
         after = [session.serialize() for session in sessions]
         assert before == after

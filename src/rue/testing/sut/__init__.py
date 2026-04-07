@@ -3,12 +3,14 @@ from .dep_collector import (
     DependencyEntry,
     collect_dependencies,
 )
+from .base import SUT
 from .decorator import sut
 
 
 __all__ = [
     "DependencyCollectionMode",
     "DependencyEntry",
+    "SUT",
     "collect_dependencies",
     "sut",
 ]

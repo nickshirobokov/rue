@@ -75,8 +75,6 @@ Register a function factory as an OpenTelemetry-observable system-under-test res
     fn: Callable | None = None,
     *,
     scope: Scope | str = Scope.CASE,
-    method: str = "__call__",
-    validate_cases: list[Case[Any, Any]] | None = None,
 )
 ```
 
@@ -86,40 +84,38 @@ Register a function factory as an OpenTelemetry-observable system-under-test res
 |------|------|---------|-------------|
 | `fn` | `Callable \| None` | `None` | The SUT factory function to register |
 | `scope` | `Scope \| str` | `Scope.CASE` | Resource lifecycle scope: `"case"`, `"suite"`, `"session"` |
-| `method` | `str` | `"__call__"` | Method to wrap in an OpenTelemetry span when the factory returns a non-callable instance |
-| `validate_cases` | `list[Case[Any, Any]] \| None` | `None` | Cases to validate against the resolved SUT signature (raises on invalid input) |
 
-**Returns:** Decorated function registered as an OpenTelemetry-observable resource
+**Returns:** Decorated function registered as an OpenTelemetry-observable resource. The factory must return or yield `SUT(...)`.
 
 **Example:**
 ```python
 import rue
+from rue import SUT
 
 from rag import retrieve
 from agents import Agent
 
 @rue.sut
 def rag():
-    return retrieve
+    return SUT(retrieve)
 
-@rue.sut(method="run")
+@rue.sut
 def agent():
-    agent = Agent(tools="all")
-    return agent
+    return SUT(Agent(tools="all"), method="run")
 
 cases = [
     rue.Case(inputs={"query": "Privacy policy"}),
     rue.Case(inputs={"query": "How do you store data?"}),
 ]
 
-@rue.sut(validate_cases=cases)
+@rue.sut
 def search_agent():
-    return retrieve
+    return SUT(retrieve, validate_cases=cases)
 
 def test_test(agent, rag):
-    # Resolved values behave like original callable/instance APIs
+    # Injected values are SUT objects and are called directly
     context = retrieve("Privacy policy")
-    output = agent.run("How do you store my data?", context=context)
+    output = agent("How do you store my data?", context=context)
 ```
 
 ---
@@ -867,20 +863,21 @@ def test_chatbot(group: CaseGroup, case: Case, chatbot):
 
 ### SUT case validation
 
-Validate case inputs by passing them to `@sut(validate_cases=...)`. Validation runs during SUT resolution and raises if any case does not match the resolved callable/method signature.
+Validate case inputs by passing them to `SUT(..., validate_cases=...)`. Validation runs when the `SUT` object is created and raises if any case does not match the resolved callable or method signature.
 
 ```python
 import rue
+from rue import SUT
 
 cases = [
     rue.Case(inputs={"prompt": "Hello", "temperature": 0.5}),
     rue.Case(inputs={"prompt": "Hi"}),
 ]
 
-@rue.sut(validate_cases=cases)
+@rue.sut
 def my_agent():
     def run(prompt: str, temperature: float = 0.7) -> str:
         return f"{prompt} @ {temperature}"
 
-    return run
+    return SUT(run, validate_cases=cases)
 ```

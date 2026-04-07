@@ -18,7 +18,7 @@ from .testing import (
     tag,
     xfail,
 )
-from .testing.sut import sut
+from .testing.sut import SUT, sut
 from .telemetry import OtelTrace, OtelTraceSession, otel_span
 
 
@@ -36,6 +36,7 @@ __all__ = [
     "skip",
     "fail",
     "xfail",
+    "SUT",
     "sut",
     # Predicates
     "predicate",

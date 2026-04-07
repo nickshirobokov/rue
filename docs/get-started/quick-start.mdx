@@ -16,11 +16,12 @@ Create `rue_store_chatbot.py` and register the chatbot as a SUT factory:
 
 ```python
 import rue
+from rue import SUT
 from rue.predicates import has_unsupported_facts, follows_policy
 
 @rue.sut
 def store_chatbot():
-    return call_llm
+    return SUT(call_llm)
 
 async def test_chatbot_no_hallucinations(store_chatbot):
     context = "Store hours: 9 AM - 6 PM, Monday-Saturday. Closed Sundays."
@@ -39,12 +40,12 @@ Add cases to test multiple scenarios:
 
 ```python
 import rue
-from rue import Case
+from rue import Case, SUT
 from rue.predicates import has_unsupported_facts, follows_policy
 
 @rue.sut
 def store_chatbot():
-    return call_llm
+    return SUT(call_llm)
 
 cases = [
     Case(
@@ -82,12 +83,12 @@ Add a metric to enforce 80% accuracy across all cases:
 
 ```python
 import rue
-from rue import Case, Metric, metrics
+from rue import Case, Metric, SUT, metrics
 from rue.predicates import has_unsupported_facts, follows_policy
 
 @rue.sut
 def store_chatbot():
-    return call_llm
+    return SUT(call_llm)
 
 @rue.metric
 def accuracy():
@@ -139,12 +140,12 @@ Inject `otel_trace` to verify the chatbot actually called the right tools:
 
 ```python
 import rue
-from rue import Case, Metric, metrics
+from rue import Case, Metric, SUT, metrics
 from rue.predicates import has_unsupported_facts, follows_policy
 
 @rue.sut
 def store_chatbot():
-    return call_llm
+    return SUT(call_llm)
 
 @rue.metric
 def accuracy():

@@ -54,6 +54,7 @@ Use `otel_trace` to query spans created during the current test execution:
 
 ```python
 import rue
+from rue import SUT
 
 from demo_app.weather import retrieve_docs
 from demo_app.weather import weather_agent as prod_weather_agent
@@ -61,7 +62,7 @@ from demo_app.weather import weather_agent as prod_weather_agent
 
 @rue.sut
 def weather_agent():
-    return prod_weather_agent
+    return SUT(prod_weather_agent)
 
 
 def test_can_inspect_trace(weather_agent, otel_trace):
