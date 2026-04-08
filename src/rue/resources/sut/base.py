@@ -112,9 +112,6 @@ class SUT(Generic[InstanceT]):
     def get_message_history(self) -> list[Message]:
         raise NotImplementedError("Not implemented")
 
-    def get_tool_calls(self) -> list[object]:
-        raise NotImplementedError("Not implemented")
-
     def validate_cases(
         self, cases: Sequence[Case[Any, Any]], method_name: str
     ) -> None:

@@ -2,29 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 from pydantic import BaseModel
 
 import rue
-from rue import Case, CaseGroup
-
-
-# =============================== Define SUT ===============================
-
-
-def simple_chatbot(prompt: str) -> str:
-    if "verbose" in prompt:
-        answer = "What an excellent question! The answer is: "
-    else:
-        answer = ""
-    if "France" in prompt:
-        return answer + "Paris"
-    if "Germany" in prompt:
-        return answer + "Berlin"
-    if "rock" in prompt:
-        return answer + "Metallica"
-    if "pop" in prompt:
-        return answer + "Lady Gaga"
-    raise ValueError(f"Unknown query: {prompt}")
+from rue import Case, CaseGroup, SUT
 
 
 # =============================== Prepare grouped cases ===============================
@@ -113,13 +96,36 @@ music_group = CaseGroup[
 )
 
 all_groups = [geography_group, music_group]
+all_cases = [case for group in all_groups for case in group.cases]
+
+
+# =============================== Define SUT ===============================
+
+
+def simple_chatbot(prompt: str) -> str:
+    if "verbose" in prompt:
+        answer = "What an excellent question! The answer is: "
+    else:
+        answer = ""
+    if "France" in prompt:
+        return answer + "Paris"
+    if "Germany" in prompt:
+        return answer + "Berlin"
+    if "rock" in prompt:
+        return answer + "Metallica"
+    if "pop" in prompt:
+        return answer + "Lady Gaga"
+    raise ValueError(f"Unknown query: {prompt}")
+
+
+@rue.resource.sut
+def chatbot():
+    sut = SUT(simple_chatbot)
+    sut.validate_cases(all_cases, "__call__")
+    return sut
+
 
 # =============================== Run tests ===============================
-
-
-@rue.resource.sut(validate_cases=[case for group in all_groups for case in group.cases])
-def chatbot():
-    return simple_chatbot
 
 
 @rue.iter_case_groups(*all_groups)
@@ -128,9 +134,9 @@ def test_iter_case_groups_with_validation(
         ExampleInputs, ExampleCaseReferences, ExampleGroupReferences
     ],
     case: Case[ExampleInputs, ExampleCaseReferences],
-    chatbot,
+    chatbot: SUT[Callable[..., str]],
 ):
-    response = chatbot(**case.inputs.model_dump())
+    response = chatbot.instance(**case.inputs.model_dump())
 
     # case-level references
     assert case.references.expected in response

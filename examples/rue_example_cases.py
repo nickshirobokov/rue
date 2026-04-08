@@ -1,14 +1,14 @@
 """Examples for `Case` and `iter_cases`."""
 
-from __future__ import annotations
+from typing import Callable
 
 from pydantic import BaseModel
 
 import rue
-from rue import Case
+from rue import Case, SUT
 
 
-# =============================== Define SUT ===============================
+# =============================== Example AI chatbot function ===============================
 
 
 def simple_chatbot(prompt: str) -> str:
@@ -80,13 +80,24 @@ all_cases = [
 ]
 
 
+# Fail early if any case has invalid input
+@rue.resource.sut
+def chatbot():
+    sut = SUT(simple_chatbot)
+    sut.validate_cases(all_cases, "__call__")
+    return sut
+
+
 # =============================== Run tests ===============================
 
 
 # Get output for each case input and assert against references
 @rue.iter_cases(*all_cases)
-def test_iter_cases_basic_usage(case: Case[ExampleInputs, ExampleReferences]):
-    response = simple_chatbot(**case.inputs.model_dump())
+def test_iter_cases_basic_usage(
+    case: Case[ExampleInputs, ExampleReferences],
+    chatbot: SUT[Callable[..., str]],
+):
+    response = chatbot.instance(**case.inputs.model_dump())
 
     assert case.references.expected in response
     assert len(response) <= case.references.max_len
@@ -105,17 +116,11 @@ def test_iter_cases_only_geography(
     assert len(response) >= case.references.min_len
 
 
-# Fail early if any case has invalid input
-@rue.resource.sut(validate_cases=all_cases)
-def chatbot():
-    return simple_chatbot
-
-
 @rue.iter_cases(*all_cases)
 def test_iter_cases_with_validation(
     case: Case[ExampleInputs, ExampleReferences], chatbot
 ):
-    response = chatbot(**case.inputs.model_dump())
+    response = chatbot.instance(**case.inputs.model_dump())
 
     assert case.references.expected in response
     assert len(response) <= case.references.max_len
