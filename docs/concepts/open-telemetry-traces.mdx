@@ -25,20 +25,26 @@ Inside that test span, you’ll typically see:
 - **Predicate spans**: created by [`@predicate`](/apis/predicates), named `predicate.<predicate_name>`
 - **LLM spans**: auto-instrumented spans whose names usually start with `openai.`, `anthropic.`, or `gen_ai.`
 
-## Enable OpenTelemetry
+## OpenTelemetry Defaults
 
-OpenTelemetry capture is disabled by default. Enable it from the CLI:
+OpenTelemetry capture is enabled by default:
 
 ```bash
-uv run rue test --otel
+uv run rue test
 ```
 
-In the usual fresh-process setup, `uv run rue test --otel` also writes local JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set. Those files are separate from SQLite storage.
+Use `--no-otel` to opt out for a run:
+
+```bash
+uv run rue test --no-otel
+```
+
+In the usual fresh-process setup, `uv run rue test` also writes local JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set. Those files are separate from SQLite storage.
 
 If you override the reporter list, keep `OtelReporter` attached when you still want local trace files:
 
 ```bash
-uv run rue test --otel --reporter ConsoleReporter --reporter OtelReporter
+uv run rue test --reporter ConsoleReporter --reporter OtelReporter
 ```
 
 If you override reporters and omit `OtelReporter`, Rue still captures trace data for the run, but it does not persist local `.rue/traces/...` files.
@@ -135,6 +141,6 @@ def test_llm_calls_are_captured(my_agent):
 
 If correctness depends on *how* the system behaves (e.g., “must call retrieval”, “must call tool X”), asserting on spans is more robust than parsing free-form text output.
 
-### 2. Be deliberate about content capture
+### 2. Be deliberate about trace content
 
-OpenTelemetry spans may include request/response content depending on configuration. See the [OpenTelemetry API docs](/apis/open-telemetry-traces) for `RUE_OTEL_CONTENT` and storage details.
+Rue records SUT and predicate content attributes when OpenTelemetry is active. See the [OpenTelemetry API docs](/apis/open-telemetry-traces) for storage details.

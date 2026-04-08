@@ -64,7 +64,6 @@ async def _run_module_with_tracing(
     source: str,
     db_enabled: bool = False,
     db_path: Path | None = None,
-    otel_content: bool = True,
 ):
     mod_name, mod_path = _write_temp_module(tmp_path, source)
 
@@ -74,7 +73,6 @@ async def _run_module_with_tracing(
         runner = Runner(
             config=RueConfig.model_construct(
                 otel=True,
-                otel_content=otel_content,
                 db_enabled=db_enabled,
                 db_path=db_path,
             ),
@@ -341,7 +339,7 @@ def test_sample():
 
 
 @pytest.mark.asyncio
-async def test_predicate_trace_omits_content_attributes_when_otel_content_disabled(
+async def test_predicate_trace_always_records_content_attributes(
     tmp_path: Path,
     trace_reporter,
     monkeypatch: pytest.MonkeyPatch,
@@ -350,7 +348,6 @@ async def test_predicate_trace_omits_content_attributes_when_otel_content_disabl
         tmp_path=tmp_path,
         trace_reporter=trace_reporter,
         monkeypatch=monkeypatch,
-        otel_content=False,
         source="""
 from rue.predicates import predicate
 
@@ -383,6 +380,6 @@ def test_sample():
     assert attrs["predicate.value"] is False
     assert attrs["predicate.strict"] is False
     assert attrs["predicate.confidence"] == 0.25
-    assert "predicate.input.actual" not in attrs
-    assert "predicate.input.reference" not in attrs
-    assert "predicate.message" not in attrs
+    assert attrs["predicate.input.actual"] == "'abc'"
+    assert attrs["predicate.input.reference"] == "'xyz'"
+    assert attrs["predicate.message"] == "'secret'"

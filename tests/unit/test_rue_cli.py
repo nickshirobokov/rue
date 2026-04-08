@@ -11,7 +11,6 @@ from rue.cli import (
     _collect_items,
     _filter_items,
     _resolve_otel,
-    _resolve_otel_content,
     _resolve_reporters,
     _run_tests,
 )
@@ -196,13 +195,41 @@ def _make_cli_config() -> Config:
     return Config()
 
 
+def test_resolve_otel_defaults_to_enabled():
+    parser = _build_parser()
+    args = parser.parse_args(["test"])
+
+    assert _resolve_otel(args, Config()) is True
+
+
+def test_resolve_otel_uses_disabled_config_when_cli_missing():
+    parser = _build_parser()
+    args = parser.parse_args(["test"])
+
+    assert _resolve_otel(args, Config(otel=False)) is False
+
+
 def test_resolve_otel_settings_prefer_cli_over_config():
     parser = _build_parser()
-    args = parser.parse_args(["test", "--no-otel", "--otel-content"])
-    config = Config(otel=True, otel_content=False)
+    args = parser.parse_args(["test", "--otel"])
+    config = Config(otel=False)
+
+    assert _resolve_otel(args, config) is True
+
+
+def test_resolve_no_otel_settings_prefer_cli_over_config():
+    parser = _build_parser()
+    args = parser.parse_args(["test", "--no-otel"])
+    config = Config(otel=True)
 
     assert _resolve_otel(args, config) is False
-    assert _resolve_otel_content(args, config) is True
+
+
+def test_parser_rejects_removed_otel_content_flag():
+    parser = _build_parser()
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["test", "--otel-content"])
+    assert exc.value.code == 2
 
 
 def test_parser_rejects_invalid_run_id():

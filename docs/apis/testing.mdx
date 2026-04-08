@@ -592,7 +592,7 @@ from rue.reports import ConsoleReporter, OtelReporter
 from rue.testing import Runner
 
 runner = Runner(
-    config=RueConfig(otel=True, db_path=".rue/rue.db"),
+    config=RueConfig(db_path=".rue/rue.db"),
     reporters=[ConsoleReporter(), OtelReporter()],
     run_id=UUID("00000000-0000-0000-0000-000000000001"),
 )

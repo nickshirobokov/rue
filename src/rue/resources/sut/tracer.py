@@ -21,7 +21,6 @@ class SUTTracer:
     def __init__(self, name: str) -> None:
         self.name = name
         self._session: OtelTraceSession | None = None
-        self._otel_content: bool = True
         self._execution_id: ContextVar[UUID | None] = ContextVar(
             f"sut_{id(self)}_otel_execution_id",
             default=None,
@@ -31,9 +30,8 @@ class SUTTracer:
             default=(),
         )
 
-    def activate(self, session: OtelTraceSession, *, otel_content: bool = True) -> None:
+    def activate(self, session: OtelTraceSession) -> None:
         self._session = session
-        self._otel_content = otel_content
 
     def deactivate(self) -> None:
         self._session = None
@@ -46,16 +44,15 @@ class SUTTracer:
         self._session = None
 
     @contextmanager
-    def tracing(self, *, otel_content: bool = True) -> Iterator[None]:
+    def tracing(self) -> Iterator[None]:
         otel_runtime.configure()
         with otel_runtime.start_as_current_span(f"sut.{self.name}") as root_span:
             session = otel_runtime.start_otel_trace(
                 root_span,
                 run_id=uuid4(),
                 execution_id=uuid4(),
-                otel_content=otel_content,
             )
-            self.activate(session, otel_content=otel_content)
+            self.activate(session)
             try:
                 yield
             finally:
@@ -156,11 +153,6 @@ class SUTTracer:
             return True
         return isinstance(trace.get_tracer_provider(), SdkTracerProvider)
 
-    def _records_content(self) -> bool:
-        if self._session is not None:
-            return self._otel_content
-        return self._should_trace() and self._otel_content
-
     def _trace_sync(
         self,
         method_name: str,
@@ -168,14 +160,13 @@ class SUTTracer:
         *args: object,
         **kwargs: object,
     ) -> object:
-        record_content = self._records_content()
         with otel_runtime.start_as_current_span(f"sut.{self.name}.{method_name}") as span:
             span_id = self._set_span_attrs(span, method_name)
             span_ids = (*CURRENT_SUT_SPAN_IDS.get(), span_id)
             with bind(CURRENT_SUT_SPAN_IDS, span_ids):
-                _set_input_attrs(span, args, kwargs, record_content)
+                _set_input_attrs(span, args, kwargs)
                 result = original_callable(*args, **kwargs)
-                _set_output_attrs(span, result, record_content)
+                _set_output_attrs(span, result)
                 return result
 
     async def _trace_async(
@@ -185,17 +176,16 @@ class SUTTracer:
         *args: object,
         **kwargs: object,
     ) -> object:
-        record_content = self._records_content()
         with otel_runtime.start_as_current_span(f"sut.{self.name}.{method_name}") as span:
             span_id = self._set_span_attrs(span, method_name)
             span_ids = (*CURRENT_SUT_SPAN_IDS.get(), span_id)
             with bind(CURRENT_SUT_SPAN_IDS, span_ids):
-                _set_input_attrs(span, args, kwargs, record_content)
+                _set_input_attrs(span, args, kwargs)
                 result = await cast(
                     Awaitable[object],
                     original_callable(*args, **kwargs),
                 )
-                _set_output_attrs(span, result, record_content)
+                _set_output_attrs(span, result)
                 return result
 
     def _set_span_attrs(self, span: Span, method_name: str) -> int:
@@ -211,19 +201,12 @@ def _set_input_attrs(
     span: Span,
     args: tuple[object, ...],
     kwargs: dict[str, object],
-    record_content: bool,
 ) -> None:
-    if not record_content:
-        span.set_attribute("sut.input.count", len(args) + len(kwargs))
-        return
     if args:
         span.set_attribute("sut.input.args", repr(args))
     if kwargs:
         span.set_attribute("sut.input.kwargs", repr(kwargs))
 
 
-def _set_output_attrs(span: Span, result: object, record_content: bool) -> None:
-    if not record_content:
-        span.set_attribute("sut.output.type", type(result).__name__)
-        return
+def _set_output_attrs(span: Span, result: object) -> None:
     span.set_attribute("sut.output", repr(result))

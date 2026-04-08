@@ -28,7 +28,7 @@ def test_chatbot_works(chatbot):
 The most common use case for `@rue.resource.sut` is asserting on the SUT call span(s).
 
 <Note>
-SUT trace accessors work only when OpenTelemetry is enabled. From the CLI, run `uv run rue test --otel`.
+SUT trace accessors work only when OpenTelemetry is enabled. Rue enables it by default in `uv run rue test`; use `--no-otel` to opt out.
 </Note>
 
 <Steps>
@@ -109,13 +109,9 @@ Each SUT call creates a span named `sut.<sut_name>.<method_name>` and sets:
 - `rue.sut.name=<sut_name>`
 - `rue.sut.method=<method_name>`
 
-If `RUE_OTEL_CONTENT=true` (default), Rue also records:
+Rue also records:
 - `sut.input.args` / `sut.input.kwargs` (`repr(...)`)
 - `sut.output` (`repr(...)`)
-
-If `RUE_OTEL_CONTENT=false`, Rue records only coarse metadata:
-- `sut.input.count`
-- `sut.output.type`
 
 ## Recommendations
 

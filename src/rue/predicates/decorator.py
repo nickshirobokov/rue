@@ -238,10 +238,6 @@ def _set_trace_attributes(
     span.set_attribute("predicate.strict", result.strict)
     span.set_attribute("predicate.confidence", result.confidence)
 
-    tracer = CURRENT_TEST_TRACER.get()
-    if tracer is None or not tracer.records_otel_content:
-        return
-
     span.set_attribute(
         "predicate.input.actual", repr(bound.arguments["actual"])
     )

@@ -46,7 +46,7 @@ from pydantic import BaseModel
 
 @rue.resource.sut
 def store_chatbot():
-    return call_llm
+    return rue.SUT(call_llm)
 
 @rue.resource.metric
 def accuracy():
@@ -72,9 +72,9 @@ async def test_chatbot_no_hallucinations(
     case: Case[dict[str, str], Refs],
     store_chatbot,
     accuracy: Metric,
-    otel_trace):
+):
     """AI agent relies on knowledge base and tool calls for transactional questions"""
-    response = store_chatbot(**case.inputs)
+    response = store_chatbot.instance(**case.inputs)
 
     # Verify the answer don't have any unsupported facts
     with metrics(accuracy):
@@ -82,25 +82,26 @@ async def test_chatbot_no_hallucinations(
 
     # Verify tool was called when expected
     if expected_tool := case.references.expected_tool:
-        sut_spans = otel_trace.get_sut_spans(name="store_chatbot")
+        sut_spans = store_chatbot.get_sut_spans()
         tool_names = [
             s.attributes.get("llm.request.functions.0.name")
-            for s in otel_trace.get_llm_calls()
+            for s in store_chatbot.get_llm_calls()
             if s.attributes
         ]
+        assert sut_spans
         assert expected_tool in tool_names
 ```
 
 Run it:
 
 ```bash
-uv run rue test --otel
+uv run rue test
 ```
 
 Use a custom run UUID when you need stable correlation IDs:
 
 ```bash
-uv run rue test --otel --run-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
+uv run rue test --run-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
 ```
 
 Output:

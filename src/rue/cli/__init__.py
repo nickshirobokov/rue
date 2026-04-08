@@ -123,20 +123,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable OpenTelemetry spans for tests and SUT calls",
     )
     test_parser.add_argument(
-        "--otel-content",
-        dest="otel_content",
-        action="store_true",
-        default=None,
-        help="Record content-bearing SUT and predicate span attributes",
-    )
-    test_parser.add_argument(
-        "--no-otel-content",
-        dest="otel_content",
-        action="store_false",
-        default=None,
-        help="Disable content-bearing SUT and predicate span attributes",
-    )
-    test_parser.add_argument(
         "-q", "--quiet", action="count", default=0, help="Reduce CLI output"
     )
     test_parser.add_argument(
@@ -394,12 +380,6 @@ def _resolve_otel(args: argparse.Namespace, config: Config) -> bool:
     return config.otel
 
 
-def _resolve_otel_content(args: argparse.Namespace, config: Config) -> bool:
-    if args.otel_content is not None:
-        return args.otel_content
-    return config.otel_content
-
-
 def _resolve_reporters(args: argparse.Namespace, config: Config) -> list[str]:
     """Resolve reporter names from CLI args and config.
 
@@ -467,7 +447,6 @@ async def _run_tests(args: argparse.Namespace, config: Config) -> int:
     concurrency = _resolve_concurrency(args, config)
     timeout = _resolve_timeout(args, config)
     otel_enabled = _resolve_otel(args, config)
-    otel_content = _resolve_otel_content(args, config)
     db_path = args.db_path or config.db_path
     db_enabled = config.db_enabled
     if args.no_db:
@@ -481,7 +460,6 @@ async def _run_tests(args: argparse.Namespace, config: Config) -> int:
             "concurrency": concurrency,
             "timeout": timeout,
             "otel": otel_enabled,
-            "otel_content": otel_content,
             "db_enabled": db_enabled,
             "db_path": db_path,
             "reporters": reporter_names,

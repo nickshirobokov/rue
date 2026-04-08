@@ -6,13 +6,14 @@ import json
 import re
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from rue.reports.base import Reporter
 
 if TYPE_CHECKING:
     from rue.config import RueConfig
+    from rue.telemetry.otel.runtime import OtelTraceSession
     from rue.testing import TestDefinition
     from rue.testing.models.result import TestExecution
     from rue.testing.models.run import Run
@@ -66,10 +67,39 @@ class OtelReporter(Reporter):
         run_dir = self._prepare_run_directory(session.run_id)
         trace_path = run_dir / f"{execution_id}.json"
         trace_path.write_text(
-            json.dumps(session.serialize(), indent=2),
+            json.dumps(self._serialize_trace_session(session), indent=2),
             encoding="utf-8",
         )
         return None
+
+    def _serialize_trace_session(
+        self, session: OtelTraceSession
+    ) -> dict[str, Any]:
+        payload = session.serialize()
+        return {
+            "run_id": payload["run_id"],
+            "execution_id": payload["execution_id"],
+            "trace": self._build_trace_tree(payload["spans"]),
+        }
+
+    def _build_trace_tree(
+        self, spans: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        nodes_by_span_id = {
+            span["context"]["span_id"]: {**span, "children": []}
+            for span in spans
+        }
+        roots: list[dict[str, Any]] = []
+
+        for span in spans:
+            node = nodes_by_span_id[span["context"]["span_id"]]
+            parent_id = span["parent_id"]
+            if parent_id is None:
+                roots.append(node)
+                continue
+            nodes_by_span_id[parent_id]["children"].append(node)
+
+        return roots[0]
 
     def _prepare_run_directory(self, run_id: UUID) -> Path:
         DEFAULT_OTEL_OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)

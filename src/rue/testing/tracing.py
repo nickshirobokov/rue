@@ -19,7 +19,6 @@ class TestTracer:
     __test__ = False
 
     otel_enabled: bool
-    otel_content: bool
     otel_root_span: Span | None = None
     otel_trace_session: OtelTraceSession | None = None
     completed_otel_trace_session: OtelTraceSession | None = None
@@ -28,10 +27,6 @@ class TestTracer:
     @property
     def has_otel_trace(self) -> bool:
         return self.otel_trace_session is not None
-
-    @property
-    def records_otel_content(self) -> bool:
-        return self.has_otel_trace and self.otel_content
 
     @property
     def otel_trace_id(self) -> str | None:
@@ -72,7 +67,6 @@ class TestTracer:
             self.otel_root_span,
             run_id=run_id,
             execution_id=execution_id,
-            otel_content=self.otel_content,
         )
         return self.otel_trace_session
 

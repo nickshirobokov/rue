@@ -165,17 +165,20 @@ This is useful for debugging tests with print statements or logging output.
 
 ## OpenTelemetry
 
-Enable OpenTelemetry capture to record spans from your SUT and tests:
+Rue enables OpenTelemetry capture by default so spans from your SUT and tests are recorded automatically:
 
 ```bash
-# Enable OpenTelemetry capture
-uv run rue test --otel
+# Default behavior
+uv run rue test
+
+# Disable OpenTelemetry for this run
+uv run rue test --no-otel
 
 # If you override reporters, keep OtelReporter attached for local trace files
-uv run rue test --otel --reporter ConsoleReporter --reporter OtelReporter
+uv run rue test --reporter ConsoleReporter --reporter OtelReporter
 ```
 
-In the usual fresh-process setup, `uv run rue test --otel` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set.
+In the usual fresh-process setup, `uv run rue test` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set. Each file stores `run_id`, `execution_id`, and a nested `trace` tree rooted at the test span.
 
 If you override the reporter list and leave out `OtelReporter`, Rue still captures traces for the run, but it does not write local `.rue/traces/...` files.
 
@@ -475,7 +478,7 @@ async def main():
 
     # Pass all reporters to runner
     runner = Runner(
-        config=RueConfig(otel=True),
+        config=RueConfig(),
         reporters=[console, otel, json_reporter, slack],
     )
 
@@ -498,7 +501,7 @@ uv run rue test --tag smoke --concurrency 5
 
 **Debug a specific test with OpenTelemetry**:
 ```bash
-uv run rue test -k "agent_tool_call" --otel -vv
+uv run rue test -k "agent_tool_call" -vv
 ```
 
 **Run fast tests, stop on first failure**:
