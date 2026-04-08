@@ -702,9 +702,76 @@ class TestOpenTelemetry:
         assert payload["run_id"] == str(result.run_id)
         assert payload["execution_id"] == str(execution.execution_id)
         assert "otel_trace_id" not in payload
+        assert "spans" not in payload
+        assert payload["trace"]["name"] == "test.test_module::test_default_trace"
+        assert [child["name"] for child in payload["trace"]["children"]] == [
+            "default_step"
+        ]
+        assert payload["trace"]["children"][0]["children"] == []
+
+    @pytest.mark.asyncio
+    async def test_otel_reporter_writes_nested_trace_tree(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        async def traced():
+            with otel_runtime.start_as_current_span("sut.pipeline.__call__"):
+                with otel_runtime.start_as_current_span("first_child"):
+                    await asyncio.sleep(0)
+                with otel_runtime.start_as_current_span("second_child"):
+                    await asyncio.sleep(0)
+
+        monkeypatch.chdir(tmp_path)
+        result = await Runner(
+            config=make_runner_config(otel=True, db_enabled=False),
+            reporters=[OtelReporter()],
+        ).run(
+            items=[make_item(traced, name="test_nested_trace", is_async=True)]
+        )
+
+        execution = result.result.executions[0]
+        run_dir = tmp_path / DEFAULT_OTEL_OUTPUT_ROOT / str(result.run_id)
+        payload = json.loads(
+            (run_dir / f"{execution.execution_id}.json").read_text()
+        )
+
+        trace = payload["trace"]
+        assert trace["name"] == "test.test_module::test_nested_trace"
+        assert [child["name"] for child in trace["children"]] == [
+            "sut.pipeline.__call__"
+        ]
+        assert [
+            child["name"] for child in trace["children"][0]["children"]
+        ] == ["first_child", "second_child"]
+        assert trace["children"][0]["children"][0]["children"] == []
+        assert trace["children"][0]["children"][1]["children"] == []
+
+    @pytest.mark.asyncio
+    async def test_otel_session_serialize_stays_flat_for_custom_reporters(
+        self,
+    ):
+        reporter = EventReporter()
+
+        async def traced():
+            with otel_runtime.start_as_current_span("flat_step"):
+                await asyncio.sleep(0)
+
+        result = await Runner(
+            config=make_runner_config(otel=True, db_enabled=False),
+            reporters=[reporter],
+        ).run(items=[make_item(traced, name="test_flat_trace", is_async=True)])
+
+        execution = result.result.executions[0]
+        session = reporter.trace_events[0][1]
+        payload = session.serialize()
+
+        assert payload["run_id"] == str(result.run_id)
+        assert payload["execution_id"] == str(execution.execution_id)
+        assert "trace" not in payload
         assert {span["name"] for span in payload["spans"]} == {
-            "default_step",
-            "test.test_module::test_default_trace",
+            "flat_step",
+            "test.test_module::test_flat_trace",
         }
 
     @pytest.mark.asyncio

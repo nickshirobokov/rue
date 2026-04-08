@@ -178,7 +178,7 @@ uv run rue test --no-otel
 uv run rue test --reporter ConsoleReporter --reporter OtelReporter
 ```
 
-In the usual fresh-process setup, `uv run rue test` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set.
+In the usual fresh-process setup, `uv run rue test` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set. Each file stores `run_id`, `execution_id`, and a nested `trace` tree rooted at the test span.
 
 If you override the reporter list and leave out `OtelReporter`, Rue still captures traces for the run, but it does not write local `.rue/traces/...` files.
 
