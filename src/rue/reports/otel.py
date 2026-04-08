@@ -66,7 +66,7 @@ class OtelReporter(Reporter):
         run_dir = self._prepare_run_directory(session.run_id)
         trace_path = run_dir / f"{execution_id}.json"
         trace_path.write_text(
-            json.dumps(session.serialize(), separators=(",", ":")),
+            json.dumps(session.serialize(), indent=2),
             encoding="utf-8",
         )
         return None
