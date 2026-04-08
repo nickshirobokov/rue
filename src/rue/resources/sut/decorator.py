@@ -42,10 +42,7 @@ def sut(
         sut_instance.reset_trace_state(execution_id)
         tracer = CURRENT_TEST_TRACER.get()
         if tracer is not None and tracer.otel_trace_session is not None:
-            sut_instance.activate_trace(
-                tracer.otel_trace_session,
-                otel_content=tracer.records_otel_content,
-            )
+            sut_instance.activate_trace(tracer.otel_trace_session)
         return sut_instance
 
     return resource(

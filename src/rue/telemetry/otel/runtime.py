@@ -28,7 +28,6 @@ class OtelTraceSession:
     run_id: UUID
     execution_id: UUID
     root_span: Span
-    otel_content: bool
     _spans: list[ReadableSpan] = field(default_factory=list)
     _sut_owners: dict[int, int] = field(default_factory=dict)
     _lock: Lock = field(default_factory=Lock, repr=False)
@@ -136,13 +135,11 @@ class OtelRuntime:
         *,
         run_id: UUID,
         execution_id: UUID,
-        otel_content: bool,
     ) -> OtelTraceSession:
         session = OtelTraceSession(
             run_id=run_id,
             execution_id=execution_id,
             root_span=root_span,
-            otel_content=otel_content,
         )
         with self._otel_traces_lock:
             self._otel_traces[root_span.get_span_context().trace_id] = session

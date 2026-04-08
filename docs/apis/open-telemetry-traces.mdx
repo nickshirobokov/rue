@@ -2,24 +2,24 @@
 title: "Rue OpenTelemetry Traces"
 ---
 
-Rue OpenTelemetry capture is **Runner-managed**, while persistence is **reporter-managed**. Traces exist only while a test function is executing inside an active OpenTelemetry-enabled test execution created by `Runner` or `uv run rue test --otel`.
+Rue OpenTelemetry capture is **Runner-managed**, while persistence is **reporter-managed**. Traces exist only while a test function is executing inside an active OpenTelemetry-enabled test execution created by `Runner` or `uv run rue test`.
 
-## Enabling OpenTelemetry
+## OpenTelemetry Defaults
 
 ### CLI
 
 ```bash
-# Enable OpenTelemetry (the usual registered reporters also write local trace files)
-uv run rue test --otel
+# OpenTelemetry is enabled by default
+uv run rue test
 
 # Disable OpenTelemetry explicitly, even if config enables it
 uv run rue test --no-otel
 
-# If you override reporters, keep OtelReporter attached for local trace files
-uv run rue test --otel --reporter ConsoleReporter --reporter OtelReporter
+# Force-enable OpenTelemetry if config or environment disabled it
+uv run rue test --otel
 
-# Disable content-bearing SUT/predicate attributes
-uv run rue test --otel --no-otel-content
+# If you override reporters, keep OtelReporter attached for local trace files
+uv run rue test --reporter ConsoleReporter --reporter OtelReporter
 ```
 
 ### Config
@@ -28,14 +28,12 @@ OpenTelemetry settings can be resolved from `rue.toml`, `[tool.rue]` in `pyproje
 
 ```toml
 [tool.rue]
-otel = true
-otel-content = false
+otel = false
 reporters = ["ConsoleReporter", "OtelReporter"]
 ```
 
-Environment variable equivalents:
+Environment variable:
 - `RUE_OTEL`
-- `RUE_OTEL_CONTENT`
 
 CLI flags override config and environment.
 
@@ -47,10 +45,12 @@ from rue.reports import ConsoleReporter, OtelReporter
 from rue.testing import Runner
 
 runner = Runner(
-    config=RueConfig(otel=True, otel_content=True),
+    config=RueConfig(),
     reporters=[ConsoleReporter(), OtelReporter()],
 )
 ```
+
+Use `RueConfig(otel=False)` to disable capture programmatically.
 
 If you do not set an explicit reporter list, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`.
 
@@ -95,8 +95,8 @@ Available properties and methods:
 
 ## Storage
 
-- Enable capture with `RueConfig(otel=True)`, `--otel`, or config files; persistence still happens only when an `OtelReporter` is attached
-- In the usual fresh-process setup, `uv run rue test --otel` writes `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set
+- Capture is enabled by default; persistence still happens only when an `OtelReporter` is attached
+- In the usual fresh-process setup, `uv run rue test` writes `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set
 - If you override the reporter list and omit `OtelReporter`, Rue captures traces but does not persist local trace files
 - `OtelReporter` stores compact JSON payloads under `.rue/traces/<run_id>/<execution_id>.json`
 - `OtelReporter` keeps only the 5 most recent run directories under `.rue/traces`
@@ -104,12 +104,10 @@ Available properties and methods:
 - File format: one compact JSON trace payload per execution from `session.serialize()` with `run_id`, `execution_id`, and `spans`
 - SQLite does not persist OpenTelemetry trace payloads or trace IDs
 
-`otel_content` controls Rue-added content-bearing SUT and predicate attributes:
+When OpenTelemetry is active, Rue records these content-bearing SUT and predicate attributes:
 - `sut.input.args`
 - `sut.input.kwargs`
 - `sut.output`
 - `predicate.input.actual`
 - `predicate.input.reference`
 - `predicate.message`
-
-When `otel_content=false`, Rue records only coarse metadata for those spans.

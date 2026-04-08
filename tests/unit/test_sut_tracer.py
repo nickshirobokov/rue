@@ -2,9 +2,10 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
+from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 from opentelemetry.trace import ProxyTracerProvider
 
-from rue.context.runtime import CURRENT_SUT_SPAN_IDS, bind
+from rue.context.runtime import CURRENT_SUT_SPAN_IDS
 from rue.resources.sut.tracer import SUTTracer
 
 
@@ -29,7 +30,6 @@ class FakeSpanScope:
 
     def __exit__(self, exc_type, exc, tb) -> None:
         _ = exc_type, exc, tb
-        return None
 
 
 class FakeReadableSpan:
@@ -104,7 +104,7 @@ def test_wraps_sync_calls_with_content(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.asyncio
-async def test_wraps_async_calls_without_content(
+async def test_wraps_async_calls_with_content(
     monkeypatch: pytest.MonkeyPatch,
 ):
     created, names, start_as_current_span = make_span_factory([202])
@@ -115,7 +115,7 @@ async def test_wraps_async_calls_without_content(
     session = FakeSession()
     tracer = SUTTracer("service")
     tracer.reset(UUID(int=1))
-    tracer.activate(session, otel_content=False)
+    tracer.activate(session)
     seen: dict[str, object] = {}
 
     async def run(value: int) -> list[int]:
@@ -132,8 +132,8 @@ async def test_wraps_async_calls_without_content(
         "rue.sut": True,
         "rue.sut.name": "service",
         "rue.sut.method": "run",
-        "sut.input.count": 1,
-        "sut.output.type": "list",
+        "sut.input.args": "(5,)",
+        "sut.output": "[5]",
     }
 
 
@@ -147,7 +147,7 @@ def test_skips_tracing_without_active_trace(monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(
         "rue.resources.sut.tracer.trace.get_tracer_provider",
-        lambda: ProxyTracerProvider(),
+        ProxyTracerProvider,
     )
     tracer = SUTTracer("plain")
     seen: list[tuple[int, ...]] = []
@@ -164,8 +164,6 @@ def test_skips_tracing_without_active_trace(monkeypatch: pytest.MonkeyPatch):
 
 def test_traces_with_sdk_provider_and_no_session(monkeypatch: pytest.MonkeyPatch):
     """SUT emits spans to a real SdkTracerProvider even without a Rue session."""
-    from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
-
     created, names, start_as_current_span = make_span_factory([501])
     monkeypatch.setattr(
         "rue.resources.sut.tracer.otel_runtime.start_as_current_span",
@@ -173,7 +171,7 @@ def test_traces_with_sdk_provider_and_no_session(monkeypatch: pytest.MonkeyPatch
     )
     monkeypatch.setattr(
         "rue.resources.sut.tracer.trace.get_tracer_provider",
-        lambda: SdkTracerProvider(),
+        SdkTracerProvider,
     )
     tracer = SUTTracer("standalone")
 

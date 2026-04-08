@@ -5,11 +5,11 @@ This example shows how to:
 2. Inspect sync, async, and multi-method SUT spans
 3. Persist local trace files with the `OtelReporter`
 
-Run with OpenTelemetry enabled:
-    uv run rue test examples/rue_example_otel_spans.py --otel
+Run with default OpenTelemetry capture:
+    uv run rue test examples/rue_example_otel_spans.py
 
 Persist local trace files too:
-    uv run rue test examples/rue_example_otel_spans.py --otel --reporter ConsoleReporter --reporter OtelReporter
+    uv run rue test examples/rue_example_otel_spans.py --reporter ConsoleReporter --reporter OtelReporter
 """
 
 import asyncio

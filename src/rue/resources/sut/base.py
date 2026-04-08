@@ -88,10 +88,7 @@ class SUT(Generic[InstanceT]):
         self._name = resolved_sut_name
         test_tracer = CURRENT_TEST_TRACER.get()
         if test_tracer is not None and test_tracer.otel_trace_session is not None:
-            self._tracer.activate(
-                test_tracer.otel_trace_session,
-                otel_content=test_tracer.records_otel_content,
-            )
+            self._tracer.activate(test_tracer.otel_trace_session)
         self.instance: InstanceT = self._wrap_instance(instance)
 
     @property
@@ -154,17 +151,15 @@ class SUT(Generic[InstanceT]):
     def reset_trace_state(self, execution_id: UUID | None) -> None:
         self._tracer.reset(execution_id)
 
-    def activate_trace(
-        self, session: OtelTraceSession, *, otel_content: bool = True
-    ) -> None:
-        self._tracer.activate(session, otel_content=otel_content)
+    def activate_trace(self, session: OtelTraceSession) -> None:
+        self._tracer.activate(session)
 
     def deactivate_trace(self) -> None:
         self._tracer.deactivate()
 
     @contextmanager
-    def tracing(self, *, otel_content: bool = True) -> Iterator[None]:
-        with self._tracer.tracing(otel_content=otel_content):
+    def tracing(self) -> Iterator[None]:
+        with self._tracer.tracing():
             yield
 
     def _create_method_spec(

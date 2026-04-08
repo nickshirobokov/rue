@@ -34,8 +34,7 @@ test-paths = ["examples"]
 include-tags = ["smoke"]
 exclude-tags = ["slow"]
 keyword = "chatbot"
-otel = true
-otel-content = false
+otel = false
 reporters = ["ConsoleReporter", "OtelReporter"]
 db-path = ".rue/custom.db"
 db-enabled = false
@@ -51,8 +50,8 @@ db-enabled = false
     assert config.maxfail == 1
     assert config.verbosity == 1
     assert config.addopts == ["-q"]
-    assert config.otel is True
-    assert config.otel_content is False
+    assert config.otel is False
+    assert not hasattr(config, "otel_content")
     assert config.reporters == ["ConsoleReporter", "OtelReporter"]
     assert config.db_path == ".rue/custom.db"
     assert config.db_enabled is False
@@ -70,7 +69,7 @@ def test_load_config_defaults_when_missing(
     assert config.maxfail is None
     assert config.verbosity == 0
     assert config.addopts == []
-    assert config.otel is False
-    assert config.otel_content is True
+    assert config.otel is True
+    assert not hasattr(config, "otel_content")
     assert config.db_path is None
     assert config.db_enabled is True

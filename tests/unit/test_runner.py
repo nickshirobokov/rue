@@ -603,12 +603,25 @@ class TestOpenTelemetry:
         assert not (tmp_path / DEFAULT_OTEL_OUTPUT_ROOT).exists()
 
     @pytest.mark.asyncio
-    async def test_no_trace_session_notification_when_no_sessions_collected(
+    async def test_default_runner_collects_trace_session(
         self,
     ):
         reporter = EventReporter()
         result = await Runner(
             config=make_runner_config(db_enabled=False),
+            reporters=[reporter],
+        ).run(items=[make_item(lambda: None, name="test_without_otel")])
+
+        assert result.result.passed == 1
+        assert len(reporter.trace_events) == 1
+
+    @pytest.mark.asyncio
+    async def test_no_trace_session_notification_when_otel_disabled(
+        self,
+    ):
+        reporter = EventReporter()
+        result = await Runner(
+            config=make_runner_config(otel=False, db_enabled=False),
             reporters=[reporter],
         ).run(items=[make_item(lambda: None, name="test_without_otel")])
 

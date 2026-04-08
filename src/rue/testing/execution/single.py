@@ -86,9 +86,6 @@ class SingleTest(Test):
         error: Exception | None = None
         tracer = TestTracer(
             otel_enabled=runner.config.otel if runner is not None else False,
-            otel_content=(
-                runner.config.otel_content if runner is not None else True
-            ),
         )
 
         with bind(CURRENT_TEST_TRACER, tracer):

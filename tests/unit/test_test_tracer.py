@@ -39,7 +39,6 @@ class FakeSpanScope:
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.exit_calls.append((exc_type, exc, tb))
-        return None
 
 
 def make_definition(
@@ -88,7 +87,7 @@ def test_test_tracer_records_root_span_metadata(
         lambda _name: scope,
     )
 
-    tracer = TestTracer(otel_enabled=True, otel_content=True)
+    tracer = TestTracer(otel_enabled=True)
     active_span = tracer.start_otel_root_span(
         make_definition(suffix=suffix, case_id=case_id)
     )
@@ -107,20 +106,23 @@ def test_test_tracer_records_result_and_finishes_session(monkeypatch):
     session = SimpleNamespace(root_span=span, execution_id=UUID(int=2))
     error = RuntimeError("boom")
 
+    def _start_otel_trace(*_args, **_kwargs):
+        return session
+
     monkeypatch.setattr(
         "rue.testing.tracing.otel_runtime.start_as_current_span",
         lambda _name: scope,
     )
     monkeypatch.setattr(
         "rue.testing.tracing.otel_runtime.start_otel_trace",
-        lambda root_span, *, run_id, execution_id, otel_content: session,
+        _start_otel_trace,
     )
     monkeypatch.setattr(
         "rue.testing.tracing.otel_runtime.finish_otel_trace",
         lambda current_session: current_session,
     )
 
-    tracer = TestTracer(otel_enabled=True, otel_content=False)
+    tracer = TestTracer(otel_enabled=True)
     tracer.start_otel_root_span(make_definition())
     started = tracer.start_otel_trace(
         run_id=UUID(int=1), execution_id=UUID(int=2)
