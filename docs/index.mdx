@@ -15,7 +15,7 @@ Rue collects results of `assert` expressions into test results and metrics.
 - Model swap: "Is GPT-5.4 better than Sonnet 4.6 for my agent?" → look at the metrics.
 - Debugging: "Why is accuracy at 61%?" → look at individual test results.
 
-Resources are fixtures. Register SUT factories with `@rue.sut` and other dependencies with `@rue.resource` so Rue can inject and swap them cleanly between runs. No global state. No magic.
+Resources are fixtures. Register SUT factories with `@rue.resource.sut` and other dependencies with `@rue.resource` so Rue can inject and swap them cleanly between runs. No global state. No magic.
 
 Let's go!
 

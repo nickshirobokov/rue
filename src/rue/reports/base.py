@@ -73,6 +73,6 @@ class Reporter(ABC, metaclass=ReporterMeta):
     async def on_trace_collected(
         self, tracer: TestTracer, execution_id: UUID
     ) -> None:
-        """Called when a test tracer finishes collecting trace data."""
+        """Called when a test finishes collecting trace data."""
         _ = tracer, execution_id
         return None

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from rue.assertions.base import AssertionResult
-    from rue.metrics_.base import MetricResult
+    from rue.resources.metrics.base import MetricResult
     from rue.predicates.models import PredicateResult
 
 

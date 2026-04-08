@@ -3,26 +3,22 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any
 from uuid import UUID
+from typing import Any
 
 from opentelemetry import trace
 from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
 from opentelemetry.instrumentation.openai import OpenAIInstrumentor
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
-from opentelemetry.sdk.trace.export import (
-    SimpleSpanProcessor,
-    SpanExporter,
-    SpanExportResult,
+from opentelemetry.sdk.trace import (
+    ReadableSpan,
+    Span,
+    SpanProcessor,
+    TracerProvider as SdkTracerProvider,
 )
-from opentelemetry.trace import INVALID_SPAN, Span
-
-from rue.context.runtime import CURRENT_TEST_TRACER
+from rue.context.runtime import CURRENT_SUT_SPAN_IDS
 
 
 @dataclass(slots=True)
@@ -34,15 +30,24 @@ class OtelTraceSession:
     root_span: Span
     otel_content: bool
     _spans: list[ReadableSpan] = field(default_factory=list)
+    _sut_owners: dict[int, int] = field(default_factory=dict)
     _lock: Lock = field(default_factory=Lock, repr=False)
 
     def add_span(self, span: ReadableSpan) -> None:
         with self._lock:
             self._spans.append(span)
 
+    def record_sut_owner(self, span_id: int, owner_span_id: int) -> None:
+        with self._lock:
+            self._sut_owners[span_id] = owner_span_id
+
     def get_spans(self) -> list[ReadableSpan]:
         with self._lock:
             return list(self._spans)
+
+    def get_sut_owner(self, span_id: int) -> int | None:
+        with self._lock:
+            return self._sut_owners.get(span_id)
 
     def serialize(self) -> dict[str, Any]:
         """Convert the finished trace session to a JSON-serializable payload."""
@@ -57,21 +62,38 @@ class OtelTraceSession:
             }
 
 
-class SessionAwareSpanExporter(SpanExporter):
-    """Exports only spans that belong to active Rue OpenTelemetry sessions."""
+class SessionAwareSpanProcessor(SpanProcessor):
+    """Routes spans into active Rue sessions and records SUT ownership."""
 
     def __init__(self) -> None:
         self._write_lock = Lock()
 
-    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        for span in spans:
-            session = otel_runtime.get_otel_trace(span.context.trace_id)
-            if session is None:
-                continue
-            with self._write_lock:
-                session.add_span(span)
+    def on_start(
+        self,
+        span: Span,
+        parent_context: trace.Context | None = None,
+    ) -> None:
+        _ = parent_context
+        session = otel_runtime.get_otel_trace(span.get_span_context().trace_id)
+        if session is None:
+            return
 
-        return SpanExportResult.SUCCESS
+        owner_span_ids = CURRENT_SUT_SPAN_IDS.get()
+        if not owner_span_ids:
+            return
+
+        with self._write_lock:
+            session.record_sut_owner(
+                span.get_span_context().span_id,
+                owner_span_ids[-1],
+            )
+
+    def on_end(self, span: ReadableSpan) -> None:
+        session = otel_runtime.get_otel_trace(span.context.trace_id)
+        if session is None:
+            return
+        with self._write_lock:
+            session.add_span(span)
 
     def shutdown(self) -> None:
         return None
@@ -86,22 +108,27 @@ class OtelRuntime:
 
     def __init__(self) -> None:
         self._initialized = False
-        self._exporter: SessionAwareSpanExporter | None = None
+        self._processor: SessionAwareSpanProcessor | None = None
         self._init_lock = Lock()
         self._otel_traces: dict[int, OtelTraceSession] = {}
         self._otel_traces_lock = Lock()
 
     def configure(self, *, service_name: str = "rue") -> None:
         with self._init_lock:
-            if not self._initialized:
-                self._exporter = SessionAwareSpanExporter()
-                provider = TracerProvider(
+            if self._initialized:
+                return
+            self._processor = SessionAwareSpanProcessor()
+            existing = trace.get_tracer_provider()
+            if isinstance(existing, SdkTracerProvider):
+                existing.add_span_processor(self._processor)
+            else:
+                provider = SdkTracerProvider(
                     resource=Resource.create({"service.name": service_name})
                 )
-                provider.add_span_processor(SimpleSpanProcessor(self._exporter))
+                provider.add_span_processor(self._processor)
                 trace.set_tracer_provider(provider)
-                self._instrument_llm_clients()
-                self._initialized = True
+            self._instrument_llm_clients()
+            self._initialized = True
 
     def start_otel_trace(
         self,
@@ -132,31 +159,18 @@ class OtelRuntime:
         with self._otel_traces_lock:
             return self._otel_traces.get(trace_id)
 
-    @contextmanager
     def start_as_current_span(self, name: str):
         """Create a current OpenTelemetry span under Rue's tracer."""
-        with trace.get_tracer("rue").start_as_current_span(name) as span:
-            yield span
-
-    @contextmanager
-    def otel_span(self, name: str, attributes: dict[str, Any] | None = None):
-        """Create a child span when inside an active OpenTelemetry-enabled test."""
-        tracer = CURRENT_TEST_TRACER.get()
-        if tracer is None or not tracer.has_otel_trace:
-            yield INVALID_SPAN
-            return
-
-        with self.start_as_current_span(name) as span:
-            if attributes:
-                for key, value in attributes.items():
-                    span.set_attribute(key, value)
-            yield span
+        return trace.get_tracer("rue").start_as_current_span(name)
 
     @staticmethod
     def _instrument_llm_clients() -> None:
-        OpenAIInstrumentor().instrument()
-        AnthropicInstrumentor().instrument()
+        openai = OpenAIInstrumentor()
+        if not openai.is_instrumented_by_opentelemetry:
+            openai.instrument()
+        anthropic = AnthropicInstrumentor()
+        if not anthropic.is_instrumented_by_opentelemetry:
+            anthropic.instrument()
 
 
 otel_runtime = OtelRuntime()
-otel_span = otel_runtime.otel_span

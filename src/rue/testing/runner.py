@@ -16,13 +16,13 @@ from rue.context.runtime import (
     CURRENT_RUNNER,
     bind,
 )
-from rue.metrics_.base import MetricResult
 from rue.reports.base import Reporter
 from rue.resources import (
     ResourceRegistry,
     ResourceResolver,
     registry as default_resource_registry,
 )
+from rue.resources.metrics.base import MetricResult
 from rue.storage import SQLiteStore
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.discovery import collect

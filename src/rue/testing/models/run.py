@@ -12,7 +12,7 @@ from importlib.metadata import distributions
 from typing import Any
 from uuid import UUID, uuid4
 
-from rue.metrics_.base import MetricResult
+from rue.resources.metrics.base import MetricResult
 from rue.testing.models.result import TestExecution, TestStatus
 
 

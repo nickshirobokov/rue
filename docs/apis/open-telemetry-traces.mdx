@@ -56,55 +56,41 @@ If you do not set an explicit reporter list, a normal fresh process uses the bui
 
 If you set `config.reporters` or pass `--reporter` and leave out `OtelReporter`, OpenTelemetry capture still runs, but local `.rue/traces/...` files are not written.
 
-## Public APIs
+## Public API
 
-### `otel_span`
+### `SUT` trace access
 
-Create a custom child span inside the current OpenTelemetry-enabled test.
-
-```python
-from rue import otel_span
-
-def test_pipeline():
-    with otel_span("retrieve", {"query": "weather"}):
-        pass
-```
-
-Outside an active OpenTelemetry-enabled test execution, `otel_span()` is a no-op and does not create Rue span output.
-
-### `OtelTrace`
-
-Declare `otel_trace` in a test signature to inspect the current OpenTelemetry test session.
+OpenTelemetry data is exposed only through `SUT` instances while a test is running.
 
 ```python
 import rue
 
-def test_agent_workflow(my_agent, otel_trace: rue.OtelTrace):
-    result = my_agent("hello")
+@rue.resource.sut
+def my_agent():
+    return rue.SUT(call_agent)
 
-    with rue.otel_span("postprocess"):
-        assert result
+def test_agent_workflow(my_agent):
+    result = my_agent.instance("hello")
 
-    spans = otel_trace.get_child_spans()
-    llm_calls = otel_trace.get_llm_calls()
-    otel_trace.set_attribute("response.length", len(result))
+    assert result
+    assert my_agent.get_sut_spans()
+    assert my_agent.get_child_spans()
+    assert my_agent.get_llm_calls()
 ```
 
 Available properties and methods:
-- `otel_trace_id`
-- `otel_span_id`
+- `get_sut_spans()`
 - `get_child_spans()`
 - `get_llm_calls()`
-- `get_sut_spans(name=None)`
-- `set_attribute(key, value)`
 
-`otel_trace` is only available while an OpenTelemetry-enabled test is actively executing. If OpenTelemetry is off, resolving it raises at runtime.
+`get_sut_spans()`, `get_child_spans()`, and `get_llm_calls()` return `[]` until that `SUT` has been called in the current execution.
 
 ## Behavior
 
 - Rue creates one root span per OpenTelemetry-enabled test execution: `test.<full_name>`.
 - Aggregator executions (`repeat`, `parametrize`, `iter_cases`, `iter_case_groups`) do not get their own OpenTelemetry roots; each child execution gets its own trace.
-- `@rue.sut` and `@predicate` write spans only when an active OpenTelemetry session exists.
+- `@rue.resource.sut` and `@predicate` write spans only when an active OpenTelemetry session exists.
+- Full traces are not exposed to test code during execution; test code can inspect only the subtree of each `SUT`.
 - OpenAI and Anthropic client instrumentation is initialized by the OpenTelemetry runtime and captured only when calls belong to an active OpenTelemetry test session.
 
 ## Storage
@@ -114,7 +100,7 @@ Available properties and methods:
 - If you override the reporter list and omit `OtelReporter`, Rue captures traces but does not persist local trace files
 - `OtelReporter` stores compact JSON payloads under `.rue/traces/<run_id>/<execution_id>.json`
 - `OtelReporter` keeps only the 5 most recent run directories under `.rue/traces`
-- Custom OTEL persistence or forwarding belongs in custom reporters via `Reporter.on_trace_collected()`
+- Custom OTEL persistence or forwarding belongs in custom reporters via `Reporter.on_trace_collected(tracer, execution_id)`
 - File format: one compact JSON trace payload per execution from `session.serialize()` with `run_id`, `execution_id`, and `spans`
 - SQLite does not persist OpenTelemetry trace payloads or trace IDs
 

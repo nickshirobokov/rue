@@ -458,7 +458,6 @@ The package import also registers builtin resources into that singleton and mark
 
 Builtin resources currently include:
 
-* `otel_trace`
 * `captured_output`
 
 `registry.reset()` MUST preserve those builtins.

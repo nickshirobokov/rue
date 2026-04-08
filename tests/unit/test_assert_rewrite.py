@@ -10,7 +10,7 @@ from rue.context.collectors import (
     CURRENT_METRIC_RESULTS,
 )
 from rue.context.runtime import CURRENT_TEST, TestContext, bind
-from rue.metrics_.base import Metric, MetricResult
+from rue.resources.metrics.base import Metric, MetricResult
 from rue.resources import ResourceResolver, registry
 from rue.testing.discovery import collect
 
@@ -20,7 +20,7 @@ def test_rewritten_assert_collects_predicate_results(tmp_path):
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(
         """
-from rue.metrics_.base import Metric
+from rue.resources.metrics.base import Metric
 from rue.predicates import predicate
 
 @predicate
@@ -139,9 +139,9 @@ async def test_rewritten_asserts_inside_metric_functions_are_collected(
     mod_path.write_text(
         """
 import rue
-from rue.metrics_.base import Metric
+from rue.resources.metrics.base import Metric
 
-@rue.metric
+@rue.resource.metric
 def my_metric():
     m = Metric(name="m")
     yield m

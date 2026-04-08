@@ -15,8 +15,8 @@ from rue.context.runtime import (
     TestContext as Ctx,
     bind,
 )
-from rue.metrics_.base import Metric, MetricMetadata, MetricResult, metric
 from rue.resources import ResourceResolver, Scope, registry
+from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult, metric
 from rue.testing.discovery import TestItem
 
 

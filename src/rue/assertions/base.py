@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import CURRENT_TEST
-from rue.metrics_.scope import ACTIVE_ASSERTION_METRICS
+from rue.resources.metrics.scope import ACTIVE_ASSERTION_METRICS
 
 
 if TYPE_CHECKING:

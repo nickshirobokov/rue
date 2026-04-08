@@ -1,6 +1,7 @@
 """Tests for runner-managed Rue tracing."""
 
 import sys
+from importlib import import_module
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,7 +10,6 @@ import pytest
 from rue.config import RueConfig
 from rue.testing.discovery import collect
 from rue.testing.runner import Runner
-from rue.telemetry.otel import otel_span
 
 
 def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
@@ -41,36 +41,109 @@ async def _run_module_with_tracing(
         sys.modules.pop(mod_name, None)
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        """
+import rue
+from rue.telemetry.otel.runtime import otel_runtime
+
+@rue.predicate
+def is_ok(actual: str, reference: str) -> bool:
+    return actual == reference
+
+@rue.resource.sut
+def traced_pipeline():
+    def run() -> str:
+        with otel_runtime.start_as_current_span("child_step") as span:
+            span.set_attribute("key", "value")
+        with otel_runtime.start_as_current_span("openai.responses.create"):
+            pass
+        assert is_ok("ok", "ok")
+        return "ok"
+
+    return rue.SUT(run)
+
+def test_sample(traced_pipeline):
+    assert traced_pipeline.get_sut_spans() == []
+    assert traced_pipeline.get_child_spans() == []
+    assert traced_pipeline.get_llm_calls() == []
+
+    assert traced_pipeline.instance() == "ok"
+    assert {span.name for span in traced_pipeline.get_sut_spans()} == {
+        "sut.traced_pipeline.__call__"
+    }
+    assert {span.name for span in traced_pipeline.get_child_spans()} == {
+        "sut.traced_pipeline.__call__",
+        "child_step",
+        "openai.responses.create",
+        "predicate.is_ok",
+    }
+    assert [span.name for span in traced_pipeline.get_llm_calls()] == [
+        "openai.responses.create"
+    ]
+""",
+        """
+import rue
+from rue.telemetry.otel.runtime import otel_runtime
+
+@rue.predicate
+def is_ok(actual: str, reference: str) -> bool:
+    return actual == reference
+
+@rue.resource.sut
+def traced_pipeline():
+    async def run() -> str:
+        with otel_runtime.start_as_current_span("child_step") as span:
+            span.set_attribute("key", "value")
+        with otel_runtime.start_as_current_span("openai.responses.create"):
+            pass
+        assert is_ok("ok", "ok")
+        return "ok"
+
+    return rue.SUT(run)
+
+async def test_sample(traced_pipeline):
+    assert traced_pipeline.get_sut_spans() == []
+    assert traced_pipeline.get_child_spans() == []
+    assert traced_pipeline.get_llm_calls() == []
+
+    assert await traced_pipeline.instance() == "ok"
+    assert {span.name for span in traced_pipeline.get_sut_spans()} == {
+        "sut.traced_pipeline.__call__"
+    }
+    assert {span.name for span in traced_pipeline.get_child_spans()} == {
+        "sut.traced_pipeline.__call__",
+        "child_step",
+        "openai.responses.create",
+        "predicate.is_ok",
+    }
+    assert [span.name for span in traced_pipeline.get_llm_calls()] == [
+        "openai.responses.create"
+    ]
+""",
+    ],
+)
 @pytest.mark.asyncio
-async def test_otel_trace_injection_and_otel_span_work_inside_runner(
+async def test_sut_trace_accessors_work_inside_runner(
     tmp_path: Path,
     trace_reporter,
     monkeypatch: pytest.MonkeyPatch,
+    source: str,
 ):
     mod_name, run, sessions = await _run_module_with_tracing(
         tmp_path=tmp_path,
         trace_reporter=trace_reporter,
         monkeypatch=monkeypatch,
-        source="""
-import rue
-
-def test_sample(otel_trace: rue.OtelTrace):
-    with rue.otel_span("child_step", {"key": "value"}):
-        pass
-
-    child_spans = otel_trace.get_child_spans()
-    assert any(span.name == "child_step" for span in child_spans)
-    otel_trace.set_attribute("my.custom.attr", "value")
-""",
+        source=source,
     )
 
     assert run.result.passed == 1
     payloads = [session.serialize() for session in sessions]
-    root_span = next(
-        span
+    assert any(
+        span["name"] == f"test.{mod_name}::test_sample"
         for payload in payloads
         for span in payload["spans"]
-        if span["name"] == f"test.{mod_name}::test_sample"
     )
     child_span = next(
         span
@@ -79,39 +152,14 @@ def test_sample(otel_trace: rue.OtelTrace):
         if span["name"] == "child_step"
     )
 
-    assert root_span["attributes"]["my.custom.attr"] == "value"
     assert child_span["attributes"]["key"] == "value"
 
 
-@pytest.mark.asyncio
-async def test_otel_span_is_no_op_outside_runner_even_after_runtime_configured(
-    tmp_path: Path,
-    trace_reporter,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    _, run, sessions = await _run_module_with_tracing(
-        tmp_path=tmp_path,
-        trace_reporter=trace_reporter,
-        monkeypatch=monkeypatch,
-        source="""
-import rue
+def test_public_otel_trace_and_otel_span_are_removed():
+    rue = import_module("rue")
+    rue_otel = import_module("rue.telemetry.otel")
 
-def test_sample():
-    with rue.otel_span("inside_step"):
-        pass
-""",
-    )
-
-    assert run.result.passed == 1
-    before = [session.serialize() for session in sessions]
-
-    with otel_span("outside_step", {"ignored": True}) as span:
-        span.set_attribute("more", "ignored")
-
-    after = [session.serialize() for session in sessions]
-    assert before == after
-    assert all(
-        "outside_step"
-        not in {inner_span["name"] for inner_span in content["spans"]}
-        for content in after
-    )
+    assert not hasattr(rue, "OtelTrace")
+    assert not hasattr(rue, "otel_span")
+    assert not hasattr(rue_otel, "OtelTrace")
+    assert not hasattr(rue_otel, "otel_span")

@@ -449,7 +449,10 @@ class JsonFileReporter(Reporter):
     async def on_trace_collected(self, tracer, execution_id) -> None:
         session = tracer.completed_otel_trace_session
         if session is not None:
-            print(f"Collected OpenTelemetry trace for execution {execution_id}")
+            print(
+                f"Collected OpenTelemetry trace for execution {execution_id}: "
+                f"{session.execution_id}"
+            )
 ```
 
 ### Using Multiple Reporters

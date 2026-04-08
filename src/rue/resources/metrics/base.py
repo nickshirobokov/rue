@@ -28,7 +28,7 @@ from rue.context.collectors import (
     CURRENT_METRIC_RESULTS,
 )
 from rue.context.runtime import CURRENT_RESOURCE_CONSUMER, CURRENT_TEST, bind
-from rue.resources import Scope, resource
+from rue.resources.registry import Scope, resource
 
 
 if TYPE_CHECKING:

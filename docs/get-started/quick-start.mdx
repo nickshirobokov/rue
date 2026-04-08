@@ -16,15 +16,16 @@ Create `rue_store_chatbot.py` and register the chatbot as a SUT factory:
 
 ```python
 import rue
+from rue import SUT
 from rue.predicates import has_unsupported_facts, follows_policy
 
-@rue.sut
+@rue.resource.sut
 def store_chatbot():
-    return call_llm
+    return SUT(call_llm)
 
 async def test_chatbot_no_hallucinations(store_chatbot):
     context = "Store hours: 9 AM - 6 PM, Monday-Saturday. Closed Sundays."
-    response = store_chatbot("When are you open?")
+    response = store_chatbot.instance("When are you open?")
 
     assert not await has_unsupported_facts(response, context)
 
@@ -39,12 +40,12 @@ Add cases to test multiple scenarios:
 
 ```python
 import rue
-from rue import Case
+from rue import Case, SUT
 from rue.predicates import has_unsupported_facts, follows_policy
 
-@rue.sut
+@rue.resource.sut
 def store_chatbot():
-    return call_llm
+    return SUT(call_llm)
 
 cases = [
     Case(
@@ -67,7 +68,7 @@ cases = [
 
 @rue.iter_cases(*cases)
 async def test_chatbot_no_hallucinations(case: Case, store_chatbot):
-    response = store_chatbot(**case.inputs)
+    response = store_chatbot.instance(**case.inputs)
 
     assert not await has_unsupported_facts(response, case.references["context"])
 
@@ -82,14 +83,14 @@ Add a metric to enforce 80% accuracy across all cases:
 
 ```python
 import rue
-from rue import Case, Metric, metrics
+from rue import Case, Metric, SUT, metrics
 from rue.predicates import has_unsupported_facts, follows_policy
 
-@rue.sut
+@rue.resource.sut
 def store_chatbot():
-    return call_llm
+    return SUT(call_llm)
 
-@rue.metric
+@rue.resource.metric
 def accuracy():
     metric = Metric()
     yield metric
@@ -120,7 +121,7 @@ async def test_chatbot_no_hallucinations(
     store_chatbot,
     accuracy: Metric,
 ):
-    response = store_chatbot(**case.inputs)
+    response = store_chatbot.instance(**case.inputs)
 
     with metrics(accuracy):
         assert not await has_unsupported_facts(
@@ -135,18 +136,18 @@ async def test_chatbot_no_hallucinations(
 </Step>
 <Step title="Assert on OpenTelemetry Spans">
 
-Inject `otel_trace` to verify the chatbot actually called the right tools:
+Use the injected `SUT` to verify the chatbot actually called the right tools:
 
 ```python
 import rue
-from rue import Case, Metric, metrics
+from rue import Case, Metric, SUT, metrics
 from rue.predicates import has_unsupported_facts, follows_policy
 
-@rue.sut
+@rue.resource.sut
 def store_chatbot():
-    return call_llm
+    return SUT(call_llm)
 
-@rue.metric
+@rue.resource.metric
 def accuracy():
     metric = Metric()
     yield metric
@@ -179,9 +180,8 @@ async def test_chatbot_no_hallucinations(
     case: Case,
     store_chatbot,
     accuracy: Metric,
-    otel_trace,
 ):
-    response = store_chatbot(**case.inputs)
+    response = store_chatbot.instance(**case.inputs)
 
     with metrics(accuracy):
         assert not await has_unsupported_facts(
@@ -191,12 +191,13 @@ async def test_chatbot_no_hallucinations(
 
     # Verify tool was called when expected
     if expected_tool := case.references.get("expected_tool"):
-        sut_spans = otel_trace.get_sut_spans(name="store_chatbot")
+        sut_spans = store_chatbot.get_sut_spans()
         tool_names = [
             s.attributes.get("llm.request.functions.0.name")
-            for s in otel_trace.get_llm_calls()
+            for s in store_chatbot.get_llm_calls()
             if s.attributes
         ]
+        assert sut_spans
         assert expected_tool in tool_names
 ```
 

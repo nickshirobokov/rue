@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rue.testing.sut.dep_collector import (
+from rue.analysis.dep_collector import (
     DependencyCollectionMode,
     DependencyCollector,
     ImportBinding,
@@ -48,7 +48,7 @@ def test_module_resolver_ignores_stdlib_and_site_packages(
     resolver = ModuleResolver(repo_root)
 
     monkeypatch.setattr(
-        "rue.testing.sut.dep_collector.importlib.util.find_spec", lambda _: None
+        "rue.analysis.dep_collector.importlib.util.find_spec", lambda _: None
     )
     assert resolver.resolve("unknown.module") is None
     assert resolver.resolve("sys") is None
@@ -58,7 +58,7 @@ def test_module_resolver_ignores_stdlib_and_site_packages(
         origin="/venv/lib/python3.12/site-packages/pkg/mod.py",
     )
     monkeypatch.setattr(
-        "rue.testing.sut.dep_collector.importlib.util.find_spec",
+        "rue.analysis.dep_collector.importlib.util.find_spec",
         lambda _: site_spec,
     )
     assert resolver.resolve("external.pkg") is None
@@ -72,7 +72,7 @@ def test_module_resolver_resolves_repo_local_module(
     local_spec = SimpleNamespace(has_location=True, origin="/repo/pkg/mod.py")
 
     monkeypatch.setattr(
-        "rue.testing.sut.dep_collector.importlib.util.find_spec",
+        "rue.analysis.dep_collector.importlib.util.find_spec",
         lambda _: local_spec,
     )
 
@@ -258,7 +258,7 @@ def test_collect_dependencies_collects_real_repo_local_dependencies(
     )
     monkeypatch.syspath_prepend(str(repo_root))
     monkeypatch.setattr(
-        "rue.testing.sut.dep_collector.inspect.getmodule", lambda _: fake_module
+        "rue.analysis.dep_collector.inspect.getmodule", lambda _: fake_module
     )
 
     deps = collect_dependencies(entrypoint, mode="module")
@@ -291,7 +291,7 @@ def test_collect_dependencies_fails_when_git_root_is_missing(
         __name__="pkg.module", __file__=str(module_file.resolve())
     )
     monkeypatch.setattr(
-        "rue.testing.sut.dep_collector.inspect.getmodule", lambda _: fake_module
+        "rue.analysis.dep_collector.inspect.getmodule", lambda _: fake_module
     )
 
     with pytest.raises(StopIteration):

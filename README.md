@@ -44,11 +44,11 @@ from rue.predicates import has_unsupported_facts, follows_policy
 
 from pydantic import BaseModel
 
-@rue.sut
+@rue.resource.sut
 def store_chatbot():
     return call_llm
 
-@rue.metric
+@rue.resource.metric
 def accuracy():
     metric = Metric()
     yield metric

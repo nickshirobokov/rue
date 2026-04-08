@@ -205,8 +205,36 @@ class RueFunctionTransformer(ast.NodeTransformer):
         return self.generic_visit(node)
 
 
+def _is_metric_decorator(node: ast.expr) -> bool:
+    """Return True if the AST node is any supported @metric decorator form.
+
+    Matches:
+      @metric
+      @rue.metric
+      @rue.resource.metric
+      @metric(...)
+      @rue.metric(...)
+      @rue.resource.metric(...)
+    """
+    target = node.func if isinstance(node, ast.Call) else node
+    if isinstance(target, ast.Name):
+        return target.id == "metric"
+    if isinstance(target, ast.Attribute) and target.attr == "metric":
+        val = target.value
+        if isinstance(val, ast.Name) and val.id == "rue":
+            return True
+        if (
+            isinstance(val, ast.Attribute)
+            and val.attr == "resource"
+            and isinstance(val.value, ast.Name)
+            and val.value.id == "rue"
+        ):
+            return True
+    return False
+
+
 class RueMetricTransformer(ast.NodeTransformer):
-    """Find metric functions (decorated with `@rue.metric` / `@metric`) and transform them."""
+    """Find metric functions (decorated with `@rue.resource.metric` / `@metric`) and transform them."""
 
     def __init__(self, transformers: list[ast.NodeTransformer]) -> None:
         self.transformers = transformers
@@ -218,55 +246,13 @@ class RueMetricTransformer(ast.NodeTransformer):
         return ast.fix_missing_locations(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
-        for decorator in node.decorator_list:
-            if isinstance(decorator, ast.Name) and decorator.id == "metric":
-                return self.apply_transformers(node)
-
-            if isinstance(decorator, ast.Attribute):
-                if (
-                    isinstance(decorator.value, ast.Name)
-                    and decorator.value.id == "rue"
-                    and decorator.attr == "metric"
-                ):
-                    return self.apply_transformers(node)
-
-            if isinstance(decorator, ast.Call):
-                func = decorator.func
-                if isinstance(func, ast.Name) and func.id == "metric":
-                    return self.apply_transformers(node)
-                if isinstance(func, ast.Attribute):
-                    if (
-                        isinstance(func.value, ast.Name)
-                        and func.value.id == "rue"
-                        and func.attr == "metric"
-                    ):
-                        return self.apply_transformers(node)
+        if any(_is_metric_decorator(d) for d in node.decorator_list):
+            return self.apply_transformers(node)
         return self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
-        for decorator in node.decorator_list:
-            if isinstance(decorator, ast.Name) and decorator.id == "metric":
-                return self.apply_transformers(node)
-
-            if isinstance(decorator, ast.Attribute):
-                if (
-                    isinstance(decorator.value, ast.Name)
-                    and decorator.value.id == "rue"
-                    and decorator.attr == "metric"
-                ):
-                    return self.apply_transformers(node)
-
-            if isinstance(decorator, ast.Call):
-                func = decorator.func
-                if isinstance(func, ast.Name) and func.id == "metric":
-                    return self.apply_transformers(node)
-                if isinstance(func, ast.Attribute):
-                    if (
-                        isinstance(func.value, ast.Name)
-                        and func.value.id == "rue"
-                        and func.attr == "metric"
-                    ):
-                        return self.apply_transformers(node)
+        if any(_is_metric_decorator(d) for d in node.decorator_list):
+            return self.apply_transformers(node)
         return self.generic_visit(node)
 
 
