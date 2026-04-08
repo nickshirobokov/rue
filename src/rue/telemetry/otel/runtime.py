@@ -165,8 +165,12 @@ class OtelRuntime:
 
     @staticmethod
     def _instrument_llm_clients() -> None:
-        OpenAIInstrumentor().instrument()
-        AnthropicInstrumentor().instrument()
+        openai = OpenAIInstrumentor()
+        if not openai.is_instrumented_by_opentelemetry:
+            openai.instrument()
+        anthropic = AnthropicInstrumentor()
+        if not anthropic.is_instrumented_by_opentelemetry:
+            anthropic.instrument()
 
 
 otel_runtime = OtelRuntime()
