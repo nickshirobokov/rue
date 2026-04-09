@@ -3,7 +3,7 @@ from textwrap import dedent
 
 import pytest
 
-from rue.cli import _collect_items
+from rue.testing.discovery import TestCollector
 from rue.config import RueConfig
 from rue.resources import registry
 from rue.testing.discovery import collect
@@ -249,7 +249,7 @@ def test_collect_items_share_confrue_session_across_selected_modules(
     )
     (bad_dir / "rue_bad.py").write_text("def test_bad():\n    assert True\n")
 
-    items = _collect_items([str(tmp_path)], [], [], "good")
+    items = TestCollector([], [], "good").collect([str(tmp_path)])
 
     assert [item.name for item in items] == ["test_good", "test_good_two"]
     assert builtins.confrue_counter == 1

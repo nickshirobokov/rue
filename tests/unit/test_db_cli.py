@@ -4,7 +4,14 @@ import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from rue.cli import _db_backup, _db_migrate, _db_reset, _db_status
+from rue.cli.db import DatabaseCommands
+from rue.config import Config
+
+
+def _commands(db_path: Path, mock_console: MagicMock) -> DatabaseCommands:
+    cmd = DatabaseCommands(Config(db_path=str(db_path)))
+    cmd.console = mock_console
+    return cmd
 
 
 class TestDbStatus:
@@ -14,7 +21,7 @@ class TestDbStatus:
         self, sqlite_db_path: Path, mock_console: MagicMock
     ) -> None:
         """Status should show migration required for fresh DB."""
-        result = _db_status(mock_console, sqlite_db_path)
+        result = _commands(sqlite_db_path, mock_console).status()
 
         assert result == 0
         calls = [str(c) for c in mock_console.print.call_args_list]
@@ -25,7 +32,7 @@ class TestDbStatus:
         self, migrated_sqlite_db_path: Path, mock_console: MagicMock
     ) -> None:
         """Status should show up to date after migration."""
-        result = _db_status(mock_console, migrated_sqlite_db_path)
+        result = _commands(migrated_sqlite_db_path, mock_console).status()
 
         assert result == 0
         calls = [str(c) for c in mock_console.print.call_args_list]
@@ -39,7 +46,7 @@ class TestDbMigrate:
         self, sqlite_db_path: Path, mock_console: MagicMock
     ) -> None:
         """Migrate should create and populate fresh DB."""
-        result = _db_migrate(mock_console, sqlite_db_path)
+        result = _commands(sqlite_db_path, mock_console).migrate()
 
         assert result == 0
         assert sqlite_db_path.exists()
@@ -53,7 +60,7 @@ class TestDbMigrate:
         self, migrated_sqlite_db_path: Path, mock_console: MagicMock
     ) -> None:
         """Migrate should report up to date if no migrations needed."""
-        result = _db_migrate(mock_console, migrated_sqlite_db_path)
+        result = _commands(migrated_sqlite_db_path, mock_console).migrate()
 
         assert result == 0
         calls = [str(c) for c in mock_console.print.call_args_list]
@@ -63,10 +70,10 @@ class TestDbMigrate:
         self, sqlite_db_path: Path, mock_console: MagicMock
     ) -> None:
         """Dry run should show pending migrations without applying."""
-        result = _db_migrate(mock_console, sqlite_db_path, dry_run=True)
+        result = _commands(sqlite_db_path, mock_console).migrate(dry_run=True)
 
         assert result == 0
-        assert not sqlite_db_path.exists()  # DB should not be created
+        assert not sqlite_db_path.exists()
         calls = [str(c) for c in mock_console.print.call_args_list]
         assert any("Dry run" in c for c in calls)
 
@@ -74,9 +81,7 @@ class TestDbMigrate:
         self, migrated_sqlite_db_path: Path, mock_console: MagicMock
     ) -> None:
         """Dry run on current DB should report up to date."""
-        result = _db_migrate(
-            mock_console, migrated_sqlite_db_path, dry_run=True
-        )
+        result = _commands(migrated_sqlite_db_path, mock_console).migrate(dry_run=True)
 
         assert result == 0
         calls = [str(c) for c in mock_console.print.call_args_list]
@@ -90,7 +95,7 @@ class TestDbBackup:
         self, migrated_sqlite_db_path: Path, mock_console: MagicMock
     ) -> None:
         """Backup should create a timestamped copy of the database."""
-        result = _db_backup(mock_console, migrated_sqlite_db_path)
+        result = _commands(migrated_sqlite_db_path, mock_console).backup()
 
         assert result == 0
         backup_files = list(migrated_sqlite_db_path.parent.glob("*.backup.*"))
@@ -100,7 +105,7 @@ class TestDbBackup:
         self, sqlite_db_path: Path, mock_console: MagicMock
     ) -> None:
         """Backup should fail if database doesn't exist."""
-        result = _db_backup(mock_console, sqlite_db_path)
+        result = _commands(sqlite_db_path, mock_console).backup()
 
         assert result == 1
         calls = [str(c) for c in mock_console.print.call_args_list]
@@ -133,7 +138,7 @@ class TestDbBackup:
         conn.commit()
         conn.close()
 
-        result = _db_backup(mock_console, migrated_sqlite_db_path)
+        result = _commands(migrated_sqlite_db_path, mock_console).backup()
         assert result == 0
 
         backup_files = list(migrated_sqlite_db_path.parent.glob("*.backup.*"))
@@ -152,9 +157,7 @@ class TestDbReset:
         self, migrated_sqlite_db_path: Path, mock_console: MagicMock
     ) -> None:
         """Reset without --yes should show warning and not delete."""
-        result = _db_reset(
-            mock_console, migrated_sqlite_db_path, confirmed=False
-        )
+        result = _commands(migrated_sqlite_db_path, mock_console).reset(confirmed=False)
 
         assert result == 1
         assert migrated_sqlite_db_path.exists()
@@ -175,9 +178,7 @@ class TestDbReset:
         conn.commit()
         conn.close()
 
-        result = _db_reset(
-            mock_console, migrated_sqlite_db_path, confirmed=True
-        )
+        result = _commands(migrated_sqlite_db_path, mock_console).reset(confirmed=True)
 
         assert result == 0
         assert migrated_sqlite_db_path.exists()
@@ -191,7 +192,7 @@ class TestDbReset:
         self, sqlite_db_path: Path, mock_console: MagicMock
     ) -> None:
         """Reset on non-existent DB should create new one."""
-        result = _db_reset(mock_console, sqlite_db_path, confirmed=True)
+        result = _commands(sqlite_db_path, mock_console).reset(confirmed=True)
 
         assert result == 0
         assert sqlite_db_path.exists()

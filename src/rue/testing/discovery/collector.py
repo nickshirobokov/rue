@@ -3,11 +3,11 @@
 import ast
 import inspect
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, Protocol, TypeVar
 
 from rue.testing.decorators.tag import TagData, get_tag_data, merge_tag_data
 from rue.testing.discovery.loader import RueImportSession
@@ -310,10 +310,101 @@ def collect(path: Path | str | None = None) -> list[TestDefinition]:
     return _collect_paths(file_paths, explicit_root=explicit_root)
 
 
-def collect_paths(paths: list[Path | str]) -> list[TestDefinition]:
+def collect_paths(paths: Sequence[Path | str]) -> list[TestDefinition]:
     """Collect tests from multiple explicit module paths in one session."""
     resolved = [
         Path(path).resolve() if isinstance(path, str) else path.resolve()
         for path in paths
     ]
     return _collect_paths(resolved, explicit_root=None)
+
+
+class Filterable(Protocol):
+    """Minimal interface needed by filtering logic."""
+
+    @property
+    def tags(self) -> set[str] | frozenset[str]: ...
+
+    @property
+    def full_name(self) -> str: ...
+
+
+FilterableT = TypeVar("FilterableT", bound=Filterable)
+
+
+class _KeywordNames(Mapping[str, bool]):
+    """Namespace for eval: each identifier is true iff it appears as a substring."""
+
+    __slots__ = ("_text",)
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def __getitem__(self, key: str) -> bool:
+        return key in self._text
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(())
+
+    def __len__(self) -> int:
+        return 0
+
+
+class KeywordMatcher:
+    """Evaluate pytest-style -k expressions (Python ``and`` / ``or`` / ``not``)."""
+
+    __slots__ = ("_code",)
+
+    def __init__(self, expression: str) -> None:
+        self._code = compile(expression, "<keyword>", "eval")
+
+    def match(self, text: str) -> bool:
+        return bool(
+            eval(self._code, {"__builtins__": {}}, _KeywordNames(text))
+        )
+
+
+class TestCollector:
+    """Discovers and filters test items for a given set of paths and criteria."""
+
+    def __init__(
+        self,
+        include_tags: Sequence[str],
+        exclude_tags: Sequence[str],
+        keyword: str | None,
+    ) -> None:
+        self.include_tags = include_tags
+        self.exclude_tags = exclude_tags
+        self.keyword = keyword
+
+    def collect(self, paths: Sequence[str]) -> list[TestDefinition]:
+        static_refs: list[StaticTestReference] = []
+        for path in paths:
+            static_refs.extend(collect_static(path))
+
+        selected_refs = self.filter(static_refs)
+        if not selected_refs:
+            return []
+
+        selected_paths = sorted({ref.module_path for ref in selected_refs})
+        items = collect_paths(selected_paths)
+        return self.filter(items)
+
+    def filter(self, items: Sequence[FilterableT]) -> list[FilterableT]:
+        filtered = list(items)
+
+        if self.include_tags:
+            include = set(self.include_tags)
+            filtered = [item for item in filtered if item.tags & include]
+
+        if self.exclude_tags:
+            exclude = set(self.exclude_tags)
+            filtered = [item for item in filtered if not (item.tags & exclude)]
+
+        if self.keyword:
+            matcher = KeywordMatcher(self.keyword)
+            filtered = [
+                item for item in filtered if matcher.match(item.full_name)
+            ]
+
+        return filtered

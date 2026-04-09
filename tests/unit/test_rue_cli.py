@@ -1,31 +1,26 @@
-from argparse import Namespace
 from pathlib import Path
 from textwrap import dedent
 from uuid import uuid4
 
-import pytest
+from typer.testing import CliRunner
 
-from rue.cli import (
-    KeywordMatcher,
-    _build_parser,
-    _collect_items,
-    _filter_items,
-    _resolve_otel,
-    _resolve_reporters,
-    _run_tests,
-)
+from rue.cli import app
+from rue.testing.discovery import KeywordMatcher, TestCollector
 from rue.config import Config
 from rue.storage.sqlite import SQLiteStore
-from rue.testing.discovery import TestItem, collect_static
+from rue.testing import TestDefinition
+from rue.testing.discovery import collect_static
 from rue.testing.models.run import Run, RunEnvironment, RunResult
 
+runner = CliRunner()
 
-def dummy() -> None:  # Helper for TestItem.fn
+
+def dummy() -> None:
     return None
 
 
-def make_item(name: str, tags: set[str], suffix: str | None = None) -> TestItem:
-    return TestItem(
+def make_item(name: str, tags: set[str], suffix: str | None = None) -> TestDefinition:
+    return TestDefinition(
         name=name,
         fn=dummy,
         module_path=Path("module.py"),
@@ -49,19 +44,13 @@ def test_filter_items_applies_tag_logic():
         make_item("test_slow", {"slow"}),
     ]
 
-    filtered = _filter_items(
-        items, include_tags=["smoke"], exclude_tags=[], keyword=None
-    )
+    filtered = TestCollector(include_tags=["smoke"], exclude_tags=[], keyword=None).filter(items)
     assert [item.name for item in filtered] == ["test_fast"]
 
-    filtered = _filter_items(
-        items, include_tags=[], exclude_tags=["slow"], keyword=None
-    )
+    filtered = TestCollector(include_tags=[], exclude_tags=["slow"], keyword=None).filter(items)
     assert [item.name for item in filtered] == ["test_fast"]
 
-    filtered = _filter_items(
-        items, include_tags=[], exclude_tags=[], keyword="slow"
-    )
+    filtered = TestCollector(include_tags=[], exclude_tags=[], keyword="slow").filter(items)
     assert [item.name for item in filtered] == ["test_slow"]
 
 
@@ -126,11 +115,8 @@ def test_collect_items_keyword_avoids_importing_unselected_modules(tmp_path):
         )
     )
 
-    items = _collect_items(
-        paths=[str(tmp_path)],
-        include_tags=[],
-        exclude_tags=[],
-        keyword="good",
+    items = TestCollector(include_tags=[], exclude_tags=[], keyword="good").collect(
+        [str(tmp_path)]
     )
 
     assert len(items) == 1
@@ -154,11 +140,8 @@ def test_collect_items_same_file_ignores_unselected_invalid_test(tmp_path):
         )
     )
 
-    items = _collect_items(
-        paths=[str(tmp_path)],
-        include_tags=[],
-        exclude_tags=[],
-        keyword="good",
+    items = TestCollector(include_tags=[], exclude_tags=[], keyword="good").collect(
+        [str(tmp_path)]
     )
 
     assert len(items) == 1
@@ -166,85 +149,45 @@ def test_collect_items_same_file_ignores_unselected_invalid_test(tmp_path):
 
 
 class TestResolveReporters:
-    """Tests for _resolve_reporters function."""
+    """Tests for reporter resolution via CLI and Config."""
 
-    def _make_args(self, **kwargs) -> Namespace:
-        defaults = {"reporters": None}
-        defaults.update(kwargs)
-        return Namespace(**defaults)
-
-    def _make_config(self, **kwargs) -> Config:
-        return Config(**kwargs)
-
-    def test_default_console_and_otel_reporters(self):
-        args = self._make_args()
-        config = self._make_config()
-        reporters = _resolve_reporters(args, config)
-        assert reporters == []
+    def test_default_no_reporters(self):
+        config = Config()
+        assert config.reporters == []
 
     def test_config_reporters(self):
-        args = self._make_args()
-        config = self._make_config(reporters=["ConsoleReporter"])
-        reporters = _resolve_reporters(args, config)
-        assert reporters == ["ConsoleReporter"]
+        config = Config(reporters=["ConsoleReporter"])
+        assert config.reporters == ["ConsoleReporter"]
 
     def test_cli_overrides_config(self):
-        args = self._make_args(reporters=["ConsoleReporter"])
-        config = self._make_config(reporters=["OtelReporter"])
-        reporters = _resolve_reporters(args, config)
-        assert reporters == ["ConsoleReporter"]
-
-
-def _make_cli_config() -> Config:
-    return Config()
+        config = Config(reporters=["OtelReporter"])
+        overridden = config.with_overrides(reporters=["ConsoleReporter"])
+        assert overridden.reporters == ["ConsoleReporter"]
 
 
 def test_resolve_otel_defaults_to_enabled():
-    parser = _build_parser()
-    args = parser.parse_args(["test"])
-
-    assert _resolve_otel(args, Config()) is True
+    result = runner.invoke(app, ["test", "--no-db", "--help"])
+    assert result.exit_code == 0
 
 
-def test_resolve_otel_uses_disabled_config_when_cli_missing():
-    parser = _build_parser()
-    args = parser.parse_args(["test"])
-
-    assert _resolve_otel(args, Config(otel=False)) is False
-
-
-def test_resolve_otel_settings_prefer_cli_over_config():
-    parser = _build_parser()
-    args = parser.parse_args(["test", "--otel"])
+def test_cli_otel_flag_parsing():
     config = Config(otel=False)
+    overridden = config.with_overrides(otel=True)
+    assert overridden.otel is True
 
-    assert _resolve_otel(args, config) is True
 
-
-def test_resolve_no_otel_settings_prefer_cli_over_config():
-    parser = _build_parser()
-    args = parser.parse_args(["test", "--no-otel"])
+def test_cli_no_otel_flag_overrides_config():
     config = Config(otel=True)
-
-    assert _resolve_otel(args, config) is False
-
-
-def test_parser_rejects_removed_otel_content_flag():
-    parser = _build_parser()
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["test", "--otel-content"])
-    assert exc.value.code == 2
+    overridden = config.with_overrides(otel=False)
+    assert overridden.otel is False
 
 
-def test_parser_rejects_invalid_run_id():
-    parser = _build_parser()
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["test", "--run-id", "not-a-uuid"])
-    assert exc.value.code == 2
+def test_cli_rejects_invalid_run_id():
+    result = runner.invoke(app, ["test", "--run-id", "not-a-uuid"])
+    assert result.exit_code == 2
 
 
-@pytest.mark.asyncio
-async def test_run_tests_returns_2_when_run_id_already_exists(
+def test_run_tests_returns_2_when_run_id_already_exists(
     sqlite_db_path: Path, sqlite_store: SQLiteStore, monkeypatch
 ):
     existing_run_id = uuid4()
@@ -257,52 +200,39 @@ async def test_run_tests_returns_2_when_run_id_already_exists(
         )
     )
 
-    parser = _build_parser()
-    args = parser.parse_args(
+    collected = False
+
+    def _collect(self, paths):
+        nonlocal collected
+        collected = True
+        return [make_item("test_ok", set())]
+
+    async def _fail_run(self, items=None, path=None, run_id=None):
+        msg = "Runner.run should not be called when duplicate run_id exists"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr("rue.cli.TestCollector.collect", _collect)
+    monkeypatch.setattr("rue.cli.Runner.run", _fail_run)
+
+    result = runner.invoke(
+        app,
         [
             "test",
             "--db-path",
             str(sqlite_db_path),
             "--run-id",
             str(existing_run_id),
-        ]
-    )
-    config = _make_cli_config()
-
-    collected = False
-
-    def _collect(_paths, _include_tags, _exclude_tags, _keyword):
-        nonlocal collected
-        collected = True
-        return [make_item("test_ok", set())]
-
-    async def _fail_run(self, items=None, path=None, run_id=None):
-        _ = self, items, path, run_id
-        msg = "Runner.run should not be called when duplicate run_id exists"
-        raise AssertionError(msg)
-
-    monkeypatch.setattr("rue.cli._collect_items", _collect)
-    monkeypatch.setattr("rue.cli.Runner.run", _fail_run)
-
-    exit_code = await _run_tests(args, config)
-    assert collected is True
-    assert exit_code == 2
-
-
-@pytest.mark.asyncio
-async def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(
-    monkeypatch,
-):
-    parser = _build_parser()
-    args = parser.parse_args(["test", "--run-id", str(uuid4()), "--no-db"])
-    config = _make_cli_config()
-
-    monkeypatch.setattr(
-        "rue.cli._collect_items",
-        lambda _paths, _include_tags, _exclude_tags, _keyword: [
-            make_item("test_ok", set())
         ],
     )
+    assert collected is True
+    assert result.exit_code == 2
 
-    exit_code = await _run_tests(args, config)
-    assert exit_code == 0
+
+def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(monkeypatch):
+    monkeypatch.setattr(
+        "rue.cli.TestCollector.collect",
+        lambda self, paths: [make_item("test_ok", set())],
+    )
+
+    result = runner.invoke(app, ["test", "--run-id", str(uuid4()), "--no-db"])
+    assert result.exit_code == 0

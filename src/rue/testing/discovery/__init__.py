@@ -1,7 +1,10 @@
 """Test discovery."""
 
 from rue.testing.discovery.collector import (
+    Filterable,
+    KeywordMatcher,
     StaticTestReference,
+    TestCollector,
     collect,
     collect_paths,
     collect_static,
@@ -14,10 +17,13 @@ from rue.testing.models import RueTestDefinition, TestDefinition
 TestItem = TestDefinition
 
 __all__ = [
+    "Filterable",
+    "KeywordMatcher",
     "RueImportSession",
     "RueModuleLoader",
     "RueTestDefinition",
     "StaticTestReference",
+    "TestCollector",
     "TestDefinition",
     "TestItem",
     "collect",
