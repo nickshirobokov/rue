@@ -53,7 +53,7 @@ class CaseGroup(BaseModel, Generic[InputsT, RefsT, GroupRefsT]):
     lets you set how many of them must pass for the whole group to be
     considered passing via ``min_passes``.
 
-    Use with ``@rue.iter_case_groups(...)`` to iterate a test function
+    Use with ``@rue.test.iterate.groups(...)`` to iterate a test function
     over multiple groups; each group is executed as a nested case-iterated
     run.
 

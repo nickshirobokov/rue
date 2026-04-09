@@ -17,24 +17,25 @@ class ParameterSet:
 
 
 @dataclass(frozen=True)
-class RepeatModifier:
-    """Repeat the inner execution N times."""
+class IterateModifier:
+    """Run the inner execution N times."""
 
     count: int
     min_passes: int
-    display_name: str = "repeat"
+    display_name: str = "iterate"
 
 
 @dataclass(frozen=True)
-class ParametrizeModifier:
+class ParamsIterateModifier:
     """Run the inner execution for each parameter set."""
 
     parameter_sets: tuple[ParameterSet, ...]
-    display_name: str = "parametrize"
+    min_passes: int
+    display_name: str = "params"
 
 
 @dataclass(frozen=True)
-class CaseIterateModifier:
+class CasesIterateModifier:
     """Run the inner execution for each case."""
 
     cases: tuple[Case[Any, Any], ...]
@@ -43,16 +44,17 @@ class CaseIterateModifier:
 
 
 @dataclass(frozen=True)
-class CaseGroupIterateModifier:
+class GroupsIterateModifier:
     """Run the inner execution for each case group."""
 
     groups: tuple[CaseGroup[Any, Any, Any], ...]
-    display_name: str = "case groups"
+    min_passes: int
+    display_name: str = "groups"
 
 
 Modifier = (
-    RepeatModifier
-    | ParametrizeModifier
-    | CaseIterateModifier
-    | CaseGroupIterateModifier
+    IterateModifier
+    | ParamsIterateModifier
+    | CasesIterateModifier
+    | GroupsIterateModifier
 )

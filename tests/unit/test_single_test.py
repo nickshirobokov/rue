@@ -5,7 +5,7 @@ import pytest
 from rue.resources import ResourceResolver, registry
 from rue.testing.execution.result_builder import ResultBuilder
 from rue.testing.execution.single import SingleTest
-from rue.testing.models import RepeatModifier, TestItem, TestStatus
+from rue.testing.models import IterateModifier, TestItem, TestStatus
 
 
 def make_item(fn=None, *, modifiers=None) -> TestItem:
@@ -43,7 +43,7 @@ def test_single_test_rejects_modifiers():
     ):
         SingleTest(
             definition=make_item(
-                modifiers=[RepeatModifier(count=2, min_passes=2)]
+                modifiers=[IterateModifier(count=2, min_passes=2)]
             ),
             params={},
             result_builder=ResultBuilder(),

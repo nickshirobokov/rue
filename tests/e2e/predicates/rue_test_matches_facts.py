@@ -393,56 +393,56 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
 ]
 
 
-@rue.iter_cases(
+@rue.test.iterate.cases(
     *[
         case
         for case in ALL_CASES
         if case.references.expected and not case.inputs.strict
     ]
 )
-@rue.repeat(2)
+@rue.test.iterate(2)
 async def test_matches_facts_strict_false_expected_true(
     case: Case[Inputs, Refs],
 ):
     assert await matches_facts(**case.inputs.model_dump())
 
 
-@rue.iter_cases(
+@rue.test.iterate.cases(
     *[
         case
         for case in ALL_CASES
         if not case.references.expected and not case.inputs.strict
     ]
 )
-@rue.repeat(2)
+@rue.test.iterate(2)
 async def test_matches_facts_strict_false_expected_false(
     case: Case[Inputs, Refs],
 ):
     assert not await matches_facts(**case.inputs.model_dump())
 
 
-@rue.iter_cases(
+@rue.test.iterate.cases(
     *[
         case
         for case in ALL_CASES
         if case.references.expected and case.inputs.strict
     ]
 )
-@rue.repeat(2)
+@rue.test.iterate(2)
 async def test_matches_facts_strict_true_expected_true(
     case: Case[Inputs, Refs],
 ):
     assert await matches_facts(**case.inputs.model_dump())
 
 
-@rue.iter_cases(
+@rue.test.iterate.cases(
     *[
         case
         for case in ALL_CASES
         if not case.references.expected and case.inputs.strict
     ]
 )
-@rue.repeat(2)
+@rue.test.iterate(2)
 async def test_matches_facts_strict_true_expected_false(
     case: Case[Inputs, Refs],
 ):

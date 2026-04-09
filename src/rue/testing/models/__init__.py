@@ -2,12 +2,12 @@
 
 from rue.testing.models.definition import TestDefinition, RueTestDefinition
 from rue.testing.models.modifiers import (
-    CaseGroupIterateModifier,
-    CaseIterateModifier,
+    CasesIterateModifier,
+    GroupsIterateModifier,
+    IterateModifier,
     Modifier,
     ParameterSet,
-    ParametrizeModifier,
-    RepeatModifier,
+    ParamsIterateModifier,
 )
 from rue.testing.models.result import TestExecution, TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult, RueRun
@@ -20,16 +20,16 @@ TestItem = TestDefinition
 __all__ = [
     "Case",
     "CaseGroup",
-    "CaseGroupIterateModifier",
+    "GroupsIterateModifier",
     "Run",
     "TestDefinition",
     "RueRun",
     "RueTestDefinition",
-    "CaseIterateModifier",
+    "CasesIterateModifier",
+    "IterateModifier",
     "Modifier",
     "ParameterSet",
-    "ParametrizeModifier",
-    "RepeatModifier",
+    "ParamsIterateModifier",
     "RunEnvironment",
     "RunResult",
     "TestExecution",

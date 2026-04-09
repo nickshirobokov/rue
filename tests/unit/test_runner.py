@@ -23,7 +23,7 @@ from rue.testing.discovery import collect
 from rue.testing.environment import _filter_env_vars
 from rue.testing.models import (
     ParameterSet,
-    ParametrizeModifier,
+    ParamsIterateModifier,
     RunResult,
     TestExecution,
     TestItem,
@@ -638,17 +638,18 @@ class TestOpenTelemetry:
 
         item = TestItem(
             fn=test_case,
-            name="test_parametrized_trace",
+            name="test_params_trace",
             module_path=Path("test_module.py"),
             is_async=True,
             params=["value"],
             class_name=None,
             modifiers=[
-                ParametrizeModifier(
+                ParamsIterateModifier(
                     parameter_sets=(
                         ParameterSet(values={"value": 1}, suffix="one"),
                         ParameterSet(values={"value": 2}, suffix="two"),
-                    )
+                    ),
+                    min_passes=2,
                 )
             ],
             tags=set(),
@@ -894,22 +895,27 @@ class TestConcurrency:
     """Tests for concurrent test execution."""
 
     @staticmethod
-    def _make_parametrized_item(
+    def _make_params_item(
         *,
         name: str,
         parameter_sets: tuple[ParameterSet, ...],
     ) -> TestItem:
-        async def parametrized_case(delay: float) -> None:
+        async def params_case(delay: float) -> None:
             await asyncio.sleep(delay)
 
         return TestItem(
-            fn=parametrized_case,
+            fn=params_case,
             name=name,
             module_path=Path("test_module.py"),
             is_async=True,
             params=["delay"],
             class_name=None,
-            modifiers=[ParametrizeModifier(parameter_sets=parameter_sets)],
+            modifiers=[
+                ParamsIterateModifier(
+                    parameter_sets=parameter_sets,
+                    min_passes=len(parameter_sets),
+                )
+            ],
             tags=set(),
         )
 
@@ -1031,8 +1037,8 @@ class TestConcurrency:
 
     @pytest.mark.asyncio
     async def test_subtest_callbacks_stream_before_parent_completion(self):
-        item = self._make_parametrized_item(
-            name="test_parametrized",
+        item = self._make_params_item(
+            name="test_params",
             parameter_sets=(
                 ParameterSet(values={"delay": 0.2}, suffix="slow"),
                 ParameterSet(values={"delay": 0.01}, suffix="fast"),

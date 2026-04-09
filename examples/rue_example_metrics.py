@@ -56,7 +56,7 @@ def false_negatives(accuracy: Metric):
     yield metric.counter[False]
 
 
-@rue.parametrize("band", ["Metallica", "Whitesnake", "Led Zeppelin"])
+@rue.test.iterate.params("band", ["Metallica", "Whitesnake", "Led Zeppelin"])
 def test_expected_true(band: str, false_negatives: Metric):
     """Test that the classifier returns True for good bands.
     If AI returns False: register it as a false negative.
@@ -66,7 +66,7 @@ def test_expected_true(band: str, false_negatives: Metric):
         assert is_good
 
 
-@rue.parametrize("band", ["Megadeth", "Nickelback", "Limp Bizkit"])
+@rue.test.iterate.params("band", ["Megadeth", "Nickelback", "Limp Bizkit"])
 def test_expected_false(band: str, false_positives: Metric):
     """Test that the classifier returns False for horrible bands.
     If AI returns True: register it as a false positive.
@@ -125,7 +125,7 @@ def case_hallucinations_count(average_hallucinations_per_case: Metric):
     yield hallucinations_for_case
 
 
-@rue.parametrize(
+@rue.test.iterate.params(
     "city,expected_state,expected_country",
     [
         ("San Francisco", "California", "USA"),

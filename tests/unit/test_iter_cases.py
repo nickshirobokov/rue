@@ -4,41 +4,41 @@ from typing import Any
 
 import pytest
 
-from rue.testing import Runner
-from rue.testing.decorators import iter_case_groups, iter_cases
+from rue.testing import Runner, test
 from rue.testing.models import (
     Case,
     CaseGroup,
-    CaseGroupIterateModifier,
-    CaseIterateModifier,
+    CasesIterateModifier,
+    GroupsIterateModifier,
     TestItem,
 )
 
 
-def test_iter_cases_decorator_rejects_invalid_threshold():
+def test_iterate_cases_decorator_rejects_invalid_threshold():
     cases = [Case(inputs={"x": 1}), Case(inputs={"x": 2})]
 
     with pytest.raises(
-        ValueError, match="min_passes .* cannot exceed cases count"
+        ValueError,
+        match="iterate\\.cases\\(\\) min_passes .* cannot exceed count",
     ):
 
-        @iter_cases(*cases, min_passes=3)
+        @test.iterate.cases(*cases, min_passes=3)
         def my_test(case):
             pass
 
 
-def test_iter_cases_empty_is_deferred_to_execution():
-    @iter_cases()
+def test_iterate_cases_empty_is_deferred_to_execution():
+    @test.iterate.cases()
     def my_test(case):
         pass
 
     assert getattr(my_test, "__rue_modifiers__", []) == []
     assert getattr(my_test, "__rue_definition_error__", None) == (
-        "iter_cases requires at least one case"
+        "iterate.cases() requires at least one case"
     )
 
 
-def test_runner_iter_cases_preserves_case_identity_and_metadata(null_reporter):
+def test_runner_iterate_cases_preserves_case_identity_and_metadata(null_reporter):
     seen_cases: list[Case[Any, Any]] = []
     cases = [
         Case(inputs={"x": 1}, metadata={"slug": "one"}),
@@ -54,7 +54,7 @@ def test_runner_iter_cases_preserves_case_identity_and_metadata(null_reporter):
         module_path=Path("sample.py"),
         is_async=False,
         params=["case"],
-        modifiers=[CaseIterateModifier(cases=tuple(cases), min_passes=2)],
+        modifiers=[CasesIterateModifier(cases=tuple(cases), min_passes=2)],
     )
 
     run_result = asyncio.run(
@@ -72,7 +72,7 @@ def test_runner_iter_cases_preserves_case_identity_and_metadata(null_reporter):
     ]
 
 
-def test_runner_iter_cases_passes_when_threshold_is_met(null_reporter):
+def test_runner_iterate_cases_passes_when_threshold_is_met(null_reporter):
     cases = [Case(inputs={"x": i}) for i in range(1, 6)]
 
     def test_partial_pass(case):
@@ -85,7 +85,7 @@ def test_runner_iter_cases_passes_when_threshold_is_met(null_reporter):
         module_path=Path("sample.py"),
         is_async=False,
         params=["case"],
-        modifiers=[CaseIterateModifier(cases=tuple(cases), min_passes=3)],
+        modifiers=[CasesIterateModifier(cases=tuple(cases), min_passes=3)],
     )
 
     run_result = asyncio.run(
@@ -104,7 +104,7 @@ def test_runner_iter_cases_passes_when_threshold_is_met(null_reporter):
     assert execution.result.status.value == "passed"
 
 
-def test_runner_iter_cases_fails_when_threshold_is_not_met(null_reporter):
+def test_runner_iterate_cases_fails_when_threshold_is_not_met(null_reporter):
     cases = [Case(inputs={"x": i}) for i in range(1, 6)]
 
     def test_mostly_fail(case):
@@ -117,7 +117,7 @@ def test_runner_iter_cases_fails_when_threshold_is_not_met(null_reporter):
         module_path=Path("sample.py"),
         is_async=False,
         params=["case"],
-        modifiers=[CaseIterateModifier(cases=tuple(cases), min_passes=3)],
+        modifiers=[CasesIterateModifier(cases=tuple(cases), min_passes=3)],
     )
 
     run_result = asyncio.run(
@@ -136,18 +136,18 @@ def test_runner_iter_cases_fails_when_threshold_is_not_met(null_reporter):
     assert execution.result.status.value == "failed"
 
 
-def test_iter_case_groups_empty_is_deferred_to_execution():
-    @iter_case_groups()
+def test_iterate_groups_empty_is_deferred_to_execution():
+    @test.iterate.groups()
     def my_test(group, case):
         pass
 
     assert getattr(my_test, "__rue_modifiers__", []) == []
     assert getattr(my_test, "__rue_definition_error__", None) == (
-        "iter_case_groups requires at least one case group"
+        "iterate.groups() requires at least one case group"
     )
 
 
-def test_runner_iter_case_groups_injects_group_and_case_and_nests(
+def test_runner_iterate_groups_injects_group_and_case_and_nests(
     null_reporter,
 ):
     g1_cases = [Case(inputs={"x": 1}), Case(inputs={"x": 2})]
@@ -167,7 +167,7 @@ def test_runner_iter_case_groups_injects_group_and_case_and_nests(
         module_path=Path("sample.py"),
         is_async=False,
         params=["group", "case"],
-        modifiers=[CaseGroupIterateModifier(groups=tuple(groups))],
+        modifiers=[GroupsIterateModifier(groups=tuple(groups), min_passes=2)],
     )
 
     run_result = asyncio.run(
@@ -185,7 +185,7 @@ def test_runner_iter_case_groups_injects_group_and_case_and_nests(
     assert len(execution.sub_executions[1].sub_executions) == 1
 
 
-def test_runner_iter_case_groups_uses_group_min_passes_and_all_groups_must_pass(
+def test_runner_iterate_groups_uses_group_and_outer_min_passes(
     null_reporter,
 ):
     groups = [
@@ -217,7 +217,7 @@ def test_runner_iter_case_groups_uses_group_min_passes_and_all_groups_must_pass(
         module_path=Path("sample.py"),
         is_async=False,
         params=["group", "case"],
-        modifiers=[CaseGroupIterateModifier(groups=tuple(groups))],
+        modifiers=[GroupsIterateModifier(groups=tuple(groups), min_passes=1)],
     )
 
     run_result = asyncio.run(
@@ -228,6 +228,22 @@ def test_runner_iter_case_groups_uses_group_min_passes_and_all_groups_must_pass(
         sub.result.status.value for sub in execution.sub_executions
     ]
 
-    assert run_result.result.failed == 1
-    assert execution.result.status.value == "failed"
+    assert run_result.result.passed == 1
+    assert execution.result.status.value == "passed"
     assert group_statuses == ["passed", "failed"]
+
+
+def test_iterate_groups_decorator_rejects_invalid_threshold():
+    groups = [
+        CaseGroup(name="alpha", cases=[Case(inputs={"x": 1})], min_passes=1),
+        CaseGroup(name="beta", cases=[Case(inputs={"x": 2})], min_passes=1),
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="iterate\\.groups\\(\\) min_passes .* cannot exceed count",
+    ):
+
+        @test.iterate.groups(*groups, min_passes=3)
+        def my_test(group, case):
+            pass

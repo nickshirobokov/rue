@@ -18,7 +18,7 @@ class ResultBuilder:
         definition: TestDefinition,
         duration_ms: float,
         assertion_results: list[AssertionResult],
-        error: Exception | None,
+        error: BaseException | None,
     ) -> TestResult:
         """Create TestResult based on assertion results and raised exceptions."""
         status, error = self._determine_status(
@@ -35,8 +35,8 @@ class ResultBuilder:
         self,
         definition: TestDefinition,
         assertion_results: list[AssertionResult],
-        error: Exception | None,
-    ) -> tuple[TestStatus, Exception | None]:
+        error: BaseException | None,
+    ) -> tuple[TestStatus, BaseException | None]:
         """Determine test status and normalize error."""
         expect_failure = definition.xfail_reason is not None
         failed_assertions = [ar for ar in assertion_results if not ar.passed]
@@ -67,9 +67,9 @@ class ResultBuilder:
 
     def _normalize_error(
         self,
-        error: Exception | None,
+        error: BaseException | None,
         failed_assertions: list[AssertionResult],
-    ) -> Exception | None:
+    ) -> BaseException | None:
         """Convert failed assertion to error if no error exists."""
         if error is None and failed_assertions:
             msg = (

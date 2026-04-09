@@ -83,7 +83,7 @@ class SingleTest(Test):
         forked_resolver = resolver.fork_for_case()
 
         assertion_results: list[AssertionResult] = []
-        error: Exception | None = None
+        error: BaseException | None = None
         tracer = TestTracer(
             otel_enabled=runner.config.otel if runner is not None else False,
         )
@@ -210,7 +210,7 @@ class SingleTest(Test):
 
         if self.definition.is_async:
             await call()
-        elif self.definition.run_inline:
+        elif self.definition.inline:
             call()
         else:
             await asyncio.to_thread(call)

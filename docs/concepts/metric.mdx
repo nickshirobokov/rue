@@ -27,7 +27,7 @@ def accuracy():
     # After all tests run, assert on the calculated statistics
     assert metric.mean > 0.8  # 80% accuracy threshold
 
-@rue.parametrize("input,expected", [("a", 1), ("b", 2)])
+@rue.test.iterate.params("input,expected", [("a", 1), ("b", 2)])
 def test_classifier_accuracy(my_classifier, input, expected, accuracy: Metric):
     result = my_classifier(input)
 
@@ -117,7 +117,7 @@ def case_hallucinations_count(average_hallucinations_per_case: Metric):
     hallucinations_for_case = metric.counter[False]
     average_hallucinations_per_case.add_record(hallucinations_for_case)
 
-@rue.parametrize("city,expected_state", [("Boston", "Massachusetts"), ("Miami", "Florida")])
+@rue.test.iterate.params("city,expected_state", [("Boston", "Massachusetts"), ("Miami", "Florida")])
 def test_geography_bot(
     city: str,
     expected_state: str,
@@ -176,13 +176,13 @@ def false_negatives(accuracy: Metric):
     # Check this specific metric
     assert metric.counter[False] < 3  # Less than 3 false negatives
 
-@rue.parametrize("input", ["good1", "good2", "good3"])
+@rue.test.iterate.params("input", ["good1", "good2", "good3"])
 def test_positive_cases(input: str, false_negatives: Metric):
     result = classifier(input)
     with metrics(false_negatives):
         assert result == True
 
-@rue.parametrize("input", ["bad1", "bad2", "bad3"])
+@rue.test.iterate.params("input", ["bad1", "bad2", "bad3"])
 def test_negative_cases(input: str, false_positives: Metric):
     result = classifier(input)
     with metrics(false_positives):

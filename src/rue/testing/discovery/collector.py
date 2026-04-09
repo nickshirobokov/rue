@@ -9,7 +9,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from rue.testing.decorators.tags import TagData, get_tag_data, merge_tag_data
+from rue.testing.decorators.tag import TagData, get_tag_data, merge_tag_data
 from rue.testing.discovery.loader import RueImportSession
 from rue.testing.models import Modifier, TestDefinition
 
@@ -55,16 +55,24 @@ def _iter_confrue_files(path: Path) -> list[Path]:
     return sorted(path.glob("confrue_*.py"))
 
 
-def _is_tag_root(expr: ast.expr) -> bool:
+def _is_test_root(expr: ast.expr) -> bool:
     if isinstance(expr, ast.Name):
-        return expr.id == "tag"
+        return expr.id == "test"
     if isinstance(expr, ast.Attribute):
         return (
             isinstance(expr.value, ast.Name)
             and expr.value.id == "rue"
-            and expr.attr == "tag"
+            and expr.attr == "test"
         )
     return False
+
+
+def _is_tag_root(expr: ast.expr) -> bool:
+    return (
+        isinstance(expr, ast.Attribute)
+        and expr.attr == "tag"
+        and _is_test_root(expr.value)
+    )
 
 
 def _is_tag_method(expr: ast.expr, method_name: str) -> bool:
@@ -78,18 +86,23 @@ def _is_tag_method(expr: ast.expr, method_name: str) -> bool:
 def _extract_static_tags(decorators: list[ast.expr]) -> set[str]:
     tags: set[str] = set()
     for decorator in decorators:
-        if not isinstance(decorator, ast.Call):
+        if isinstance(decorator, ast.Call):
+            if _is_tag_root(decorator.func):
+                for arg in decorator.args:
+                    if (
+                        isinstance(arg, ast.Constant)
+                        and isinstance(arg.value, str)
+                    ):
+                        tags.add(arg.value)
+                continue
+            if _is_tag_method(decorator.func, "skip"):
+                tags.add("skip")
+                continue
+            if _is_tag_method(decorator.func, "xfail"):
+                tags.add("xfail")
             continue
-        if _is_tag_root(decorator.func):
-            for arg in decorator.args:
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                    tags.add(arg.value)
-            continue
-        if _is_tag_method(decorator.func, "skip"):
-            tags.add("skip")
-            continue
-        if _is_tag_method(decorator.func, "xfail"):
-            tags.add("xfail")
+        if _is_tag_method(decorator, "inline"):
+            tags.add("inline")
     return tags
 
 
@@ -273,7 +286,7 @@ def _build_item_for_callable(
         xfail_reason=combined_tags.xfail_reason,
         xfail_strict=combined_tags.xfail_strict,
         definition_error=definition_error,
-        run_inline=getattr(fn, "__rue_run_inline__", False),
+        inline=combined_tags.inline,
     )
 
 

@@ -439,49 +439,49 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
 ]
 
 
-@rue.iter_cases(
+@rue.test.iterate.cases(
     *[
         case
         for case in ALL_CASES
         if case.references.expected and not case.inputs.strict
     ]
 )
-@rue.repeat(2)
+@rue.test.iterate(2)
 async def test_has_topic_strict_false_expected_true(case: Case[Inputs, Refs]):
     assert await has_topic(**case.inputs.model_dump())
 
 
-@rue.iter_cases(
+@rue.test.iterate.cases(
     *[
         case
         for case in ALL_CASES
         if not case.references.expected and not case.inputs.strict
     ]
 )
-@rue.repeat(2)
+@rue.test.iterate(2)
 async def test_has_topic_strict_false_expected_false(case: Case[Inputs, Refs]):
     assert not await has_topic(**case.inputs.model_dump())
 
 
-@rue.iter_cases(
+@rue.test.iterate.cases(
     *[
         case
         for case in ALL_CASES
         if case.references.expected and case.inputs.strict
     ]
 )
-@rue.repeat(2)
+@rue.test.iterate(2)
 async def test_has_topic_strict_true_expected_true(case: Case[Inputs, Refs]):
     assert await has_topic(**case.inputs.model_dump())
 
 
-@rue.iter_cases(
+@rue.test.iterate.cases(
     *[
         case
         for case in ALL_CASES
         if not case.references.expected and case.inputs.strict
     ]
 )
-@rue.repeat(2)
+@rue.test.iterate(2)
 async def test_has_topic_strict_true_expected_false(case: Case[Inputs, Refs]):
     assert not await has_topic(**case.inputs.model_dump())

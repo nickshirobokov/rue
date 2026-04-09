@@ -2,23 +2,22 @@ import asyncio
 from pathlib import Path
 
 from rue.resources import registry, resource
-from rue.testing import Runner
-from rue.testing.decorators import parametrize
-from rue.testing.models import ParameterSet, ParametrizeModifier, TestItem
+from rue.testing import Runner, test
+from rue.testing.models import ParameterSet, ParamsIterateModifier, TestItem
 
 
-def test_parametrize_invalid_inputs_are_deferred_to_execution():
-    @parametrize("value", [])
+def test_iterate_params_invalid_inputs_are_deferred_to_execution():
+    @test.iterate.params("value", [])
     def sample(value):
         return value
 
     assert getattr(sample, "__rue_modifiers__", []) == []
     assert getattr(sample, "__rue_definition_error__", None) == (
-        "parametrize() requires at least one value set"
+        "iterate.params() requires at least one value set"
     )
 
 
-def test_runner_parametrize_applies_values_and_runs_all_sets(null_reporter):
+def test_runner_iterate_params_applies_values_and_runs_all_sets(null_reporter):
     recorded = []
 
     def test_sample(param_a, resource_b):
@@ -28,12 +27,13 @@ def test_runner_parametrize_applies_values_and_runs_all_sets(null_reporter):
     def resource_b():
         return "from_resource"
 
-    modifier = ParametrizeModifier(
+    modifier = ParamsIterateModifier(
         parameter_sets=(
             ParameterSet(values={"param_a": "one"}, suffix="one"),
             ParameterSet(values={"param_a": "two"}, suffix="two"),
             ParameterSet(values={"param_a": "three"}, suffix="three"),
-        )
+        ),
+        min_passes=3,
     )
 
     item = TestItem(
@@ -62,8 +62,10 @@ def test_runner_parametrize_applies_values_and_runs_all_sets(null_reporter):
     assert len(execution.sub_executions) == 3
 
 
-def test_runner_reports_invalid_parametrize_as_error(null_reporter):
-    @parametrize("value", [])
+def test_runner_iterate_params_reports_invalid_definition_as_error(
+    null_reporter,
+):
+    @test.iterate.params("value", [])
     def test_invalid(value):
         return value
 
@@ -86,4 +88,63 @@ def test_runner_reports_invalid_parametrize_as_error(null_reporter):
     assert run_result.result.errors == 1
     assert "requires at least one value set" in str(
         run_result.result.executions[0].result.error
+    )
+
+
+def test_runner_iterate_params_uses_min_passes_threshold(null_reporter):
+    recorded: list[str] = []
+
+    def test_sample(value):
+        recorded.append(value)
+        if value == "three":
+            raise AssertionError("boom")
+
+    item = TestItem(
+        name="test_sample",
+        fn=test_sample,
+        module_path=Path("sample.py"),
+        is_async=False,
+        params=["value"],
+        modifiers=[
+            ParamsIterateModifier(
+                parameter_sets=(
+                    ParameterSet(values={"value": "one"}, suffix="one"),
+                    ParameterSet(values={"value": "two"}, suffix="two"),
+                    ParameterSet(values={"value": "three"}, suffix="three"),
+                ),
+                min_passes=2,
+            )
+        ],
+    )
+
+    run_result = asyncio.run(
+        Runner(reporters=[null_reporter]).run(items=[item])
+    )
+
+    assert recorded == ["one", "two", "three"]
+    assert run_result.result.passed == 1
+
+
+def test_iterate_params_formats_default_suffixes():
+    obj = {"nested": [1, 2, 3], "enabled": True}
+    long_value = "abcdefghijklmnopqrstuvwxyz1234567890"
+
+    @test.iterate.params(
+        "short,long_value,obj",
+        [
+            (
+                "abc",
+                long_value,
+                obj,
+            )
+        ],
+    )
+    def sample(short, long_value, obj):
+        return short, long_value, obj
+
+    [modifier] = getattr(sample, "__rue_modifiers__")
+    assert modifier.parameter_sets[0].suffix == (
+        f"{{short={repr('abc')[:30]}, "
+        f"long_value={repr(long_value)[:30]}, "
+        f"obj={repr(obj)[:30]}}}"
     )

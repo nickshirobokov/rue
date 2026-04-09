@@ -4,7 +4,7 @@ title: "OpenTelemetry Traces"
 
 An OpenTelemetry trace is the structured execution record of a single test execution. In Rue, **each concrete test execution gets its own OpenTelemetry trace**: a tree of spans showing what happened, when it happened, and how long it took.
 
-For `repeat`, `parametrize`, `iter_cases`, and `iter_case_groups`, each child execution gets its own trace.
+For `iterate`, `iterate.params`, `iterate.cases`, and `iterate.groups`, each child execution gets its own trace.
 
 <Warning>
 This page uses “trace” in the OpenTelemetry sense (spans you can query and assert on), not a Python exception traceback/stacktrace.

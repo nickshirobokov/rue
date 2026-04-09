@@ -109,7 +109,7 @@ def ml_model():
     # Expensive model loaded once for all tests
     return load_model("model.pkl")
 
-@rue.parametrize("user_id", [1, 2, 3, 4, 5])
+@rue.test.iterate.params("user_id", [1, 2, 3, 4, 5])
 def test_user_queries(user_id, isolated_db, shared_api_client, ml_model):
     # isolated_db: new instance for each of 5 cases
     # shared_api_client: same instance across all 5 cases in this file
@@ -285,7 +285,7 @@ def test_simple(user_id):
 import rue
 
 # Simple values can be parametrized or hardcoded
-@rue.parametrize("user_id", [123, 456, 789])
+@rue.test.iterate.params("user_id", [123, 456, 789])
 def test_simple(user_id):
     assert user_id > 0
 

@@ -36,7 +36,7 @@ class TestResult:
 
     status: TestStatus
     duration_ms: float
-    error: Exception | None = None
+    error: BaseException | None = None
     assertion_results: list[AssertionResult] = field(default_factory=list)
 
 

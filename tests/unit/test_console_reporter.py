@@ -246,7 +246,7 @@ async def test_nested_failures_render_leaf_assertion_repr():
 
     parent = make_item("test_nested", "tests/test_nested.py")
     repeated = make_item(
-        "test_nested", "tests/test_nested.py", suffix="repeat=0"
+        "test_nested", "tests/test_nested.py", suffix="iterate=0"
     )
     leaf = make_item("test_nested", "tests/test_nested.py", suffix="case=1")
     assertion = AssertionResult(
@@ -287,7 +287,7 @@ async def test_nested_failures_render_leaf_assertion_repr():
 
     text = output.getvalue()
     assert "FAILURES" in text
-    assert "repeat=0" in text
+    assert "iterate=0" in text
     assert "case=1" in text
     assert "left == right" in text
     assert "values differ" in text

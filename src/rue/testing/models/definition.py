@@ -29,7 +29,7 @@ class TestDefinition:
     xfail_reason: str | None = None
     xfail_strict: bool = False
     definition_error: str | None = None
-    run_inline: bool = False
+    inline: bool = False
     fail_fast: bool = False
     suffix: str | None = None
     case_id: UUID | None = None

@@ -1,4 +1,4 @@
-"""Examples for `CaseGroup` and `iter_case_groups`."""
+"""Examples for `CaseGroup` and `test.iterate.groups`."""
 
 from __future__ import annotations
 
@@ -128,7 +128,7 @@ def chatbot():
 # =============================== Run tests ===============================
 
 
-@rue.iter_case_groups(*all_groups)
+@rue.test.iterate.groups(*all_groups)
 def test_iter_case_groups_with_validation(
     group: CaseGroup[
         ExampleInputs, ExampleCaseReferences, ExampleGroupReferences

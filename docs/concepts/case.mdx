@@ -5,8 +5,8 @@ title: "Case"
 `Case` is a container for a single scenario: **inputs** you will pass to your System Under Test (SUT), plus optional **reference values** you’ll assert against.
 
 Using `Case` enables:
-- Iterating one test function over many scenarios with `@rue.iter_cases(...)`
-- Grouping related cases with `CaseGroup` and iterating with `@rue.iter_case_groups(...)`
+- Iterating one test function over many scenarios with `@rue.test.iterate.cases(...)`
+- Grouping related cases with `CaseGroup` and iterating with `@rue.test.iterate.groups(...)`
 - Keeping inputs in `inputs` and calling SUTs with `sut(**case.inputs)` or `sut(**case.inputs.model_dump())` for typed inputs
 - Storing reference data in `references` (typed or untyped)
 - Tagging and filtering with `tags`, and attaching context with `metadata`
@@ -35,7 +35,7 @@ case2 = Case(
 )
 
 
-@rue.iter_cases(*[c for c in (case1, case2) if "smoke" in c.tags])
+@rue.test.iterate.cases(*[c for c in (case1, case2) if "smoke" in c.tags])
 def test_classifier(case: Case):
     label = classifier(**case.inputs)
     assert label == case.references["expected_label"]
@@ -198,7 +198,7 @@ def my_agent():
     return sut
 
 
-@rue.iter_cases(*cases)
+@rue.test.iterate.cases(*cases)
 def test_my_agent(case: Case, my_agent):
     my_agent.instance(**case.inputs)
 ```
@@ -237,17 +237,17 @@ music = CaseGroup(
 )
 
 
-@rue.iter_case_groups(geography, music)
+@rue.test.iterate.groups(geography, music, min_passes=1)
 def test_chatbot(group: CaseGroup, case: Case, chatbot):
     response = chatbot.instance(**case.inputs)
     assert case.references["expected"] in response
 ```
 
-`@rue.iter_case_groups` injects two parameters by name:
+`@rue.test.iterate.groups` injects two parameters by name:
 - **`group`** — the current `CaseGroup` (with its `name`, `references`, and `cases`)
 - **`case`** — the current `Case` inside that group
 
-The test passes only if **every group** meets its own `min_passes` threshold.
+Each `CaseGroup` enforces its own `min_passes` threshold for its cases. The decorator-level `min_passes` decides how many groups must pass overall.
 
 ### Typed group references
 
@@ -329,12 +329,12 @@ If you're hardcoding inputs directly in your test functions, you probably don't 
 
 **Don't do this:**
 ```python
-from rue import Case, iter_cases
+from rue import Case, test
 
 # Hardcoding simple data in Case objects is unnecessary
 cases = [Case(inputs={"x": 1}), Case(inputs={"x": 2})]
 
-@iter_cases(*cases)
+@test.iterate.cases(*cases)
 def test_simple(case, add_one):
     result = add_one(**case.inputs)
     assert result
@@ -344,8 +344,8 @@ def test_simple(case, add_one):
 ```python
 import rue
 
-# For simple hardcoded data, use parametrize directly
-@rue.parametrize("x", [1, 2, 3, 4, 5])
+# For simple hardcoded data, use test.iterate.params directly
+@rue.test.iterate.params("x", [1, 2, 3, 4, 5])
 def test_simple(x, add_one):
     result = add_one(x)
     assert result
@@ -383,7 +383,7 @@ else:
     # Full suite locally
     test_cases = cases
 
-@rue.iter_cases(*test_cases)
+@rue.test.iterate.cases(*test_cases)
 def test_text_processor(case: Case, processor):
     processor(**case.inputs)
 ```

@@ -11,7 +11,7 @@ from rue.testing.models.result import TestExecution
 
 
 class Test(ABC):
-    """Executable test - single, repeated, or parametrized."""
+    """Executable test - single or iterated."""
 
     @abstractmethod
     async def execute(self, resolver: ResourceResolver) -> TestExecution:
