@@ -11,7 +11,7 @@ def goodbye_chatbot(prompt: str) -> str:
     return f"Goodbye, {prompt}!"
 
 
-@rue.parametrize(
+@rue.test.iterate.params(
     "prompt,expected",
     [
         ("World", "Hello, World!"),
@@ -20,14 +20,14 @@ def goodbye_chatbot(prompt: str) -> str:
     ],
     ids=["world", "alice", "bob"],
 )
-@rue.tag("smoke", "chatbot")
+@rue.test.tag("smoke", "chatbot")
 def test_chatbot_greetings(prompt: str, expected: str) -> None:
     """This test runs three times, once per parameter set."""
     assert simple_chatbot(prompt) == expected
 
 
-@rue.repeat(count=2)
-@rue.parametrize(
+@rue.test.iterate(count=2)
+@rue.test.iterate.params(
     "prompt,expected",
     [
         ("World", "Goodbye, World!"),
@@ -36,32 +36,32 @@ def test_chatbot_greetings(prompt: str, expected: str) -> None:
     ],
     ids=["world", "alice", "bob"],
 )
-@rue.tag("smoke", "chatbot")
+@rue.test.tag("smoke", "chatbot")
 def test_chatbot_goodbyes(prompt: str, expected: str) -> None:
     """This test runs three times, once per parameter set."""
     assert goodbye_chatbot(prompt) == expected
 
 
-@rue.tag.skip(reason="Dependency still offline")
+@rue.test.tag.skip(reason="Dependency still offline")
 def test_external_dependency() -> None:
     """Example of permanently skipped test with a reason."""
     raise RuntimeError("Should never execute")
 
 
-@rue.tag.xfail(reason="Farerue flow not implemented yet")
+@rue.test.tag.xfail(reason="Farerue flow not implemented yet")
 def test_chatbot_farerue() -> None:
     response = simple_chatbot("friend")
     assert response.endswith("Goodbye!")
 
 
-@rue.repeat(count=5)
+@rue.test.iterate(count=5)
 def test_chatbot_stability() -> None:
     """Test that the chatbot consistently responds correctly."""
     response = simple_chatbot("tester")
     assert response == "Hello, tester!"
 
 
-@rue.repeat(count=10, min_passes=8)
+@rue.test.iterate(count=10, min_passes=8)
 def test_mostly_fail():
     """A test that fails too often and won't meet the minimum pass threshold.
 

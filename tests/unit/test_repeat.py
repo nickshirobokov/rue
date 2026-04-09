@@ -3,31 +3,34 @@ from pathlib import Path
 
 import pytest
 
-from rue.testing import Runner, repeat
-from rue.testing.models import RepeatModifier, TestItem
+from rue.testing import Runner, test
+from rue.testing.models import IterateModifier, TestItem
 
 
-def test_repeat_decorator_validation():
-    with pytest.raises(ValueError, match="repeat count must be >= 1"):
+def test_iterate_decorator_validation():
+    with pytest.raises(ValueError, match="iterate\\(\\) count must be >= 1"):
 
-        @repeat(0)
+        @test.iterate(0)
         def sample1():
             pass
 
-    with pytest.raises(ValueError, match="min_passes must be >= 1"):
+    with pytest.raises(ValueError, match="iterate\\(\\) min_passes must be >= 1"):
 
-        @repeat(5, min_passes=0)
+        @test.iterate(5, min_passes=0)
         def sample2():
             pass
 
-    with pytest.raises(ValueError, match="min_passes .* cannot exceed count"):
+    with pytest.raises(
+        ValueError,
+        match="iterate\\(\\) min_passes .* cannot exceed count",
+    ):
 
-        @repeat(3, min_passes=5)
+        @test.iterate(3, min_passes=5)
         def sample3():
             pass
 
 
-def test_runner_repeat_passes_when_minimum_threshold_is_met(null_reporter):
+def test_runner_iterate_passes_when_minimum_threshold_is_met(null_reporter):
     runner = Runner(reporters=[null_reporter])
     call_count = 0
 
@@ -44,8 +47,8 @@ def test_runner_repeat_passes_when_minimum_threshold_is_met(null_reporter):
         module_path=Path("sample.py"),
         is_async=False,
         params=[],
-        modifiers=[RepeatModifier(count=5, min_passes=3)],
-        tags={"repeat"},
+        modifiers=[IterateModifier(count=5, min_passes=3)],
+        tags={"iterate"},
     )
 
     run_result = asyncio.run(runner.run(items=[repeat_item]))
@@ -62,7 +65,7 @@ def test_runner_repeat_passes_when_minimum_threshold_is_met(null_reporter):
     assert passed == 3
 
 
-def test_runner_repeat_fails_when_threshold_is_not_met(null_reporter):
+def test_runner_iterate_fails_when_threshold_is_not_met(null_reporter):
     runner = Runner(reporters=[null_reporter])
     call_count = 0
 
@@ -79,8 +82,8 @@ def test_runner_repeat_fails_when_threshold_is_not_met(null_reporter):
         module_path=Path("sample.py"),
         is_async=False,
         params=[],
-        modifiers=[RepeatModifier(count=5, min_passes=3)],
-        tags={"repeat"},
+        modifiers=[IterateModifier(count=5, min_passes=3)],
+        tags={"iterate"},
     )
 
     run_result = asyncio.run(runner.run(items=[repeat_item]))

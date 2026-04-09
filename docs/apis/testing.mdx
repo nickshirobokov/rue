@@ -125,17 +125,18 @@ def test_test(agent, rag):
 
 ---
 
-### @parametrize
+### @test.iterate.params
 
 Run a test function with multiple parameter combinations.
 
 **Signature:**
 ```python
-@parametrize(
+@test.iterate.params(
     argnames: str | Sequence[str],
     argvalues: Iterable[Any],
     *,
     ids: Sequence[str] | None = None,
+    min_passes: int | None = None,
 )
 ```
 
@@ -146,14 +147,15 @@ Run a test function with multiple parameter combinations.
 | `argnames` | `str \| Sequence[str]` | - | Parameter name(s) as string or sequence |
 | `argvalues` | `Iterable[Any]` | - | List of value tuples for each parameter combination |
 | `ids` | `Sequence[str] \| None` | `None` | Optional custom IDs for each test case |
+| `min_passes` | `int \| None` | Number of value sets | Minimum number of passing parameter executions required for the parent test to pass |
 
-**Returns:** Decorator that applies parametrization to the target function
+**Returns:** Decorator that applies parameter iteration to the target function
 
 **Example:**
 ```python
 import rue
 
-@rue.parametrize("city,state", [
+@rue.test.iterate.params("city,state", [
     ("Boston", "Massachusetts"),
     ("Austin", "Texas"),
     ("Miami", "Florida"),
@@ -162,28 +164,36 @@ def test_geography(city: str, state: str, bot):
     result = bot.ask(f"What state is {city} in?")
     assert state in result
 
-# Stacked parametrization (creates cartesian product)
-@rue.parametrize("model", ["gpt-4", "claude-3"])
-@rue.parametrize("temperature", [0.0, 0.7])
+# Stacked parameter iteration (creates cartesian product)
+@rue.test.iterate.params("model", ["gpt-4", "claude-3"])
+@rue.test.iterate.params("temperature", [0.0, 0.7])
 def test_combinations(model: str, temperature: float):
     # Runs 4 times: 2 models × 2 temperatures
     pass
 
 # Custom IDs
-@rue.parametrize("value", [1, 2, 3], ids=["one", "two", "three"])
+@rue.test.iterate.params("value", [1, 2, 3], ids=["one", "two", "three"])
 def test_custom_ids(value: int):
     assert value > 0
+
+@rue.test.iterate.params(
+    "value",
+    [1, 2, 3],
+    min_passes=2,
+)
+def test_thresholded_params(value: int):
+    assert value < 3
 ```
 
 ---
 
-### @repeat
+### @test.iterate
 
 Run a test function multiple times to test consistency.
 
 **Signature:**
 ```python
-@repeat(
+@test.iterate(
     count: int,
     *,
     min_passes: int | None = None,
@@ -197,19 +207,19 @@ Run a test function multiple times to test consistency.
 | `count` | `int` | - | Number of times to run the test |
 | `min_passes` | `int \| None` | `count` | Minimum passes required (defaults to all) |
 
-**Returns:** Decorator that applies repeat configuration to the target
+**Returns:** Decorator that applies repeated execution to the target
 
 **Example:**
 ```python
 import rue
 
-@rue.repeat(10)
+@rue.test.iterate(10)
 def test_consistent(llm):
     # All 10 runs must pass
     response = llm.generate("Say hello")
     assert "hello" in response.lower()
 
-@rue.repeat(10, min_passes=8)
+@rue.test.iterate(10, min_passes=8)
 def test_mostly_reliable(llm):
     # At least 8 out of 10 must pass
     response = llm.generate("Translate 'hello' to Spanish")
@@ -218,24 +228,18 @@ def test_mostly_reliable(llm):
 
 ---
 
-### @run_inline
+### @test.tag.inline
 
 Run a synchronous test inline on the event-loop thread.
 
-By default, synchronous tests are offloaded to a worker thread via `asyncio.to_thread(...)`. Use `@run_inline` to opt out when thread affinity matters.
+By default, synchronous tests are offloaded to a worker thread via `asyncio.to_thread(...)`. Use `@test.tag.inline` to opt out when thread affinity matters.
 
 **Signature:**
 ```python
-@run_inline
+@test.tag.inline
 ```
 
-**Parameters:**
-
-| Name | Type | Description |
-|------|------|-------------|
-| `fn` | `Callable[..., Any]` | Synchronous test function to mark for inline execution |
-
-**Returns:** Decorated sync function marked to run inline
+**Returns:** Decorated sync function marked to run inline on the event-loop thread
 
 **Notes:**
 - Applies only to synchronous `def test_*` functions.
@@ -250,7 +254,7 @@ def test_default_threaded():
     # Default sync behavior: worker thread.
     assert threading.current_thread() is not threading.main_thread()
 
-@rue.run_inline
+@rue.test.tag.inline
 def test_main_thread_only():
     # Opt-out: runs inline on main event-loop thread.
     assert threading.current_thread() is threading.main_thread()
@@ -264,7 +268,7 @@ Add tags to test functions or classes for filtering and organization.
 
 **Signature:**
 ```python
-@tag(*names: str)
+@test.tag(*names: str)
 ```
 
 **Parameters:**
@@ -279,22 +283,22 @@ Add tags to test functions or classes for filtering and organization.
 ```python
 import rue
 
-@rue.tag("smoke", "fast")
+@rue.test.tag("smoke", "fast")
 def test_health_check(api):
     assert api.health_check()
 
-@rue.tag("integration", "slow")
+@rue.test.tag("integration", "slow")
 def test_end_to_end(system):
     pass
 
 # Tag entire classes
-@rue.tag("customer-support")
+@rue.test.tag("customer-support")
 class TestSupportBot:
-    @rue.tag("greeting")
+    @rue.test.tag("greeting")
     def test_hello(self, bot):
         pass
 
-    @rue.tag("farewell")
+    @rue.test.tag("farewell")
     def test_goodbye(self, bot):
         pass
 ```
@@ -307,13 +311,13 @@ rue test --tag slow     # Only slow tests
 
 ---
 
-### @tag.skip
+### @test.tag.skip
 
 Skip a test function with an optional reason.
 
 **Signature:**
 ```python
-@tag.skip(*, reason: str | None = None)
+@test.tag.skip(*, reason: str | None = None)
 ```
 
 **Parameters:**
@@ -328,24 +332,24 @@ Skip a test function with an optional reason.
 ```python
 import rue
 
-@rue.tag.skip(reason="Feature not implemented yet")
+@rue.test.tag.skip(reason="Feature not implemented yet")
 def test_upcoming_feature():
     pass
 
-@rue.tag.skip(reason="Requires API key")
+@rue.test.tag.skip(reason="Requires API key")
 def test_external_api():
     pass
 ```
 
 ---
 
-### @tag.xfail
+### @test.tag.xfail
 
 Mark a test as expected to fail.
 
 **Signature:**
 ```python
-@tag.xfail(
+@test.tag.xfail(
     *,
     reason: str | None = None,
     strict: bool = False,
@@ -365,12 +369,12 @@ Mark a test as expected to fail.
 ```python
 import rue
 
-@rue.tag.xfail(reason="Known bug #123")
+@rue.test.tag.xfail(reason="Known bug #123")
 def test_known_issue():
     # This failure won't fail the test suite
     assert False
 
-@rue.tag.xfail(reason="Model not accurate yet", strict=True)
+@rue.test.tag.xfail(reason="Model not accurate yet", strict=True)
 def test_strict_xfail():
     # If this passes, it's an error (unexpected)
     pass
@@ -745,21 +749,21 @@ def test_conditional_xfail():
 ```
 
 **Note:** These imperative functions are different from the decorators:
-- `rue.skip()` (function) vs `@rue.tag.skip()` (decorator)
+- `rue.skip()` (function) vs `@rue.test.tag.skip()` (decorator)
 - `rue.fail()` (function) vs no decorator equivalent
-- `rue.xfail()` (function) vs `@rue.tag.xfail()` (decorator)
+- `rue.xfail()` (function) vs `@rue.test.tag.xfail()` (decorator)
 
 Use decorators for unconditional outcomes known at definition time. Use functions for conditional outcomes determined at runtime.
 
 ---
 
-### iter_cases
+### test.iterate.cases
 
 Decorator to run a test function for each case.
 
 **Signature:**
 ```python
-def iter_cases(
+test.iterate.cases(
     *cases: Case[InputsT, RefsT],
     min_passes: int | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]
@@ -772,7 +776,7 @@ def iter_cases(
 | `*cases` | `Case[InputsT, RefsT]` | One or more test cases to iterate over |
 | `min_passes` | `int \| None` | Minimum number of passing case executions required for the parent test to pass. Defaults to all cases. |
 
-**Returns:** Decorator that applies parametrization using the cases
+**Returns:** Decorator that applies case iteration using the cases
 
 **Validation:**
 - `min_passes` must be `>= 1`
@@ -780,14 +784,14 @@ def iter_cases(
 
 **Example:**
 ```python
-from rue import Case, iter_cases
+from rue import Case, test
 import json
 
 # Load test cases
 with open("test_cases.json") as f:
     cases = [Case(**item) for item in json.load(f)]
 
-@iter_cases(*cases)
+@test.iterate.cases(*cases)
 def test_from_dataset(case: Case, classifier):
     result = classifier(**case.inputs)
 
@@ -795,7 +799,7 @@ def test_from_dataset(case: Case, classifier):
         expected = case.references["expected_label"]
         assert result == expected
 
-@iter_cases(*cases, min_passes=8)
+@test.iterate.cases(*cases, min_passes=8)
 def test_from_dataset_pass_at_k(case: Case, classifier):
     result = classifier(**case.inputs)
     assert result in {"positive", "negative", "neutral"}
@@ -803,14 +807,15 @@ def test_from_dataset_pass_at_k(case: Case, classifier):
 
 ---
 
-### iter_case_groups
+### test.iterate.groups
 
 Decorator to run a test function for each case group, iterating cases within each group.
 
 **Signature:**
 ```python
-def iter_case_groups(
+test.iterate.groups(
     *groups: CaseGroup[InputsT, RefsT, GroupRefsT],
+    min_passes: int | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]
 ```
 
@@ -819,6 +824,7 @@ def iter_case_groups(
 | Name | Type | Description |
 |------|------|-------------|
 | `*groups` | `CaseGroup[InputsT, RefsT, GroupRefsT]` | One or more case groups to iterate over |
+| `min_passes` | `int \| None` | Minimum number of passing groups required for the parent test to pass. Defaults to all groups. |
 
 **Returns:** Decorator that applies group-level iteration to the target function
 
@@ -831,10 +837,12 @@ def iter_case_groups(
 
 **Execution semantics:**
 - Each group produces a nested execution; within each group, cases are iterated using the group's `min_passes` threshold.
-- The parent test passes only if **all groups** pass (i.e. every group meets its own `min_passes`).
+- The decorator-level `min_passes` controls how many groups must pass overall.
 
 **Validation:**
 - At least one group is required (empty call sets a deferred definition error)
+- `min_passes` must be `>= 1`
+- `min_passes` cannot exceed the number of provided `groups`
 
 **Example:**
 ```python
@@ -858,7 +866,7 @@ music = CaseGroup(
     min_passes=1,
 )
 
-@rue.iter_case_groups(geography, music)
+@rue.test.iterate.groups(geography, music, min_passes=1)
 def test_chatbot(group: CaseGroup, case: Case, chatbot):
     response = chatbot.instance(**case.inputs)
     assert case.references["expected"] in response

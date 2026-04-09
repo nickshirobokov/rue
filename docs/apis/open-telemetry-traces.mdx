@@ -88,7 +88,7 @@ Available properties and methods:
 ## Behavior
 
 - Rue creates one root span per OpenTelemetry-enabled test execution: `test.<full_name>`.
-- Aggregator executions (`repeat`, `parametrize`, `iter_cases`, `iter_case_groups`) do not get their own OpenTelemetry roots; each child execution gets its own trace.
+- Aggregator executions (`iterate`, `iterate.params`, `iterate.cases`, `iterate.groups`) do not get their own OpenTelemetry roots; each child execution gets its own trace.
 - `@rue.resource.sut` and `@predicate` write spans only when an active OpenTelemetry session exists.
 - Full traces are not exposed to test code during execution; test code can inspect only the subtree of each `SUT`.
 - OpenAI and Anthropic client instrumentation is initialized by the OpenTelemetry runtime and captured only when calls belong to an active OpenTelemetry test session.

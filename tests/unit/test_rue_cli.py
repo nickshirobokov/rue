@@ -71,15 +71,18 @@ def test_collect_static_extracts_names_and_tags(tmp_path):
         dedent(
             """
             import rue
-            from rue import tag
+            from rue import test
 
-            @tag("smoke")
+            @test.tag("smoke")
+            @test.tag.inline
             def test_top():
                 pass
 
-            @rue.tag("suite")
+            @rue.test.tag("suite")
+            @rue.test.tag.skip(reason="skip suite")
             class TestFlows:
-                @tag("fast")
+                @test.tag("fast")
+                @test.tag.xfail(reason="known")
                 def test_nested(self):
                     pass
             """
@@ -90,11 +93,13 @@ def test_collect_static_extracts_names_and_tags(tmp_path):
     refs_by_name = {ref.full_name: ref for ref in refs}
 
     assert "rue_sample::test_top" in refs_by_name
-    assert refs_by_name["rue_sample::test_top"].tags == frozenset({"smoke"})
+    assert refs_by_name["rue_sample::test_top"].tags == frozenset(
+        {"smoke", "inline"}
+    )
 
     assert "rue_sample::TestFlows::test_nested" in refs_by_name
     assert refs_by_name["rue_sample::TestFlows::test_nested"].tags == frozenset(
-        {"suite", "fast"}
+        {"suite", "skip", "fast", "xfail"}
     )
 
 
@@ -137,13 +142,12 @@ def test_collect_items_same_file_ignores_unselected_invalid_test(tmp_path):
     mixed_module.write_text(
         dedent(
             """
-            import rue
-            from rue import iter_cases
+            from rue import test
 
             def test_good():
                 assert True
 
-            @iter_cases()
+            @test.iterate.cases()
             def test_bad(case):
                 assert case
             """

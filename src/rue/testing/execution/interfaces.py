@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass, field
 from typing import Any
+from uuid import uuid4
 
+from rue.context.runtime import CURRENT_RUNNER
 from rue.resources.resolver import ResourceResolver
 from rue.testing.models.definition import TestDefinition
-from rue.testing.models.result import TestExecution
+from rue.testing.models.result import TestExecution, TestResult, TestStatus
 
 
 class Test(ABC):
-    """Executable test - single, repeated, or parametrized."""
+    """Executable test - single or composite."""
 
     @abstractmethod
     async def execute(self, resolver: ResourceResolver) -> TestExecution:

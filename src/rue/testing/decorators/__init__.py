@@ -1,25 +1,30 @@
 """Test decorators."""
 
-from rue.testing.decorators.parametrize import parametrize
-from rue.testing.decorators.repeat import repeat
-from rue.testing.decorators.run_inline import run_inline
-from rue.testing.decorators.tags import (
+from dataclasses import dataclass
+
+from rue.testing.decorators.iterate import iterate
+from rue.testing.decorators.tag import (
     TagData,
     get_tag_data,
     merge_tag_data,
     tag,
 )
-from rue.testing.decorators.iterate import iter_case_groups, iter_cases
 
+
+@dataclass(frozen=True)
+class TestDecoratorNamespace: #temp object until we figure out what raw test decorator should do 
+    iterate: object
+    tag: object
+
+
+test = TestDecoratorNamespace(iterate=iterate, tag=tag)
 
 __all__ = [
-    "iter_cases",
-    "iter_case_groups",
     "TagData",
+    "TestDecoratorNamespace",
     "get_tag_data",
+    "iterate",
     "merge_tag_data",
-    "parametrize",
-    "repeat",
-    "run_inline",
     "tag",
+    "test",
 ]

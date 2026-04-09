@@ -139,7 +139,7 @@ def response_quality():
     # Quality gate
     assert metric.mean > 0.8
 
-@rue.parametrize("input,expected", test_cases)
+@rue.test.iterate.params("input,expected", test_cases)
 def test_quality_check(input, expected, response_quality: Metric):
     result = model.predict(input)
     is_correct = result == expected
@@ -268,7 +268,7 @@ def hallucination_rate():
     false_rate = metric.counter[False] / metric.len if metric.len > 0 else 0
     assert false_rate < 0.05
 
-@rue.parametrize("question,context", test_cases)
+@rue.test.iterate.params("question,context", test_cases)
 async def test_bot_quality(question, context, bot, accuracy: Metric, hallucination_rate: Metric):
     answer = bot.ask(question, context=context)
 
@@ -321,7 +321,7 @@ def accuracy():
     yield metric
     assert metric.mean > 0.8
 
-@rue.parametrize("input,expected", test_cases)
+@rue.test.iterate.params("input,expected", test_cases)
 def test_classifier(input, expected, classifier, accuracy: Metric):
     result = classifier(input)
 
@@ -387,7 +387,7 @@ def sentiment_score_distribution():
         rate = dist.get(score, 0)
         assert 0.2 < rate < 0.5, f"score {score} rate out of range: {rate}"
 
-@rue.parametrize("text", test_texts)
+@rue.test.iterate.params("text", test_texts)
 def test_sentiment(text, classifier, sentiment_score_distribution: Metric):
     label = classifier.classify(text)  # e.g. "positive" | "neutral" | "negative"
     score = SENTIMENT_TO_SCORE[label]
@@ -414,7 +414,7 @@ def response_time():
     # Final value for reporting
     yield metric.p95
 
-@rue.repeat(100)
+@rue.test.iterate(100)
 def test_latency_test(api, response_time: Metric):
     import time
 
@@ -444,7 +444,7 @@ def success_rate():
     # Lower bound must exceed threshold
     assert lower > 0.75, f"95% CI lower bound too low: {lower}"
 
-@rue.repeat(50, min_passes=40)
+@rue.test.iterate(50, min_passes=40)
 def test_reliability(llm, success_rate: Metric):
     response = llm.generate("Hello")
 

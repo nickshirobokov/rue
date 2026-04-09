@@ -199,12 +199,12 @@ AI systems are inherently non-deterministic, making it essential to test them ac
 
 ### Iterate with different parameters
 
-When you need to run the same test with a small set of different inputs, `@rue.parametrize` offers the most concise syntax. It's ideal for testing a handful of variations without the overhead of defining structured case objects.
+When you need to run the same test with a small set of different inputs, `@rue.test.iterate.params` offers the most concise syntax. It's ideal for testing a handful of variations without the overhead of defining structured case objects.
 
 ```python
 import rue
 
-@rue.parametrize("city,state", [
+@rue.test.iterate.params("city,state", [
     ("Boston", "Massachusetts"),
     ("Austin", "Texas"),
 ])
@@ -220,8 +220,8 @@ This creates 2 test cases:
 Multiple parameters can be stacked:
 
 ```python
-@rue.parametrize("model", ["gpt-4", "claude-3"])
-@rue.parametrize("temperature", [0.0, 0.7, 1.0])
+@rue.test.iterate.params("model", ["gpt-4", "claude-3"])
+@rue.test.iterate.params("temperature", [0.0, 0.7, 1.0])
 def test_model_combinations(model: str, temperature: float):
     # Runs 6 times: 2 models × 3 temperatures
     pass
@@ -233,7 +233,7 @@ Parametrization works best when you have a small number of input variations (typ
 
 ### Iterate with different cases
 
-When evaluating against tens or hundreds of examples, or when you need consistent typing and structure, use `@rue.iter_cases` with `Case` objects. This approach provides type safety through Pydantic validation and enables loading test cases from external sources like JSON files or databases.
+When evaluating against tens or hundreds of examples, or when you need consistent typing and structure, use `@rue.test.iterate.cases` with `Case` objects. This approach provides type safety through Pydantic validation and enables loading test cases from external sources like JSON files or databases.
 
 ```python
 from rue import Case
@@ -243,14 +243,14 @@ import json
 with open("test_cases.json") as f:
     cases = [Case(**item) for item in json.load(f)]
 
-@rue.iter_cases(*cases)
+@rue.test.iterate.cases(*cases)
 def test_from_dataset(case: Case, classifier):
     result = classifier(**case.inputs)
 
     expected = case.references["expected_label"]
     assert result == expected
 
-@rue.iter_cases(*cases, min_passes=8)
+@rue.test.iterate.cases(*cases, min_passes=8)
 def test_from_dataset_pass_at_k(case: Case, classifier):
     result = classifier(**case.inputs)
 
@@ -258,11 +258,11 @@ def test_from_dataset_pass_at_k(case: Case, classifier):
     assert result == expected
 ```
 
-`min_passes` on `iter_cases` works like `repeat`: by default all case executions must pass, but you can require a lower threshold when evaluating large or noisy datasets.
+`min_passes` on `test.iterate.cases` works like `test.iterate`: by default all case executions must pass, but you can require a lower threshold when evaluating large or noisy datasets.
 
 ### Iterate with grouped cases
 
-When your cases naturally fall into groups (e.g. topics, difficulty tiers, languages), use `@rue.iter_case_groups` with `CaseGroup` objects. Each group carries its own **group-level references** and a **`min_passes` threshold**, giving you hierarchical reporting (run → groups → cases) and per-group pass/fail semantics.
+When your cases naturally fall into groups (e.g. topics, difficulty tiers, languages), use `@rue.test.iterate.groups` with `CaseGroup` objects. Each group carries its own **group-level references** and a **`min_passes` threshold**, giving you hierarchical reporting (run → groups → cases) and per-group pass/fail semantics.
 
 ```python
 import rue
@@ -287,32 +287,32 @@ music = CaseGroup(
 )
 
 
-@rue.iter_case_groups(geography, music)
+@rue.test.iterate.groups(geography, music, min_passes=1)
 def test_chatbot(group: CaseGroup, case: Case, chatbot):
     response = chatbot(**case.inputs)
     assert case.references["expected"] in response
 ```
 
-The test passes only if **every group** meets its own `min_passes`. Inside the test function, `group` and `case` are injected automatically — use `group.references` for group-level data and `case.references` for case-level data.
+Each `CaseGroup` still uses its own `min_passes` for its cases. The decorator-level `min_passes` controls how many groups must pass overall. Inside the test function, `group` and `case` are injected automatically — use `group.references` for group-level data and `case.references` for case-level data.
 
 <Tip>
-Use `CaseGroup` when you need per-group thresholds or group-level metadata. If all cases are flat and share the same threshold, stick with `@rue.iter_cases(*cases, min_passes=k)`.
+Use `CaseGroup` when you need per-group thresholds or group-level metadata. If all cases are flat and share the same threshold, stick with `@rue.test.iterate.cases(*cases, min_passes=k)`.
 </Tip>
 
-### Repeat with same data
+### Iterate with same data
 
-AI systems can produce different outputs for identical inputs due to their non-deterministic nature. Use `@rue.repeat` to run the same test multiple times with the same data, measuring consistency and reliability of your AI component.
+AI systems can produce different outputs for identical inputs due to their non-deterministic nature. Use `@rue.test.iterate` to run the same test multiple times with the same data, measuring consistency and reliability of your AI component.
 
 ```python
 import rue
 
-@rue.repeat(count=5)
+@rue.test.iterate(count=5)
 def test_chatbot_consistent_greeting(chatbot):
     """Run 5 times - all must pass."""
     response = chatbot.ask("Hello")
     assert "hi" in response.lower() or "hello" in response.lower()
 
-@rue.repeat(count=10, min_passes=8)
+@rue.test.iterate(count=10, min_passes=8)
 def test_sentiment_mostly_accurate(classifier):
     """Run 10 times - at least 8 must pass."""
     result = classifier("This product is amazing!")
@@ -320,37 +320,37 @@ def test_sentiment_mostly_accurate(classifier):
 ```
 
 <Tip>
-The `min_passes` parameter is sometimes referred to as "pass@k" in the AI evaluation community. For example, `@rue.repeat(count=10, min_passes=8)` checks if your system achieves the desired behavior in at least 8 out of 10 attempts (pass@8/10).
+The `min_passes` parameter is sometimes referred to as "pass@k" in the AI evaluation community. For example, `@rue.test.iterate(count=10, min_passes=8)` checks if your system achieves the desired behavior in at least 8 out of 10 attempts (pass@8/10).
 </Tip>
 
 ## Organizing Tests with Tags
 
 ### Running only specific Tests
 
-Use `@rue.tag` to organize and filter tests:
+Use `@rue.test.tag` to organize and filter tests:
 
 ```python
 import rue
 
-@rue.tag("smoke", "fast")
+@rue.test.tag("smoke", "fast")
 def test_health_check(api_client):
     response = api_client.get("/health")
     assert response.status_code == 200
 
-@rue.tag("integration", "slow")
+@rue.test.tag("integration", "slow")
 def test_end_to_end_workflow(system):
     # Long-running integration test
     pass
 
 # Tag entire classes
-@rue.tag("customer-support")
+@rue.test.tag("customer-support")
 class TestSupportBot:
 
-    @rue.tag("greeting")
+    @rue.test.tag("greeting")
     def test_hello(self, support_bot):
         pass
 
-    @rue.tag("farewell")
+    @rue.test.tag("farewell")
     def test_goodbye(self, support_bot):
         pass
 ```
@@ -364,16 +364,16 @@ uv run rue test --tag slow   # Only slow tests
 
 ### Skipping Tests unconditionally
 
-Skip tests with `@rue.tag.skip`:
+Skip tests with `@rue.test.tag.skip`:
 
 ```python
 import rue
 
-@rue.tag.skip(reason="Feature not implemented yet")
+@rue.test.tag.skip(reason="Feature not implemented yet")
 def test_upcoming_feature():
     pass
 
-@rue.tag.skip(reason="Requires API key")
+@rue.test.tag.skip(reason="Requires API key")
 def test_external_api():
     pass
 ```
@@ -394,15 +394,15 @@ You can also use `rue.skip()` inside resources to conditionally skip tests when 
 
 ### Expected Failures
 
-Mark tests expected to fail with `@rue.tag.xfail`:
+Mark tests expected to fail with `@rue.test.tag.xfail`:
 
 ```python
-@rue.tag.xfail(reason="Known bug #123")
+@rue.test.tag.xfail(reason="Known bug #123")
 def test_known_issue():
     # This failure won't fail the test suite
     assert False
 
-@rue.tag.xfail(reason="Model not accurate yet", strict=True)
+@rue.test.tag.xfail(reason="Model not accurate yet", strict=True)
 def test_strict_xfail():
     # If this passes, the test suite FAILS (unexpected pass)
     pass
@@ -493,19 +493,19 @@ Group related tests in classes for better organization and shared tags/setup:
 ```python
 # rue_support.py - flat functions with repeated tags
 
-@rue.tag("customer-support", "greeting")
+@rue.test.tag("customer-support", "greeting")
 def test_support_greeting_casual():
     pass
 
-@rue.tag("customer-support", "greeting")
+@rue.test.tag("customer-support", "greeting")
 def test_support_greeting_formal():
     pass
 
-@rue.tag("customer-support", "farewell")
+@rue.test.tag("customer-support", "farewell")
 def test_support_farewell_casual():
     pass
 
-@rue.tag("customer-support", "farewell")
+@rue.test.tag("customer-support", "farewell")
 def test_support_farewell_formal():
     pass
 ```
@@ -514,27 +514,27 @@ def test_support_farewell_formal():
 ```python
 # rue_support.py - organized in classes
 
-@rue.tag("customer-support")
+@rue.test.tag("customer-support")
 class TestSupportGreetings:
     """Evaluate support bot greeting scenarios."""
 
-    @rue.tag("casual")
+    @rue.test.tag("casual")
     def test_greeting_casual(self, support_bot):
         pass
 
-    @rue.tag("formal")
+    @rue.test.tag("formal")
     def test_greeting_formal(self, support_bot):
         pass
 
-@rue.tag("customer-support")
+@rue.test.tag("customer-support")
 class TestSupportFarewells:
     """Evaluate support bot farewell scenarios."""
 
-    @rue.tag("casual")
+    @rue.test.tag("casual")
     def test_farewell_casual(self, support_bot):
         pass
 
-    @rue.tag("formal")
+    @rue.test.tag("formal")
     def test_farewell_formal(self, support_bot):
         pass
 ```

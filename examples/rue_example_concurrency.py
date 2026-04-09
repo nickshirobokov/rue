@@ -66,7 +66,7 @@ async def test_slow_api_call_6(shared_client):
     assert shared_client["id"] == "shared-client"
 
 
-@rue.repeat(5)
+@rue.test.iterate(5)
 async def test_slow_api_call_7(shared_client):
     """Simulates a seventh slow API call."""
     await asyncio.sleep(1.5)

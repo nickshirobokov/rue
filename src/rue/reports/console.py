@@ -170,6 +170,13 @@ class ConsoleReporter(Reporter):
             return str(execution.execution_id)[:8]
         return "case"
 
+    def _get_modifier_suffix(self, execution: TestExecution) -> str:
+        if execution.definition.modifiers and execution.sub_executions:
+            return self._format_label(
+                execution.definition.modifiers[0].display_name
+            )
+        return ""
+
     def _print_sub_execution_line(
         self, sub: TestExecution, indent: int
     ) -> None:
@@ -178,8 +185,9 @@ class ConsoleReporter(Reporter):
         prefix = " " * indent + "• "
         duration = f"[dim]({sub.result.duration_ms:.1f}ms)[/dim]"
         sub_label = self._format_label(self._get_execution_label(sub))
+        modifier_suffix = self._get_modifier_suffix(sub)
         self.console.print(
-            f"{prefix}{sub_label} {duration} [{color}]{label}[/{color}]"
+            f"{prefix}{sub_label}{modifier_suffix} {duration} [{color}]{label}[/{color}]"
         )
 
     def _format_assertion_repr(self, assertion: AssertionResult) -> list[str]:
@@ -486,8 +494,9 @@ class ConsoleReporter(Reporter):
         label = self._status_label(result.status)
         extra = self._get_status_extra(result)
 
+        modifier_suffix = self._get_modifier_suffix(execution)
         return (
-            f"{test_state.item.full_name} "
+            f"{test_state.item.full_name}{modifier_suffix} "
             f"[dim]({result.duration_ms:.1f}ms)[/dim] "
             f"{extra}[{color}]{label}[/{color}]"
         )
@@ -506,8 +515,9 @@ class ConsoleReporter(Reporter):
                 label = self._status_label(sub.result.status)
                 duration = f"[dim]({sub.result.duration_ms:.1f}ms)[/dim]"
                 sub_label = self._format_label(self._get_execution_label(sub))
+                modifier_suffix = self._get_modifier_suffix(sub)
                 node = parent.add(
-                    f"{sub_label} {duration} [{color}]{label}[/{color}]"
+                    f"{sub_label}{modifier_suffix} {duration} [{color}]{label}[/{color}]"
                 )
 
             if sub.sub_executions:
@@ -613,7 +623,8 @@ class ConsoleReporter(Reporter):
             self._print_file_header(item.module_path)
 
         if execution.sub_executions:
-            self._print_test_line(item.full_name, result)
+            modifier_suffix = self._get_modifier_suffix(execution)
+            self._print_test_line(f"{item.full_name}{modifier_suffix}", result)
             self._print_sub_executions(execution.sub_executions, indent=4)
             return
 

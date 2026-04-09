@@ -1,11 +1,11 @@
-"""Tests for run_inline decorator and threaded sync execution."""
+"""Tests for tag.inline decorator and threaded sync execution."""
 
 import asyncio
 import threading
 from pathlib import Path
 
-from rue.testing import Runner, run_inline
-from rue.testing.models import RepeatModifier, TestItem
+from rue.testing import Runner, test
+from rue.testing.models import IterateModifier, TestItem
 
 
 def test_sync_test_runs_in_worker_thread(null_reporter):
@@ -30,11 +30,11 @@ def test_sync_test_runs_in_worker_thread(null_reporter):
     assert observed_thread is not threading.main_thread()
 
 
-def test_run_inline_test_runs_on_main_thread(null_reporter):
+def test_tag_inline_runs_on_main_thread(null_reporter):
     runner = Runner(reporters=[null_reporter])
     observed_thread = None
 
-    @run_inline
+    @test.tag.inline
     def test_inline():
         nonlocal observed_thread
         observed_thread = threading.current_thread()
@@ -45,7 +45,7 @@ def test_run_inline_test_runs_on_main_thread(null_reporter):
         module_path=Path("sample.py"),
         is_async=False,
         params=[],
-        run_inline=True,
+        inline=True,
     )
 
     asyncio.run(runner.run(items=[item]))
@@ -77,11 +77,11 @@ def test_sync_exception_propagates(null_reporter):
     assert "sync boom" in str(execution.result.error)
 
 
-def test_run_inline_propagates_through_repeat(null_reporter):
+def test_tag_inline_propagates_through_iterate(null_reporter):
     runner = Runner(reporters=[null_reporter])
     threads: list[threading.Thread] = []
 
-    @run_inline
+    @test.tag.inline
     def test_inline_repeat():
         threads.append(threading.current_thread())
 
@@ -91,8 +91,8 @@ def test_run_inline_propagates_through_repeat(null_reporter):
         module_path=Path("sample.py"),
         is_async=False,
         params=[],
-        run_inline=True,
-        modifiers=[RepeatModifier(count=3, min_passes=3)],
+        inline=True,
+        modifiers=[IterateModifier(count=3, min_passes=3)],
     )
 
     asyncio.run(runner.run(items=[item]))

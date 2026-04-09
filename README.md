@@ -66,8 +66,8 @@ cases = [
     Case(inputs={"prompt": "How much for the Nike Air Max?"}, references=Refs(kb="Nike Air Max: $129.99", expected_tool="offer_product")),
 ]
 
-@rue.iter_cases(cases)
-@rue.repeat(3)
+@rue.test.iterate.cases(*cases)
+@rue.test.iterate(3)
 async def test_chatbot_no_hallucinations(
     case: Case[dict[str, str], Refs],
     store_chatbot,

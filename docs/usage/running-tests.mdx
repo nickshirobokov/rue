@@ -110,7 +110,7 @@ uv run rue test --concurrency 0
 - **Concurrent (>1)**: Faster runs for independent tests. Use with stateless SUTs.
 - **Unlimited (0)**: Maximum parallelism for large test suites.
 
-For synchronous tests (`def test_*`), Rue runs test bodies in worker threads by default to keep the event loop responsive. Use `@rue.run_inline` on a sync test when it must run on the main event-loop thread.
+For synchronous tests (`def test_*`), Rue runs test bodies in worker threads by default to keep the event loop responsive. Use `@rue.test.tag.inline` on a sync test when it must run on the main event-loop thread.
 
 ### Timeout
 
@@ -301,7 +301,7 @@ Use `-v` to show per-test lines with durations and detailed sub-results.
 
 ### Repeated Tests
 
-For tests with `@rue.repeat()`, verbose output shows aggregated results:
+For tests with `@rue.test.iterate()`, verbose output shows aggregated results:
 
 ```
   ✓ test_llm_consistency (1234.5ms) PASSED
