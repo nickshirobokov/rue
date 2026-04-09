@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
-from rue.testing.execution.iterate import (
-    CasesIterateTest,
-    GroupsIterateTest,
-    IterateTest,
-    ParamsIterateTest,
-)
 from rue.testing.execution.interfaces import Test, TestFactory
 from rue.testing.execution.result_builder import ResultBuilder
+from rue.testing.execution.composite import CompositeTest
 from rue.testing.execution.single import SingleTest
 from rue.testing.models import (
     CasesIterateModifier,
@@ -34,7 +29,7 @@ class DefaultTestFactory(TestFactory):
         definition: TestDefinition,
         params: dict[str, Any] | None = None,
     ) -> Test:
-        """Build appropriate executable test from definition."""
+        """Recursively build the full test tree from definition."""
         params = params or {}
 
         match definition.modifiers:
@@ -44,38 +39,78 @@ class DefaultTestFactory(TestFactory):
                     params=params,
                     result_builder=self.result_builder,
                 )
-            case [IterateModifier() as mod, *_]:
-                return IterateTest(
+
+            case [IterateModifier() as mod, *rest]:
+                children = [
+                    self.build(
+                        replace(definition, modifiers=rest, suffix=f"iterate={i}"),
+                        params,
+                    )
+                    for i in range(mod.count)
+                ]
+                return CompositeTest(
                     definition=definition,
-                    params=params,
-                    count=mod.count,
                     min_passes=mod.min_passes,
-                    factory=self,
+                    children=children,
                 )
-            case [CasesIterateModifier() as mod, *_]:
-                return CasesIterateTest(
+
+            case [CasesIterateModifier() as mod, *rest]:
+                children = [
+                    self.build(
+                        replace(
+                            definition,
+                            modifiers=rest,
+                            suffix=repr(c.metadata) if c.metadata else None,
+                            case_id=c.id,
+                        ),
+                        {**params, "case": c},
+                    )
+                    for c in mod.cases
+                ]
+                return CompositeTest(
                     definition=definition,
-                    params=params,
-                    cases=mod.cases,
                     min_passes=mod.min_passes,
-                    factory=self,
+                    children=children,
                 )
-            case [GroupsIterateModifier() as mod, *_]:
-                return GroupsIterateTest(
+
+            case [GroupsIterateModifier() as mod, *rest]:
+                children = [
+                    self.build(
+                        replace(
+                            definition,
+                            modifiers=[
+                                CasesIterateModifier(
+                                    cases=tuple(g.cases),
+                                    min_passes=g.min_passes,
+                                ),
+                                *rest,
+                            ],
+                            suffix=g.name,
+                        ),
+                        {**params, "group": g},
+                    )
+                    for g in mod.groups
+                ]
+                return CompositeTest(
                     definition=definition,
-                    params=params,
-                    groups=mod.groups,
                     min_passes=mod.min_passes,
-                    factory=self,
+                    children=children,
                 )
-            case [ParamsIterateModifier() as mod, *_]:
-                return ParamsIterateTest(
+
+            case [ParamsIterateModifier() as mod, *rest]:
+                children = [
+                    self.build(
+                        replace(definition, modifiers=rest, suffix=ps.suffix),
+                        {**params, **ps.values},
+                    )
+                    for ps in mod.parameter_sets
+                ]
+                return CompositeTest(
                     definition=definition,
-                    params=params,
-                    parameter_sets=mod.parameter_sets,
                     min_passes=mod.min_passes,
-                    factory=self,
+                    children=children,
                 )
+
             case _:
                 raise NotImplementedError(
                     f"Unknown modifier(s): {definition.modifiers}"
