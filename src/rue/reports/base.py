@@ -41,7 +41,7 @@ class Reporter(ABC, metaclass=ReporterMeta):
         """Called when test collection finds no tests."""
 
     @abstractmethod
-    async def on_collection_complete(self, items: list[TestDefinition]) -> None:
+    async def on_collection_complete(self, items: list[TestDefinition], run: Run) -> None:
         """Called after test collection completes."""
 
     async def on_test_start(self, item: TestDefinition) -> None:
@@ -49,18 +49,9 @@ class Reporter(ABC, metaclass=ReporterMeta):
         _ = item
         return None
 
-    async def on_subtest_complete(
-        self,
-        parent: TestDefinition,
-        sub_execution: TestExecution,
-    ) -> None:
-        """Called when a subtest execution completes."""
-        _ = parent, sub_execution
-        return None
-
     @abstractmethod
-    async def on_test_complete(self, execution: TestExecution) -> None:
-        """Called after each test completes."""
+    async def on_execution_complete(self, execution: TestExecution) -> None:
+        """Called when any test node (leaf or composite) completes."""
 
     @abstractmethod
     async def on_run_complete(self, run: Run) -> None:

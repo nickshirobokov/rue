@@ -85,6 +85,7 @@ class EventReporter(Reporter):
         self.subtest_event_times: list[tuple[str, str, float]] = []
         self.trace_events: list[tuple[UUID, OtelTraceSession]] = []
         self.run_complete_elapsed = 0.0
+        self._started_ids: set[int] = set()
 
     def configure(self, config: RueConfig) -> None:
         self.verbosity = config.verbosity
@@ -92,29 +93,27 @@ class EventReporter(Reporter):
     async def on_no_tests_found(self) -> None:
         pass
 
-    async def on_collection_complete(self, _items: list[TestItem]) -> None:
+    async def on_collection_complete(self, _items: list[TestItem], _run) -> None:
         self.start_time = time.perf_counter()
 
     async def on_test_start(self, item: TestItem) -> None:
+        self._started_ids.add(id(item))
         elapsed = time.perf_counter() - self.start_time
         self.event_times.append(("start", item.name, elapsed))
         self.event_order.append(("start", item.name))
 
-    async def on_test_complete(self, execution: TestExecution) -> None:
+    async def on_execution_complete(self, execution: TestExecution) -> None:
         elapsed = time.perf_counter() - self.start_time
-        self.event_times.append(("complete", execution.item.name, elapsed))
-        self.event_order.append(("complete", execution.item.name))
-
-    async def on_subtest_complete(
-        self, parent: TestItem, sub_execution: TestExecution
-    ) -> None:
-        elapsed = time.perf_counter() - self.start_time
-        label = sub_execution.item.suffix or (
-            str(sub_execution.item.case_id)
-            if sub_execution.item.case_id
-            else ""
-        )
-        self.subtest_event_times.append((parent.name, label, elapsed))
+        if id(execution.item) in self._started_ids:
+            self.event_times.append(("complete", execution.item.name, elapsed))
+            self.event_order.append(("complete", execution.item.name))
+        else:
+            label = execution.item.suffix or (
+                str(execution.item.case_id)
+                if execution.item.case_id
+                else ""
+            )
+            self.subtest_event_times.append((execution.item.name, label, elapsed))
 
     async def on_run_complete(self, _rue_run) -> None:
         self.run_complete_elapsed = time.perf_counter() - self.start_time
@@ -1023,7 +1022,7 @@ class TestConcurrency:
             await asyncio.sleep(0.01)
 
         class CompleteFailureReporter(EventReporter):
-            async def on_test_complete(self, execution: TestExecution) -> None:
+            async def on_execution_complete(self, execution: TestExecution) -> None:
                 raise RuntimeError("complete callback failed")
 
         runner = Runner(

@@ -27,7 +27,7 @@ from rue.storage import SQLiteStore
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.discovery import collect
 from rue.testing.environment import capture_environment
-from rue.testing.execution import DefaultTestFactory, ResultBuilder
+from rue.testing.execution import DefaultTestFactory
 from rue.testing.models import (
     Run,
     TestExecution,
@@ -81,10 +81,6 @@ class Runner:
         for reporter in self.reporters:
             reporter.configure(self.config)
 
-        self._result_builder = ResultBuilder()
-        self._factory = DefaultTestFactory(result_builder=self._result_builder)
-
-        # Used in single.py test execution through run_context
         self.semaphore: asyncio.Semaphore | None = None
         self.stop_flag: bool = False
 
@@ -124,39 +120,19 @@ class Runner:
         await asyncio.gather(*[r.on_no_tests_found() for r in self.reporters])
 
     async def _notify_collection_complete(
-        self, items: list[TestDefinition]
+        self, items: list[TestDefinition], run: Run
     ) -> None:
         await asyncio.gather(
-            *[r.on_collection_complete(items) for r in self.reporters]
+            *[r.on_collection_complete(items, run) for r in self.reporters]
         )
 
     async def _notify_test_start(self, item: TestDefinition) -> None:
         await asyncio.gather(*[r.on_test_start(item) for r in self.reporters])
 
-    async def _notify_subtest_complete(
-        self,
-        parent: TestDefinition,
-        sub_execution: TestExecution,
-    ) -> None:
+    async def _on_execution_complete(self, execution: TestExecution) -> None:
         await asyncio.gather(
-            *[
-                r.on_subtest_complete(parent, sub_execution)
-                for r in self.reporters
-            ]
+            *[r.on_execution_complete(execution) for r in self.reporters]
         )
-
-    async def _notify_test_complete(self, execution: TestExecution) -> None:
-        await asyncio.gather(
-            *[r.on_test_complete(execution) for r in self.reporters]
-        )
-
-    async def notify_subtest_complete(
-        self,
-        parent: TestDefinition,
-        sub_execution: TestExecution,
-    ) -> None:
-        """Public callback for execution strategies to stream subtest updates."""
-        await self._notify_subtest_complete(parent, sub_execution)
 
     async def _notify_run_complete(self, run: Run) -> None:
         await asyncio.gather(*[r.on_run_complete(run) for r in self.reporters])
@@ -175,12 +151,6 @@ class Runner:
                 for r in self.reporters
             ]
         )
-
-    async def notify_trace_collected(
-        self, tracer: TestTracer, execution_id: UUID
-    ) -> None:
-        """Public callback for execution strategies to stream trace updates."""
-        await self._notify_trace_collected(tracer, execution_id)
 
     def _ensure_db_ready(self) -> None:
         """Initialize DB and run migrations. Raises MigrationError if not possible."""
@@ -271,7 +241,7 @@ class Runner:
             sys_output_capture(swallow=self.capture_output),
             bind(CURRENT_METRIC_RESULTS, metric_results),
         ):
-            await self._notify_collection_complete(items)
+            await self._notify_collection_complete(items, self.current_run)
 
             resolver = ResourceResolver(self.resource_registry)
 
@@ -323,6 +293,14 @@ class Runner:
         run: Run,
     ) -> None:
         """Execute the test run with the given items and resolver."""
+        self._factory = DefaultTestFactory(
+            config=self.config,
+            run_id=run.run_id,
+            semaphore=self.semaphore,
+            is_stopped=lambda: self.stop_flag,
+            on_complete=self._on_execution_complete,
+            on_trace_collected=self._notify_trace_collected,
+        )
         try:
             if self._concurrency_limit() == 1:
                 await self._run_sequential(items, resolver, run)
@@ -336,7 +314,7 @@ class Runner:
     ) -> TestExecution:
         """Execute a single test with error handling."""
         if item.definition_error:
-            return TestExecution(
+            execution = TestExecution(
                 definition=item,
                 result=TestResult(
                     status=TestStatus.ERROR,
@@ -345,6 +323,8 @@ class Runner:
                 ),
                 execution_id=uuid4(),
             )
+            await self._on_execution_complete(execution)
+            return execution
 
         test = self._factory.build(item)
         t_start = time.perf_counter()
@@ -353,13 +333,15 @@ class Runner:
             execution = await test.execute(resolver)
         except Exception as e:
             duration = (time.perf_counter() - t_start) * 1000
-            return TestExecution(
+            execution = TestExecution(
                 definition=item,
                 result=TestResult(
                     status=TestStatus.ERROR, duration_ms=duration, error=e
                 ),
                 execution_id=uuid4(),
             )
+            await self._on_execution_complete(execution)
+            return execution
 
         return execution
 
@@ -374,8 +356,6 @@ class Runner:
                 break
             await self._notify_test_start(item)
             execution = await self._execute_item(item, resolver)
-            await self._notify_test_complete(execution)
-
             run.result.executions.append(execution)
 
             if execution.result.status.is_failure:
@@ -411,8 +391,6 @@ class Runner:
                     if self.config.maxfail and failures >= self.config.maxfail:
                         self.stop_flag = True
                         run.result.stopped_early = True
-
-            await self._notify_test_complete(execution)
 
         task_results = await asyncio.gather(
             *[run_one(i, item) for i, item in enumerate(items)],

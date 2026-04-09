@@ -19,6 +19,7 @@ class TestTracer:
     __test__ = False
 
     otel_enabled: bool
+    run_id: UUID | None = None
     otel_root_span: Span | None = None
     otel_trace_session: OtelTraceSession | None = None
     completed_otel_trace_session: OtelTraceSession | None = None
@@ -58,14 +59,14 @@ class TestTracer:
         return span
 
     def start_otel_trace(
-        self, *, run_id: UUID, execution_id: UUID
+        self, *, execution_id: UUID
     ) -> OtelTraceSession | None:
-        if self.otel_root_span is None:
+        if self.otel_root_span is None or self.run_id is None:
             return None
 
         self.otel_trace_session = otel_runtime.start_otel_trace(
             self.otel_root_span,
-            run_id=run_id,
+            run_id=self.run_id,
             execution_id=execution_id,
         )
         return self.otel_trace_session

@@ -122,11 +122,9 @@ def test_test_tracer_records_result_and_finishes_session(monkeypatch):
         lambda current_session: current_session,
     )
 
-    tracer = TestTracer(otel_enabled=True)
+    tracer = TestTracer(otel_enabled=True, run_id=UUID(int=1))
     tracer.start_otel_root_span(make_definition())
-    started = tracer.start_otel_trace(
-        run_id=UUID(int=1), execution_id=UUID(int=2)
-    )
+    started = tracer.start_otel_trace(execution_id=UUID(int=2))
     tracer.record_otel_result(
         TestResult(status=TestStatus.FAILED, duration_ms=12.5, error=error)
     )

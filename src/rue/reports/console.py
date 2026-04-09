@@ -22,7 +22,6 @@ from rich.text import Text
 from rich.traceback import Frame, Stack, Trace, Traceback
 from rich.tree import Tree
 
-from rue.context.runtime import CURRENT_RUNNER
 from rue.reports.base import Reporter
 from rue.testing.models.run import RunEnvironment
 
@@ -398,14 +397,6 @@ class ConsoleReporter(Reporter):
             self._completed_count += 1
         state.execution = execution
 
-    def _mark_subtest_complete(
-        self, parent: TestDefinition, sub_execution: TestExecution
-    ) -> None:
-        state = self._lookup_test_state(parent)
-        if state is None:
-            return
-        state.live_sub_executions.append(sub_execution)
-
     def _sub_executions_for_state(
         self, test_state: _LiveTestState
     ) -> list[TestExecution]:
@@ -526,24 +517,13 @@ class ConsoleReporter(Reporter):
     async def on_no_tests_found(self) -> None:
         self.console.print("[yellow]No tests found.[/yellow]")
 
-    async def on_collection_complete(self, items: list[TestDefinition]) -> None:
+    async def on_collection_complete(self, items: list[TestDefinition], run: Run) -> None:
         async with self._callback_lock:
             self._failures = []
             self._current_module = None
             self._reset_live_state(total_tests=len(items))
 
-            runner = CURRENT_RUNNER.get()
-            environment = (
-                runner.current_run.environment
-                if runner and runner.current_run
-                else RunEnvironment()
-            )
-            run_id = (
-                runner.current_run.run_id
-                if runner and runner.current_run
-                else None
-            )
-            self._print_run_header(environment, run_id)
+            self._print_run_header(run.environment, run.run_id)
             if self.verbosity >= 0:
                 self.console.print(
                     f"[bold]Collected {len(items)} tests[/bold]\n"
@@ -570,34 +550,36 @@ class ConsoleReporter(Reporter):
             self._mark_test_started(item)
             self._refresh()
 
-    async def on_subtest_complete(
-        self,
-        parent: TestDefinition,
-        sub_execution: TestExecution,
-    ) -> None:
+    async def on_execution_complete(self, execution: TestExecution) -> None:
         async with self._callback_lock:
-            if not self._live_enabled or self.verbosity < 1:
-                return
-            self._mark_subtest_complete(parent, sub_execution)
-            self._refresh()
+            # A sub-execution is one that was NOT directly started (not in _item_state_lookup
+            # by id), but whose name matches a started parent (found by name lookup).
+            is_sub = (
+                id(execution.item) not in self._item_state_lookup
+                and self._lookup_test_state(execution.item) is not None
+            )
 
-    async def on_test_complete(self, execution: TestExecution) -> None:
-        async with self._callback_lock:
-            result = execution.result
-            item = execution.item
-
-            if result.status in {TestStatus.FAILED, TestStatus.ERROR}:
+            if not is_sub and execution.result.status in {TestStatus.FAILED, TestStatus.ERROR}:
                 self._failures.append(execution)
 
             if self._live_enabled:
-                self._mark_test_complete(execution)
+                if is_sub:
+                    if self.verbosity >= 1:
+                        parent_state = self._lookup_test_state(execution.item)
+                        if parent_state is not None:
+                            parent_state.live_sub_executions.append(execution)
+                else:
+                    self._mark_test_complete(execution)
                 self._refresh()
+                return
+
+            if is_sub:
                 return
 
             if self.verbosity < 0:
                 return
             if self.verbosity == 0:
-                self._print_compact_test(item, result)
+                self._print_compact_test(execution.item, execution.result)
                 return
 
             self._print_verbose_test(execution)

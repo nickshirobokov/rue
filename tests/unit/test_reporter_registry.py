@@ -16,13 +16,13 @@ class DummyReporter(Reporter):
     async def on_no_tests_found(self) -> None:
         pass
 
-    async def on_collection_complete(self, items) -> None:
+    async def on_collection_complete(self, items, run) -> None:
         pass
 
     async def on_test_start(self, item) -> None:
         pass
 
-    async def on_test_complete(self, execution) -> None:
+    async def on_execution_complete(self, execution) -> None:
         pass
 
     async def on_run_complete(self, test_run) -> None:

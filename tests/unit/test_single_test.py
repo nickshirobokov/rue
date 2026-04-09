@@ -3,9 +3,9 @@ from pathlib import Path
 import pytest
 
 from rue.resources import ResourceResolver, registry
-from rue.testing.execution.result_builder import ResultBuilder
 from rue.testing.execution.single import SingleTest
 from rue.testing.models import IterateModifier, TestItem, TestStatus
+from rue.testing.tracing import TestTracer
 
 
 def make_item(fn=None, *, modifiers=None) -> TestItem:
@@ -18,6 +18,10 @@ def make_item(fn=None, *, modifiers=None) -> TestItem:
     )
 
 
+def make_tracer() -> TestTracer:
+    return TestTracer(otel_enabled=False)
+
+
 @pytest.mark.asyncio
 async def test_single_test_executes_without_runner():
     called: list[str] = []
@@ -28,7 +32,7 @@ async def test_single_test_executes_without_runner():
     test = SingleTest(
         definition=make_item(test_body),
         params={},
-        result_builder=ResultBuilder(),
+        tracer=make_tracer(),
     )
 
     execution = await test.execute(ResourceResolver(registry))
@@ -46,5 +50,5 @@ def test_single_test_rejects_modifiers():
                 modifiers=[IterateModifier(count=2, min_passes=2)]
             ),
             params={},
-            result_builder=ResultBuilder(),
+            tracer=make_tracer(),
         )

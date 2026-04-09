@@ -39,12 +39,12 @@ class OtelReporter(Reporter):
     async def on_no_tests_found(self) -> None:
         return None
 
-    async def on_collection_complete(self, items: list[TestDefinition]) -> None:
-        _ = items
+    async def on_collection_complete(self, items: list[TestDefinition], run: Run) -> None:
+        _ = items, run
         self._prepared_run_ids.clear()
         return None
 
-    async def on_test_complete(self, execution: TestExecution) -> None:
+    async def on_execution_complete(self, execution: TestExecution) -> None:
         _ = execution
         return None
 

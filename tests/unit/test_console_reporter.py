@@ -123,20 +123,20 @@ async def test_verbose_live_output_grouped_by_file(monkeypatch):
     users_create = make_item("test_create", "tests/test_users.py")
 
     await reporter.on_collection_complete(
-        [auth_login, auth_logout, users_create]
+        [auth_login, auth_logout, users_create], Run()
     )
     await reporter.on_test_start(auth_login)
     await reporter.on_test_start(users_create)
-    await reporter.on_test_complete(
+    await reporter.on_execution_complete(
         make_execution(users_create, TestStatus.PASSED, 45.1)
     )
-    await reporter.on_test_complete(
+    await reporter.on_execution_complete(
         make_execution(
             auth_login, TestStatus.FAILED, 120.3, error=AssertionError("boom")
         )
     )
     await reporter.on_test_start(auth_logout)
-    await reporter.on_test_complete(
+    await reporter.on_execution_complete(
         make_execution(auth_logout, TestStatus.PASSED, 22.0)
     )
 
@@ -166,12 +166,12 @@ async def test_compact_live_symbols_replace_running_marker(monkeypatch):
 
     item = make_item("test_login", "tests/test_auth.py")
 
-    await reporter.on_collection_complete([item])
+    await reporter.on_collection_complete([item], Run())
     await reporter.on_test_start(item)
     running_text = render_to_text(FakeLive.instances[-1].renderables[-1])
     assert "⋯" in running_text
 
-    await reporter.on_test_complete(
+    await reporter.on_execution_complete(
         make_execution(item, TestStatus.PASSED, 15.0)
     )
     done_text = render_to_text(FakeLive.instances[-1].renderables[-1])
@@ -192,19 +192,19 @@ async def test_quiet_live_progress_counter(monkeypatch):
     first = make_item("test_one", "tests/test_progress.py")
     second = make_item("test_two", "tests/test_progress.py")
 
-    await reporter.on_collection_complete([first, second])
+    await reporter.on_collection_complete([first, second], Run())
     text = render_to_text(FakeLive.instances[-1].renderables[-1])
     assert "0/2 complete" in text
 
     await reporter.on_test_start(first)
-    await reporter.on_test_complete(
+    await reporter.on_execution_complete(
         make_execution(first, TestStatus.PASSED, 5.0)
     )
     text = render_to_text(FakeLive.instances[-1].renderables[-1])
     assert "1/2 complete" in text
 
     await reporter.on_test_start(second)
-    await reporter.on_test_complete(
+    await reporter.on_execution_complete(
         make_execution(second, TestStatus.PASSED, 6.0)
     )
     text = render_to_text(FakeLive.instances[-1].renderables[-1])
@@ -222,9 +222,9 @@ async def test_non_terminal_fallback_uses_static_output():
     item = make_item("test_login", "tests/test_auth.py")
     execution = make_execution(item, TestStatus.PASSED, 20.0)
 
-    await reporter.on_collection_complete([item])
+    await reporter.on_collection_complete([item], Run())
     await reporter.on_test_start(item)
-    await reporter.on_test_complete(execution)
+    await reporter.on_execution_complete(execution)
 
     test_run = Run()
     test_run.result.executions = [execution]
@@ -278,8 +278,8 @@ async def test_nested_failures_render_leaf_assertion_repr():
         sub_executions=[repeated_execution],
     )
 
-    await reporter.on_collection_complete([parent])
-    await reporter.on_test_complete(execution)
+    await reporter.on_collection_complete([parent], Run())
+    await reporter.on_execution_complete(execution)
 
     test_run = Run()
     test_run.result.executions = [execution]
@@ -322,9 +322,9 @@ async def test_verbose_live_renders_sub_executions(monkeypatch):
         sub_executions=sub_executions,
     )
 
-    await reporter.on_collection_complete([parent])
+    await reporter.on_collection_complete([parent], Run())
     await reporter.on_test_start(parent)
-    await reporter.on_test_complete(execution)
+    await reporter.on_execution_complete(execution)
 
     text = render_to_text(FakeLive.instances[-1].renderables[-1])
     assert "case=1" in text
@@ -351,9 +351,9 @@ async def test_verbose_live_streams_subtests_before_parent_completion(
     case_one = make_item("test_matrix", "tests/test_matrix.py", suffix="case=1")
     sub_execution = make_execution(case_one, TestStatus.PASSED, 8.0)
 
-    await reporter.on_collection_complete([parent])
+    await reporter.on_collection_complete([parent], Run())
     await reporter.on_test_start(parent)
-    await reporter.on_subtest_complete(parent, sub_execution)
+    await reporter.on_execution_complete(sub_execution)
 
     text = render_to_text(FakeLive.instances[-1].renderables[-1])
     assert "test_matrix::test_matrix" in text
