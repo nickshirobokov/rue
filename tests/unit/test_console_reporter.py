@@ -109,7 +109,7 @@ def render_to_text(renderable) -> str:
 
 @pytest.mark.asyncio
 async def test_verbose_live_output_grouped_by_file(monkeypatch):
-    monkeypatch.setattr("rue.reports.console.Live", FakeLive)
+    monkeypatch.setattr("rue.reports.console.live.Live", FakeLive)
     FakeLive.instances.clear()
 
     output = io.StringIO()
@@ -155,7 +155,7 @@ async def test_verbose_live_output_grouped_by_file(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_compact_live_symbols_replace_running_marker(monkeypatch):
-    monkeypatch.setattr("rue.reports.console.Live", FakeLive)
+    monkeypatch.setattr("rue.reports.console.live.Live", FakeLive)
     FakeLive.instances.clear()
 
     output = io.StringIO()
@@ -180,7 +180,7 @@ async def test_compact_live_symbols_replace_running_marker(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_quiet_live_progress_counter(monkeypatch):
-    monkeypatch.setattr("rue.reports.console.Live", FakeLive)
+    monkeypatch.setattr("rue.reports.console.live.Live", FakeLive)
     FakeLive.instances.clear()
 
     output = io.StringIO()
@@ -296,7 +296,7 @@ async def test_nested_failures_render_leaf_assertion_repr():
 
 @pytest.mark.asyncio
 async def test_verbose_live_renders_sub_executions(monkeypatch):
-    monkeypatch.setattr("rue.reports.console.Live", FakeLive)
+    monkeypatch.setattr("rue.reports.console.live.Live", FakeLive)
     FakeLive.instances.clear()
 
     output = io.StringIO()
@@ -338,7 +338,7 @@ async def test_verbose_live_renders_sub_executions(monkeypatch):
 async def test_verbose_live_streams_subtests_before_parent_completion(
     monkeypatch,
 ):
-    monkeypatch.setattr("rue.reports.console.Live", FakeLive)
+    monkeypatch.setattr("rue.reports.console.live.Live", FakeLive)
     FakeLive.instances.clear()
 
     output = io.StringIO()
