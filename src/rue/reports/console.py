@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import linecache
 import math
 import sys
-from dataclasses import dataclass, field
+from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,6 +22,7 @@ from rich.traceback import Frame, Stack, Trace, Traceback
 from rich.tree import Tree
 
 from rue.reports.base import Reporter
+from rue.testing.execution.composite import CompositeTest
 from rue.testing.models.run import RunEnvironment
 
 
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from rue.config import RueConfig
     from rue.resources.metrics.base import MetricResult
     from rue.testing import TestDefinition
+    from rue.testing.execution.interfaces import Test
     from rue.testing.models.result import TestExecution, TestResult
     from rue.testing.models.run import Run
 
@@ -48,23 +49,6 @@ _STATUS_CONFIG: dict[TestStatus, tuple[str, str, str]] = {
 }
 
 
-@dataclass
-class _LiveTestState:
-    """Tracks the live display state for a single test."""
-
-    item: TestDefinition
-    execution: TestExecution | None = None
-    live_sub_executions: list[TestExecution] = field(default_factory=list)
-
-
-@dataclass
-class _LiveFileState:
-    """Tracks the live display state for a single test file."""
-
-    path: Path
-    tests: list[_LiveTestState] = field(default_factory=list)
-
-
 class ConsoleReporter(Reporter):
     """Reporter that outputs test results to the console using Rich formatting."""
 
@@ -77,14 +61,16 @@ class ConsoleReporter(Reporter):
         self._current_module: Path | None = None
         self._live: Live | None = None
         self._live_enabled = False
-        self._file_states: dict[Path, _LiveFileState] = {}
-        self._item_state_lookup: dict[int, _LiveTestState] = {}
-        self._item_state_lookup_by_name: dict[
-            tuple[str, str, str], _LiveTestState
-        ] = {}
+        # Set upfront from on_collection_complete
+        self._items: list[TestDefinition] = []
+        self._item_ids: set[int] = set()
+        self._items_by_file: dict[Path, list[TestDefinition]] = {}
         self._total_tests = 0
         self._completed_count = 0
-        self._callback_lock = asyncio.Lock()
+        # Set from on_tests_ready
+        self._tests: dict[int, Test] = {}
+        # Updated from on_execution_complete
+        self._executions: dict[int, TestExecution] = {}
 
     def configure(self, config: RueConfig) -> None:
         self.verbosity = config.verbosity
@@ -339,71 +325,6 @@ class ConsoleReporter(Reporter):
             return str(metric.execution_id)[:8]
         return "case"
 
-    def _reset_live_state(self, *, total_tests: int) -> None:
-        if self._live is not None:
-            self._live.stop()
-        self._live = None
-        self._live_enabled = False
-        self._file_states = {}
-        self._item_state_lookup = {}
-        self._item_state_lookup_by_name = {}
-        self._total_tests = total_tests
-        self._completed_count = 0
-
-    def _item_state_key(self, item: TestDefinition) -> tuple[str, str, str]:
-        return (
-            str(item.module_path),
-            item.class_name or "",
-            item.name,
-        )
-
-    def _lookup_test_state(self, item: TestDefinition) -> _LiveTestState | None:
-        by_id = self._item_state_lookup.get(id(item))
-        if by_id is not None:
-            return by_id
-
-        by_name = self._item_state_lookup_by_name.get(
-            self._item_state_key(item)
-        )
-        if by_name is not None:
-            self._item_state_lookup[id(item)] = by_name
-            return by_name
-        return None
-
-    def _get_or_create_test_state(self, item: TestDefinition) -> _LiveTestState:
-        existing = self._lookup_test_state(item)
-        if existing is not None:
-            return existing
-
-        file_state = self._file_states.get(item.module_path)
-        if file_state is None:
-            file_state = _LiveFileState(path=item.module_path)
-            self._file_states[item.module_path] = file_state
-
-        state = _LiveTestState(item=item)
-        file_state.tests.append(state)
-        self._item_state_lookup[id(item)] = state
-        self._item_state_lookup_by_name[self._item_state_key(item)] = state
-        return state
-
-    def _mark_test_started(self, item: TestDefinition) -> None:
-        state = self._get_or_create_test_state(item)
-        state.execution = None
-        state.live_sub_executions = []
-
-    def _mark_test_complete(self, execution: TestExecution) -> None:
-        state = self._get_or_create_test_state(execution.item)
-        if state.execution is None:
-            self._completed_count += 1
-        state.execution = execution
-
-    def _sub_executions_for_state(
-        self, test_state: _LiveTestState
-    ) -> list[TestExecution]:
-        if test_state.execution is not None:
-            return test_state.execution.sub_executions
-        return test_state.live_sub_executions
-
     def _refresh(self) -> None:
         if self._live is None:
             return
@@ -411,7 +332,6 @@ class ConsoleReporter(Reporter):
 
     def _build_live_text_spinner_line(self, text: Text) -> Table:
         """Render a single live line with trailing spinner."""
-        # Spinner renders before its text; grid keeps label first and spinner last.
         line = Table.grid(padding=(0, 1))
         line.add_column()
         line.add_column(no_wrap=True)
@@ -430,16 +350,17 @@ class ConsoleReporter(Reporter):
 
     def _build_compact_live_renderable(self) -> Group | Text:
         lines: list[RenderableType] = []
-        for file_state in self._file_states.values():
-            path = self._safe_relative_path(file_state.path)
-            line = Text(f" • {path.as_posix()} ")
+        for path, items in self._items_by_file.items():
+            rel = self._safe_relative_path(path)
+            line = Text(f" • {rel.as_posix()} ")
             has_running = False
-            for test_state in file_state.tests:
-                if test_state.execution is None:
+            for item in items:
+                execution = self._executions.get(id(item))
+                if execution is None:
                     has_running = True
                     line.append("⋯", style="dim")
                     continue
-                status = test_state.execution.result.status
+                status = execution.result.status
                 line.append(
                     self._status_symbol(status),
                     style=self._status_color(status),
@@ -456,41 +377,69 @@ class ConsoleReporter(Reporter):
     def _build_verbose_live_renderable(self) -> Group | Text:
         trees: list[Tree] = []
 
-        for file_state in self._file_states.values():
-            path = self._safe_relative_path(file_state.path)
-            tree = Tree(f"• {path.as_posix()}")
-            for test_state in file_state.tests:
-                branch = tree.add(self._build_live_test_line(test_state))
-                sub_executions = self._sub_executions_for_state(test_state)
-                if sub_executions:
-                    self._add_live_sub_executions(branch, sub_executions)
+        for path, items in self._items_by_file.items():
+            rel = self._safe_relative_path(path)
+            tree = Tree(f"• {rel.as_posix()}")
+            for item in items:
+                test = self._tests.get(id(item))
+                execution = self._executions.get(id(item))
+                branch = tree.add(self._build_live_item_line(item, test, execution))
+                if execution is not None and execution.sub_executions:
+                    self._add_live_sub_executions(branch, execution.sub_executions)
+                elif isinstance(test, CompositeTest) and execution is None:
+                    self._add_live_composite_children(branch, test)
             trees.append(tree)
 
         if not trees:
             return Text("")
         return Group(*trees)
 
-    def _build_live_test_line(
-        self, test_state: _LiveTestState
+    def _build_live_item_line(
+        self,
+        item: TestDefinition,
+        test: Test | None,
+        execution: TestExecution | None,
     ) -> RenderableType:
-        if test_state.execution is None:
+        if execution is None:
             text = Text.from_markup(
-                f"{test_state.item.full_name} [dim]⋯ running[/dim]"
+                f"{item.full_name} [dim]⋯ running[/dim]"
             )
             return self._build_live_text_spinner_line(text)
 
-        execution = test_state.execution
         result = execution.result
         color = self._status_color(result.status)
         label = self._status_label(result.status)
         extra = self._get_status_extra(result)
-
         modifier_suffix = self._get_modifier_suffix(execution)
         return (
-            f"{test_state.item.full_name}{modifier_suffix} "
+            f"{item.full_name}{modifier_suffix} "
             f"[dim]({result.duration_ms:.1f}ms)[/dim] "
             f"{extra}[{color}]{label}[/{color}]"
         )
+
+    def _add_live_composite_children(
+        self, parent: Tree, test: CompositeTest
+    ) -> None:
+        for child in test.children:
+            child_exec = self._executions.get(id(child.definition))
+            if child_exec is not None:
+                color = self._status_color(child_exec.result.status)
+                label = self._status_label(child_exec.result.status)
+                duration = f"[dim]({child_exec.result.duration_ms:.1f}ms)[/dim]"
+                sub_label = self._format_label(self._get_execution_label(child_exec))
+                modifier_suffix = self._get_modifier_suffix(child_exec)
+                node = parent.add(
+                    f"{sub_label}{modifier_suffix} {duration} [{color}]{label}[/{color}]"
+                )
+                if child_exec.sub_executions:
+                    self._add_live_sub_executions(node, child_exec.sub_executions)
+            elif isinstance(child, CompositeTest):
+                node = parent.add(
+                    Text.from_markup(
+                        f"{self._format_label(child.definition.suffix or 'case')} [dim]⋯[/dim]"
+                    )
+                )
+                self._add_live_composite_children(node, child)
 
     def _add_live_sub_executions(
         self, parent: Tree, sub_executions: list[TestExecution]
@@ -518,71 +467,73 @@ class ConsoleReporter(Reporter):
         self.console.print("[yellow]No tests found.[/yellow]")
 
     async def on_collection_complete(self, items: list[TestDefinition], run: Run) -> None:
-        async with self._callback_lock:
-            self._failures = []
-            self._current_module = None
-            self._reset_live_state(total_tests=len(items))
+        self._failures = []
+        self._current_module = None
+        self._items = list(items)
+        self._item_ids = {id(item) for item in items}
+        self._items_by_file = defaultdict(list)
+        for item in items:
+            self._items_by_file[item.module_path].append(item)
+        self._total_tests = len(items)
+        self._completed_count = 0
+        self._tests = {}
+        self._executions = {}
 
-            self._print_run_header(run.environment, run.run_id)
-            if self.verbosity >= 0:
-                self.console.print(
-                    f"[bold]Collected {len(items)} tests[/bold]\n"
-                )
+        if self._live is not None:
+            self._live.stop()
+            self._live = None
+        self._live_enabled = False
 
-            self._live_enabled = self.console.is_terminal
-            if self._live_enabled:
-                self._live = Live(
-                    self._build_live_renderable(),
-                    console=self.console,
-                    auto_refresh=True,
-                    refresh_per_second=1,
-                    transient=False,
-                    redirect_stdout=False,
-                    redirect_stderr=False,
-                )
-                self._live.start()
-                self._refresh()
-
-    async def on_test_start(self, item: TestDefinition) -> None:
-        async with self._callback_lock:
-            if not self._live_enabled:
-                return
-            self._mark_test_started(item)
-            self._refresh()
-
-    async def on_execution_complete(self, execution: TestExecution) -> None:
-        async with self._callback_lock:
-            # A sub-execution is one that was NOT directly started (not in _item_state_lookup
-            # by id), but whose name matches a started parent (found by name lookup).
-            is_sub = (
-                id(execution.item) not in self._item_state_lookup
-                and self._lookup_test_state(execution.item) is not None
+        self._print_run_header(run.environment, run.run_id)
+        if self.verbosity >= 0:
+            self.console.print(
+                f"[bold]Collected {len(items)} tests[/bold]\n"
             )
 
-            if not is_sub and execution.result.status in {TestStatus.FAILED, TestStatus.ERROR}:
+        self._live_enabled = self.console.is_terminal
+        if self._live_enabled:
+            self._live = Live(
+                self._build_live_renderable(),
+                console=self.console,
+                auto_refresh=True,
+                refresh_per_second=1,
+                transient=False,
+                redirect_stdout=False,
+                redirect_stderr=False,
+            )
+            self._live.start()
+            self._refresh()
+
+    async def on_tests_ready(self, tests: list[Test]) -> None:
+        for test in tests:
+            self._tests[id(test.definition)] = test
+
+    async def on_test_start(self, item: TestDefinition) -> None:
+        self._refresh()
+
+    async def on_execution_complete(self, execution: TestExecution) -> None:
+        self._executions[id(execution.definition)] = execution
+
+        is_top_level = id(execution.definition) in self._item_ids
+        if is_top_level:
+            self._completed_count += 1
+            if execution.result.status.is_failure:
                 self._failures.append(execution)
 
-            if self._live_enabled:
-                if is_sub:
-                    if self.verbosity >= 1:
-                        parent_state = self._lookup_test_state(execution.item)
-                        if parent_state is not None:
-                            parent_state.live_sub_executions.append(execution)
-                else:
-                    self._mark_test_complete(execution)
-                self._refresh()
-                return
+        if self._live_enabled:
+            self._refresh()
+            return
 
-            if is_sub:
-                return
+        if not is_top_level:
+            return
 
-            if self.verbosity < 0:
-                return
-            if self.verbosity == 0:
-                self._print_compact_test(execution.item, execution.result)
-                return
+        if self.verbosity < 0:
+            return
+        if self.verbosity == 0:
+            self._print_compact_test(execution.item, execution.result)
+            return
 
-            self._print_verbose_test(execution)
+        self._print_verbose_test(execution)
 
     def _print_compact_test(
         self, item: TestDefinition, result: TestResult
@@ -640,24 +591,23 @@ class ConsoleReporter(Reporter):
                 self._print_sub_executions(sub.sub_executions, indent + 2)
 
     async def on_run_complete(self, run: Run) -> None:
-        async with self._callback_lock:
-            if self._live is not None:
-                self._live.stop()
-                self._live = None
-                self._live_enabled = False
+        if self._live is not None:
+            self._live.stop()
+            self._live = None
+            self._live_enabled = False
 
-            result = run.result
-            if self.verbosity == 0 and self._current_module is not None:
-                self.console.print()
+        result = run.result
+        if self.verbosity == 0 and self._current_module is not None:
+            self.console.print()
 
-            if self.verbosity != 0 and self._failures:
-                self._print_failures()
+        if self.verbosity != 0 and self._failures:
+            self._print_failures()
 
-            if result.stopped_early:
-                self.console.print("[yellow]Run terminated early.[/yellow]")
+        if result.stopped_early:
+            self.console.print("[yellow]Run terminated early.[/yellow]")
 
-            self._print_metric_results(result.metric_results)
-            self._print_summary(run)
+        self._print_metric_results(result.metric_results)
+        self._print_summary(run)
 
     def _print_failures(self) -> None:
         self.console.print()
@@ -793,14 +743,12 @@ class ConsoleReporter(Reporter):
         parsed = json.loads(data)
         frames = []
         for f in parsed["frames"]:
-            # Convert stored repr strings to Rich Node objects for display
             locals_nodes: dict[str, Node] | None = None
             if show_locals and f.get("locals"):
                 locals_nodes = {
                     k: Node(value_repr=v) for k, v in f["locals"].items()
                 }
 
-            # Use stored line, fall back to linecache if source file still exists
             frames.append(
                 Frame(
                     filename=f["filename"],
@@ -812,7 +760,6 @@ class ConsoleReporter(Reporter):
                 )
             )
 
-        # Build Rich's internal structure: Trace contains Stacks, Stack contains Frames
         stack = Stack(
             exc_type=parsed["exc_type"],
             exc_value=parsed["exc_value"],

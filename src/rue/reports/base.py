@@ -10,6 +10,7 @@ from uuid import UUID
 if TYPE_CHECKING:
     from rue.config import RueConfig
     from rue.testing import TestDefinition
+    from rue.testing.execution.interfaces import Test
     from rue.testing.models.result import TestExecution
     from rue.testing.models.run import Run
     from rue.testing.tracing import TestTracer
@@ -43,6 +44,11 @@ class Reporter(ABC, metaclass=ReporterMeta):
     @abstractmethod
     async def on_collection_complete(self, items: list[TestDefinition], run: Run) -> None:
         """Called after test collection completes."""
+
+    async def on_tests_ready(self, tests: list[Test]) -> None:
+        """Called after all Test trees are built, before execution starts."""
+        _ = tests
+        return None
 
     async def on_test_start(self, item: TestDefinition) -> None:
         """Called before a test starts executing."""
