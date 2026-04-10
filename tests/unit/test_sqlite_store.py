@@ -5,8 +5,11 @@ from uuid import uuid4
 
 from rue.assertions.base import AssertionRepr, AssertionResult
 from rue.predicates.models import PredicateResult
-from rue.resources import Scope
-from rue.resources.metrics.base import MetricMetadata, MetricResult
+from rue.resources import ResourceIdentity, Scope
+from rue.resources.metrics.base import (
+    MetricMetadata,
+    MetricResult,
+)
 from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.store import MAX_STORED_RUNS
 from rue.testing.models.definition import TestDefinition
@@ -56,16 +59,29 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     metric_metadata = MetricMetadata(
         first_item_recorded_at=start_time,
         last_item_recorded_at=end_time,
-        scope=Scope.CASE,
+        identity=ResourceIdentity(
+            name="latency_ms",
+            scope=Scope.CASE,
+            provider_path="/tmp/project/confrue_root.py",
+            provider_dir="/tmp/project",
+        ),
         collected_from_tests={"test_test"},
         collected_from_resources={"resource"},
         collected_from_cases={"case-1"},
+        collected_from_modules={"tests/test_sample.py"},
     )
     metric_result = MetricResult(
-        name="latency_ms",
         metadata=metric_metadata,
         assertion_results=[],
         value=12.5,
+        dependencies=[
+            ResourceIdentity(
+                name="overall_latency",
+                scope=Scope.SESSION,
+                provider_path="/tmp/project/confrue_root.py",
+                provider_dir="/tmp/project",
+            )
+        ],
         execution_id=execution_id,
     )
 
@@ -111,9 +127,26 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     assert loaded.result.executions[0].definition.case_id == case_id
     assert len(loaded.result.executions[0].sub_executions) == 1
     assert len(loaded.result.metric_results) == 1
-    assert loaded.result.metric_results[0].name == "latency_ms"
+    assert loaded.result.metric_results[0].metadata.identity.name == "latency_ms"
     assert loaded.result.metric_results[0].value == 12.5
-    assert loaded.result.metric_results[0].metadata.scope == Scope.CASE
+    assert loaded.result.metric_results[0].metadata.identity.scope == Scope.CASE
+    assert loaded.result.metric_results[0].metadata.collected_from_modules == {
+        "tests/test_sample.py"
+    }
+    assert loaded.result.metric_results[0].metadata.identity.provider_path == (
+        "/tmp/project/confrue_root.py"
+    )
+    assert loaded.result.metric_results[0].metadata.identity.provider_dir == (
+        "/tmp/project"
+    )
+    assert loaded.result.metric_results[0].dependencies == [
+        ResourceIdentity(
+            name="overall_latency",
+            scope=Scope.SESSION,
+            provider_path="/tmp/project/confrue_root.py",
+            provider_dir="/tmp/project",
+        )
+    ]
 
 
 def test_sqlite_store_list_runs(sqlite_store: SQLiteStore) -> None:
@@ -183,7 +216,9 @@ def test_sqlite_store_assertions_and_predicates(
         execution_id=execution_id,
     )
 
-    metric_metadata = MetricMetadata(scope=Scope.SESSION)
+    metric_metadata = MetricMetadata(
+        identity=ResourceIdentity(name="count", scope=Scope.SESSION)
+    )
     metric_assertion = AssertionResult(
         expression_repr=AssertionRepr(
             expr="metric > 0",
@@ -194,7 +229,6 @@ def test_sqlite_store_assertions_and_predicates(
         passed=True,
     )
     metric_result = MetricResult(
-        name="count",
         metadata=metric_metadata,
         assertion_results=[metric_assertion],
         value=[1, 2, 3],

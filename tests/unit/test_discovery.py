@@ -184,6 +184,104 @@ async def test_confrue_session_resources_resolve_hierarchically(
 
 
 @pytest.mark.asyncio
+async def test_same_named_confrue_metrics_preserve_provider_identity_and_modules(
+    tmp_path,
+    null_reporter,
+):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'tmp'\nversion = '0.0.0'\n"
+    )
+    child = tmp_path / "child"
+    child.mkdir()
+
+    (tmp_path / "confrue_root.py").write_text(
+        dedent(
+            """
+            import rue
+            from rue import Metric, metrics
+
+            @rue.resource.metric(scope="session")
+            def quality():
+                metric = Metric()
+                yield metric
+                yield metric.mean
+
+            def root_check(quality: Metric):
+                with metrics(quality):
+                    assert True
+            """
+        )
+    )
+    (child / "confrue_child.py").write_text(
+        dedent(
+            """
+            import rue
+            from rue import Metric, metrics
+
+            @rue.resource.metric(scope="session")
+            def quality():
+                metric = Metric()
+                yield metric
+                yield metric.mean
+
+            def child_check(quality: Metric):
+                with metrics(quality):
+                    assert True
+            """
+        )
+    )
+    (tmp_path / "rue_root.py").write_text(
+        dedent(
+            """
+            from rue import metrics
+
+            def test_shared(quality):
+                with metrics(quality):
+                    assert True
+            """
+        )
+    )
+    (child / "rue_child.py").write_text(
+        dedent(
+            """
+            from rue import metrics
+
+            def test_shared(quality):
+                with metrics(quality):
+                    assert True
+            """
+        )
+    )
+
+    items = collect(tmp_path)
+    run = await Runner(
+        config=RueConfig.model_construct(db_enabled=False),
+        reporters=[null_reporter],
+    ).run(items=items)
+
+    metrics = sorted(
+        run.result.metric_results,
+        key=lambda result: result.metadata.identity.provider_path or "",
+    )
+    assert len(metrics) == 2
+    assert {metric.metadata.identity.name for metric in metrics} == {"quality"}
+    assert all(
+        metric.metadata.collected_from_tests == {"test_shared"}
+        for metric in metrics
+    )
+    assert metrics[0].metadata.identity != metrics[1].metadata.identity
+    module_sets = [metric.metadata.collected_from_modules for metric in metrics]
+    assert any(
+        any(module.endswith("rue_root.py") for module in modules)
+        for modules in module_sets
+    )
+    assert any(
+        any(module.endswith("child/rue_child.py") for module in modules)
+        for modules in module_sets
+    )
+
+
+@pytest.mark.asyncio
 async def test_collect_runs_class_based_tests_with_resource_injection(
     tmp_path,
     null_reporter,

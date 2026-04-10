@@ -226,6 +226,63 @@ class TestMigrationRunner:
         assert len(tables) == 1
         conn.close()
 
+    def test_metric_provenance_migration_backfills_provider_identity(
+        self, sqlite_db_path: Path
+    ) -> None:
+        full_runner = MigrationRunner(sqlite_db_path)
+        legacy_runner = MigrationRunner.__new__(MigrationRunner)
+        legacy_runner.path = sqlite_db_path
+        legacy_runner._migrations = full_runner._migrations[:3]
+        legacy_runner.migrate()
+
+        conn = sqlite3.connect(sqlite_db_path)
+        conn.execute(
+            "INSERT INTO runs (run_id, start_time, total_duration_ms, "
+            "passed, failed, errors, skipped, xfailed, xpassed, total, stopped_early) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("run-1", "2024-01-01T00:00:00", 100.0, 1, 0, 0, 0, 0, 0, 1, 0),
+        )
+        conn.execute(
+            "INSERT INTO metrics ("
+            "run_id, test_execution_id, name, scope, value, value_json, "
+            "first_recorded_at, last_recorded_at, collected_from_tests_json, "
+            "collected_from_resources_json, collected_from_cases_json"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "run-1",
+                None,
+                "quality",
+                "session",
+                1.0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        full_runner.migrate()
+
+        conn = sqlite3.connect(sqlite_db_path)
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(metrics)").fetchall()
+        }
+        provider = conn.execute(
+            "SELECT provider_name, provider_scope, collected_from_modules_json, "
+            "depends_on_metrics_json FROM metrics"
+        ).fetchone()
+
+        assert "provider_name" in columns
+        assert "provider_scope" in columns
+        assert "collected_from_modules_json" in columns
+        assert "depends_on_metrics_json" in columns
+        assert provider == ("quality", "session", None, None)
+        conn.close()
+
     def test_corrupted_db_no_user_version(self, sqlite_db_path: Path) -> None:
         """DB exists but has no tables - should still work."""
         conn = sqlite3.connect(sqlite_db_path)

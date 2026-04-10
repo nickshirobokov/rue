@@ -58,7 +58,13 @@ CREATE TABLE IF NOT EXISTS metrics (
     last_recorded_at    TEXT,
     collected_from_tests_json       TEXT,
     collected_from_resources_json   TEXT,
-    collected_from_cases_json       TEXT
+    collected_from_cases_json       TEXT,
+    collected_from_modules_json     TEXT,
+    provider_name                   TEXT,
+    provider_scope                  TEXT,
+    provider_path                   TEXT,
+    provider_dir                    TEXT,
+    depends_on_metrics_json         TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_metrics_run ON metrics(run_id);

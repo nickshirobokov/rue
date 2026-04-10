@@ -1,47 +1,35 @@
-"""Renders exception/traceback panels for errored test executions."""
+"""Renders assertion failure panels for failed test executions."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 from rich.console import Group, RenderableType
-from rich.markup import escape
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
-from rich.traceback import Traceback
 
-from .shared import STATUS_STYLES, get_execution_label
+from .shared import (
+    STATUS_STYLES,
+    format_assertion_result,
+    get_execution_label,
+)
 
 if TYPE_CHECKING:
     from rue.testing.models.result import TestExecution
 
-_RUE_MODULE = __import__("rue")
-
-
-class ExceptionRenderer:
-    def __init__(self, show_locals: bool = False) -> None:
-        self.show_locals = show_locals
-
+class AssertionRenderer:
     @staticmethod
-    def _should_show_error(execution: TestExecution) -> bool:
-        result = execution.result
-        if result.error is None:
-            return False
-        failed = [a for a in result.assertion_results if not a.passed]
-        return not (isinstance(result.error, AssertionError) and failed)
-
-    @classmethod
-    def _has_exception(cls, execution: TestExecution) -> bool:
-        if cls._should_show_error(execution):
+    def _has_failed_assertions(execution: TestExecution) -> bool:
+        if any(not a.passed for a in execution.result.assertion_results):
             return True
-        return any(cls._has_exception(s) for s in execution.sub_executions)
+        return any(AssertionRenderer._has_failed_assertions(s) for s in execution.sub_executions)
 
     def render(self, failures: list[TestExecution]) -> list[RenderableType]:
-        relevant = [f for f in failures if self._has_exception(f)]
+        relevant = [f for f in failures if self._has_failed_assertions(f)]
         if not relevant:
             return []
-        renderables: list[RenderableType] = [Text(""), Rule("ERRORS", characters="=")]
+        renderables: list[RenderableType] = [Text(""), Rule("ASSERTIONS", characters="=", style="bold red")]
         for index, failure in enumerate(relevant):
             if index:
                 renderables.append(Text(""))
@@ -56,26 +44,24 @@ class ExceptionRenderer:
         style = STATUS_STYLES[result.status]
         renderables: list[RenderableType] = []
 
-        if self._should_show_error(execution):
-            err = result.error
-            assert err is not None
-            if err.__traceback__:
-                renderables.append(
-                    Traceback.from_exception(
-                        type(err),
-                        err,
-                        err.__traceback__,
-                        suppress=[_RUE_MODULE],
-                        show_locals=self.show_locals,
+        failed = [a for a in result.assertion_results if not a.passed]
+        if failed:
+            combined = Text()
+            for i, assertion in enumerate(failed):
+                if i:
+                    combined.append("\n\n")
+                combined.append_text(
+                    format_assertion_result(
+                        assertion,
+                        heading="Failed Assertion",
                     )
                 )
-            else:
-                renderables.append(escape(f"{type(err).__name__}: {err}"))
+            renderables.append(combined)
 
         renderables.extend(
             self.render_panel(sub)
             for sub in execution.sub_executions
-            if self._has_exception(sub)
+            if self._has_failed_assertions(sub)
         )
 
         match renderables:

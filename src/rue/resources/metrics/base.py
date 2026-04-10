@@ -27,8 +27,15 @@ from rue.context.collectors import (
     CURRENT_ASSERTION_RESULTS,
     CURRENT_METRIC_RESULTS,
 )
-from rue.context.runtime import CURRENT_RESOURCE_CONSUMER, CURRENT_TEST, bind
-from rue.resources.registry import Scope, resource
+from rue.context.runtime import (
+    CURRENT_RESOURCE_CONSUMER,
+    CURRENT_RESOURCE_CONSUMER_KIND,
+    CURRENT_RESOURCE_PROVIDER,
+    CURRENT_RESOURCE_RESOLVER,
+    CURRENT_TEST,
+    bind,
+)
+from rue.resources.registry import ResourceIdentity, Scope, resource
 
 
 if TYPE_CHECKING:
@@ -61,9 +68,8 @@ class MetricMetadata:
         Timestamp of the most recently recorded value.
     first_item_recorded_at : datetime, optional
         Timestamp of the first recorded value.
-    scope : Scope
-        The lifecycle scope of the metric (e.g., SESSION, SUITE, CASE).
-        Defaults to Scope.SESSION.
+    identity : ResourceIdentity
+        Name, scope, and provider origin for the metric.
     collected_from_tests : set of str
         Names of tests that contributed to this metric.
     collected_from_resources : set of str
@@ -74,10 +80,11 @@ class MetricMetadata:
 
     last_item_recorded_at: datetime | None = None
     first_item_recorded_at: datetime | None = None
-    scope: Scope = field(default=Scope.SESSION)
+    identity: ResourceIdentity = field(default=ResourceIdentity(name="", scope=Scope.SESSION))
     collected_from_tests: set[str] = field(default_factory=set)
     collected_from_resources: set[str] = field(default_factory=set)
     collected_from_cases: set[str] = field(default_factory=set)
+    collected_from_modules: set[str] = field(default_factory=set)
 
 
 @dataclass(slots=True)
@@ -147,13 +154,10 @@ class Metric:
 
     Attributes:
     ----------
-    name : str, optional
-        Name of the metric.
     metadata : MetricMetadata
-        Metadata describing the collection context.
+        Metadata describing the collection context (including identity).
     """
 
-    name: str | None = None
     metadata: MetricMetadata = field(default_factory=MetricMetadata)
 
     _raw_values: list[int | float | bool] = field(
@@ -179,6 +183,10 @@ class Metric:
             if test_ctx is not None:
                 if test_ctx.item.name:
                     self.metadata.collected_from_tests.add(test_ctx.item.name)
+                if test_ctx.item.module_path:
+                    self.metadata.collected_from_modules.add(
+                        str(test_ctx.item.module_path)
+                    )
                 if test_ctx.item.case_id:
                     self.metadata.collected_from_cases.add(
                         str(test_ctx.item.case_id)
@@ -244,7 +252,7 @@ class Metric:
             if self._cache.min is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute min for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute min for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.min = math.nan
@@ -259,7 +267,7 @@ class Metric:
             if self._cache.max is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute max for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute max for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     value = math.nan
@@ -275,7 +283,7 @@ class Metric:
             if self._cache.median is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute median for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute median for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.median = math.nan
@@ -290,7 +298,7 @@ class Metric:
             if self._cache.mean is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute mean for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute mean for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.mean = math.nan
@@ -305,7 +313,7 @@ class Metric:
             if self._cache.variance is None:
                 if self.len < 2:
                     warnings.warn(
-                        f"Cannot compute variance for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute variance for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.variance = math.nan
@@ -322,7 +330,7 @@ class Metric:
             if self._cache.std is None:
                 if self.len < 2:
                     warnings.warn(
-                        f"Cannot compute std for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute std for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.std = math.nan
@@ -339,7 +347,7 @@ class Metric:
             if self._cache.pvariance is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute pvariance for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute pvariance for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.pvariance = math.nan
@@ -356,7 +364,7 @@ class Metric:
             if self._cache.pstd is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute pstd for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute pstd for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.pstd = math.nan
@@ -373,7 +381,7 @@ class Metric:
             if self._cache.ci_90 is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute ci_90 for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute ci_90 for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.ci_90 = (math.nan, math.nan)
@@ -389,7 +397,7 @@ class Metric:
             if self._cache.ci_95 is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute ci_95 for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute ci_95 for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.ci_95 = (math.nan, math.nan)
@@ -405,7 +413,7 @@ class Metric:
             if self._cache.ci_99 is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute ci_99 for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute ci_99 for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.ci_99 = (math.nan, math.nan)
@@ -421,7 +429,7 @@ class Metric:
             if self._cache.percentiles is None:
                 if self.len < 2:
                     warnings.warn(
-                        f"Metric '{self.name or 'unnamed'}' has less than 2 values. Cannot compute percentiles.",
+                        f"Metric '{self.metadata.identity.name or 'unnamed'}' has less than 2 values. Cannot compute percentiles.",
                         stacklevel=2,
                     )
                     self._cache.percentiles = [math.nan] * 99
@@ -495,11 +503,11 @@ class MetricResult:
 
     Parameters
     ----------
-    name : str
-        The metric name. By default this is the decorated function name.
     metadata : MetricMetadata
         Snapshot of metadata describing where/when the metric was recorded
-        (scope, contributors, timestamps).
+        (identity, contributors, timestamps).
+    dependencies : list[ResourceIdentity]
+        Direct resource dependencies for the metric provider.
     assertion_results : list[AssertionResult]
         Assertion results collected while the metric resource was running.
     value : CalculatedValue
@@ -508,11 +516,22 @@ class MetricResult:
         The test execution that produced this metric result.
     """
 
-    name: str
     metadata: MetricMetadata
     assertion_results: list[AssertionResult]
     value: CalculatedValue
+    dependencies: list[ResourceIdentity] = field(default_factory=list)
     execution_id: UUID | None = None
+
+    @property
+    def primary_case_id(self) -> str:
+        cases = sorted(self.metadata.collected_from_cases)
+        if cases:
+            return cases[0]
+        return ""
+
+    @property
+    def has_failures(self) -> bool:
+        return any(not assertion.passed for assertion in self.assertion_results)
 
     def __post_init__(self) -> None:
         if self.execution_id is None:
@@ -561,13 +580,22 @@ def metric(
     is_async_generator = inspect.isasyncgenfunction(fn)
 
     def on_resolve_hook(m: Metric) -> Metric:
-        m.name = name
-        m.metadata.scope = scope if isinstance(scope, Scope) else Scope(scope)
+        scope_val = scope if isinstance(scope, Scope) else Scope(scope)
+        ident = m.metadata.identity
+        m.metadata.identity = ResourceIdentity(
+            name=name,
+            scope=scope_val,
+            provider_path=ident.provider_path,
+            provider_dir=ident.provider_dir,
+        )
         return m
 
     def on_injection_hook(m: Metric) -> Metric:
         consumer_name = CURRENT_RESOURCE_CONSUMER.get()
-        if consumer_name:
+        if (
+            consumer_name
+            and CURRENT_RESOURCE_CONSUMER_KIND.get() == "resource"
+        ):
             m.metadata.collected_from_resources.add(consumer_name)
         return m
 
@@ -595,11 +623,29 @@ def metric(
                             value = math.nan
                         else:
                             value = final_value
+                        provider = CURRENT_RESOURCE_PROVIDER.get()
+                        resolver = CURRENT_RESOURCE_RESOLVER.get()
+                        metadata = replace(metric_instance.metadata)
+                        if provider is not None:
+                            ident = metadata.identity
+                            metadata = replace(
+                                metadata,
+                                identity=replace(
+                                    ident,
+                                    provider_path=provider.identity.provider_path,
+                                    provider_dir=provider.identity.provider_dir,
+                                ),
+                            )
+                        dependencies = (
+                            resolver.direct_dependencies_for(
+                                provider.identity
+                            )
+                            if provider is not None and resolver is not None
+                            else []
+                        )
                         MetricResult(
-                            name=name,
-                            metadata=replace(
-                                metric_instance.metadata
-                            ),  # use replace to create a copy
+                            metadata=metadata,
+                            dependencies=dependencies,
                             assertion_results=assertions_results,
                             value=value,
                         )
@@ -610,6 +656,7 @@ def metric(
             scope=scope,
             on_resolve=on_resolve_hook,
             on_injection=on_injection_hook,
+            origin_fn=fn,
         )
 
     if is_async_generator:
@@ -634,11 +681,29 @@ def metric(
                             value = math.nan
                         else:
                             value = final_value
+                        provider = CURRENT_RESOURCE_PROVIDER.get()
+                        resolver = CURRENT_RESOURCE_RESOLVER.get()
+                        metadata = replace(metric_instance.metadata)
+                        if provider is not None:
+                            ident = metadata.identity
+                            metadata = replace(
+                                metadata,
+                                identity=replace(
+                                    ident,
+                                    provider_path=provider.identity.provider_path,
+                                    provider_dir=provider.identity.provider_dir,
+                                ),
+                            )
+                        dependencies = (
+                            resolver.direct_dependencies_for(
+                                provider.identity
+                            )
+                            if provider is not None and resolver is not None
+                            else []
+                        )
                         MetricResult(
-                            name=name,
-                            metadata=replace(
-                                metric_instance.metadata
-                            ),  # use replace to create a copy
+                            metadata=metadata,
+                            dependencies=dependencies,
                             assertion_results=assertions_results,
                             value=value,
                         )
@@ -649,6 +714,7 @@ def metric(
             scope=scope,
             on_resolve=on_resolve_hook,
             on_injection=on_injection_hook,
+            origin_fn=fn,
         )
 
     msg = f"""

@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from rich.console import Console, Group, RenderableType
+from rich.markup import escape
 from rich.text import Text
 from rich.tree import Tree
 
@@ -25,10 +26,12 @@ from .shared import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from rue.testing.models.definition import TestDefinition
     from rue.testing.models.result import TestExecution
 
-    from .state import SessionState
+    from .reporter import ConsoleReporter
 
 
 class OutputMode(ABC):
@@ -43,11 +46,26 @@ class OutputMode(ABC):
     def show_collected_count(self) -> bool:
         return True
 
-    @abstractmethod
-    def render_live(self, state: SessionState) -> RenderableType: ...
+    @property
+    def show_progress_bar(self) -> bool:
+        return False
 
     @abstractmethod
-    def print_test(self, execution: TestExecution, state: SessionState) -> None: ...
+    def render_live(self, state: ConsoleReporter) -> RenderableType: ...
+
+    @abstractmethod
+    def print_test(self, execution: TestExecution, state: ConsoleReporter) -> None: ...
+
+    def print_completed_module(
+        self,
+        path: Path,
+        items: list[TestDefinition],
+        state: ConsoleReporter,
+    ) -> None:
+        for item in items:
+            execution = state.executions.get(id(item))
+            if execution is not None:
+                self.print_test(execution, state)
 
 
 class QuietMode(OutputMode):
@@ -55,20 +73,22 @@ class QuietMode(OutputMode):
     def show_collected_count(self) -> bool:
         return False
 
-    def render_live(self, state: SessionState) -> RenderableType:
+    def render_live(self, state: ConsoleReporter) -> RenderableType:
         text = Text.from_markup(
             f"Running tests... {state.completed_count}/{state.total_tests} completed"
         )
         return render_spinner_line(text)
 
-    def print_test(self, execution: TestExecution, state: SessionState) -> None:
+    def print_test(self, execution: TestExecution, state: ConsoleReporter) -> None:
         pass
 
 
 class CompactMode(OutputMode):
-    def render_live(self, state: SessionState) -> RenderableType:
+    def render_live(self, state: ConsoleReporter) -> RenderableType:
         lines: list[RenderableType] = []
         for path, items in state.items_by_file.items():
+            if path in state.completed_modules:
+                continue
             rel = safe_relative_path(path)
             line = Text(f" • {rel.as_posix()} ")
             has_running = False
@@ -83,7 +103,7 @@ class CompactMode(OutputMode):
             lines.append(render_spinner_line(line) if has_running else line)
         return Group(*lines) if lines else Text("")
 
-    def print_test(self, execution: TestExecution, state: SessionState) -> None:
+    def print_test(self, execution: TestExecution, state: ConsoleReporter) -> None:
         item = execution.item
         style = STATUS_STYLES[execution.result.status]
         if state.current_module != item.module_path:
@@ -94,15 +114,37 @@ class CompactMode(OutputMode):
             state.current_module = item.module_path
         self.console.print(Text(style.symbol, style=style.color), end="")
 
+    def print_completed_module(
+        self,
+        path: Path,
+        items: list[TestDefinition],
+        state: ConsoleReporter,
+    ) -> None:
+        rel = safe_relative_path(path)
+        line = Text(f" • {rel.as_posix()} ")
+        for item in items:
+            execution = state.executions.get(id(item))
+            if execution is not None:
+                style = STATUS_STYLES[execution.result.status]
+                line.append(style.symbol, style=style.color)
+        self.console.print(line)
+        state.current_module = path
+
 
 class VerboseMode(OutputMode):
     @property
     def show_failures(self) -> bool:
         return True
 
-    def render_live(self, state: SessionState) -> RenderableType:
+    @property
+    def show_progress_bar(self) -> bool:
+        return True
+
+    def render_live(self, state: ConsoleReporter) -> RenderableType:
         trees: list[Tree] = []
         for path, items in state.items_by_file.items():
+            if path in state.completed_modules:
+                continue
             rel = safe_relative_path(path)
             tree = Tree(f"• {rel.as_posix()}")
             for item in items:
@@ -121,7 +163,7 @@ class VerboseMode(OutputMode):
         return Group(*trees) if trees else Text("")
 
     def _early_sub_executions(
-        self, item: TestDefinition, state: SessionState
+        self, item: TestDefinition, state: ConsoleReporter
     ) -> list[TestExecution]:
         """Sub-executions that completed before the parent finished."""
         return [
@@ -132,7 +174,23 @@ class VerboseMode(OutputMode):
             and ex.definition.module_path == item.module_path
         ]
 
-    def print_test(self, execution: TestExecution, state: SessionState) -> None:
+    def print_completed_module(
+        self,
+        path: Path,
+        items: list[TestDefinition],
+        state: ConsoleReporter,
+    ) -> None:
+        rel = safe_relative_path(path)
+        tree = Tree(f"• {rel.as_posix()}")
+        for item in items:
+            execution = state.executions.get(id(item))
+            branch = tree.add(self._build_live_item_line(item, execution))
+            if execution is not None and execution.sub_executions:
+                self._add_live_sub_executions(branch, execution.sub_executions, state)
+        self.console.print(tree)
+        state.current_module = path
+
+    def print_test(self, execution: TestExecution, state: ConsoleReporter) -> None:
         item = execution.item
         if state.current_module != item.module_path:
             rel = safe_relative_path(item.module_path)
@@ -175,7 +233,7 @@ class VerboseMode(OutputMode):
         return text
 
     def _add_live_composite_children(
-        self, parent: Tree, test: CompositeTest, state: SessionState
+        self, parent: Tree, test: CompositeTest, state: ConsoleReporter
     ) -> None:
         for child in test.children:
             child_exec = state.executions.get(id(child.definition))
@@ -193,7 +251,7 @@ class VerboseMode(OutputMode):
             elif isinstance(child, CompositeTest):
                 node = parent.add(
                     Text.from_markup(
-                        f"{format_label(child.definition.suffix or 'case')} [dim]⋯[/dim]"
+                        f"{escape(format_label(child.definition.suffix or 'case'))} [dim]⋯[/dim]"
                     )
                 )
                 self._add_live_composite_children(node, child, state)
@@ -202,7 +260,7 @@ class VerboseMode(OutputMode):
         self,
         parent: Tree,
         sub_executions: list[TestExecution],
-        state: SessionState,
+        state: ConsoleReporter,
     ) -> None:
         for sub in sub_executions:
             node = parent

@@ -4,28 +4,26 @@ import asyncio
 import inspect
 from collections.abc import AsyncGenerator, Generator
 from contextvars import ContextVar
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from rue.context.runtime import (
     CURRENT_RESOURCE_CONSUMER,
+    CURRENT_RESOURCE_CONSUMER_KIND,
+    CURRENT_RESOURCE_PROVIDER,
+    CURRENT_RESOURCE_RESOLVER,
     CURRENT_TEST,
     bind,
 )
-from rue.resources.registry import ResourceDef, ResourceRegistry, Scope
+from rue.resources.registry import (
+    ResourceDef,
+    ResourceIdentity,
+    ResourceRegistry,
+    Scope,
+)
 
 
-@dataclass(frozen=True, slots=True)
-class ResourceKey:
-    """Cache and resolution identity for a resource provider."""
-
-    scope: Scope
-    name: str
-    provider_dir: Path | None = None
-
-
-_RESOLUTION_PATH: ContextVar[tuple[ResourceKey, ...]] = ContextVar(
+_RESOLUTION_PATH: ContextVar[tuple[ResourceIdentity, ...]] = ContextVar(
     "resource_resolution_path",
     default=(),
 )
@@ -41,17 +39,22 @@ class ResourceResolver:
         parent: "ResourceResolver | None" = None,
     ) -> None:
         self._registry = registry
-        self._cache: dict[ResourceKey, Any] = {}
+        self._cache: dict[ResourceIdentity, Any] = {}
         self._teardowns: list[
             tuple[
-                ResourceKey,
+                ResourceIdentity,
                 ResourceDef,
                 Generator[Any, None, None] | AsyncGenerator[Any, None],
             ]
         ] = []
         self._parent = parent
-        self._shared_creation_locks: dict[ResourceKey, asyncio.Lock] = (
+        self._shared_creation_locks: dict[ResourceIdentity, asyncio.Lock] = (
             parent._shared_creation_locks if parent is not None else {}
+        )
+        self._shared_dependency_graph: dict[
+            ResourceIdentity, list[ResourceIdentity]
+        ] = (
+            parent._shared_dependency_graph if parent is not None else {}
         )
 
     def _owner_resolver_for_scope(self, scope: Scope) -> "ResourceResolver":
@@ -60,7 +63,7 @@ class ResourceResolver:
         return self
 
     @staticmethod
-    def _cycle_label(key: ResourceKey) -> str:
+    def _cycle_label(key: ResourceIdentity) -> str:
         if key.provider_dir is None:
             return f"{key.scope.value}:{key.name}"
         return f"{key.scope.value}:{key.name}@{key.provider_dir}"
@@ -94,38 +97,47 @@ class ResourceResolver:
         *,
         name: str,
         definition: ResourceDef,
-        cache_key: ResourceKey,
+        cache_key: ResourceIdentity,
     ) -> Any:
         kwargs = {}
-        with bind(CURRENT_RESOURCE_CONSUMER, name):
+        with (
+            bind(CURRENT_RESOURCE_CONSUMER, name),
+            bind(CURRENT_RESOURCE_CONSUMER_KIND, "resource"),
+            bind(CURRENT_RESOURCE_PROVIDER, definition),
+            bind(CURRENT_RESOURCE_RESOLVER, self),
+        ):
             for dependency in definition.dependencies:
                 kwargs[dependency] = await self.resolve(dependency)
 
-        if definition.is_async_generator:
-            generator = definition.fn(**kwargs)
-            value = await generator.__anext__()
-            self._register_teardown(cache_key, definition, generator)
-        elif definition.is_generator:
-            generator = definition.fn(**kwargs)
-            value = next(generator)
-            self._register_teardown(cache_key, definition, generator)
-        elif definition.is_async:
-            value = await definition.fn(**kwargs)
-        else:
-            value = definition.fn(**kwargs)
+        with (
+            bind(CURRENT_RESOURCE_PROVIDER, definition),
+            bind(CURRENT_RESOURCE_RESOLVER, self),
+        ):
+            if definition.is_async_generator:
+                generator = definition.fn(**kwargs)
+                value = await generator.__anext__()
+                self._register_teardown(cache_key, definition, generator)
+            elif definition.is_generator:
+                generator = definition.fn(**kwargs)
+                value = next(generator)
+                self._register_teardown(cache_key, definition, generator)
+            elif definition.is_async:
+                value = await definition.fn(**kwargs)
+            else:
+                value = definition.fn(**kwargs)
 
-        if definition.on_resolve:
-            try:
-                value = definition.on_resolve(value)
-                if inspect.iscoroutine(value):
-                    value = await value
-            except Exception as e:
-                raise RuntimeError(
-                    f"Hook {definition.on_resolve.__name__} failed for resource '{name}': {e}"
-                ) from e
+            if definition.on_resolve:
+                try:
+                    value = definition.on_resolve(value)
+                    if inspect.iscoroutine(value):
+                        value = await value
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Hook {definition.on_resolve.__name__} failed for resource '{name}': {e}"
+                    ) from e
 
         self._cache[cache_key] = value
-        if definition.scope in {Scope.SUITE, Scope.SESSION} and self._parent:
+        if definition.identity.scope in {Scope.SUITE, Scope.SESSION} and self._parent:
             self._parent._cache[cache_key] = value
         return value
 
@@ -139,7 +151,7 @@ class ResourceResolver:
 
     def _register_teardown(
         self,
-        key: ResourceKey,
+        key: ResourceIdentity,
         definition: ResourceDef,
         generator: Generator[Any, None, None] | AsyncGenerator[Any, None],
     ) -> None:
@@ -148,14 +160,24 @@ class ResourceResolver:
             return
         self._teardowns.append((key, definition, generator))
 
+    def _record_dependency(
+        self,
+        parent: ResourceIdentity,
+        dependency: ResourceIdentity,
+    ) -> None:
+        direct = self._shared_dependency_graph.setdefault(parent, [])
+        if dependency not in direct:
+            direct.append(dependency)
+
+    def direct_dependencies_for(
+        self, identity: ResourceIdentity
+    ) -> list[ResourceIdentity]:
+        return list(self._shared_dependency_graph.get(identity, []))
+
     async def resolve(self, name: str) -> Any:
         selected = self._registry.select(name, self._request_path())
         definition = selected.definition
-        cache_key = ResourceKey(
-            scope=definition.scope,
-            name=name,
-            provider_dir=selected.provider_dir,
-        )
+        cache_key = definition.identity
 
         path = _RESOLUTION_PATH.get()
         if cache_key in path:
@@ -168,11 +190,14 @@ class ResourceResolver:
 
         token = _RESOLUTION_PATH.set((*path, cache_key))
         try:
-            owner = self._owner_resolver_for_scope(definition.scope)
+            owner = self._owner_resolver_for_scope(definition.identity.scope)
+            parent = CURRENT_RESOURCE_PROVIDER.get()
+            if parent is not None:
+                self._record_dependency(parent.identity, cache_key)
 
             if cache_key in owner._cache:
                 value = owner._cache[cache_key]
-            elif definition.scope in {Scope.SUITE, Scope.SESSION}:
+            elif definition.identity.scope in {Scope.SUITE, Scope.SESSION}:
                 lock = owner._shared_creation_locks.setdefault(
                     cache_key, asyncio.Lock()
                 )
@@ -195,7 +220,13 @@ class ResourceResolver:
             if owner is not self and cache_key in owner._cache:
                 self._cache[cache_key] = owner._cache[cache_key]
 
-            return await self._apply_on_injection(definition, name, value)
+            with (
+                bind(CURRENT_RESOURCE_PROVIDER, definition),
+                bind(CURRENT_RESOURCE_RESOLVER, owner),
+            ):
+                return await self._apply_on_injection(
+                    definition, name, value
+                )
         finally:
             _RESOLUTION_PATH.reset(token)
 
@@ -206,35 +237,39 @@ class ResourceResolver:
         teardown_errors: list[Exception] = []
 
         for key, definition, generator in reversed(self._teardowns):
-            try:
-                if isinstance(generator, AsyncGenerator):
-                    try:
-                        await generator.__anext__()
-                    except StopAsyncIteration:
-                        pass
-                else:
-                    try:
-                        next(generator)
-                    except StopIteration:
-                        pass
-            except Exception as e:
-                teardown_errors.append(
-                    RuntimeError(
-                        f"Generator teardown failed for resource '{key.name}': {e}"
-                    )
-                )
-
-            if definition.on_teardown and key in self._cache:
+            with (
+                bind(CURRENT_RESOURCE_PROVIDER, definition),
+                bind(CURRENT_RESOURCE_RESOLVER, self),
+            ):
                 try:
-                    result = definition.on_teardown(self._cache[key])
-                    if inspect.iscoroutine(result):
-                        await result
+                    if isinstance(generator, AsyncGenerator):
+                        try:
+                            await generator.__anext__()
+                        except StopAsyncIteration:
+                            pass
+                    else:
+                        try:
+                            next(generator)
+                        except StopIteration:
+                            pass
                 except Exception as e:
                     teardown_errors.append(
                         RuntimeError(
-                            f"Hook {definition.on_teardown.__name__} failed for resource '{key.name}': {e}"
+                            f"Generator teardown failed for resource '{key.name}': {e}"
                         )
                     )
+
+                if definition.on_teardown and key in self._cache:
+                    try:
+                        result = definition.on_teardown(self._cache[key])
+                        if inspect.iscoroutine(result):
+                            await result
+                    except Exception as e:
+                        teardown_errors.append(
+                            RuntimeError(
+                                f"Hook {definition.on_teardown.__name__} failed for resource '{key.name}': {e}"
+                            )
+                        )
         self._teardowns.clear()
 
         if teardown_errors:
@@ -248,7 +283,7 @@ class ResourceResolver:
         teardown_errors: list[Exception] = []
         to_keep: list[
             tuple[
-                ResourceKey,
+                ResourceIdentity,
                 ResourceDef,
                 Generator[Any, None, None] | AsyncGenerator[Any, None],
             ]
@@ -258,35 +293,39 @@ class ResourceResolver:
             if key.scope != scope:
                 to_keep.append((key, definition, generator))
                 continue
-            try:
-                if isinstance(generator, AsyncGenerator):
-                    try:
-                        await generator.__anext__()
-                    except StopAsyncIteration:
-                        pass
-                else:
-                    try:
-                        next(generator)
-                    except StopIteration:
-                        pass
-            except Exception as e:
-                teardown_errors.append(
-                    RuntimeError(
-                        f"Generator teardown failed for resource '{key.name}': {e}"
-                    )
-                )
-
-            if definition.on_teardown and key in owner._cache:
+            with (
+                bind(CURRENT_RESOURCE_PROVIDER, definition),
+                bind(CURRENT_RESOURCE_RESOLVER, owner),
+            ):
                 try:
-                    result = definition.on_teardown(owner._cache[key])
-                    if inspect.iscoroutine(result):
-                        await result
+                    if isinstance(generator, AsyncGenerator):
+                        try:
+                            await generator.__anext__()
+                        except StopAsyncIteration:
+                            pass
+                    else:
+                        try:
+                            next(generator)
+                        except StopIteration:
+                            pass
                 except Exception as e:
                     teardown_errors.append(
                         RuntimeError(
-                            f"Hook {definition.on_teardown.__name__} failed for resource '{key.name}': {e}"
+                            f"Generator teardown failed for resource '{key.name}': {e}"
                         )
                     )
+
+                if definition.on_teardown and key in owner._cache:
+                    try:
+                        result = definition.on_teardown(owner._cache[key])
+                        if inspect.iscoroutine(result):
+                            await result
+                    except Exception as e:
+                        teardown_errors.append(
+                            RuntimeError(
+                                f"Hook {definition.on_teardown.__name__} failed for resource '{key.name}': {e}"
+                            )
+                        )
             owner._cache.pop(key, None)
 
         owner._teardowns = list(reversed(to_keep))

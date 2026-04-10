@@ -16,6 +16,7 @@ from rue.assertions.base import AssertionResult
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
     CURRENT_RESOURCE_CONSUMER,
+    CURRENT_RESOURCE_CONSUMER_KIND,
     CURRENT_TEST,
     CURRENT_TEST_TRACER,
     TestContext,
@@ -225,7 +226,10 @@ class SingleTest(Test):
     ) -> dict[str, Any]:
         """Resolve test parameters from resources."""
         kwargs = dict(self.params)
-        with bind(CURRENT_RESOURCE_CONSUMER, self.definition.name):
+        with (
+            bind(CURRENT_RESOURCE_CONSUMER, self.definition.name),
+            bind(CURRENT_RESOURCE_CONSUMER_KIND, "test"),
+        ):
             for param in self.definition.params:
                 if param not in kwargs:
                     kwargs[param] = await resolver.resolve(param)

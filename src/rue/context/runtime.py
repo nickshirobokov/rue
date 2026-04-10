@@ -9,6 +9,8 @@ from uuid import UUID
 
 
 if TYPE_CHECKING:
+    from rue.resources.registry import ResourceDef
+    from rue.resources.resolver import ResourceResolver
     from rue.testing.models import TestDefinition
     from rue.testing.runner import Runner
     from rue.testing.tracing import TestTracer
@@ -39,6 +41,15 @@ CURRENT_RUNNER: ContextVar[Runner | None] = ContextVar(
 )
 CURRENT_RESOURCE_CONSUMER: ContextVar[str | None] = ContextVar(
     "current_resource_consumer", default=None
+)
+CURRENT_RESOURCE_CONSUMER_KIND: ContextVar[str | None] = ContextVar(
+    "current_resource_consumer_kind", default=None
+)
+CURRENT_RESOURCE_PROVIDER: ContextVar[ResourceDef | None] = ContextVar(
+    "current_resource_provider", default=None
+)
+CURRENT_RESOURCE_RESOLVER: ContextVar[ResourceResolver | None] = ContextVar(
+    "current_resource_resolver", default=None
 )
 
 

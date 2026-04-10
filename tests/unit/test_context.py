@@ -14,8 +14,8 @@ from rue.context.runtime import (
     TestContext as Ctx,
     bind,
 )
-from rue.resources import registry
-from rue.resources.metrics.base import Metric
+from rue.resources import ResourceIdentity, Scope, registry
+from rue.resources.metrics.base import Metric, MetricMetadata
 from rue.testing.discovery import TestItem
 
 
@@ -76,8 +76,16 @@ def test_assertionresult_appends_to_test_context():
 def test_metrics_records_assertion_passed_and_reads_test_context_for_metadata():
     test_ctx = Ctx(item=_make_item("my_merit"))
 
-    m1 = Metric(name="m1")
-    m2 = Metric(name="m2")
+    m1 = Metric(
+        metadata=MetricMetadata(
+            identity=ResourceIdentity(name="m1", scope=Scope.SESSION)
+        )
+    )
+    m2 = Metric(
+        metadata=MetricMetadata(
+            identity=ResourceIdentity(name="m2", scope=Scope.SESSION)
+        )
+    )
 
     with bind(CURRENT_TEST, test_ctx), metrics(m1, m2):
         # AssertionResult.__post_init__ calls metric.add_record(self.passed)

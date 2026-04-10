@@ -2,20 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rich.console import Console, Group, RenderableType
+from rich.live import Live
 from rich.rule import Rule
 from rich.text import Text
 
 from rue.reports.base import Reporter
 
-from .failures import FailureRenderer
-from .live import LiveDisplay
+from .assertions import AssertionRenderer
+from .captured import CapturedOutputRenderer, StderrCapture
+from .failures import ExceptionRenderer
 from .metrics import MetricsRenderer
 from .modes import OutputMode, make_mode
-from .state import SessionState
+from .shared import render_progress_bar
+
+from rue.testing.models import TestStatus
 
 if TYPE_CHECKING:
     from rue.config import RueConfig
@@ -29,16 +35,31 @@ class ConsoleReporter(Reporter):
     def __init__(self, console: Console | None = None, verbosity: int = 0) -> None:
         self.console = console or Console(file=sys.__stdout__)
         self.verbosity = verbosity
-        self._state = SessionState()
         self._mode: OutputMode = make_mode(verbosity, self.console)
-        self._live = LiveDisplay(self.console)
-        self._failures = FailureRenderer()
+        self._live: Live | None = None
+        self._assertions = AssertionRenderer()
+        self._exceptions = ExceptionRenderer()
         self._metrics = MetricsRenderer()
+        self._stderr_capture = StderrCapture()
+        self._captured_renderer = CapturedOutputRenderer()
+        self._lock = asyncio.Lock()
+        self.items: list[TestDefinition] = []
+        self.item_ids: set[int] = set()
+        self.items_by_file: dict[Path, list[TestDefinition]] = {}
+        self.total_tests: int = 0
+        self.completed_count: int = 0
+        self.tests: dict[int, Test] = {}
+        self.executions: dict[int, TestExecution] = {}
+        self.failures: list[TestExecution] = []
+        self._status_counts: dict[TestStatus, int] = {}
+        self.current_module: Path | None = None
+        self.completed_modules: set[Path] = set()
 
     def configure(self, config: RueConfig) -> None:
         self.verbosity = config.verbosity
         self._mode = make_mode(self.verbosity, self.console)
-        self._failures = FailureRenderer(show_locals=config.verbosity >= 2)
+        self._assertions = AssertionRenderer()
+        self._exceptions = ExceptionRenderer(show_locals=config.verbosity >= 2)
 
     # ── Run header & summary ──────────────────────────────────────────────────
 
@@ -83,6 +104,17 @@ class ConsoleReporter(Reporter):
             Rule(characters="="),
         )
 
+    def _build_live_display(self) -> RenderableType:
+        if self.items_by_file and len(self.completed_modules) == len(self.items_by_file):
+            return Text("")
+        live = self._mode.render_live(self)
+        if not self._mode.show_progress_bar:
+            return live
+        return Group(
+            render_progress_bar(self.completed_count, self.total_tests, self._status_counts),
+            live,
+        )
+
     # ── Reporter hooks ────────────────────────────────────────────────────────
 
     async def on_no_tests_found(self) -> None:
@@ -91,8 +123,22 @@ class ConsoleReporter(Reporter):
     async def on_collection_complete(
         self, items: list[TestDefinition], run: Run
     ) -> None:
-        self._live.stop()
-        self._state.reset(items)
+        if self._live is not None:
+            self._live.stop()
+            self._live = None
+        self.items = list(items)
+        self.item_ids = {id(item) for item in items}
+        self.items_by_file = {}
+        for item in items:
+            self.items_by_file.setdefault(item.module_path, []).append(item)
+        self.total_tests = len(items)
+        self.completed_count = 0
+        self.tests = {}
+        self.executions = {}
+        self.failures = []
+        self._status_counts = {}
+        self.current_module = None
+        self.completed_modules = set()
 
         self.console.print(self._build_run_header(run.environment, run.run_id))
         self.console.print()
@@ -100,51 +146,86 @@ class ConsoleReporter(Reporter):
             self.console.print(f"[bold]Collected {len(items)} tests[/bold]\n")
 
         if self.console.is_terminal:
-            self._live.start(self._mode.render_live(self._state))
+            self._live = Live(
+                self._build_live_display(),
+                console=self.console,
+                auto_refresh=True,
+                refresh_per_second=1,
+                transient=False,
+                redirect_stdout=False,
+                redirect_stderr=False,
+            )
+            self._live.start()
+        if self.verbosity >= 2:
+            self._stderr_capture.start()
 
     async def on_tests_ready(self, tests: list[Test]) -> None:
         for test in tests:
-            self._state.tests[id(test.definition)] = test
+            self.tests[id(test.definition)] = test
 
     async def on_test_start(self, item: TestDefinition) -> None:
-        if self._live.active:
-            self._live.refresh(self._mode.render_live(self._state))
+        if self._live is not None:
+            self._live.update(self._build_live_display(), refresh=True)
 
     async def on_execution_complete(self, execution: TestExecution) -> None:
-        self._state.executions[id(execution.definition)] = execution
+        async with self._lock:
+            self.executions[id(execution.definition)] = execution
 
-        is_top_level = id(execution.definition) in self._state.item_ids
-        if is_top_level:
-            self._state.completed_count += 1
-            if execution.result.status.is_failure:
-                self._state.failures.append(execution)
+            is_top_level = id(execution.definition) in self.item_ids
+            if is_top_level:
+                self.completed_count += 1
+                status = execution.result.status
+                self._status_counts[status] = self._status_counts.get(status, 0) + 1
+                if status.is_failure:
+                    self.failures.append(execution)
 
-        if self._live.active:
-            self._live.refresh(self._mode.render_live(self._state))
-            return
+            if self._live is not None:
+                module_path = execution.definition.module_path
+                if (
+                    module_path not in self.completed_modules
+                    and all(id(i) in self.executions for i in self.items_by_file.get(module_path, []))
+                ):
+                    self._mode.print_completed_module(
+                        module_path, self.items_by_file[module_path], self
+                    )
+                    self.completed_modules.add(module_path)
+                self._live.update(self._build_live_display(), refresh=True)
+                return
 
-        if not is_top_level:
-            return
+            if not is_top_level:
+                return
 
-        self._mode.print_test(execution, self._state)
+            self._mode.print_test(execution, self)
 
     async def on_run_complete(self, run: Run) -> None:
-        self._live.stop()
+        self._stderr_capture.stop()
 
-        if self.verbosity == 0 and self._state.current_module is not None:
+        if self._live is not None:
+            self._live.stop()
+            self._live = None
+
+        if self.verbosity == 0 and self.current_module is not None:
             self.console.print()
 
-        if self._mode.show_failures and self._state.failures:
-            for renderable in self._failures.render(self._state.failures):
+        if self._mode.show_failures and self.failures:
+            for renderable in self._assertions.render(self.failures):
+                self.console.print(renderable)
+            for renderable in self._exceptions.render(self.failures):
                 self.console.print(renderable)
 
         if run.result.stopped_early:
             self.console.print("[yellow]Run terminated early.[/yellow]")
 
         for renderable in self._metrics.render(
-            run.result.metric_results, self.verbosity
+            run.result.metric_results,
+            self.verbosity,
+            run.result.executions,
         ):
             self.console.print(renderable)
+
+        if self.verbosity >= 2:
+            for renderable in self._captured_renderer.render(self._stderr_capture.lines):
+                self.console.print(renderable)
 
         self.console.print()
         self.console.print(self._build_summary(run))
