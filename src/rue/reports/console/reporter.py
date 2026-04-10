@@ -156,8 +156,7 @@ class ConsoleReporter(Reporter):
                 redirect_stderr=False,
             )
             self._live.start()
-        if self.verbosity >= 2:
-            self._stderr_capture.start()
+        self._stderr_capture.start()
 
     async def on_tests_ready(self, tests: list[Test]) -> None:
         for test in tests:

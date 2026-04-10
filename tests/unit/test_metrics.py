@@ -17,7 +17,8 @@ from rue.context.runtime import (
     bind,
 )
 from rue.resources import ResourceIdentity, ResourceResolver, Scope, registry
-from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult, metric
+from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
+from rue.resources.metrics.decorator import metric
 from rue.testing.discovery import TestItem
 
 
