@@ -27,6 +27,7 @@ class IterateDecorator:
         modifiers: list[Any] = getattr(target, "__rue_modifiers__", [])
         modifiers.append(modifier)
         target.__rue_modifiers__ = modifiers  # type: ignore[attr-defined]
+        target.__rue_test__ = True  # type: ignore[attr-defined]
         return target
 
     def _resolve_min_passes(
@@ -130,6 +131,7 @@ class IterateDecorator:
             match definition_error:
                 case str() as err:
                     target.__rue_definition_error__ = err  # type: ignore[attr-defined]
+                    target.__rue_test__ = True  # type: ignore[attr-defined]
                     return target
                 case _:
                     return self._attach_modifier(target, modifier)
@@ -163,6 +165,7 @@ class IterateDecorator:
         def decorator(target: Callable[..., Any]) -> Callable[..., Any]:
             if definition_error:
                 target.__rue_definition_error__ = definition_error  # type: ignore[attr-defined]
+                target.__rue_test__ = True  # type: ignore[attr-defined]
                 return target
             if modifier is None:
                 return target
@@ -196,6 +199,7 @@ class IterateDecorator:
         def decorator(target: Callable[..., Any]) -> Callable[..., Any]:
             if definition_error:
                 target.__rue_definition_error__ = definition_error  # type: ignore[attr-defined]
+                target.__rue_test__ = True  # type: ignore[attr-defined]
                 return target
             if modifier is None:
                 return target

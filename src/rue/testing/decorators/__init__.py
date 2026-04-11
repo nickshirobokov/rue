@@ -1,6 +1,7 @@
 """Test decorators."""
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from typing import Any
 
 from rue.testing.decorators.iterate import iterate
 from rue.testing.decorators.tag import (
@@ -11,17 +12,13 @@ from rue.testing.decorators.tag import (
 )
 
 
-@dataclass(frozen=True)
-class TestDecoratorNamespace: #temp object until we figure out what raw test decorator should do 
-    iterate: object
-    tag: object
+def test(fn: Callable[..., Any]) -> Callable[..., Any]:
+    fn.__rue_test__ = True  # type: ignore[attr-defined]
+    return fn
 
-
-test = TestDecoratorNamespace(iterate=iterate, tag=tag)
 
 __all__ = [
     "TagData",
-    "TestDecoratorNamespace",
     "get_tag_data",
     "iterate",
     "merge_tag_data",

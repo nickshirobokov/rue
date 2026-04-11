@@ -16,16 +16,16 @@ from rue.context.runtime import (
 )
 from rue.resources import ResourceIdentity, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata
-from rue.testing.discovery import TestItem
+from rue.testing.models import TestDefinition
 
 
 def _make_item(
     name: str = "test_fn",
     suffix: str | None = None,
     case_id=None,
-) -> TestItem:
-    """Create a minimal TestItem for testing."""
-    return TestItem(
+) -> TestDefinition:
+    """Create a minimal TestDefinition for testing."""
+    return TestDefinition(
         name=name,
         fn=lambda: None,
         module_path=Path("test.py"),

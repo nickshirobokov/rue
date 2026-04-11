@@ -2,12 +2,12 @@ import asyncio
 from pathlib import Path
 
 from rue.resources import registry, resource
-from rue.testing import Runner, test
-from rue.testing.models import ParameterSet, ParamsIterateModifier, TestItem
+from rue.testing import Runner, test as t_decorator
+from rue.testing.models import ParameterSet, ParamsIterateModifier, TestDefinition
 
 
 def test_iterate_params_invalid_inputs_are_deferred_to_execution():
-    @test.iterate.params("value", [])
+    @t_decorator.iterate.params("value", [])
     def sample(value):
         return value
 
@@ -36,7 +36,7 @@ def test_runner_iterate_params_applies_values_and_runs_all_sets(null_reporter):
         min_passes=3,
     )
 
-    item = TestItem(
+    item = TestDefinition(
         name="test_sample",
         fn=test_sample,
         module_path=Path("sample.py"),
@@ -65,11 +65,11 @@ def test_runner_iterate_params_applies_values_and_runs_all_sets(null_reporter):
 def test_runner_iterate_params_reports_invalid_definition_as_error(
     null_reporter,
 ):
-    @test.iterate.params("value", [])
+    @t_decorator.iterate.params("value", [])
     def test_invalid(value):
         return value
 
-    item = TestItem(
+    item = TestDefinition(
         name="test_invalid",
         fn=test_invalid,
         module_path=Path("sample.py"),
@@ -99,7 +99,7 @@ def test_runner_iterate_params_uses_min_passes_threshold(null_reporter):
         if value == "three":
             raise AssertionError("boom")
 
-    item = TestItem(
+    item = TestDefinition(
         name="test_sample",
         fn=test_sample,
         module_path=Path("sample.py"),
@@ -129,7 +129,7 @@ def test_iterate_params_formats_default_suffixes():
     obj = {"nested": [1, 2, 3], "enabled": True}
     long_value = "abcdefghijklmnopqrstuvwxyz1234567890"
 
-    @test.iterate.params(
+    @t_decorator.iterate.params(
         "short,long_value,obj",
         [
             (

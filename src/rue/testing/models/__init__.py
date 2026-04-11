@@ -14,9 +14,6 @@ from rue.testing.models.run import Run, RunEnvironment, RunResult
 from rue.testing.models.case import Case, CaseGroup
 
 
-# Backwards compatibility alias
-TestItem = TestDefinition
-
 __all__ = [
     "Case",
     "CaseGroup",
@@ -31,7 +28,6 @@ __all__ = [
     "RunEnvironment",
     "RunResult",
     "TestExecution",
-    "TestItem",  # alias
     "TestResult",
     "TestStatus",
 ]

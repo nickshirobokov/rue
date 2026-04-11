@@ -67,6 +67,7 @@ class TagDecorator:
                 if not name:
                     continue
                 data.tags.add(str(name))
+            target.__rue_test__ = True
             return target
 
         return decorator
@@ -76,6 +77,7 @@ class TagDecorator:
             data = _ensure_tag_data(target)
             data.skip_reason = reason or "skipped via tag"
             data.tags.add("skip")
+            target.__rue_test__ = True
             return target
 
         return decorator
@@ -91,6 +93,7 @@ class TagDecorator:
             data.xfail_reason = reason or "expected failure"
             data.xfail_strict = strict
             data.tags.add("xfail")
+            target.__rue_test__ = True
             return target
 
         return decorator
@@ -101,11 +104,13 @@ class TagDecorator:
             data = _ensure_tag_data(target)
             data.inline = True
             data.tags.add("inline")
+            target.__rue_test__ = True
             return target
 
         return decorator
 
 
 tag = TagDecorator()
+
 
 __all__ = ["TagData", "TagDecorator", "get_tag_data", "merge_tag_data", "tag"]

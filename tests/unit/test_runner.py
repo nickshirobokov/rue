@@ -26,7 +26,7 @@ from rue.testing.models import (
     ParamsIterateModifier,
     RunResult,
     TestExecution,
-    TestItem,
+    TestDefinition,
     TestResult,
     TestStatus,
 )
@@ -51,9 +51,9 @@ def make_item(
     xfail_strict: bool = False,
     suffix: str | None = None,
     case_id: UUID | None = None,
-) -> TestItem:
-    """Helper to create TestItem for testing."""
-    return TestItem(
+) -> TestDefinition:
+    """Helper to create TestDefinition for testing."""
+    return TestDefinition(
         fn=fn,
         name=name or fn.__name__,
         module_path=Path("test_module.py"),
@@ -93,10 +93,10 @@ class EventReporter(Reporter):
     async def on_no_tests_found(self) -> None:
         pass
 
-    async def on_collection_complete(self, _items: list[TestItem], _run) -> None:
+    async def on_collection_complete(self, _items: list[TestDefinition], _run) -> None:
         self.start_time = time.perf_counter()
 
-    async def on_test_start(self, item: TestItem) -> None:
+    async def on_test_start(self, item: TestDefinition) -> None:
         self._started_ids.add(id(item))
         elapsed = time.perf_counter() - self.start_time
         self.event_times.append(("start", item.name, elapsed))
@@ -635,7 +635,7 @@ class TestOpenTelemetry:
             _ = value
             await asyncio.sleep(0)
 
-        item = TestItem(
+        item = TestDefinition(
             fn=test_case,
             name="test_params_trace",
             module_path=Path("test_module.py"),
@@ -898,11 +898,11 @@ class TestConcurrency:
         *,
         name: str,
         parameter_sets: tuple[ParameterSet, ...],
-    ) -> TestItem:
+    ) -> TestDefinition:
         async def params_case(delay: float) -> None:
             await asyncio.sleep(delay)
 
-        return TestItem(
+        return TestDefinition(
             fn=params_case,
             name=name,
             module_path=Path("test_module.py"),
@@ -1004,7 +1004,7 @@ class TestConcurrency:
             await asyncio.sleep(0.01)
 
         class StartFailureReporter(EventReporter):
-            async def on_test_start(self, item: TestItem) -> None:
+            async def on_test_start(self, item: TestDefinition) -> None:
                 raise RuntimeError("start callback failed")
 
         runner = Runner(

@@ -12,11 +12,15 @@ from .testing import (
     skip,
     test,
     xfail,
+    iterate,
+    tag,
 )
 from .telemetry import OtelTraceSession
 
 resource.sut = sut
 resource.metric = metric
+test.iterate = iterate
+test.tag = tag
 
 __all__ = [
     # Core testing
@@ -24,6 +28,8 @@ __all__ = [
     "CaseGroup",
     "resource",
     "test",
+    "iterate",
+    "tag",
     "skip",
     "fail",
     "xfail",

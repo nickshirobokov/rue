@@ -67,6 +67,17 @@ def _is_test_root(expr: ast.expr) -> bool:
     return False
 
 
+def _is_rue_test_decorator(expr: ast.expr) -> bool:
+    """Return True if the decorator AST node roots at `test` or `rue.test`."""
+    if isinstance(expr, ast.Call):
+        return _is_rue_test_decorator(expr.func)
+    if _is_test_root(expr):
+        return True
+    if isinstance(expr, ast.Attribute):
+        return _is_rue_test_decorator(expr.value)
+    return False
+
+
 def _is_tag_root(expr: ast.expr) -> bool:
     return (
         isinstance(expr, ast.Attribute)
@@ -112,7 +123,9 @@ def _collect_static_from_module(path: Path) -> list[StaticTestReference]:
 
     for node in module.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name.startswith("test_"):
+            if node.name.startswith("test_") or any(
+                _is_rue_test_decorator(d) for d in node.decorator_list
+            ):
                 refs.append(
                     StaticTestReference(
                         name=node.name,
@@ -130,7 +143,10 @@ def _collect_static_from_module(path: Path) -> list[StaticTestReference]:
                 if isinstance(
                     class_node, (ast.FunctionDef, ast.AsyncFunctionDef)
                 ):
-                    if class_node.name.startswith("test_"):
+                    if class_node.name.startswith("test_") or any(
+                        _is_rue_test_decorator(d)
+                        for d in class_node.decorator_list
+                    ):
                         tags = class_tags | _extract_static_tags(
                             class_node.decorator_list
                         )
@@ -239,7 +255,9 @@ def _collect_from_module(
     items: list[TestDefinition] = []
 
     for name, obj in inspect.getmembers(module):
-        if name.startswith("test_") and inspect.isfunction(obj):
+        if inspect.isfunction(obj) and (
+            name.startswith("test_") or getattr(obj, "__rue_test__", False)
+        ):
             items.append(_build_item_for_callable(obj, name, module_path))
 
         elif name.startswith("Test") and inspect.isclass(obj):
@@ -247,7 +265,9 @@ def _collect_from_module(
             for method_name, method in inspect.getmembers(
                 obj, predicate=inspect.isfunction
             ):
-                if method_name.startswith("test_"):
+                if method_name.startswith("test_") or getattr(
+                    method, "__rue_test__", False
+                ):
                     items.append(
                         _build_item_for_callable(
                             method,
