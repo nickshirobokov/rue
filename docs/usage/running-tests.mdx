@@ -321,7 +321,7 @@ All reporters implement the `Reporter` ABC from `src/rue/reports/base.py`:
 ```python
 class Reporter(ABC):
     @abstractmethod
-    def configure(self, config: RueConfig) -> None:
+    def configure(self, config: Config) -> None:
         """Adjust reporter parameters from runtime config."""
 
     @abstractmethod
@@ -398,7 +398,7 @@ Override `on_test_start` if you need live in-flight state:
 import json
 from pathlib import Path
 
-from rue.config import RueConfig
+from rue.config import Config
 from rue.reports.base import Reporter
 from rue.testing import Run, TestDefinition, TestExecution
 
@@ -410,7 +410,7 @@ class JsonFileReporter(Reporter):
         self.results = []
         self.verbosity = 0
 
-    def configure(self, config: RueConfig) -> None:
+    def configure(self, config: Config) -> None:
         self.verbosity = config.verbosity
 
     async def on_no_tests_found(self) -> None:
@@ -464,7 +464,7 @@ Use multiple reporters simultaneously with the programmatic API:
 
 ```python
 import asyncio
-from rue.config import RueConfig
+from rue.config import Config
 from rue.testing import Runner
 from rue.reports import ConsoleReporter, OtelReporter
 from my_reporters import JsonFileReporter, SlackReporter
@@ -478,7 +478,7 @@ async def main():
 
     # Pass all reporters to runner
     runner = Runner(
-        config=RueConfig(),
+        config=Config(),
         reporters=[console, otel, json_reporter, slack],
     )
 

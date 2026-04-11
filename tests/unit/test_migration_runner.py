@@ -111,11 +111,11 @@ class TestMigrationRunner:
     def test_migrations_drop_otel_trace_storage_and_preserve_existing_data(
         self, sqlite_db_path: Path
     ) -> None:
-        """Migrating from v2 should remove deprecated OTEL storage without touching run data."""
+        """Migrating from v1 should remove deprecated OTEL storage without touching run data."""
         full_runner = MigrationRunner(sqlite_db_path)
         legacy_runner = MigrationRunner.__new__(MigrationRunner)
         legacy_runner.path = sqlite_db_path
-        legacy_runner._migrations = full_runner._migrations[:2]
+        legacy_runner._migrations = full_runner._migrations[:1]
         legacy_runner.migrate()
 
         conn = sqlite3.connect(sqlite_db_path)
@@ -232,7 +232,7 @@ class TestMigrationRunner:
         full_runner = MigrationRunner(sqlite_db_path)
         legacy_runner = MigrationRunner.__new__(MigrationRunner)
         legacy_runner.path = sqlite_db_path
-        legacy_runner._migrations = full_runner._migrations[:3]
+        legacy_runner._migrations = full_runner._migrations[:1]
         legacy_runner.migrate()
 
         conn = sqlite3.connect(sqlite_db_path)

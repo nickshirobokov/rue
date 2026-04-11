@@ -10,7 +10,7 @@ from rue.testing.discovery.collector import (
     collect_static,
 )
 from rue.testing.discovery.loader import RueImportSession, RueModuleLoader
-from rue.testing.models import RueTestDefinition, TestDefinition
+from rue.testing.models import TestDefinition
 
 
 # Backwards compatibility alias
@@ -21,7 +21,6 @@ __all__ = [
     "KeywordMatcher",
     "RueImportSession",
     "RueModuleLoader",
-    "RueTestDefinition",
     "StaticTestReference",
     "TestCollector",
     "TestDefinition",

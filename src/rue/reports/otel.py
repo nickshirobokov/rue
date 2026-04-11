@@ -12,7 +12,7 @@ from uuid import UUID
 from rue.reports.base import Reporter
 
 if TYPE_CHECKING:
-    from rue.config import RueConfig
+    from rue.config import Config
     from rue.telemetry.otel.runtime import OtelTraceSession
     from rue.testing import TestDefinition
     from rue.testing.models.result import TestExecution
@@ -33,7 +33,7 @@ class OtelReporter(Reporter):
     def __init__(self) -> None:
         self._prepared_run_ids: set[UUID] = set()
 
-    def configure(self, config: RueConfig) -> None:
+    def configure(self, config: Config) -> None:
         _ = config
 
     async def on_no_tests_found(self) -> None:

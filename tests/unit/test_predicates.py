@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 
-from rue.config import RueConfig
+from rue.config import Config
 from rue.context.collectors import CURRENT_PREDICATE_RESULTS
 from rue.context.runtime import bind
 from rue.predicates import PredicateResult, predicate
@@ -71,7 +71,7 @@ async def _run_module_with_tracing(
         monkeypatch.chdir(tmp_path)
         items = collect(mod_path)
         runner = Runner(
-            config=RueConfig.model_construct(
+            config=Config.model_construct(
                 otel=True,
                 db_enabled=db_enabled,
                 db_path=db_path,

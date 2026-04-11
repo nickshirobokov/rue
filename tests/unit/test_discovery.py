@@ -4,7 +4,7 @@ from textwrap import dedent
 import pytest
 
 from rue.testing.discovery import TestCollector
-from rue.config import RueConfig
+from rue.config import Config
 from rue.resources import registry
 from rue.testing.discovery import collect
 from rue.testing.runner import Runner
@@ -174,7 +174,7 @@ async def test_confrue_session_resources_resolve_hierarchically(
 
     items = collect(tmp_path)
     run = await Runner(
-        config=RueConfig.model_construct(db_enabled=False),
+        config=Config.model_construct(db_enabled=False),
         reporters=[null_reporter],
     ).run(items=items)
 
@@ -255,7 +255,7 @@ async def test_same_named_confrue_metrics_preserve_provider_identity_and_modules
 
     items = collect(tmp_path)
     run = await Runner(
-        config=RueConfig.model_construct(db_enabled=False),
+        config=Config.model_construct(db_enabled=False),
         reporters=[null_reporter],
     ).run(items=items)
 

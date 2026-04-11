@@ -181,12 +181,9 @@ def reset_load_config_cache() -> None:
     load_config.cache_clear()
 
 
-RueConfig = Config
-
 __all__ = [
     "Config",
     "PredicateConfig",
-    "RueConfig",
     "load_config",
     "reset_load_config_cache",
     "with_overrides",

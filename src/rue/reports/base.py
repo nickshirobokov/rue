@@ -8,7 +8,7 @@ from uuid import UUID
 
 
 if TYPE_CHECKING:
-    from rue.config import RueConfig
+    from rue.config import Config
     from rue.testing import TestDefinition
     from rue.testing.execution.interfaces import Test
     from rue.testing.models.result import TestExecution
@@ -34,7 +34,7 @@ class Reporter(ABC, metaclass=ReporterMeta):
     REGISTRY: ClassVar[dict[str, Reporter]] = {}
 
     @abstractmethod
-    def configure(self, config: RueConfig) -> None:
+    def configure(self, config: Config) -> None:
         """Adjust reporter parameters based on runtime config."""
 
     @abstractmethod

@@ -150,6 +150,3 @@ class Run:
             "xpassed": self.result.xpassed,
             "total": self.result.total,
         }
-
-
-RueRun = Run

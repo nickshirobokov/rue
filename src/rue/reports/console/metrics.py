@@ -20,7 +20,6 @@ from rue.resources import ResourceIdentity, Scope
 
 from .shared import (
     format_assertion_result,
-    format_label,
     oneline,
     safe_relative_path,
     truncate,
@@ -481,7 +480,7 @@ class MetricsRenderer:
     def _instance_label(self, metric: MetricResult) -> str:
         case_id = metric.primary_case_id
         if case_id:
-            return format_label(case_id)
+            return f"[{case_id}]"
         if metric.execution_id is not None:
             return str(metric.execution_id)[:8]
         ident = metric.metadata.identity
@@ -558,7 +557,7 @@ class MetricsRenderer:
         if path:
             items = [safe_relative_path(Path(v)).as_posix() if v else v for v in items]
         if case:
-            items = [format_label(v) for v in items]
+            items = [f"[{v}]" for v in items]
         rendered = ", ".join(items[:limit])
         if len(items) > limit:
             rendered += f" +{len(items) - limit}"

@@ -7,29 +7,21 @@ from typing import TYPE_CHECKING
 
 from rich.console import Console, Group, RenderableType
 from rich.markup import escape
+from rich.spinner import Spinner
+from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
 from rue.testing.execution.composite import CompositeTest
 from rue.testing.models import TestStatus
 
-from .shared import (
-    STATUS_STYLES,
-    format_label,
-    get_execution_label,
-    get_modifier_suffix,
-    get_status_extra,
-    iter_sub_executions,
-    render_spinner_line,
-    render_test_line,
-    safe_relative_path,
-)
+from .shared import STATUS_STYLES, safe_relative_path
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from rue.testing.models.definition import TestDefinition
-    from rue.testing.models.result import TestExecution
+    from rue.testing.models.result import TestExecution, TestResult
 
     from .reporter import ConsoleReporter
 
@@ -49,6 +41,13 @@ class OutputMode(ABC):
     @property
     def show_progress_bar(self) -> bool:
         return False
+
+    def _render_spinner_line(self, text: Text) -> Table:
+        line = Table.grid(padding=(0, 1))
+        line.add_column()
+        line.add_column(no_wrap=True)
+        line.add_row(text, Spinner("simpleDots", style="bold blue"))
+        return line
 
     @abstractmethod
     def render_live(self, state: ConsoleReporter) -> RenderableType: ...
@@ -77,7 +76,7 @@ class QuietMode(OutputMode):
         text = Text.from_markup(
             f"Running tests... {state.completed_count}/{state.total_tests} completed"
         )
-        return render_spinner_line(text)
+        return self._render_spinner_line(text)
 
     def print_test(self, execution: TestExecution, state: ConsoleReporter) -> None:
         pass
@@ -100,7 +99,7 @@ class CompactMode(OutputMode):
                     continue
                 style = STATUS_STYLES[execution.result.status]
                 line.append(style.symbol, style=style.color)
-            lines.append(render_spinner_line(line) if has_running else line)
+            lines.append(self._render_spinner_line(line) if has_running else line)
         return Group(*lines) if lines else Text("")
 
     def print_test(self, execution: TestExecution, state: ConsoleReporter) -> None:
@@ -139,6 +138,52 @@ class VerboseMode(OutputMode):
     @property
     def show_progress_bar(self) -> bool:
         return True
+
+    def _get_modifier_suffix(self, execution: TestExecution) -> str:
+        if execution.definition.modifiers and execution.sub_executions:
+            return f"[{execution.definition.modifiers[0].display_name}]"
+        return ""
+
+    def _render_test_line(
+        self,
+        name: str,
+        result: TestResult,
+        *,
+        extra: str = "",
+        indent: int = 2,
+    ) -> Text:
+        style = STATUS_STYLES[result.status]
+        text = Text(" " * indent + "• ")
+        text.append(name)
+        text.append(f" ({result.duration_ms:.1f}ms)", style="dim")
+        if extra:
+            text.append(f" {extra}", style="dim")
+        text.append(f" {style.label}", style=style.color)
+        return text
+
+    def _iter_sub_executions(
+        self, sub_executions: list[TestExecution], indent: int
+    ) -> list[RenderableType]:
+        renderables: list[RenderableType] = []
+        for sub in sub_executions:
+            if sub.result.status in {
+                TestStatus.PASSED,
+                TestStatus.FAILED,
+                TestStatus.ERROR,
+            }:
+                style = STATUS_STYLES[sub.result.status]
+                sub_label = f"[{sub.label}]"
+                modifier_suffix = self._get_modifier_suffix(sub)
+                line = Text(" " * indent + "• ")
+                line.append(f"{sub_label}{modifier_suffix}")
+                line.append(f" ({sub.result.duration_ms:.1f}ms)", style="dim")
+                line.append(f" {style.label}", style=style.color)
+                renderables.append(line)
+            if sub.sub_executions:
+                renderables.extend(
+                    self._iter_sub_executions(sub.sub_executions, indent + 2)
+                )
+        return renderables
 
     def render_live(self, state: ConsoleReporter) -> RenderableType:
         trees: list[Tree] = []
@@ -200,16 +245,20 @@ class VerboseMode(OutputMode):
             state.current_module = item.module_path
 
         if execution.sub_executions:
-            modifier_suffix = get_modifier_suffix(execution)
+            modifier_suffix = self._get_modifier_suffix(execution)
             self.console.print(
-                render_test_line(f"{item.full_name}{modifier_suffix}", execution.result)
+                self._render_test_line(
+                    f"{item.full_name}{modifier_suffix}", execution.result
+                )
             )
-            for renderable in iter_sub_executions(execution.sub_executions, indent=4):
+            for renderable in self._iter_sub_executions(
+                execution.sub_executions, indent=4
+            ):
                 self.console.print(renderable)
         else:
-            extra = get_status_extra(execution.result)
+            extra = execution.result.status_repr
             self.console.print(
-                render_test_line(item.full_name, execution.result, extra=extra)
+                self._render_test_line(item.full_name, execution.result, extra=extra)
             )
 
     def _build_live_item_line(
@@ -219,11 +268,11 @@ class VerboseMode(OutputMode):
     ) -> RenderableType:
         if execution is None:
             text = Text.from_markup(f"{item.full_name} [dim]⋯ running[/dim]")
-            return render_spinner_line(text)
+            return self._render_spinner_line(text)
         result = execution.result
         style = STATUS_STYLES[result.status]
-        extra = get_status_extra(result)
-        modifier_suffix = get_modifier_suffix(execution)
+        extra = result.status_repr
+        modifier_suffix = self._get_modifier_suffix(execution)
         text = Text()
         text.append(f"{item.full_name}{modifier_suffix} ")
         text.append(f"({result.duration_ms:.1f}ms) ", style="dim")
@@ -239,8 +288,8 @@ class VerboseMode(OutputMode):
             child_exec = state.executions.get(id(child.definition))
             if child_exec is not None:
                 style = STATUS_STYLES[child_exec.result.status]
-                sub_label = format_label(get_execution_label(child_exec))
-                modifier_suffix = get_modifier_suffix(child_exec)
+                sub_label = f"[{child_exec.label}]"
+                modifier_suffix = self._get_modifier_suffix(child_exec)
                 text = Text()
                 text.append(f"{sub_label}{modifier_suffix} ")
                 text.append(f"({child_exec.result.duration_ms:.1f}ms) ", style="dim")
@@ -249,10 +298,9 @@ class VerboseMode(OutputMode):
                 if child_exec.sub_executions:
                     self._add_live_sub_executions(node, child_exec.sub_executions, state)
             elif isinstance(child, CompositeTest):
+                pending = f"[{child.definition.suffix or 'case'}]"
                 node = parent.add(
-                    Text.from_markup(
-                        f"{escape(format_label(child.definition.suffix or 'case'))} [dim]⋯[/dim]"
-                    )
+                    Text.from_markup(f"{escape(pending)} [dim]⋯[/dim]")
                 )
                 self._add_live_composite_children(node, child, state)
 
@@ -270,8 +318,8 @@ class VerboseMode(OutputMode):
                 TestStatus.ERROR,
             }:
                 style = STATUS_STYLES[sub.result.status]
-                sub_label = format_label(get_execution_label(sub))
-                modifier_suffix = get_modifier_suffix(sub)
+                sub_label = f"[{sub.label}]"
+                modifier_suffix = self._get_modifier_suffix(sub)
                 text = Text()
                 text.append(f"{sub_label}{modifier_suffix} ")
                 text.append(f"({sub.result.duration_ms:.1f}ms) ", style="dim")

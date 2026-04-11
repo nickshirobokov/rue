@@ -1,6 +1,6 @@
 """Tests for reporter instance registration."""
 
-from rue.config import RueConfig
+from rue.config import Config
 from rue.reports.base import Reporter
 
 
@@ -10,7 +10,7 @@ class DummyReporter(Reporter):
     def __init__(self, verbosity: int = 0):
         self.verbosity = verbosity
 
-    def configure(self, config: RueConfig) -> None:
+    def configure(self, config: Config) -> None:
         self.verbosity = config.verbosity
 
     async def on_no_tests_found(self) -> None:
@@ -47,7 +47,7 @@ class TestReporterBase:
 
     def test_configure_adjusts_params_from_config(self):
         reporter = DummyReporter()
-        config = RueConfig.model_construct(verbosity=3)
+        config = Config.model_construct(verbosity=3)
 
         reporter.configure(config)
 

@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from rue.config import RueConfig, load_config
+from rue.config import Config, load_config
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.runtime import (
     CURRENT_RUNNER,
@@ -57,7 +57,7 @@ class Runner:
         result = await runner.run(path="tests/")
 
         # Concurrent execution with 5 workers
-        runner = Runner(config=RueConfig(concurrency=5))
+        runner = Runner(config=Config(concurrency=5))
         result = await runner.run(path="tests/")
     """
 
@@ -66,7 +66,7 @@ class Runner:
     def __init__(
         self,
         *,
-        config: RueConfig | None = None,
+        config: Config | None = None,
         reporters: list[Reporter] | None = None,
         fail_fast: bool = False,
         capture_output: bool = True,

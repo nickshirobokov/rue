@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 from uuid import UUID
 
-from rue.config import RueConfig
+from rue.config import Config
 from rue.testing.execution.composite import CompositeTest
 from rue.testing.execution.interfaces import Test
 from rue.testing.execution.single import SingleTest
@@ -26,7 +26,7 @@ from rue.testing.tracing import TestTracer
 class DefaultTestFactory:
     """Creates test instances with shared collaborators."""
 
-    config: RueConfig
+    config: Config
     run_id: UUID | None = None
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)

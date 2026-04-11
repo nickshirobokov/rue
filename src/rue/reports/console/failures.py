@@ -11,7 +11,7 @@ from rich.rule import Rule
 from rich.text import Text
 from rich.traceback import Traceback
 
-from .shared import STATUS_STYLES, get_execution_label
+from .shared import STATUS_STYLES
 
 if TYPE_CHECKING:
     from rue.testing.models.result import TestExecution
@@ -88,7 +88,7 @@ class ExceptionRenderer:
 
         return Panel(
             panel_content,
-            title=title or get_execution_label(execution),
+            title=title or execution.label,
             title_align="left",
             border_style=style.color,
             expand=True,

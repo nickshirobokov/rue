@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from rue import SUT
-from rue.config import RueConfig
+from rue.config import Config
 from rue.reports import OtelReporter
 from rue.reports.base import Reporter
 from rue.reports.otel import DEFAULT_OTEL_OUTPUT_ROOT, MAX_STORED_OTEL_RUNS
@@ -70,8 +70,8 @@ def make_item(
     )
 
 
-def make_runner_config(**kwargs) -> RueConfig:
-    return RueConfig.model_construct(**kwargs)
+def make_runner_config(**kwargs) -> Config:
+    return Config.model_construct(**kwargs)
 
 
 class EventReporter(Reporter):
@@ -87,7 +87,7 @@ class EventReporter(Reporter):
         self.run_complete_elapsed = 0.0
         self._started_ids: set[int] = set()
 
-    def configure(self, config: RueConfig) -> None:
+    def configure(self, config: Config) -> None:
         self.verbosity = config.verbosity
 
     async def on_no_tests_found(self) -> None:

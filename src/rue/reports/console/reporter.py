@@ -9,7 +9,10 @@ from typing import TYPE_CHECKING
 
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
+from rich.panel import Panel
+from rich.progress_bar import ProgressBar
 from rich.rule import Rule
+from rich.table import Table
 from rich.text import Text
 
 from rue.reports.base import Reporter
@@ -19,12 +22,12 @@ from .captured import CapturedOutputRenderer, StderrCapture
 from .failures import ExceptionRenderer
 from .metrics import MetricsRenderer
 from .modes import OutputMode, make_mode
-from .shared import render_progress_bar
+from .shared import STATUS_STYLES
 
 from rue.testing.models import TestStatus
 
 if TYPE_CHECKING:
-    from rue.config import RueConfig
+    from rue.config import Config
     from rue.testing import TestDefinition
     from rue.testing.execution.interfaces import Test
     from rue.testing.models.result import TestExecution
@@ -32,6 +35,15 @@ if TYPE_CHECKING:
 
 
 class ConsoleReporter(Reporter):
+    _PROGRESS_STAT_ORDER: tuple[tuple[TestStatus, str], ...] = (
+        (TestStatus.PASSED, "passed"),
+        (TestStatus.FAILED, "failed"),
+        (TestStatus.ERROR, "errors"),
+        (TestStatus.SKIPPED, "skipped"),
+        (TestStatus.XFAILED, "xfailed"),
+        (TestStatus.XPASSED, "xpassed"),
+    )
+
     def __init__(self, console: Console | None = None, verbosity: int = 0) -> None:
         self.console = console or Console(file=sys.__stdout__)
         self.verbosity = verbosity
@@ -55,7 +67,7 @@ class ConsoleReporter(Reporter):
         self.current_module: Path | None = None
         self.completed_modules: set[Path] = set()
 
-    def configure(self, config: RueConfig) -> None:
+    def configure(self, config: Config) -> None:
         self.verbosity = config.verbosity
         self._mode = make_mode(self.verbosity, self.console)
         self._assertions = AssertionRenderer()
@@ -110,10 +122,37 @@ class ConsoleReporter(Reporter):
         live = self._mode.render_live(self)
         if not self._mode.show_progress_bar:
             return live
-        return Group(
-            render_progress_bar(self.completed_count, self.total_tests, self._status_counts),
-            live,
+        completed, total = self.completed_count, self.total_tests
+        pct = completed / total * 100 if total else 0
+        finished = completed == total and total > 0
+        bar = ProgressBar(
+            total=max(total, 1),
+            completed=completed,
+            complete_style="cyan",
+            finished_style="bold green",
         )
+        info = Text()
+        info.append(f"{completed}/{total}", style="bold")
+        info.append(f" ({pct:.0f}%)", style="dim")
+        for status, label in self._PROGRESS_STAT_ORDER:
+            count = self._status_counts.get(status, 0)
+            if not count:
+                continue
+            info.append("  ")
+            style = STATUS_STYLES[status]
+            info.append(f"{style.symbol} {count} {label}", style=style.color)
+        content = Table.grid()
+        content.add_column(ratio=1)
+        content.add_row(bar)
+        content.add_row(info)
+        progress = Panel(
+            content,
+            title="Running tests...",
+            title_align="left",
+            border_style="green" if finished else "cyan",
+            padding=(0, 1),
+        )
+        return Group(progress, live)
 
     # ── Reporter hooks ────────────────────────────────────────────────────────
 
