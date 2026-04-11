@@ -39,6 +39,18 @@ class TestResult:
     error: BaseException | None = None
     assertion_results: list[AssertionResult] = field(default_factory=list)
 
+    @property
+    def status_repr(self) -> str:
+        if self.status == TestStatus.SKIPPED:
+            reason = self.error.args[0] if self.error else "skipped"
+            return f"skipped ({reason})"
+        if self.status == TestStatus.XFAILED:
+            reason = self.error.args[0] if self.error else "expected failure"
+            return f"xfailed ({reason})"
+        if self.status == TestStatus.XPASSED:
+            return "XPASS"
+        return ""
+
 
 @dataclass
 class TestExecution:
@@ -69,3 +81,12 @@ class TestExecution:
     def duration_ms(self) -> float:
         """Convenience access to result duration."""
         return self.result.duration_ms
+
+    @property
+    def label(self) -> str:
+        dlabel = self.definition.label
+        if dlabel:
+            return dlabel
+        if self.execution_id:
+            return str(self.execution_id)[:8]
+        return "case"

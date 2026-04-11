@@ -8,8 +8,9 @@ from uuid import UUID
 
 
 if TYPE_CHECKING:
-    from rue.config import RueConfig
+    from rue.config import Config
     from rue.testing import TestDefinition
+    from rue.testing.execution.interfaces import Test
     from rue.testing.models.result import TestExecution
     from rue.testing.models.run import Run
     from rue.testing.tracing import TestTracer
@@ -33,7 +34,7 @@ class Reporter(ABC, metaclass=ReporterMeta):
     REGISTRY: ClassVar[dict[str, Reporter]] = {}
 
     @abstractmethod
-    def configure(self, config: RueConfig) -> None:
+    def configure(self, config: Config) -> None:
         """Adjust reporter parameters based on runtime config."""
 
     @abstractmethod
@@ -41,26 +42,22 @@ class Reporter(ABC, metaclass=ReporterMeta):
         """Called when test collection finds no tests."""
 
     @abstractmethod
-    async def on_collection_complete(self, items: list[TestDefinition]) -> None:
+    async def on_collection_complete(self, items: list[TestDefinition], run: Run) -> None:
         """Called after test collection completes."""
+
+    async def on_tests_ready(self, tests: list[Test]) -> None:
+        """Called after all Test trees are built, before execution starts."""
+        _ = tests
+        return None
 
     async def on_test_start(self, item: TestDefinition) -> None:
         """Called before a test starts executing."""
         _ = item
         return None
 
-    async def on_subtest_complete(
-        self,
-        parent: TestDefinition,
-        sub_execution: TestExecution,
-    ) -> None:
-        """Called when a subtest execution completes."""
-        _ = parent, sub_execution
-        return None
-
     @abstractmethod
-    async def on_test_complete(self, execution: TestExecution) -> None:
-        """Called after each test completes."""
+    async def on_execution_complete(self, execution: TestExecution) -> None:
+        """Called when any test node (leaf or composite) completes."""
 
     @abstractmethod
     async def on_run_complete(self, run: Run) -> None:

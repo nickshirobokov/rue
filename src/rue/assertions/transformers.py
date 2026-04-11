@@ -270,6 +270,10 @@ class AssertTransformer(ast.NodeTransformer):
                         id=self.RESOLVED_ARGS_VAR_NAME, ctx=ast.Load()
                     ),
                 ),
+                ast.keyword(
+                    arg="col_offset",
+                    value=ast.Constant(value=node.col_offset),
+                ),
             ],
         )
         ar_keywords = [

@@ -10,8 +10,8 @@ from rue.context.collectors import (
     CURRENT_METRIC_RESULTS,
 )
 from rue.context.runtime import CURRENT_TEST, TestContext, bind
-from rue.resources.metrics.base import Metric, MetricResult
-from rue.resources import ResourceResolver, registry
+from rue.resources import ResourceIdentity, ResourceResolver, Scope, registry
+from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
 from rue.testing.discovery import collect
 
 
@@ -20,7 +20,8 @@ def test_rewritten_assert_collects_predicate_results(tmp_path):
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(
         """
-from rue.resources.metrics.base import Metric
+from rue.resources import ResourceIdentity, Scope
+from rue.resources.metrics.base import Metric, MetricMetadata
 from rue.predicates import predicate
 
 @predicate
@@ -28,7 +29,7 @@ def equals(actual, reference):
     return actual == reference
 
 def test_sample():
-    m = Metric(name="m")
+    m = Metric(metadata=MetricMetadata(identity=ResourceIdentity(name="m", scope=Scope.SESSION)))
     m.add_record([1, 2, 3])
     assert equals(1, 1) and (m.len == 3)
 """.lstrip()
@@ -112,7 +113,13 @@ def test_metric_capture_multi():
         [item] = collect(mod_path)
         assertion_results: list[AssertionResult] = []
         ctx = TestContext(item=item)
-        m = Metric(name="assert_outcomes")
+        m = Metric(
+            metadata=MetricMetadata(
+                identity=ResourceIdentity(
+                    name="assert_outcomes", scope=Scope.SESSION
+                )
+            )
+        )
         with (
             bind(CURRENT_TEST, ctx),
             metrics_scope_ctx(m),
@@ -139,11 +146,12 @@ async def test_rewritten_asserts_inside_metric_functions_are_collected(
     mod_path.write_text(
         """
 import rue
-from rue.resources.metrics.base import Metric
+from rue.resources import ResourceIdentity, Scope
+from rue.resources.metrics.base import Metric, MetricMetadata
 
 @rue.resource.metric
 def my_metric():
-    m = Metric(name="m")
+    m = Metric(metadata=MetricMetadata(identity=ResourceIdentity(name="m", scope=Scope.SESSION)))
     yield m
     assert False, "nope"
 

@@ -1,6 +1,6 @@
 """Testing models - pure data classes."""
 
-from rue.testing.models.definition import TestDefinition, RueTestDefinition
+from rue.testing.models.definition import TestDefinition
 from rue.testing.models.modifiers import (
     CasesIterateModifier,
     GroupsIterateModifier,
@@ -10,7 +10,7 @@ from rue.testing.models.modifiers import (
     ParamsIterateModifier,
 )
 from rue.testing.models.result import TestExecution, TestResult, TestStatus
-from rue.testing.models.run import Run, RunEnvironment, RunResult, RueRun
+from rue.testing.models.run import Run, RunEnvironment, RunResult
 from rue.testing.models.case import Case, CaseGroup
 
 
@@ -23,8 +23,6 @@ __all__ = [
     "GroupsIterateModifier",
     "Run",
     "TestDefinition",
-    "RueRun",
-    "RueTestDefinition",
     "CasesIterateModifier",
     "IterateModifier",
     "Modifier",

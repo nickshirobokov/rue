@@ -552,7 +552,7 @@ If multiple `SESSION` resources share the same name, Rue keeps them side by side
 Execute discovered tests and return a `Run`.
 
 **Common constructor parameters:**
-- `config: RueConfig | None = None`
+- `config: Config | None = None`
 - `reporters: list[Reporter] | None = None`
 - `fail_fast: bool = False`
 - `capture_output: bool = True`
@@ -570,7 +570,7 @@ runner.run_id_exists(run_id: UUID | str) -> bool
 ```
 
 **Constructor behavior:**
-- `Runner` is config-driven. OpenTelemetry, DB, timeout, concurrency, verbosity, and reporter-name settings come from `RueConfig`.
+- `Runner` is config-driven. OpenTelemetry, DB, timeout, concurrency, verbosity, and reporter-name settings come from `Config`.
 - If `config.reporters` contains names, `Runner` uses those named reporters and ignores any `reporters=[...]` instances you pass in.
 - If `config.reporters` is empty and `reporters=[...]` is provided, `Runner` uses those instances.
 - If both are omitted, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`.
@@ -591,12 +591,12 @@ runner.run_id_exists(run_id: UUID | str) -> bool
 ```python
 from uuid import UUID
 
-from rue.config import RueConfig
+from rue.config import Config
 from rue.reports import ConsoleReporter, OtelReporter
 from rue.testing import Runner
 
 runner = Runner(
-    config=RueConfig(db_path=".rue/rue.db"),
+    config=Config(db_path=".rue/rue.db"),
     reporters=[ConsoleReporter(), OtelReporter()],
     run_id=UUID("00000000-0000-0000-0000-000000000001"),
 )

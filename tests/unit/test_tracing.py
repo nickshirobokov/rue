@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 
-from rue.config import RueConfig
+from rue.config import Config
 from rue.testing.discovery import collect
 from rue.testing.runner import Runner
 
@@ -32,7 +32,7 @@ async def _run_module_with_tracing(
         monkeypatch.chdir(tmp_path)
         items = collect(mod_path)
         runner = Runner(
-            config=RueConfig.model_construct(otel=True, db_enabled=False),
+            config=Config.model_construct(otel=True, db_enabled=False),
             reporters=[trace_reporter],
         )
         run = await runner.run(items=items)

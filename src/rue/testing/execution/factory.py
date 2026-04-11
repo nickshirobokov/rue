@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import asyncio
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from typing import Any
+from uuid import UUID
 
-from rue.testing.execution.interfaces import Test, TestFactory
-from rue.testing.execution.result_builder import ResultBuilder
+from rue.config import Config
 from rue.testing.execution.composite import CompositeTest
+from rue.testing.execution.interfaces import Test
 from rue.testing.execution.single import SingleTest
 from rue.testing.models import (
     CasesIterateModifier,
@@ -16,13 +19,19 @@ from rue.testing.models import (
     ParamsIterateModifier,
     TestDefinition,
 )
+from rue.testing.tracing import TestTracer
 
 
 @dataclass
-class DefaultTestFactory(TestFactory):
+class DefaultTestFactory:
     """Creates test instances with shared collaborators."""
 
-    result_builder: ResultBuilder
+    config: Config
+    run_id: UUID | None = None
+    semaphore: asyncio.Semaphore | None = None
+    is_stopped: Callable[[], bool] = field(default=lambda: False)
+    on_complete: Callable | None = None
+    on_trace_collected: Callable | None = None
 
     def build(
         self,
@@ -37,7 +46,14 @@ class DefaultTestFactory(TestFactory):
                 return SingleTest(
                     definition=definition,
                     params=params,
-                    result_builder=self.result_builder,
+                    tracer=TestTracer(
+                        otel_enabled=self.config.otel,
+                        run_id=self.run_id,
+                    ),
+                    semaphore=self.semaphore,
+                    is_stopped=self.is_stopped,
+                    on_complete=self.on_complete,
+                    on_trace_collected=self.on_trace_collected,
                 )
 
             case [IterateModifier() as mod, *rest]:
@@ -52,6 +68,7 @@ class DefaultTestFactory(TestFactory):
                     definition=definition,
                     min_passes=mod.min_passes,
                     children=children,
+                    on_complete=self.on_complete,
                 )
 
             case [CasesIterateModifier() as mod, *rest]:
@@ -71,6 +88,7 @@ class DefaultTestFactory(TestFactory):
                     definition=definition,
                     min_passes=mod.min_passes,
                     children=children,
+                    on_complete=self.on_complete,
                 )
 
             case [GroupsIterateModifier() as mod, *rest]:
@@ -95,6 +113,7 @@ class DefaultTestFactory(TestFactory):
                     definition=definition,
                     min_passes=mod.min_passes,
                     children=children,
+                    on_complete=self.on_complete,
                 )
 
             case [ParamsIterateModifier() as mod, *rest]:
@@ -109,6 +128,7 @@ class DefaultTestFactory(TestFactory):
                     definition=definition,
                     min_passes=mod.min_passes,
                     children=children,
+                    on_complete=self.on_complete,
                 )
 
             case _:

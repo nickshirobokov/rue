@@ -20,6 +20,7 @@ dependencies = [
     "opentelemetry-instrumentation-openai>=0.49.0",
     "opentelemetry-instrumentation-anthropic>=0.49.0",
     "pydantic-ai>=1.67.0",
+    "typer>=0.24.1",
 ]
 
 classifiers = [
@@ -68,6 +69,7 @@ packages = ["src/rue"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+filterwarnings = ["ignore::pytest.PytestCollectionWarning"]
 
 [tool.ruff]
 line-length = 80

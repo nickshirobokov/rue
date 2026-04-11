@@ -41,5 +41,10 @@ class TestDefinition:
             return f"{self.module_path.stem}::{self.class_name}::{self.name}"
         return f"{self.module_path.stem}::{self.name}"
 
-
-RueTestDefinition = TestDefinition
+    @property
+    def label(self) -> str | None:
+        if self.suffix:
+            return self.suffix
+        if self.case_id:
+            return str(self.case_id)
+        return None

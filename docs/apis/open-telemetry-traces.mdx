@@ -40,17 +40,17 @@ CLI flags override config and environment.
 ### Runner
 
 ```python
-from rue.config import RueConfig
+from rue.config import Config
 from rue.reports import ConsoleReporter, OtelReporter
 from rue.testing import Runner
 
 runner = Runner(
-    config=RueConfig(),
+    config=Config(),
     reporters=[ConsoleReporter(), OtelReporter()],
 )
 ```
 
-Use `RueConfig(otel=False)` to disable capture programmatically.
+Use `Config(otel=False)` to disable capture programmatically.
 
 If you do not set an explicit reporter list, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`.
 

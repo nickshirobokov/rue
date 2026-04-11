@@ -20,13 +20,34 @@ class Scope(Enum):
     SESSION = "session"  # Shared across entire test run
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
+class ResourceIdentity:
+    """Canonical identity for one resolved resource provider."""
+
+    name: str
+    scope: Scope
+    provider_path: str | None = None
+    provider_dir: str | None = None
+
+    @property
+    def origin_path(self) -> Path | None:
+        if self.provider_path is None:
+            return None
+        return Path(self.provider_path)
+
+    @property
+    def origin_dir(self) -> Path | None:
+        if self.provider_dir is None:
+            return None
+        return Path(self.provider_dir)
+
+
+@dataclass(slots=True, eq=False)
 class ResourceDef:
     """Definition of a registered resource."""
 
-    name: str
+    identity: ResourceIdentity
     fn: Callable[..., Any]
-    scope: Scope
     is_async: bool
     is_generator: bool
     is_async_generator: bool
@@ -34,8 +55,6 @@ class ResourceDef:
     on_resolve: Callable[[Any], Any] | None = None
     on_injection: Callable[[Any], Any] | None = None
     on_teardown: Callable[[Any], Any] | None = None
-    origin_path: Path | None = None
-    origin_dir: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +62,6 @@ class SelectedResource:
     """Selected resource provider for one resolution request."""
 
     definition: ResourceDef
-    provider_dir: Path | None = None
 
 
 class ResourceRegistry:
@@ -74,18 +92,19 @@ class ResourceRegistry:
         return definition
 
     def _register(self, definition: ResourceDef) -> None:
-        if definition.scope == Scope.SESSION:
+        ident = definition.identity
+        if ident.scope == Scope.SESSION:
             session_defs = self._session_definitions.setdefault(
-                definition.name, []
+                ident.name, []
             )
             session_defs.append(definition)
 
-            current = self._definitions.get(definition.name)
-            if current is None or current.scope == Scope.SESSION:
-                self._definitions[definition.name] = definition
+            current = self._definitions.get(ident.name)
+            if current is None or current.identity.scope == Scope.SESSION:
+                self._definitions[ident.name] = definition
             return
 
-        self._definitions[definition.name] = definition
+        self._definitions[ident.name] = definition
 
     def resource(
         self,
@@ -95,6 +114,7 @@ class ResourceRegistry:
         on_resolve: Callable[[Any], Any] | None = None,
         on_injection: Callable[[Any], Any] | None = None,
         on_teardown: Callable[[Any], Any] | None = None,
+        origin_fn: Callable[..., Any] | None = None,
     ) -> Any:
         """Register a function as a resource for dependency injection."""
 
@@ -112,12 +132,20 @@ class ResourceRegistry:
             is_async = inspect.iscoroutinefunction(fn)
             is_async_generator = inspect.isasyncgenfunction(fn)
             is_generator = inspect.isgeneratorfunction(fn)
-            origin_path, origin_dir = self._resource_origin(fn)
+            origin_path, origin_dir = self._resource_origin(origin_fn or fn)
 
             definition = ResourceDef(
-                name=fn.__name__,
+                identity=ResourceIdentity(
+                    name=fn.__name__,
+                    scope=scope,
+                    provider_path=str(origin_path)
+                    if origin_path is not None
+                    else None,
+                    provider_dir=str(origin_dir)
+                    if origin_dir is not None
+                    else None,
+                ),
                 fn=fn,
-                scope=scope,
                 is_async=is_async or is_async_generator,
                 is_generator=is_generator,
                 is_async_generator=is_async_generator,
@@ -125,8 +153,6 @@ class ResourceRegistry:
                 on_resolve=on_resolve,
                 on_injection=on_injection,
                 on_teardown=on_teardown,
-                origin_path=origin_path,
-                origin_dir=origin_dir,
             )
             self._register(definition)
             return fn
@@ -175,7 +201,7 @@ class ResourceRegistry:
             raise ValueError(msg)
 
         definition = self._definitions.get(name)
-        if definition is not None and definition.scope != Scope.SESSION:
+        if definition is not None and definition.identity.scope != Scope.SESSION:
             return SelectedResource(definition=definition)
 
         selected: ResourceDef | None = None
@@ -183,24 +209,21 @@ class ResourceRegistry:
         if request_path is not None:
             request_dir = request_path.resolve().parent
             for session_definition in self._session_definitions.get(name, []):
-                if session_definition.origin_dir is None:
+                origin_dir = session_definition.identity.origin_dir
+                if origin_dir is None:
                     continue
-                if not request_dir.is_relative_to(
-                    session_definition.origin_dir
-                ):
+                if not request_dir.is_relative_to(origin_dir):
                     continue
-                depth = len(session_definition.origin_dir.parts)
+                depth = len(origin_dir.parts)
                 if depth >= selected_depth:
                     selected = session_definition
                     selected_depth = depth
 
         if selected is not None:
-            return SelectedResource(
-                definition=selected,
-                provider_dir=selected.origin_dir,
-            )
+            return SelectedResource(definition=selected)
 
-        return SelectedResource(definition=self._require(name))
+        definition = self._require(name)
+        return SelectedResource(definition=definition)
 
 
 registry = ResourceRegistry()
@@ -213,6 +236,7 @@ def resource(
     on_resolve: Callable[[Any], Any] | None = None,
     on_injection: Callable[[Any], Any] | None = None,
     on_teardown: Callable[[Any], Any] | None = None,
+    origin_fn: Callable[..., Any] | None = None,
 ) -> Any:
     """Register a function as a resource in the default registry."""
     return registry.resource(
@@ -221,4 +245,5 @@ def resource(
         on_resolve=on_resolve,
         on_injection=on_injection,
         on_teardown=on_teardown,
+        origin_fn=origin_fn,
     )

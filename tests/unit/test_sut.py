@@ -10,7 +10,7 @@ import pytest
 from pydantic_core import ValidationError
 
 from rue import SUT
-from rue.config import RueConfig
+from rue.config import Config
 from rue.resources import ResourceResolver, registry as resources_registry
 from rue.resources.sut import sut
 from rue.testing.discovery import collect
@@ -45,7 +45,7 @@ async def _run_module_with_tracing(
         monkeypatch.chdir(tmp_path)
         items = collect(mod_path)
         runner = Runner(
-            config=RueConfig.model_construct(otel=True, db_enabled=False),
+            config=Config.model_construct(otel=True, db_enabled=False),
             reporters=[trace_reporter],
         )
         run = await runner.run(items=items)

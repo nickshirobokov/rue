@@ -11,7 +11,7 @@ from uuid import UUID
 
 from rue.assertions.base import AssertionResult
 from rue.predicates.models import PredicateResult
-from rue.resources import Scope
+from rue.resources import ResourceIdentity, Scope
 from rue.resources.metrics.base import (
     CalculatedValue,
     MetricMetadata,
@@ -49,8 +49,10 @@ METRIC_INSERT_SQL = """
     INSERT INTO metrics (
         run_id, test_execution_id, name, scope, value, value_json,
         first_recorded_at, last_recorded_at,
-        collected_from_tests_json, collected_from_resources_json, collected_from_cases_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        collected_from_tests_json, collected_from_resources_json, collected_from_cases_json,
+        collected_from_modules_json, provider_name, provider_scope, provider_path,
+        provider_dir, depends_on_metrics_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 ASSERTION_INSERT_SQL = """
@@ -338,15 +340,16 @@ class SQLiteStore(Store):
             value_json = json.dumps(value)
 
         meta = metric.metadata
+        ident = meta.identity
         cursor = conn.execute(
             METRIC_INSERT_SQL,
             (
                 str(run_id),
                 str(metric.execution_id) if metric.execution_id else None,
-                metric.name,
-                meta.scope.value
-                if isinstance(meta.scope, Scope)
-                else str(meta.scope),
+                ident.name,
+                ident.scope.value
+                if isinstance(ident.scope, Scope)
+                else str(ident.scope),
                 value_real,
                 value_json,
                 meta.first_item_recorded_at.isoformat()
@@ -358,6 +361,14 @@ class SQLiteStore(Store):
                 self._to_json_list(meta.collected_from_tests),
                 self._to_json_list(meta.collected_from_resources),
                 self._to_json_list(meta.collected_from_cases),
+                self._to_json_list(meta.collected_from_modules),
+                ident.name,
+                ident.scope.value
+                if isinstance(ident.scope, Scope)
+                else str(ident.scope),
+                ident.provider_path,
+                ident.provider_dir,
+                self._to_json_resource_identities(metric.dependencies),
             ),
         )
         return cast("int", cursor.lastrowid)
@@ -388,6 +399,23 @@ class SQLiteStore(Store):
 
     def _to_json_list(self, items: set[str]) -> str | None:
         return json.dumps(list(items)) if items else None
+
+    def _to_json_resource_identities(
+        self, items: list[ResourceIdentity]
+    ) -> str | None:
+        if not items:
+            return None
+        return json.dumps(
+            [
+                {
+                    "name": item.name,
+                    "scope": item.scope.value,
+                    "provider_path": item.provider_path,
+                    "provider_dir": item.provider_dir,
+                }
+                for item in items
+            ]
+        )
 
     def get_run(self, run_id: UUID) -> Run | None:
         """Retrieve a test run by ID."""
@@ -544,6 +572,8 @@ class SQLiteStore(Store):
         )
 
     def _row_to_metric(self, row: sqlite3.Row) -> MetricResult:
+        keys = set(row.keys())
+
         if row["value"] is not None:
             value = cast("CalculatedValue", row["value"])
         elif row["value_json"]:
@@ -560,6 +590,16 @@ class SQLiteStore(Store):
 
         first_at = row["first_recorded_at"]
         last_at = row["last_recorded_at"]
+        identity = ResourceIdentity(
+            name=row["name"],
+            scope=scope,
+            provider_path=row["provider_path"]
+            if "provider_path" in keys
+            else None,
+            provider_dir=row["provider_dir"]
+            if "provider_dir" in keys
+            else None,
+        )
         metadata = MetricMetadata(
             first_item_recorded_at=datetime.fromisoformat(first_at)
             if first_at
@@ -567,7 +607,7 @@ class SQLiteStore(Store):
             last_item_recorded_at=datetime.fromisoformat(last_at)
             if last_at
             else None,
-            scope=scope,
+            identity=identity,
             collected_from_tests=self._from_json_set(
                 row["collected_from_tests_json"]
             ),
@@ -577,16 +617,40 @@ class SQLiteStore(Store):
             collected_from_cases=self._from_json_set(
                 row["collected_from_cases_json"]
             ),
+            collected_from_modules=self._from_json_set(
+                row["collected_from_modules_json"]
+                if "collected_from_modules_json" in keys
+                else None
+            ),
         )
 
         exec_id = row["test_execution_id"]
         return MetricResult(
-            name=row["name"],
             metadata=metadata,
             assertion_results=[],
             value=value,
+            dependencies=self._from_json_resource_identities(
+                row["depends_on_metrics_json"]
+                if "depends_on_metrics_json" in keys
+                else None
+            ),
             execution_id=UUID(exec_id) if exec_id else None,
         )
 
     def _from_json_set(self, json_str: str | None) -> set[str]:
         return set(json.loads(json_str)) if json_str else set()
+
+    def _from_json_resource_identities(
+        self, json_str: str | None
+    ) -> list[ResourceIdentity]:
+        if not json_str:
+            return []
+        return [
+            ResourceIdentity(
+                name=item["name"],
+                scope=Scope(item["scope"]),
+                provider_path=item.get("provider_path"),
+                provider_dir=item.get("provider_dir"),
+            )
+            for item in json.loads(json_str)
+        ]

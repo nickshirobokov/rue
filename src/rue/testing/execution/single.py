@@ -6,7 +6,8 @@ import asyncio
 import contextlib
 import logging
 import time
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 from uuid import uuid4
@@ -14,8 +15,8 @@ from uuid import uuid4
 from rue.assertions.base import AssertionResult
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
-    CURRENT_RUNNER,
     CURRENT_RESOURCE_CONSUMER,
+    CURRENT_RESOURCE_CONSUMER_KIND,
     CURRENT_TEST,
     CURRENT_TEST_TRACER,
     TestContext,
@@ -24,7 +25,6 @@ from rue.context.runtime import (
 from rue.resources import ResourceResolver
 from rue.resources.resolver import Scope
 from rue.testing.execution.interfaces import Test
-from rue.testing.execution.result_builder import ResultBuilder
 from rue.testing.models import (
     TestDefinition,
     TestExecution,
@@ -44,7 +44,11 @@ class SingleTest(Test):
 
     definition: TestDefinition
     params: dict[str, Any]
-    result_builder: ResultBuilder
+    tracer: TestTracer
+    semaphore: asyncio.Semaphore | None = None
+    is_stopped: Callable[[], bool] = field(default=lambda: False)
+    on_complete: Callable | None = None
+    on_trace_collected: Callable | None = None
 
     def __post_init__(self) -> None:
         """Validate that this test has no modifiers."""
@@ -53,10 +57,8 @@ class SingleTest(Test):
 
     async def execute(self, resolver: ResourceResolver) -> TestExecution:
         """Execute the test and return result."""
-        runner = CURRENT_RUNNER.get()
-
-        if runner is not None and runner.stop_flag:
-            return TestExecution(
+        if self.is_stopped():
+            execution = TestExecution(
                 definition=self.definition,
                 result=TestResult(
                     status=TestStatus.SKIPPED,
@@ -65,9 +67,12 @@ class SingleTest(Test):
                 ),
                 execution_id=uuid4(),
             )
+            if self.on_complete:
+                await self.on_complete(execution)
+            return execution
 
         if self.definition.skip_reason:
-            return TestExecution(
+            execution = TestExecution(
                 definition=self.definition,
                 result=TestResult(
                     status=TestStatus.SKIPPED,
@@ -76,27 +81,20 @@ class SingleTest(Test):
                 ),
                 execution_id=uuid4(),
             )
+            if self.on_complete:
+                await self.on_complete(execution)
+            return execution
 
         exec_id = uuid4()
 
-        # fork resolver for case isolation
         forked_resolver = resolver.fork_for_case()
 
         assertion_results: list[AssertionResult] = []
         error: BaseException | None = None
-        tracer = TestTracer(
-            otel_enabled=runner.config.otel if runner is not None else False,
-        )
 
-        with bind(CURRENT_TEST_TRACER, tracer):
-            tracer.start_otel_root_span(self.definition)
-            if tracer.otel_enabled:
-                assert runner is not None
-                assert runner.current_run is not None
-                tracer.start_otel_trace(
-                    run_id=runner.current_run.run_id,
-                    execution_id=exec_id,
-                )
+        with bind(CURRENT_TEST_TRACER, self.tracer):
+            self.tracer.start_otel_root_span(self.definition)
+            self.tracer.start_otel_trace(execution_id=exec_id)
 
             ctx = TestContext(
                 item=self.definition,
@@ -110,8 +108,8 @@ class SingleTest(Test):
             ):
                 try:
                     semaphore = (
-                        runner.semaphore
-                        if runner and runner.semaphore
+                        self.semaphore
+                        if self.semaphore
                         else contextlib.nullcontext()
                     )
 
@@ -119,7 +117,7 @@ class SingleTest(Test):
                         start = time.perf_counter()
                         kwargs = await self._resolve_params(forked_resolver)
 
-                        if runner and runner.stop_flag:
+                        if self.is_stopped():
                             imperative_outcome = TestStatus.SKIPPED
                             error = Exception("Run stopped early")
                         else:
@@ -157,31 +155,81 @@ class SingleTest(Test):
                     assertion_results=assertion_results,
                 )
             else:
-                result = self.result_builder.build(
-                    self.definition, duration_ms, assertion_results, error
+                expect_failure = self.definition.xfail_reason is not None
+                failed_assertions = [
+                    ar for ar in assertion_results if not ar.passed
+                ]
+                has_error = error is not None and not isinstance(
+                    error, AssertionError
+                )
+                has_assertion_fail = bool(failed_assertions) or isinstance(
+                    error, AssertionError
                 )
 
-            tracer.record_otel_result(result)
-            tracer.finish_otel_trace()
+                match (has_error, has_assertion_fail, expect_failure):
+                    # Unexpected exception in a test marked xfail
+                    case (True, _, True):
+                        status, result_error = TestStatus.XFAILED, error
+                    # Unexpected exception in a normal test
+                    case (True, _, False):
+                        status, result_error = TestStatus.ERROR, error
+                    # Assertion-level failure (explicit or via AssertionError)
+                    case (_, True, xfail):
+                        status = (
+                            TestStatus.XFAILED if xfail else TestStatus.FAILED
+                        )
+                        if error is None and failed_assertions:
+                            msg = (
+                                failed_assertions[0].error_message
+                                or failed_assertions[0].expression_repr.expr
+                            )
+                            result_error = AssertionError(msg)
+                        else:
+                            result_error = error
+                    # xfail test passed when it shouldn't have (strict mode)
+                    case (_, _, True) if self.definition.xfail_strict:
+                        status = TestStatus.FAILED
+                        result_error = AssertionError(
+                            self.definition.xfail_reason or "xfail test passed"
+                        )
+                    # xfail test passed unexpectedly (non-strict)
+                    case (_, _, True):
+                        status, result_error = TestStatus.XPASSED, None
+                    # Clean pass
+                    case _:
+                        status, result_error = TestStatus.PASSED, None
 
-        if (
-            tracer.completed_otel_trace_session is not None
-            and runner is not None
-        ):
-            await runner.notify_trace_collected(tracer, exec_id)
+                result = TestResult(
+                    status=status,
+                    duration_ms=duration_ms,
+                    error=result_error,
+                    assertion_results=assertion_results.copy(),
+                )
 
-        return TestExecution(
+            self.tracer.record_otel_result(result)
+            self.tracer.finish_otel_trace()
+
+        if self.tracer.completed_otel_trace_session is not None and self.on_trace_collected:
+            await self.on_trace_collected(self.tracer, exec_id)
+
+        execution = TestExecution(
             definition=self.definition,
             result=result,
             execution_id=exec_id,
         )
+        if self.on_complete:
+            await self.on_complete(execution)
+        return execution
 
     async def _resolve_params(
         self, resolver: ResourceResolver
     ) -> dict[str, Any]:
         """Resolve test parameters from resources."""
         kwargs = dict(self.params)
-        with bind(CURRENT_RESOURCE_CONSUMER, self.definition.name):
+        with (
+            bind(CURRENT_RESOURCE_CONSUMER, self.definition.name),
+            bind(CURRENT_RESOURCE_CONSUMER_KIND, "test"),
+        ):
             for param in self.definition.params:
                 if param not in kwargs:
                     kwargs[param] = await resolver.resolve(param)

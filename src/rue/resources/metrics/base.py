@@ -4,38 +4,29 @@ from __future__ import annotations
 """
 Metric abstractions for the Rue testing framework.
 
-This module provides the core classes and decorators for recording,
-computing, and managing metrics during test execution.
+This module provides the core classes for recording, computing, and managing
+metrics during test execution.
 """
 
-import functools
-import inspect
 import math
 import statistics
 import threading
 import warnings
 from collections import Counter
-from collections.abc import AsyncGenerator, Callable, Generator
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, ParamSpec
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import validate_call
 
-from rue.context.collectors import (
-    CURRENT_ASSERTION_RESULTS,
-    CURRENT_METRIC_RESULTS,
-)
-from rue.context.runtime import CURRENT_RESOURCE_CONSUMER, CURRENT_TEST, bind
-from rue.resources.registry import Scope, resource
+from rue.context.collectors import CURRENT_METRIC_RESULTS
+from rue.context.runtime import CURRENT_TEST
+from rue.resources.registry import ResourceIdentity, Scope
 
 
 if TYPE_CHECKING:
     from rue.assertions.base import AssertionResult
-
-
-P = ParamSpec("P")
 
 
 CalculatedValue = (
@@ -61,9 +52,8 @@ class MetricMetadata:
         Timestamp of the most recently recorded value.
     first_item_recorded_at : datetime, optional
         Timestamp of the first recorded value.
-    scope : Scope
-        The lifecycle scope of the metric (e.g., SESSION, SUITE, CASE).
-        Defaults to Scope.SESSION.
+    identity : ResourceIdentity
+        Name, scope, and provider origin for the metric.
     collected_from_tests : set of str
         Names of tests that contributed to this metric.
     collected_from_resources : set of str
@@ -74,10 +64,11 @@ class MetricMetadata:
 
     last_item_recorded_at: datetime | None = None
     first_item_recorded_at: datetime | None = None
-    scope: Scope = field(default=Scope.SESSION)
+    identity: ResourceIdentity = field(default=ResourceIdentity(name="", scope=Scope.SESSION))
     collected_from_tests: set[str] = field(default_factory=set)
     collected_from_resources: set[str] = field(default_factory=set)
     collected_from_cases: set[str] = field(default_factory=set)
+    collected_from_modules: set[str] = field(default_factory=set)
 
 
 @dataclass(slots=True)
@@ -147,13 +138,10 @@ class Metric:
 
     Attributes:
     ----------
-    name : str, optional
-        Name of the metric.
     metadata : MetricMetadata
-        Metadata describing the collection context.
+        Metadata describing the collection context (including identity).
     """
 
-    name: str | None = None
     metadata: MetricMetadata = field(default_factory=MetricMetadata)
 
     _raw_values: list[int | float | bool] = field(
@@ -179,6 +167,10 @@ class Metric:
             if test_ctx is not None:
                 if test_ctx.item.name:
                     self.metadata.collected_from_tests.add(test_ctx.item.name)
+                if test_ctx.item.module_path:
+                    self.metadata.collected_from_modules.add(
+                        str(test_ctx.item.module_path)
+                    )
                 if test_ctx.item.case_id:
                     self.metadata.collected_from_cases.add(
                         str(test_ctx.item.case_id)
@@ -244,7 +236,7 @@ class Metric:
             if self._cache.min is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute min for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute min for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.min = math.nan
@@ -259,7 +251,7 @@ class Metric:
             if self._cache.max is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute max for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute max for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     value = math.nan
@@ -275,7 +267,7 @@ class Metric:
             if self._cache.median is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute median for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute median for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.median = math.nan
@@ -290,7 +282,7 @@ class Metric:
             if self._cache.mean is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute mean for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute mean for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.mean = math.nan
@@ -305,7 +297,7 @@ class Metric:
             if self._cache.variance is None:
                 if self.len < 2:
                     warnings.warn(
-                        f"Cannot compute variance for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute variance for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.variance = math.nan
@@ -322,7 +314,7 @@ class Metric:
             if self._cache.std is None:
                 if self.len < 2:
                     warnings.warn(
-                        f"Cannot compute std for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute std for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.std = math.nan
@@ -339,7 +331,7 @@ class Metric:
             if self._cache.pvariance is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute pvariance for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute pvariance for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.pvariance = math.nan
@@ -356,7 +348,7 @@ class Metric:
             if self._cache.pstd is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute pstd for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute pstd for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.pstd = math.nan
@@ -373,7 +365,7 @@ class Metric:
             if self._cache.ci_90 is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute ci_90 for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute ci_90 for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.ci_90 = (math.nan, math.nan)
@@ -389,7 +381,7 @@ class Metric:
             if self._cache.ci_95 is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute ci_95 for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute ci_95 for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.ci_95 = (math.nan, math.nan)
@@ -405,7 +397,7 @@ class Metric:
             if self._cache.ci_99 is None:
                 if self.len == 0:
                     warnings.warn(
-                        f"Cannot compute ci_99 for {self.name or 'unnamed metric'} - not enough values. Returning NaN.",
+                        f"Cannot compute ci_99 for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
                         stacklevel=2,
                     )
                     self._cache.ci_99 = (math.nan, math.nan)
@@ -421,7 +413,7 @@ class Metric:
             if self._cache.percentiles is None:
                 if self.len < 2:
                     warnings.warn(
-                        f"Metric '{self.name or 'unnamed'}' has less than 2 values. Cannot compute percentiles.",
+                        f"Metric '{self.metadata.identity.name or 'unnamed'}' has less than 2 values. Cannot compute percentiles.",
                         stacklevel=2,
                     )
                     self._cache.percentiles = [math.nan] * 99
@@ -495,11 +487,11 @@ class MetricResult:
 
     Parameters
     ----------
-    name : str
-        The metric name. By default this is the decorated function name.
     metadata : MetricMetadata
         Snapshot of metadata describing where/when the metric was recorded
-        (scope, contributors, timestamps).
+        (identity, contributors, timestamps).
+    dependencies : list[ResourceIdentity]
+        Direct resource dependencies for the metric provider.
     assertion_results : list[AssertionResult]
         Assertion results collected while the metric resource was running.
     value : CalculatedValue
@@ -508,11 +500,22 @@ class MetricResult:
         The test execution that produced this metric result.
     """
 
-    name: str
     metadata: MetricMetadata
     assertion_results: list[AssertionResult]
     value: CalculatedValue
+    dependencies: list[ResourceIdentity] = field(default_factory=list)
     execution_id: UUID | None = None
+
+    @property
+    def primary_case_id(self) -> str:
+        cases = sorted(self.metadata.collected_from_cases)
+        if cases:
+            return cases[0]
+        return ""
+
+    @property
+    def has_failures(self) -> bool:
+        return any(not assertion.passed for assertion in self.assertion_results)
 
     def __post_init__(self) -> None:
         if self.execution_id is None:
@@ -522,137 +525,3 @@ class MetricResult:
         collector = CURRENT_METRIC_RESULTS.get()
         if collector is not None:
             collector.append(self)
-
-
-def metric(
-    fn: Callable[P, Generator[Metric | CalculatedValue, Any, Any]]
-    | Callable[P, AsyncGenerator[Metric | CalculatedValue, Any]]
-    | None = None,
-    *,
-    scope: Scope | str = Scope.SESSION,
-) -> Any:
-    """Register a metric resource and capture its final result.
-
-    This decorator wraps a **generator** or **async generator** function into a
-    managed resource via `rue.resources.resource`. The wrapped function
-    must:
-
-    - `yield` a single `Metric` instance first (this is what gets injected and
-      used during the test run).
-    - Optionally `yield` a **final value** (int/float/bool/list/CI tuple) later.
-      When the generator completes, a `MetricResult` is emitted containing that
-      final value and any assertions evaluated while the generator was running.
-
-    Parameters
-    ----------
-    fn : callable, optional
-        The generator/async-generator function to register. If None, returns a
-        decorator.
-    scope : Scope or str, default Scope.SESSION
-        The lifecycle scope of the metric resource. Can be "case", "suite",
-        or "session".
-    """
-    if fn is None:
-        return lambda f: metric(f, scope=scope)
-
-    name = fn.__name__
-
-    is_generator = inspect.isgeneratorfunction(fn)
-    is_async_generator = inspect.isasyncgenfunction(fn)
-
-    def on_resolve_hook(m: Metric) -> Metric:
-        m.name = name
-        m.metadata.scope = scope if isinstance(scope, Scope) else Scope(scope)
-        return m
-
-    def on_injection_hook(m: Metric) -> Metric:
-        consumer_name = CURRENT_RESOURCE_CONSUMER.get()
-        if consumer_name:
-            m.metadata.collected_from_resources.add(consumer_name)
-        return m
-
-    if is_generator:
-
-        @functools.wraps(fn)
-        def wrapped_gen(
-            *args: Any, **kwargs: Any
-        ) -> Generator[Metric, Any, Any]:
-            assertions_results = []
-
-            with bind(CURRENT_ASSERTION_RESULTS, assertions_results):
-                gen = fn(*args, **kwargs)
-                metric_instance: Metric = next(gen)
-
-            yield metric_instance
-
-            with bind(CURRENT_ASSERTION_RESULTS, assertions_results):
-                final_value = None
-                while True:
-                    try:
-                        final_value = next(gen)
-                    except StopIteration:
-                        if final_value is None:
-                            value = math.nan
-                        else:
-                            value = final_value
-                        MetricResult(
-                            name=name,
-                            metadata=replace(
-                                metric_instance.metadata
-                            ),  # use replace to create a copy
-                            assertion_results=assertions_results,
-                            value=value,
-                        )
-                        break
-
-        return resource(
-            wrapped_gen,
-            scope=scope,
-            on_resolve=on_resolve_hook,
-            on_injection=on_injection_hook,
-        )
-
-    if is_async_generator:
-
-        @functools.wraps(fn)
-        async def wrapped_async_gen(*args: Any, **kwargs: Any):
-            assertions_results = []
-
-            with bind(CURRENT_ASSERTION_RESULTS, assertions_results):
-                gen = fn(*args, **kwargs)
-                metric_instance: Metric = await gen.__anext__()
-
-            yield metric_instance
-
-            with bind(CURRENT_ASSERTION_RESULTS, assertions_results):
-                final_value = None
-                while True:
-                    try:
-                        final_value = await gen.__anext__()
-                    except StopAsyncIteration:
-                        if final_value is None:
-                            value = math.nan
-                        else:
-                            value = final_value
-                        MetricResult(
-                            name=name,
-                            metadata=replace(
-                                metric_instance.metadata
-                            ),  # use replace to create a copy
-                            assertion_results=assertions_results,
-                            value=value,
-                        )
-                        break
-
-        return resource(
-            wrapped_async_gen,
-            scope=scope,
-            on_resolve=on_resolve_hook,
-            on_injection=on_injection_hook,
-        )
-
-    msg = f"""
-        {fn.__name__} is not a generator or async generator and can't be wrapped as a Rue metric.
-        To fix: yield a Metric instance and optionally yield a final calculated value.
-        """
-    raise ValueError(msg)

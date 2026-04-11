@@ -9,6 +9,8 @@ import pytest
 
 from rue.context.runtime import (
     CURRENT_RESOURCE_CONSUMER,
+    CURRENT_RESOURCE_PROVIDER,
+    CURRENT_RESOURCE_RESOLVER,
     CURRENT_TEST,
     TestContext as Ctx,
     bind,
@@ -104,8 +106,8 @@ class TestResourceDecorator:
 
         defn = registry.get(name)
         assert defn is not None
-        assert defn.name == name
-        assert defn.scope == Scope.CASE
+        assert defn.identity.name == name
+        assert defn.identity.scope == Scope.CASE
         assert defn.is_async == expected_flags["is_async"]
         assert defn.is_generator == expected_flags["is_generator"]
         assert defn.is_async_generator == expected_flags["is_async_generator"]
@@ -179,7 +181,7 @@ class TestResourceDecorator:
 
         defn = registry.get(name)
         assert defn is not None
-        assert defn.scope == expected_scope
+        assert defn.identity.scope == expected_scope
 
     def test_detects_dependencies(self):
         @resource
@@ -233,8 +235,8 @@ class TestResourceRegistry:
 
         definition = custom_registry.get("shared")
         assert definition is not None
-        assert definition.scope == Scope.SESSION
-        assert definition.origin_dir == child.resolve()
+        assert definition.identity.scope == Scope.SESSION
+        assert definition.identity.origin_dir == child.resolve()
 
     def test_select_picks_nearest_ancestor_session_definition(self, tmp_path):
         custom_registry = ResourceRegistry()
@@ -271,10 +273,8 @@ class TestResourceRegistry:
             sibling / "rue_sibling.py",
         )
 
-        assert child_selected.definition.origin_dir == child.resolve()
-        assert child_selected.provider_dir == child.resolve()
-        assert sibling_selected.definition.origin_dir == root.resolve()
-        assert sibling_selected.provider_dir == root.resolve()
+        assert child_selected.definition.identity.origin_dir == child.resolve()
+        assert sibling_selected.definition.identity.origin_dir == root.resolve()
 
     def test_non_session_definition_wins_over_session_definition(
         self, tmp_path
@@ -299,8 +299,9 @@ class TestResourceRegistry:
 
         selected = custom_registry.select("shared", root / "rue_test.py")
 
-        assert selected.definition.scope == Scope.SUITE
-        assert selected.provider_dir is None
+        assert selected.definition.identity.scope == Scope.SUITE
+        assert selected.definition.identity.name == "shared"
+        assert selected.definition.identity.provider_dir is not None
 
     def test_reset_restores_builtin_resources(self):
         custom_registry = ResourceRegistry()
@@ -401,6 +402,50 @@ class TestResourceResolver:
         resolver = ResourceResolver(registry)
         value = await resolver.resolve("derived")
         assert value == 20
+
+    @pytest.mark.asyncio
+    async def test_records_direct_dependency_graph(self):
+        observed: list[list[str]] = []
+
+        @resource
+        def leaf():
+            return "leaf"
+
+        @resource
+        def middle(leaf):
+            provider = CURRENT_RESOURCE_PROVIDER.get()
+            resolver = CURRENT_RESOURCE_RESOLVER.get()
+            assert provider is not None
+            assert resolver is not None
+            observed.append(
+                [
+                    identity.name
+                    for identity in resolver.direct_dependencies_for(
+                        provider.identity
+                    )
+                ]
+            )
+            return leaf
+
+        @resource
+        def root(middle):
+            provider = CURRENT_RESOURCE_PROVIDER.get()
+            resolver = CURRENT_RESOURCE_RESOLVER.get()
+            assert provider is not None
+            assert resolver is not None
+            observed.append(
+                [
+                    identity.name
+                    for identity in resolver.direct_dependencies_for(
+                        provider.identity
+                    )
+                ]
+            )
+            return middle
+
+        resolver = ResourceResolver(registry)
+        assert await resolver.resolve("root") == "leaf"
+        assert observed == [["leaf"], ["middle"]]
 
     @pytest.mark.asyncio
     async def test_unknown_resource_raises(self):
@@ -787,8 +832,8 @@ class TestHierarchicalSessionResources:
         ]
         assert len(cache_keys) == 2
         assert {key.provider_dir for key in cache_keys} == {
-            root.resolve(),
-            child.resolve(),
+            str(root.resolve()),
+            str(child.resolve()),
         }
 
         await resolver.teardown()

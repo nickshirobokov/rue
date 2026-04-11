@@ -36,6 +36,7 @@ class AssertionRepr:
     lines_above: str
     lines_below: str
     resolved_args: dict[str, str]
+    col_offset: int = 0
 
 
 @dataclass

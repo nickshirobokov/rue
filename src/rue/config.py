@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Annotated, Self
+from pathlib import Path
+from typing import Annotated, Any, Self
 
 from pydantic import (
     AliasChoices,
@@ -135,6 +136,19 @@ class Config(BaseSettings):
             return self.model_copy(update={"test_paths": ["."]})
         return self
 
+    def with_overrides(self, **kwargs: Any) -> Config:
+        """Return a copy with non-None kwargs applied on top of current values."""
+        return self.model_copy(update={k: v for k, v in kwargs.items() if v is not None})
+
+    @property
+    def resolved_db_path(self) -> Path:
+        """Resolve the database path from config or project root default."""
+        if self.db_path:
+            return Path(self.db_path)
+        from rue.storage.sqlite.store import DEFAULT_DB_NAME, find_project_root
+
+        return find_project_root() / DEFAULT_DB_NAME
+
     @classmethod
     def settings_customise_sources(
         cls,
@@ -167,12 +181,10 @@ def reset_load_config_cache() -> None:
     load_config.cache_clear()
 
 
-RueConfig = Config
-
 __all__ = [
     "Config",
     "PredicateConfig",
-    "RueConfig",
     "load_config",
     "reset_load_config_cache",
+    "with_overrides",
 ]
