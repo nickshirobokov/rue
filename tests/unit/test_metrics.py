@@ -19,7 +19,7 @@ from rue.context.runtime import (
 from rue.resources import ResourceIdentity, ResourceResolver, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
 from rue.resources.metrics.decorator import metric
-from rue.testing.discovery import TestItem
+from rue.testing.models import TestDefinition
 
 
 def _metric(name: str = "") -> Metric:
@@ -35,9 +35,9 @@ def _make_item(
     module_path: Path | None = None,
     suffix: str | None = None,
     case_id: UUID | None = None,
-) -> TestItem:
-    """Create a minimal TestItem for testing."""
-    return TestItem(
+) -> TestDefinition:
+    """Create a minimal TestDefinition for testing."""
+    return TestDefinition(
         name=name,
         fn=lambda: None,
         module_path=module_path or Path("test.py"),

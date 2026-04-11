@@ -1,7 +1,7 @@
 """Rue testing package — discovery, execution, and decorators."""
 
 from ..resources import resource
-from .decorators import test
+from .decorators import iterate, tag, test
 from .discovery import collect
 from .models import (
     Case,
@@ -27,6 +27,8 @@ __all__ = [
     "fail",
     "resource",
     "skip",
+    "iterate",
+    "tag",
     "test",
     "xfail",
 ]

@@ -193,16 +193,43 @@ class RueFunctionTransformer(ast.NodeTransformer):
         return ast.fix_missing_locations(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
-        if node.name.startswith("test_"):
+        if node.name.startswith("test_") or any(
+            _is_test_decorator(d) for d in node.decorator_list
+        ):
             node = self.apply_transformers(node)
             return node
         return self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
-        if node.name.startswith("test_"):
+        if node.name.startswith("test_") or any(
+            _is_test_decorator(d) for d in node.decorator_list
+        ):
             node = self.apply_transformers(node)
             return node
         return self.generic_visit(node)
+
+
+def _is_test_decorator(node: ast.expr) -> bool:
+    """Return True if the AST node is any supported @test / @rue.test decorator form.
+
+    Matches:
+      @test
+      @rue.test
+      @test(...)
+      @test.tag(...)
+      @test.iterate(...)
+      @rue.test.tag.skip()
+      etc.
+    """
+    if isinstance(node, ast.Call):
+        return _is_test_decorator(node.func)
+    if isinstance(node, ast.Name) and node.id == "test":
+        return True
+    if isinstance(node, ast.Attribute):
+        if node.attr == "test" and isinstance(node.value, ast.Name) and node.value.id == "rue":
+            return True
+        return _is_test_decorator(node.value)
+    return False
 
 
 def _is_metric_decorator(node: ast.expr) -> bool:

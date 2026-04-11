@@ -4,13 +4,13 @@ from typing import Any
 
 import pytest
 
-from rue.testing import Runner, test
+from rue.testing import Runner, test as t_decorator
 from rue.testing.models import (
     Case,
     CaseGroup,
     CasesIterateModifier,
     GroupsIterateModifier,
-    TestItem,
+    TestDefinition,
 )
 
 
@@ -22,13 +22,13 @@ def test_iterate_cases_decorator_rejects_invalid_threshold():
         match="iterate\\.cases\\(\\) min_passes .* cannot exceed count",
     ):
 
-        @test.iterate.cases(*cases, min_passes=3)
+        @t_decorator.iterate.cases(*cases, min_passes=3)
         def my_test(case):
             pass
 
 
 def test_iterate_cases_empty_is_deferred_to_execution():
-    @test.iterate.cases()
+    @t_decorator.iterate.cases()
     def my_test(case):
         pass
 
@@ -48,7 +48,7 @@ def test_runner_iterate_cases_preserves_case_identity_and_metadata(null_reporter
     def test_collect_case(case):
         seen_cases.append(case)
 
-    item = TestItem(
+    item = TestDefinition(
         name="test_collect_case",
         fn=test_collect_case,
         module_path=Path("sample.py"),
@@ -79,7 +79,7 @@ def test_runner_iterate_cases_passes_when_threshold_is_met(null_reporter):
         if case.inputs["x"] >= 4:
             raise AssertionError("fail")
 
-    item = TestItem(
+    item = TestDefinition(
         name="test_partial_pass",
         fn=test_partial_pass,
         module_path=Path("sample.py"),
@@ -111,7 +111,7 @@ def test_runner_iterate_cases_fails_when_threshold_is_not_met(null_reporter):
         if case.inputs["x"] > 2:
             raise AssertionError("fail")
 
-    item = TestItem(
+    item = TestDefinition(
         name="test_mostly_fail",
         fn=test_mostly_fail,
         module_path=Path("sample.py"),
@@ -137,7 +137,7 @@ def test_runner_iterate_cases_fails_when_threshold_is_not_met(null_reporter):
 
 
 def test_iterate_groups_empty_is_deferred_to_execution():
-    @test.iterate.groups()
+    @t_decorator.iterate.groups()
     def my_test(group, case):
         pass
 
@@ -161,7 +161,7 @@ def test_runner_iterate_groups_injects_group_and_case_and_nests(
     def test_collect_group_case(group, case):
         seen_pairs.append((group.name, case.id))
 
-    item = TestItem(
+    item = TestDefinition(
         name="test_collect_group_case",
         fn=test_collect_group_case,
         module_path=Path("sample.py"),
@@ -211,7 +211,7 @@ def test_runner_iterate_groups_uses_group_and_outer_min_passes(
         if group.name == "beta" and case.inputs["x"] == 2:
             raise AssertionError("beta fail")
 
-    item = TestItem(
+    item = TestDefinition(
         name="test_group_threshold",
         fn=test_group_threshold,
         module_path=Path("sample.py"),
@@ -244,6 +244,6 @@ def test_iterate_groups_decorator_rejects_invalid_threshold():
         match="iterate\\.groups\\(\\) min_passes .* cannot exceed count",
     ):
 
-        @test.iterate.groups(*groups, min_passes=3)
+        @t_decorator.iterate.groups(*groups, min_passes=3)
         def my_test(group, case):
             pass

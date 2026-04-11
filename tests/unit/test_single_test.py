@@ -4,12 +4,12 @@ import pytest
 
 from rue.resources import ResourceResolver, registry
 from rue.testing.execution.single import SingleTest
-from rue.testing.models import IterateModifier, TestItem, TestStatus
+from rue.testing.models import IterateModifier, TestDefinition, TestStatus
 from rue.testing.tracing import TestTracer
 
 
-def make_item(fn=None, *, modifiers=None) -> TestItem:
-    return TestItem(
+def make_item(fn=None, *, modifiers=None) -> TestDefinition:
+    return TestDefinition(
         name="test_sample",
         fn=fn or (lambda: None),
         module_path=Path("test_sample.py"),

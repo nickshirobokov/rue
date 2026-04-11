@@ -17,8 +17,8 @@ from rue.resources.metrics.base import (
 )
 from rue.testing.models import (
     Run,
+    TestDefinition,
     TestExecution,
-    TestItem,
     TestResult,
     TestStatus,
 )
@@ -68,8 +68,8 @@ def make_item(
     *,
     suffix: str | None = None,
     case_id: UUID | None = None,
-) -> TestItem:
-    return TestItem(
+) -> TestDefinition:
+    return TestDefinition(
         name=name,
         fn=lambda: None,
         module_path=Path(module_path),
@@ -84,7 +84,7 @@ def make_item(
 
 
 def make_execution(
-    item: TestItem,
+    item: TestDefinition,
     status: TestStatus,
     duration_ms: float,
     *,

@@ -22,7 +22,7 @@ from rue.resources import (
     registry,
     resource,
 )
-from rue.testing.discovery import TestItem
+from rue.testing.models import TestDefinition
 
 
 def _make_item(
@@ -30,9 +30,9 @@ def _make_item(
     suffix: str | None = None,
     case_id=None,
     module_path: Path | None = None,
-) -> TestItem:
-    """Create a minimal TestItem for testing."""
-    return TestItem(
+) -> TestDefinition:
+    """Create a minimal TestDefinition for testing."""
+    return TestDefinition(
         name=name,
         fn=lambda: None,
         module_path=module_path or Path("test.py"),

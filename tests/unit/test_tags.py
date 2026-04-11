@@ -1,11 +1,11 @@
-from rue.testing.decorators import get_tag_data, test
+from rue.testing.decorators import get_tag_data, test as t_decorator
 
 
 def test_tag_decorator_records_metadata():
-    @test.tag("slow", "llm")
-    @test.tag.skip(reason="network down")
-    @test.tag.xfail(reason="flaky", strict=True)
-    @test.tag.inline
+    @t_decorator.tag("slow", "llm")
+    @t_decorator.tag.skip(reason="network down")
+    @t_decorator.tag.xfail(reason="flaky", strict=True)
+    @t_decorator.tag.inline
     def sample():
         pass
 

@@ -3,20 +3,20 @@ from pathlib import Path
 
 import pytest
 
-from rue.testing import Runner, test
-from rue.testing.models import IterateModifier, TestItem
+from rue.testing import Runner, test as t_decorator
+from rue.testing.models import IterateModifier, TestDefinition
 
 
 def test_iterate_decorator_validation():
     with pytest.raises(ValueError, match="iterate\\(\\) count must be >= 1"):
 
-        @test.iterate(0)
+        @t_decorator.iterate(0)
         def sample1():
             pass
 
     with pytest.raises(ValueError, match="iterate\\(\\) min_passes must be >= 1"):
 
-        @test.iterate(5, min_passes=0)
+        @t_decorator.iterate(5, min_passes=0)
         def sample2():
             pass
 
@@ -25,7 +25,7 @@ def test_iterate_decorator_validation():
         match="iterate\\(\\) min_passes .* cannot exceed count",
     ):
 
-        @test.iterate(3, min_passes=5)
+        @t_decorator.iterate(3, min_passes=5)
         def sample3():
             pass
 
@@ -41,7 +41,7 @@ def test_runner_iterate_passes_when_minimum_threshold_is_met(null_reporter):
             return
         raise AssertionError("flake")
 
-    repeat_item = TestItem(
+    repeat_item = TestDefinition(
         name="test_flaky",
         fn=test_flaky,
         module_path=Path("sample.py"),
@@ -76,7 +76,7 @@ def test_runner_iterate_fails_when_threshold_is_not_met(null_reporter):
             return
         raise AssertionError("fail")
 
-    repeat_item = TestItem(
+    repeat_item = TestDefinition(
         name="test_mostly_fail",
         fn=test_mostly_fail,
         module_path=Path("sample.py"),

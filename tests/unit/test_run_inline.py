@@ -4,8 +4,8 @@ import asyncio
 import threading
 from pathlib import Path
 
-from rue.testing import Runner, test
-from rue.testing.models import IterateModifier, TestItem
+from rue.testing import Runner, test as t_decorator
+from rue.testing.models import IterateModifier, TestDefinition
 
 
 def test_sync_test_runs_in_worker_thread(null_reporter):
@@ -16,7 +16,7 @@ def test_sync_test_runs_in_worker_thread(null_reporter):
         nonlocal observed_thread
         observed_thread = threading.current_thread()
 
-    item = TestItem(
+    item = TestDefinition(
         name="test_check_thread",
         fn=test_check_thread,
         module_path=Path("sample.py"),
@@ -34,12 +34,12 @@ def test_tag_inline_runs_on_main_thread(null_reporter):
     runner = Runner(reporters=[null_reporter])
     observed_thread = None
 
-    @test.tag.inline
+    @t_decorator.tag.inline
     def test_inline():
         nonlocal observed_thread
         observed_thread = threading.current_thread()
 
-    item = TestItem(
+    item = TestDefinition(
         name="test_inline",
         fn=test_inline,
         module_path=Path("sample.py"),
@@ -60,7 +60,7 @@ def test_sync_exception_propagates(null_reporter):
     def test_raise():
         raise ValueError("sync boom")
 
-    item = TestItem(
+    item = TestDefinition(
         name="test_raise",
         fn=test_raise,
         module_path=Path("sample.py"),
@@ -81,11 +81,11 @@ def test_tag_inline_propagates_through_iterate(null_reporter):
     runner = Runner(reporters=[null_reporter])
     threads: list[threading.Thread] = []
 
-    @test.tag.inline
+    @t_decorator.tag.inline
     def test_inline_repeat():
         threads.append(threading.current_thread())
 
-    item = TestItem(
+    item = TestDefinition(
         name="test_inline_repeat",
         fn=test_inline_repeat,
         module_path=Path("sample.py"),
