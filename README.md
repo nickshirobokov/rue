@@ -82,13 +82,13 @@ async def test_chatbot_no_hallucinations(
 
     # Verify tool was called when expected
     if expected_tool := case.references.expected_tool:
-        sut_spans = store_chatbot.get_sut_spans()
+        root_spans = store_chatbot.root_spans
         tool_names = [
             s.attributes.get("llm.request.functions.0.name")
-            for s in store_chatbot.get_llm_calls()
+            for s in store_chatbot.llm_spans
             if s.attributes
         ]
-        assert sut_spans
+        assert root_spans
         assert expected_tool in tool_names
 ```
 

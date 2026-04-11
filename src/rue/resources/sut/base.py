@@ -19,6 +19,11 @@ from pydantic_core import ArgsKwargs, SchemaValidator
 from typing_extensions import TypeVar
 
 from rue.context.runtime import CURRENT_TEST_TRACER
+from rue.resources.sut.output import (
+    CapturedOutput,
+    CapturedStream,
+    SUTOutputCapture,
+)
 from rue.resources.sut.tracer import SUTTracer
 from rue.telemetry.otel.runtime import OtelTraceSession
 
@@ -84,6 +89,7 @@ class SUT(Generic[InstanceT]):
                 resolved_sut_name = resolved_name
             case _:
                 resolved_sut_name = type(instance).__name__
+        self._output_capture = SUTOutputCapture()
         self._tracer = SUTTracer(resolved_sut_name)
         self._name = resolved_sut_name
         test_tracer = CURRENT_TEST_TRACER.get()
@@ -99,6 +105,30 @@ class SUT(Generic[InstanceT]):
     def name(self, value: str) -> None:
         self._name = value
         self._tracer.name = value
+
+    @property
+    def captured_output(self) -> CapturedOutput:
+        return self._output_capture.output
+
+    @property
+    def stdout(self) -> CapturedStream:
+        return self._output_capture.stdout
+
+    @property
+    def stderr(self) -> CapturedStream:
+        return self._output_capture.stderr
+
+    @property
+    def root_spans(self) -> list[ReadableSpan]:
+        return self._tracer.get_root_spans()
+
+    @property
+    def all_spans(self) -> list[ReadableSpan]:
+        return self._tracer.get_all_spans()
+
+    @property
+    def llm_spans(self) -> list[ReadableSpan]:
+        return self._tracer.get_llm_spans()
 
     def get_ai_requests(self) -> list[ModelRequest]:
         raise NotImplementedError("Not implemented")
@@ -139,14 +169,11 @@ class SUT(Generic[InstanceT]):
             parsed_args = ArgsKwargs(args=(), kwargs=input_values)
             spec.validator.validate_python(parsed_args)
 
-    def get_sut_spans(self) -> list[ReadableSpan]:
-        return self._tracer.get_sut_spans()
+    def clear_output(self) -> None:
+        self._output_capture.clear()
 
-    def get_child_spans(self) -> list[ReadableSpan]:
-        return self._tracer.get_child_spans()
-
-    def get_llm_calls(self) -> list[ReadableSpan]:
-        return self._tracer.get_llm_calls()
+    def reset_output_state(self, execution_id: UUID | None) -> None:
+        self._output_capture.reset(execution_id)
 
     def reset_trace_state(self, execution_id: UUID | None) -> None:
         self._tracer.reset(execution_id)
@@ -194,9 +221,13 @@ class SUT(Generic[InstanceT]):
         wrapped_instance: object = instance
         for method_name in self.methods:
             spec = self._method_specs[method_name]
+            captured_callable = self._output_capture.wrap(
+                spec.original_callable,
+                is_async=spec.is_async,
+            )
             wrapped_callable = self._tracer.wrap(
                 spec.name,
-                spec.original_callable,
+                captured_callable,
                 is_async=spec.is_async,
             )
 

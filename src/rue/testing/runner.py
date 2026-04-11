@@ -23,6 +23,7 @@ from rue.resources import (
     registry as default_resource_registry,
 )
 from rue.resources.metrics.base import MetricResult
+from rue.resources.sut.output import SUTOutputCapture
 from rue.storage import SQLiteStore
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.discovery import collect
@@ -36,7 +37,6 @@ from rue.testing.models import (
     TestResult,
     TestStatus,
 )
-from rue.context.output import sys_output_capture
 from rue.testing.tracing import TestTracer
 
 UUID_STRING_PATTERN = re.compile(
@@ -242,7 +242,7 @@ class Runner:
 
         with (
             bind(CURRENT_RUNNER, self),
-            sys_output_capture(swallow=self.capture_output),
+            SUTOutputCapture.sys_capture(swallow=self.capture_output),
             bind(CURRENT_METRIC_RESULTS, metric_results),
         ):
             await self._notify_collection_complete(items, self.current_run)

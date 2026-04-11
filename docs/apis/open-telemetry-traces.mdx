@@ -73,17 +73,17 @@ def test_agent_workflow(my_agent):
     result = my_agent.instance("hello")
 
     assert result
-    assert my_agent.get_sut_spans()
-    assert my_agent.get_child_spans()
-    assert my_agent.get_llm_calls()
+    assert my_agent.root_spans
+    assert my_agent.all_spans
+    assert my_agent.llm_spans
 ```
 
-Available properties and methods:
-- `get_sut_spans()`
-- `get_child_spans()`
-- `get_llm_calls()`
+Available read-only span accessors on `SUT`:
+- `root_spans`
+- `all_spans`
+- `llm_spans`
 
-`get_sut_spans()`, `get_child_spans()`, and `get_llm_calls()` return `[]` until that `SUT` has been called in the current execution.
+`root_spans`, `all_spans`, and `llm_spans` return `[]` until that `SUT` has been called in the current execution.
 
 ## Behavior
 

@@ -2,154 +2,158 @@
 
 import sys
 
-from rue.context.output import (
-    CURRENT_OUTPUT_CAPTURE,
-    OutputBuffer,
-    SysOutputCapture,
-    sys_output_capture,
-)
-
-
-class TestOutputBuffer:
-    def test_readouterr_returns_captured_output(self):
-        buf = OutputBuffer()
-        buf.stdout.write("hello")
-        buf.stderr.write("error")
-
-        out, err = buf.readouterr()
-
-        assert out == "hello"
-        assert err == "error"
-
-    def test_readouterr_clears_buffer(self):
-        buf = OutputBuffer()
-        buf.stdout.write("hello")
-        buf.readouterr()
-
-        out, err = buf.readouterr()
-
-        assert out == ""
-        assert err == ""
-
-    def test_disabled_context_manager(self):
-        buf = OutputBuffer()
-
-        assert not buf._disabled
-        with buf.disabled():
-            assert buf._disabled
-        assert not buf._disabled
+from rue.resources.sut.output import SUTOutputCapture
 
 
 class TestSysOutputCapture:
     def test_install_replaces_sys_streams(self):
         original_stdout = sys.stdout
         original_stderr = sys.stderr
-        capture = SysOutputCapture(swallow=True)
 
-        capture.install()
-
-        assert sys.stdout is not original_stdout
-        assert sys.stderr is not original_stderr
-
-        capture.uninstall()
+        with SUTOutputCapture.sys_capture(swallow=True):
+            assert sys.stdout is not original_stdout
+            assert sys.stderr is not original_stderr
 
         assert sys.stdout is original_stdout
         assert sys.stderr is original_stderr
 
-    def test_capture_context_manager_provides_buffer(self):
-        capture = SysOutputCapture(swallow=True)
-        capture.install()
+    def test_capture_routes_stdout_and_stderr(self):
+        capture = SUTOutputCapture()
 
-        with capture.capture() as buf:
-            print("hello")
+        with capture.capturing():
+            sys.stdout.write("hello")
             sys.stderr.write("error\n")
 
-        capture.uninstall()
+        assert [
+            (event.stream, event.text) for event in capture.output.events
+        ] == [("stdout", "hello"), ("stderr", "error\n")]
 
-        out, err = buf.readouterr()
-        assert out == "hello\n"
-        assert err == "error\n"
+    def test_swallow_true_hides_output_when_sink_active(self, capsys):
+        capture = SUTOutputCapture()
 
-    def test_swallow_true_hides_output_when_buffer_active(self, capsys):
-        capture = SysOutputCapture(swallow=True)
-        capture.install()
+        with SUTOutputCapture.sys_capture(swallow=True):
+            with capture.capturing():
+                sys.stdout.write("hidden")
 
-        with capture.capture():
-            print("hidden")
-
-        capture.uninstall()
-
-        # Output should not appear in real stdout when buffer is active
         real_out, _ = capsys.readouterr()
         assert "hidden" not in real_out
 
-    def test_swallow_true_passes_through_when_no_buffer(self, capsys):
-        capture = SysOutputCapture(swallow=True)
-        capture.install()
-
-        # No buffer active - output should pass through
-        print("visible")
-
-        capture.uninstall()
+    def test_swallow_true_passes_through_when_no_sink(self, capsys):
+        with SUTOutputCapture.sys_capture(swallow=True):
+            sys.stdout.write("visible")
 
         real_out, _ = capsys.readouterr()
         assert "visible" in real_out
 
-    def test_disabled_bypasses_capture(self, capsys):
-        capture = SysOutputCapture(swallow=True)
-        capture.install()
-
-        with capture.capture() as buf:
-            print("captured")
-            with buf.disabled():
-                print("bypassed")
-            print("captured again")
-
-        capture.uninstall()
-
-        out, _ = buf.readouterr()
-        real_out, _ = capsys.readouterr()
-
-        assert "captured" in out
-        assert "captured again" in out
-        assert "bypassed" not in out
-        assert "bypassed" in real_out
-
     def test_swallow_false_shows_output(self, capsys):
-        capture = SysOutputCapture(swallow=False)
-        capture.install()
+        capture = SUTOutputCapture()
 
-        with capture.capture() as buf:
-            print("visible")
+        with SUTOutputCapture.sys_capture(swallow=False):
+            with capture.capturing():
+                sys.stdout.write("visible")
 
-        capture.uninstall()
-
-        # Output should appear in both buffer and real stdout
-        out, _ = buf.readouterr()
-        assert out == "visible\n"
         real_out, _ = capsys.readouterr()
-        assert real_out == "visible\n"
+        assert real_out == "visible"
+        assert capture.stdout.text == "visible"
+
+    def test_nested_captures_fan_out_to_all_sinks(self):
+        outer = SUTOutputCapture()
+        inner = SUTOutputCapture()
+
+        with SUTOutputCapture.sys_capture(swallow=True):
+            with outer.capturing():
+                with inner.capturing():
+                    sys.stderr.write("nested")
+
+        assert [(event.stream, event.text) for event in outer.output.events] == [
+            ("stderr", "nested")
+        ]
+        assert [(event.stream, event.text) for event in inner.output.events] == [
+            ("stderr", "nested")
+        ]
 
 
 class TestSysOutputCaptureContextManager:
-    def test_sets_current_capture(self):
-        assert CURRENT_OUTPUT_CAPTURE.get() is None
+    def test_installs_global_capture_temporarily(self):
+        assert not SUTOutputCapture.is_sys_capture_installed()
 
-        with sys_output_capture(swallow=True) as capture:
-            assert CURRENT_OUTPUT_CAPTURE.get() is capture
+        with SUTOutputCapture.sys_capture(swallow=True):
+            assert SUTOutputCapture.is_sys_capture_installed()
 
-        assert CURRENT_OUTPUT_CAPTURE.get() is None
+        assert not SUTOutputCapture.is_sys_capture_installed()
 
-    def test_nested_captures_isolate_output(self):
-        with sys_output_capture(swallow=True) as outer_capture:
-            with outer_capture.capture() as buf1:
-                print("outer")
 
-            with outer_capture.capture() as buf2:
-                print("inner")
+class TestGlobalListener:
+    def setup_method(self):
+        SUTOutputCapture.clear_global_listener()
 
-        out1, _ = buf1.readouterr()
-        out2, _ = buf2.readouterr()
+    def teardown_method(self):
+        SUTOutputCapture.clear_global_listener()
 
-        assert out1 == "outer\n"
-        assert out2 == "inner\n"
+    def test_global_listener_receives_non_sut_stderr(self):
+        received: list[tuple[str, str]] = []
+
+        SUTOutputCapture.set_global_listener(
+            lambda stream, s: received.append((stream, s))
+        )
+
+        with SUTOutputCapture.sys_capture(swallow=True):
+            sys.stderr.write("warning\n")
+
+        assert received == [("stderr", "warning\n")]
+
+    def test_global_listener_skipped_when_sut_swallows(self):
+        received: list[tuple[str, str]] = []
+        capture = SUTOutputCapture()
+
+        SUTOutputCapture.set_global_listener(
+            lambda stream, s: received.append((stream, s))
+        )
+
+        with SUTOutputCapture.sys_capture(swallow=True):
+            with capture.capturing():
+                sys.stderr.write("sut-only\n")
+
+        assert capture.stderr.text == "sut-only\n"
+        assert received == []
+
+    def test_global_listener_receives_when_sut_does_not_swallow(self):
+        received: list[tuple[str, str]] = []
+        capture = SUTOutputCapture()
+
+        SUTOutputCapture.set_global_listener(
+            lambda stream, s: received.append((stream, s))
+        )
+
+        with SUTOutputCapture.sys_capture(swallow=False):
+            with capture.capturing():
+                sys.stderr.write("shared\n")
+
+        assert capture.stderr.text == "shared\n"
+        assert received == [("stderr", "shared\n")]
+
+    def test_global_listener_not_called_for_stdout(self):
+        received: list[tuple[str, str]] = []
+
+        SUTOutputCapture.set_global_listener(
+            lambda stream, s: received.append((stream, s))
+        )
+
+        with SUTOutputCapture.sys_capture(swallow=True):
+            sys.stdout.write("stdout-only\n")
+
+        stderr_received = [r for r in received if r[0] == "stderr"]
+        assert stderr_received == []
+
+    def test_clear_global_listener_stops_receiving(self):
+        received: list[tuple[str, str]] = []
+
+        SUTOutputCapture.set_global_listener(
+            lambda stream, s: received.append((stream, s))
+        )
+        SUTOutputCapture.clear_global_listener()
+
+        with SUTOutputCapture.sys_capture(swallow=True):
+            sys.stderr.write("nothing\n")
+
+        assert received == []

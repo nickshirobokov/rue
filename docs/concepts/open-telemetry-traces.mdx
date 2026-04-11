@@ -71,11 +71,11 @@ def weather_agent():
 def test_can_inspect_trace(weather_agent):
     out = weather_agent.instance("What's the weather in SF?")
 
-    sut_spans = weather_agent.get_sut_spans()
-    assert sut_spans[0].attributes.get("rue.sut.name") == "weather_agent"
+    root_spans = weather_agent.root_spans
+    assert root_spans[0].attributes.get("rue.sut.name") == "weather_agent"
 
-    child_spans = weather_agent.get_child_spans()
-    assert child_spans
+    all_spans = weather_agent.all_spans
+    assert all_spans
 ```
 
 ## Common patterns
@@ -93,7 +93,7 @@ def test_tool_dependency(my_agent):
     my_agent.instance("Find the policy and cite sources")
 
     tools: list[str] = []
-    for span in my_agent.get_llm_calls():
+    for span in my_agent.llm_spans:
         attrs = span.attributes or {}
         for key, value in attrs.items():
             if key.startswith("llm.request.functions.") and key.endswith(".name") and value:
@@ -112,7 +112,7 @@ def test_no_tool_loops(my_agent):
     my_agent.instance("Solve the task with tools, but don't loop.")
 
     tools: list[str] = []
-    for span in my_agent.get_llm_calls():
+    for span in my_agent.llm_spans:
         attrs = span.attributes or {}
         for key, value in attrs.items():
             if key.startswith("llm.request.functions.") and key.endswith(".name") and value:
@@ -129,10 +129,10 @@ def test_no_tool_loops(my_agent):
 If your SUT triggers instrumented LLM clients, you can locate those spans:
 
 ```python
-def test_llm_calls_are_captured(my_agent):
+def test_llm_spans_are_captured(my_agent):
     my_agent.instance("hello")
 
-    llm_spans = my_agent.get_llm_calls()
+    llm_spans = my_agent.llm_spans
 ```
 
 ## Recommendations

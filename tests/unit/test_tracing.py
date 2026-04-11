@@ -65,21 +65,21 @@ def traced_pipeline():
     return rue.SUT(run)
 
 def test_sample(traced_pipeline):
-    assert traced_pipeline.get_sut_spans() == []
-    assert traced_pipeline.get_child_spans() == []
-    assert traced_pipeline.get_llm_calls() == []
+    assert traced_pipeline.root_spans == []
+    assert traced_pipeline.all_spans == []
+    assert traced_pipeline.llm_spans == []
 
     assert traced_pipeline.instance() == "ok"
-    assert {span.name for span in traced_pipeline.get_sut_spans()} == {
+    assert {span.name for span in traced_pipeline.root_spans} == {
         "sut.traced_pipeline.__call__"
     }
-    assert {span.name for span in traced_pipeline.get_child_spans()} == {
+    assert {span.name for span in traced_pipeline.all_spans} == {
         "sut.traced_pipeline.__call__",
         "child_step",
         "openai.responses.create",
         "predicate.is_ok",
     }
-    assert [span.name for span in traced_pipeline.get_llm_calls()] == [
+    assert [span.name for span in traced_pipeline.llm_spans] == [
         "openai.responses.create"
     ]
 """,
@@ -104,21 +104,21 @@ def traced_pipeline():
     return rue.SUT(run)
 
 async def test_sample(traced_pipeline):
-    assert traced_pipeline.get_sut_spans() == []
-    assert traced_pipeline.get_child_spans() == []
-    assert traced_pipeline.get_llm_calls() == []
+    assert traced_pipeline.root_spans == []
+    assert traced_pipeline.all_spans == []
+    assert traced_pipeline.llm_spans == []
 
     assert await traced_pipeline.instance() == "ok"
-    assert {span.name for span in traced_pipeline.get_sut_spans()} == {
+    assert {span.name for span in traced_pipeline.root_spans} == {
         "sut.traced_pipeline.__call__"
     }
-    assert {span.name for span in traced_pipeline.get_child_spans()} == {
+    assert {span.name for span in traced_pipeline.all_spans} == {
         "sut.traced_pipeline.__call__",
         "child_step",
         "openai.responses.create",
         "predicate.is_ok",
     }
-    assert [span.name for span in traced_pipeline.get_llm_calls()] == [
+    assert [span.name for span in traced_pipeline.llm_spans] == [
         "openai.responses.create"
     ]
 """,

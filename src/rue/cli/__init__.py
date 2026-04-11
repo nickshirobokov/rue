@@ -71,7 +71,7 @@ def test(
         Option(
             "-s",
             "--show-output",
-            help="Show stdout/stderr live (still captured)",
+            help="Show SUT stdout/stderr live (still captured on the SUT)",
         ),
     ] = False,
     db_path: Annotated[

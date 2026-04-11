@@ -20,5 +20,3 @@ __all__ = [
     "registry",
     "resource",
 ]
-
-from rue.resources import builtins

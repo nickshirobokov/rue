@@ -97,7 +97,7 @@ class SUTTracer:
 
         return sync_wrapped
 
-    def get_sut_spans(self) -> list[ReadableSpan]:
+    def get_root_spans(self) -> list[ReadableSpan]:
         session = self._require_session()
         span_ids = set(self._span_ids.get())
         if not span_ids:
@@ -106,13 +106,13 @@ class SUTTracer:
             span for span in session.get_spans() if span.context.span_id in span_ids
         ]
 
-    def get_child_spans(self) -> list[ReadableSpan]:
+    def get_all_spans(self) -> list[ReadableSpan]:
         session = self._require_session()
-        sut_spans = self.get_sut_spans()
-        if not sut_spans:
+        root_spans = self.get_root_spans()
+        if not root_spans:
             return []
 
-        root_ids = {span.context.span_id for span in sut_spans}
+        root_ids = {span.context.span_id for span in root_spans}
         descendant_ids = set(root_ids)
         spans = session.get_spans()
 
@@ -134,10 +134,10 @@ class SUTTracer:
 
         return [span for span in spans if span.context.span_id in descendant_ids]
 
-    def get_llm_calls(self) -> list[ReadableSpan]:
+    def get_llm_spans(self) -> list[ReadableSpan]:
         return [
             span
-            for span in self.get_child_spans()
+            for span in self.get_all_spans()
             if span.name.startswith(("openai.", "anthropic.", "gen_ai."))
         ]
 

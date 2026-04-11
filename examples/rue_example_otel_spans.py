@@ -71,7 +71,7 @@ def agent_with_external_client():
 def test_simple_sut_works(simple_sut):
     """A callable SUT produces one root span per call."""
     result = simple_sut.instance("Hello, world!")
-    spans = simple_sut.get_sut_spans()
+    spans = simple_sut.root_spans
 
     assert "Hello" in result
     assert len(spans) == 1
@@ -81,7 +81,7 @@ def test_simple_sut_works(simple_sut):
 async def test_async_sut_works(async_sut):
     """Async SUT calls are traced too."""
     result = await async_sut.instance("Async question")
-    spans = async_sut.get_sut_spans()
+    spans = async_sut.root_spans
 
     assert "Async" in result
     assert len(spans) == 1
@@ -91,23 +91,23 @@ async def test_async_sut_works(async_sut):
 def test_pipeline_works(pipeline_sut):
     """Wrapped methods show up as SUT child spans."""
     result = pipeline_sut.instance.run("What is Python?")
-    sut_names = {span.name for span in pipeline_sut.get_sut_spans()}
-    child_names = {span.name for span in pipeline_sut.get_child_spans()}
+    root_names = {span.name for span in pipeline_sut.root_spans}
+    all_names = {span.name for span in pipeline_sut.all_spans}
 
     assert "Answer" in result
     assert "Python" in result
-    assert sut_names == {
+    assert root_names == {
         "sut.pipeline_sut.run",
         "sut.pipeline_sut.retrieve",
         "sut.pipeline_sut.generate",
     }
-    assert child_names == sut_names
+    assert all_names == root_names
 
 
 def test_sut_span_attributes(simple_sut):
     """Captured SUT spans include name, method, and IO metadata."""
     result = simple_sut.instance("processed: test input")
-    span = simple_sut.get_sut_spans()[0]
+    span = simple_sut.root_spans[0]
 
     assert span.attributes.get("rue.sut") is True
     assert span.attributes.get("rue.sut.name") == "simple_sut"
@@ -120,7 +120,7 @@ def test_repeated_calls_create_multiple_spans(simple_sut):
     """Each call within one test execution creates a new SUT span."""
     result1 = simple_sut.instance("First call")
     result2 = simple_sut.instance("Second call")
-    spans = simple_sut.get_sut_spans()
+    spans = simple_sut.root_spans
 
     assert "First" in result1
     assert "Second" in result2
@@ -129,9 +129,9 @@ def test_repeated_calls_create_multiple_spans(simple_sut):
 
 
 def test_external_client_pattern(agent_with_external_client):
-    """Instrumented SDK spans would appear in `get_llm_calls()`."""
+    """Instrumented SDK spans would appear in `llm_spans`."""
     result = agent_with_external_client.instance("Summarize this document")
 
     assert "Completed" in result
-    assert len(agent_with_external_client.get_sut_spans()) == 1
-    assert agent_with_external_client.get_llm_calls() == []
+    assert len(agent_with_external_client.root_spans) == 1
+    assert agent_with_external_client.llm_spans == []

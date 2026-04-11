@@ -3,7 +3,13 @@
 from .predicates import PredicateResult, predicate
 from .reports import Reporter
 from .resources.metrics import Metric, metric, metrics
-from .resources.sut import SUT, sut
+from .resources.sut import (
+    CapturedEvent,
+    CapturedOutput,
+    CapturedStream,
+    SUT,
+    sut,
+)
 from .testing import (
     Case,
     CaseGroup,
@@ -34,6 +40,9 @@ __all__ = [
     "fail",
     "xfail",
     "SUT",
+    "CapturedEvent",
+    "CapturedOutput",
+    "CapturedStream",
     # Predicates
     "predicate",
     "PredicateResult",
