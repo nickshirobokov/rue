@@ -2,49 +2,39 @@
 
 from __future__ import annotations
 
-import sys
 from collections import Counter
-from typing import IO
 
 from rich.console import RenderableType
 from rich.rule import Rule
 from rich.text import Text
+
+from rue.resources.sut.output import SUTOutputCapture
 
 
 class StderrCapture:
     def __init__(self) -> None:
         self._lines: list[str] = []
         self._buf: str = ""
-        self._original: IO[str] | None = None
 
     def start(self) -> None:
         self._lines.clear()
         self._buf = ""
-        self._original = sys.stderr
-        sys.stderr = self  # type: ignore[assignment]
+        SUTOutputCapture.set_global_listener(self._on_write)
 
     def stop(self) -> None:
-        if self._original is None:
-            return
-        sys.stderr = self._original
-        self._original = None
+        SUTOutputCapture.clear_global_listener()
         if self._buf.strip():
             self._lines.append(self._buf.rstrip())
             self._buf = ""
 
-    def write(self, s: str) -> int:
+    def _on_write(self, stream: str, s: str) -> None:
+        if stream != "stderr":
+            return
         self._buf += s
         while "\n" in self._buf:
             line, self._buf = self._buf.split("\n", 1)
             if line.strip():
                 self._lines.append(line)
-        return len(s)
-
-    def flush(self) -> None:
-        pass
-
-    def isatty(self) -> bool:
-        return False
 
     @property
     def lines(self) -> list[str]:

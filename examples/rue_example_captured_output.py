@@ -1,17 +1,19 @@
-"""Example: Using captured_output resource to inspect stdout/stderr.
+"""Example: Inspecting SUT-owned stdout/stderr capture.
 
 Run with:
     rue test examples/rue_example_captured_output.py
 
-Run with live output visible:
+Run with live SUT output visible:
     rue test examples/rue_example_captured_output.py -s
 """
+
+import sys
 
 import rue
 
 
 class Greeter:
-    def __init__(self, prefix: str = "Hello"):
+    def __init__(self, prefix: str = "Hello") -> None:
         self.prefix = prefix
 
     def greet(self, name: str) -> str:
@@ -19,99 +21,42 @@ class Greeter:
         print(message)
         return message
 
-    def greet_many(self, names: list[str]) -> list[str]:
-        messages = []
-        for name in names:
-            messages.append(self.greet(name))
-        return messages
+    def warn(self, name: str) -> None:
+        sys.stderr.write(f"warn:{name}\n")
 
 
-@rue.resource
-def greeter() -> Greeter:
-    """Prints greetings."""
-    return Greeter()
+@rue.resource.sut
+def greeter():
+    return rue.SUT(Greeter(), methods=["greet", "warn"])
 
 
-def test_capture_stdout(captured_output):
-    """Test that captures and inspects stdout."""
-    print("Hello from the test!")
-    print("Another line")
-
-    out, err = captured_output.readouterr()
-
-    assert "Hello from the test!" in out
-    assert "Another line" in out
-    assert err == ""
-
-
-def test_capture_stderr(captured_output):
-    """Test that captures and inspects stderr."""
-    import sys
-
-    sys.stderr.write("Error message\n")
-
-    out, err = captured_output.readouterr()
-
-    assert out == ""
-    assert "Error message" in err
-
-
-def test_capture_multiple_reads(captured_output):
-    """Test that readouterr() clears the buffer each time."""
-    print("First")
-    out1, _ = captured_output.readouterr()
-
-    print("Second")
-    out2, _ = captured_output.readouterr()
-
-    assert out1 == "First\n"
-    assert out2 == "Second\n"
-
-
-def test_capture_from_function_call(captured_output):
-    """Test capturing output from code under test."""
-
-    def say_hello(name: str) -> None:
-        print(f"Hi, {name}!")
-
-    say_hello("World")
-
-    out, _ = captured_output.readouterr()
-    assert out == "Hi, World!\n"
-
-
-def test_capture_output(greeter, captured_output):
-    """Test capturing stdout from a SUT."""
-    result = greeter.greet("Alice")
-
-    out, _ = captured_output.readouterr()
+def test_capture_stdout(greeter):
+    result = greeter.instance.greet("Alice")
 
     assert result == "Hello, Alice!"
-    assert out == "Hello, Alice!\n"
+    assert greeter.stdout.text == "Hello, Alice!\n"
+    assert greeter.stderr.text == ""
 
 
-def test_capture_multiple_calls(greeter, captured_output):
-    """Test capturing stdout from multiple SUT calls."""
-    greeter.greet_many(["Alice", "Bob", "Charlie"])
+def test_capture_stderr(greeter):
+    greeter.instance.warn("Bob")
 
-    out, _ = captured_output.readouterr()
-
-    assert "Hello, Alice!" in out
-    assert "Hello, Bob!" in out
-    assert "Hello, Charlie!" in out
+    assert greeter.stdout.text == ""
+    assert greeter.stderr.lines == ("warn:Bob",)
 
 
-def test_disabled_bypasses_capture(captured_output):
-    """Test that disabled() allows output to pass through to real stdout."""
-    print("this is captured")
+def test_capture_multiple_calls(greeter):
+    greeter.instance.greet("Alice")
+    greeter.instance.greet("Bob")
 
-    # with captured_output.disabled():
-    #     print("this goes to real stdout (useful for debugging)")
+    assert greeter.stdout.lines == ("Hello, Alice!", "Hello, Bob!")
 
-    print("this is captured again")
 
-    out, _ = captured_output.readouterr()
+def test_clear_output(greeter):
+    greeter.instance.greet("Alice")
+    assert greeter.stdout.text == "Hello, Alice!\n"
 
-    assert "this is captured" in out
-    assert "this is captured again" in out
-    assert "this goes to real stdout" not in out
+    greeter.clear_output()
+
+    assert greeter.captured_output.events == ()
+    assert greeter.captured_output.combined.text == ""

@@ -5,8 +5,9 @@ title: "SUT"
 <Note>SUT stands for *System Under Test*.</Note>
 <Note>`@rue.resource.sut` is optional. It exists to make your agent/workflow callable injectable and OpenTelemetry-observable.</Note>
 
-`@rue.resource.sut` registers a **SUT factory function** as an injectable **resource**. The factory must return (or yield) a `rue.SUT(...)` object, and each invocation of `sut.instance` (or a wrapped method on it) is wrapped in an OpenTelemetry span. This gives you two things:
+`@rue.resource.sut` registers a **SUT factory function** as an injectable **resource**. The factory must return (or yield) a `rue.SUT(...)` object, and each invocation of `sut.instance` (or a wrapped method on it) is wrapped in an OpenTelemetry span. This gives you three things:
 - A clean dependency injection (DI) boundary in your tests (you call the injected parameter's `instance`, not a global).
+- SUT-owned stdout/stderr capture you can assert on through `sut.stdout`, `sut.stderr`, and `sut.captured_output`.
 - OpenTelemetry spans you can query from that `SUT` inside a test (when OpenTelemetry is enabled).
 
 ```python
@@ -22,6 +23,7 @@ def chatbot():
 def test_chatbot_works(chatbot):
     out = chatbot.instance("hello")
     assert "hello" in out
+    assert "hello" in chatbot.stdout.text
 ```
 
 ## Basic Usage
@@ -54,10 +56,10 @@ def weather_agent():
 def test_weather_agent_calls_tools(weather_agent):
     out = weather_agent.instance("What's the weather in SF?")
 
-    spans = weather_agent.get_sut_spans()
+    spans = weather_agent.root_spans
     assert spans
     assert spans[0].attributes.get("rue.sut.name") == "weather_agent"
-    assert weather_agent.get_child_spans()
+    assert weather_agent.all_spans
 ```
 </Step>
 </Steps>
@@ -101,6 +103,42 @@ def weather_agent():
 def test_custom_method(weather_agent):
     out = weather_agent.instance.run("task")
     assert out
+```
+
+## SUT-owned output capture
+Each wrapped SUT call appends Python-level stdout/stderr writes to the `SUT` instance:
+
+- `sut.stdout.text`
+- `sut.stderr.text`
+- `sut.captured_output.combined.text`
+- `sut.captured_output.events`
+
+Use `sut.clear_output()` when you want to reset accumulated output manually.
+
+```python
+import sys
+import rue
+from rue import SUT
+
+
+class Agent:
+    def run(self, prompt: str) -> str:
+        print(f"running: {prompt}")
+        sys.stderr.write("debug: tool invoked\n")
+        return prompt.upper()
+
+
+@rue.resource.sut
+def agent():
+    return SUT(Agent(), methods=["run"])
+
+
+def test_agent_output(agent):
+    assert agent.stdout.text == ""
+
+    assert agent.instance.run("hello") == "HELLO"
+    assert "running: hello" in agent.stdout.text
+    assert "debug: tool invoked" in agent.stderr.text
 ```
 
 ## SUT span attributes

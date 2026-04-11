@@ -212,18 +212,18 @@ def test_resolves_child_and_llm_spans_and_resets_per_execution(
     ]
     session.owners = {303: root_span_id}
 
-    assert [span.name for span in tracer.get_sut_spans()] == [
+    assert [span.name for span in tracer.get_root_spans()] == [
         "sut.pipeline.__call__"
     ]
-    assert {span.name for span in tracer.get_child_spans()} == {
+    assert {span.name for span in tracer.get_all_spans()} == {
         "sut.pipeline.__call__",
         "child_step",
         "openai.responses.create",
     }
-    assert [span.name for span in tracer.get_llm_calls()] == [
+    assert [span.name for span in tracer.get_llm_spans()] == [
         "openai.responses.create"
     ]
 
     tracer.reset(UUID(int=2))
     tracer.activate(session)
-    assert tracer.get_sut_spans() == []
+    assert tracer.get_root_spans() == []

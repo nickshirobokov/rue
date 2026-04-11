@@ -288,14 +288,14 @@ def test_agent_uses_tools(weather_agent):
     result = weather_agent.instance("What's the weather?")
 
     # Access OpenTelemetry spans for assertions
-    sut_spans = weather_agent.get_sut_spans()
-    assert sut_spans
+    root_spans = weather_agent.root_spans
+    assert root_spans
 
     # If you want to assert on tool calls, query LLM spans explicitly.
     # Note: attribute keys come from OpenTelemetry LLM instrumentations.
     tool_names = [
         s.attributes.get("llm.request.functions.0.name")
-        for s in weather_agent.get_llm_calls()
+        for s in weather_agent.llm_spans
         if s.attributes
     ]
     assert "get_weather" in tool_names

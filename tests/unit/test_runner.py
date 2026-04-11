@@ -18,6 +18,7 @@ from rue.reports import OtelReporter
 from rue.reports.base import Reporter
 from rue.reports.otel import DEFAULT_OTEL_OUTPUT_ROOT, MAX_STORED_OTEL_RUNS
 from rue.resources import ResourceRegistry, registry, resource
+from rue.resources.sut import sut
 from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
 from rue.testing.discovery import collect
 from rue.testing.environment import _filter_env_vars
@@ -461,7 +462,7 @@ class TestResourceInjection:
 
     @pytest.mark.parametrize("capture_output", [True, False])
     @pytest.mark.asyncio
-    async def test_captured_output_resource_respects_runner_capture_mode(
+    async def test_sut_output_respects_runner_capture_mode(
         self,
         capture_output: bool,
         capsys,
@@ -469,24 +470,34 @@ class TestResourceInjection:
     ):
         captured = []
 
-        def test_output(captured_output):
+        @sut
+        def agent():
+            def run():
+                print("hello from sut")
+
+            return SUT(run)
+
+        def test_output(agent):
             print("hello from test")
-            captured.append(captured_output.readouterr())
+            agent.instance()
+            captured.append((agent.stdout.text, agent.stderr.text))
 
         result = await Runner(
             reporters=[null_reporter],
             capture_output=capture_output,
-        ).run(items=[make_item(test_output, params=["captured_output"])])
+        ).run(items=[make_item(test_output, params=["agent"])])
 
         assert result.result.passed == 1
-        assert captured == [("hello from test\n", "")]
+        assert captured == [("hello from sut\n", "")]
 
         real_out, real_err = capsys.readouterr()
         assert real_err == ""
+        assert "hello from test" in real_out
         if capture_output:
-            assert real_out == ""
+            assert "hello from sut" not in real_out
         else:
             assert "hello from test" in real_out
+            assert "hello from sut" in real_out
 
 
 class TestOpenTelemetry:
@@ -506,7 +517,7 @@ class TestOpenTelemetry:
             first_agent = SUT(run, name="first_agent")
             await first_agent.instance()
             captured["first"] = {
-                span.name for span in first_agent.get_child_spans()
+                span.name for span in first_agent.all_spans
             }
 
         async def second():
@@ -517,7 +528,7 @@ class TestOpenTelemetry:
             second_agent = SUT(run, name="second_agent")
             await second_agent.instance()
             captured["second"] = {
-                span.name for span in second_agent.get_child_spans()
+                span.name for span in second_agent.all_spans
             }
 
         items = [

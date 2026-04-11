@@ -40,9 +40,9 @@ def multi_step_pipeline():
 
 def test_sut_accessors_start_empty(simple_pipeline):
     """SUT trace accessors are empty until the SUT is called."""
-    assert simple_pipeline.get_sut_spans() == []
-    assert simple_pipeline.get_child_spans() == []
-    assert simple_pipeline.get_llm_calls() == []
+    assert simple_pipeline.root_spans == []
+    assert simple_pipeline.all_spans == []
+    assert simple_pipeline.llm_spans == []
 
 
 def test_inspect_simple_sut_span(simple_pipeline):
@@ -50,15 +50,15 @@ def test_inspect_simple_sut_span(simple_pipeline):
     query = "hello world"
     result = simple_pipeline.instance(query)
 
-    sut_spans = simple_pipeline.get_sut_spans()
-    child_spans = simple_pipeline.get_child_spans()
+    root_spans = simple_pipeline.root_spans
+    all_spans = simple_pipeline.all_spans
 
-    assert len(sut_spans) == 1
-    assert {span.name for span in child_spans} == {
+    assert len(root_spans) == 1
+    assert {span.name for span in all_spans} == {
         "sut.simple_pipeline.__call__"
     }
 
-    span = sut_spans[0]
+    span = root_spans[0]
     assert span.name == "sut.simple_pipeline.__call__"
     assert span.attributes.get("rue.sut") is True
     assert span.attributes.get("rue.sut.name") == "simple_pipeline"
@@ -71,7 +71,7 @@ def test_access_span_ids(simple_pipeline):
     """ReadableSpan exposes OpenTelemetry trace and span identifiers."""
     simple_pipeline.instance("get ids")
 
-    span = simple_pipeline.get_sut_spans()[0]
+    span = simple_pipeline.root_spans[0]
     otel_trace_id = f"{span.context.trace_id:032x}"
     otel_span_id = f"{span.context.span_id:016x}"
 
@@ -79,22 +79,22 @@ def test_access_span_ids(simple_pipeline):
     assert len(otel_span_id) == 16
 
 
-def test_query_child_spans(multi_step_pipeline):
-    """Wrapped methods appear as child spans of the root SUT call."""
+def test_query_all_spans(multi_step_pipeline):
+    """Wrapped methods appear in the SUT span subtree."""
     result = multi_step_pipeline.instance.run("test query")
 
-    sut_names = {span.name for span in multi_step_pipeline.get_sut_spans()}
-    child_names = {
-        span.name for span in multi_step_pipeline.get_child_spans()
+    root_names = {span.name for span in multi_step_pipeline.root_spans}
+    all_names = {
+        span.name for span in multi_step_pipeline.all_spans
     }
 
     assert "test query" in result
-    assert sut_names == {
+    assert root_names == {
         "sut.multi_step_pipeline.run",
         "sut.multi_step_pipeline.retrieve",
         "sut.multi_step_pipeline.generate",
     }
-    assert child_names == sut_names
+    assert all_names == root_names
 
 
 def test_assert_on_trace_data(multi_step_pipeline):
@@ -102,7 +102,7 @@ def test_assert_on_trace_data(multi_step_pipeline):
     multi_step_pipeline.instance.run("assertion test")
 
     spans = {
-        span.name: span for span in multi_step_pipeline.get_sut_spans()
+        span.name: span for span in multi_step_pipeline.root_spans
     }
     run_span = spans["sut.multi_step_pipeline.run"]
     retrieve_span = spans["sut.multi_step_pipeline.retrieve"]
@@ -114,4 +114,4 @@ def test_assert_on_trace_data(multi_step_pipeline):
     assert generate_span.parent.span_id == run_span.context.span_id
     assert retrieve_span.attributes.get("rue.sut.method") == "retrieve"
     assert generate_span.attributes.get("rue.sut.method") == "generate"
-    assert multi_step_pipeline.get_llm_calls() == []
+    assert multi_step_pipeline.llm_spans == []

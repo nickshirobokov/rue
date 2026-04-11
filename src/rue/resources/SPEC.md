@@ -456,9 +456,7 @@ The default decorator `rue.resources.resource(...)` registers into that singleto
 
 The package import also registers builtin resources into that singleton and marks them builtin so they survive `registry.reset()`.
 
-Builtin resources currently include:
-
-* `captured_output`
+Builtin resources currently include none.
 
 `registry.reset()` MUST preserve those builtins.
 

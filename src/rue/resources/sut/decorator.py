@@ -39,6 +39,7 @@ def sut(
     def on_injection(sut_instance: SUT) -> SUT:
         test_ctx = CURRENT_TEST.get()
         execution_id = None if test_ctx is None else test_ctx.execution_id
+        sut_instance.reset_output_state(execution_id)
         sut_instance.reset_trace_state(execution_id)
         tracer = CURRENT_TEST_TRACER.get()
         if tracer is not None and tracer.otel_trace_session is not None:

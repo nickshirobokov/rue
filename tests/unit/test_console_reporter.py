@@ -15,6 +15,7 @@ from rue.resources.metrics.base import (
     MetricMetadata,
     MetricResult,
 )
+from rue.resources.sut.output import SUTOutputCapture
 from rue.testing.models import (
     Run,
     TestDefinition,
@@ -501,6 +502,8 @@ async def test_verbose_live_renders_sub_executions(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_very_verbose_mode_shows_captured_stderr_as_warnings_section():
+    import sys
+
     output = io.StringIO()
     console = Console(
         file=output, force_terminal=False, color_system=None, width=120
@@ -510,14 +513,14 @@ async def test_very_verbose_mode_shows_captured_stderr_as_warnings_section():
     item = make_item("test_foo", "tests/test_foo.py")
     execution = make_execution(item, TestStatus.PASSED, 10.0)
 
-    await reporter.on_collection_complete([item], Run())
-    import sys
-    sys.stderr.write("some noisy warning\n")
-    await reporter.on_execution_complete(execution)
+    with SUTOutputCapture.sys_capture(swallow=False):
+        await reporter.on_collection_complete([item], Run())
+        sys.stderr.write("some noisy warning\n")
+        await reporter.on_execution_complete(execution)
 
-    test_run = Run()
-    test_run.result.executions = [execution]
-    await reporter.on_run_complete(test_run)
+        test_run = Run()
+        test_run.result.executions = [execution]
+        await reporter.on_run_complete(test_run)
 
     text = output.getvalue()
     assert "WARNINGS" in text
@@ -574,6 +577,8 @@ async def test_verbose_mode_does_not_show_warnings_section():
 
 @pytest.mark.asyncio
 async def test_very_verbose_mode_collapses_duplicate_warnings():
+    import sys
+
     output = io.StringIO()
     console = Console(
         file=output, force_terminal=False, color_system=None, width=120
@@ -583,16 +588,16 @@ async def test_very_verbose_mode_collapses_duplicate_warnings():
     item = make_item("test_foo", "tests/test_foo.py")
     execution = make_execution(item, TestStatus.PASSED, 10.0)
 
-    await reporter.on_collection_complete([item], Run())
-    import sys
-    for _ in range(3):
-        sys.stderr.write("repeated warning\n")
-    sys.stderr.write("unique warning\n")
-    await reporter.on_execution_complete(execution)
+    with SUTOutputCapture.sys_capture(swallow=False):
+        await reporter.on_collection_complete([item], Run())
+        for _ in range(3):
+            sys.stderr.write("repeated warning\n")
+        sys.stderr.write("unique warning\n")
+        await reporter.on_execution_complete(execution)
 
-    test_run = Run()
-    test_run.result.executions = [execution]
-    await reporter.on_run_complete(test_run)
+        test_run = Run()
+        test_run.result.executions = [execution]
+        await reporter.on_run_complete(test_run)
 
     text = output.getvalue()
     assert text.count("repeated warning") == 1

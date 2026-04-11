@@ -13,6 +13,7 @@ from rue import SUT
 from rue.config import Config
 from rue.resources import ResourceResolver, registry as resources_registry
 from rue.resources.sut import sut
+from rue.resources.sut.output import SUTOutputCapture
 from rue.testing.discovery import collect
 from rue.testing.models import Case
 from rue.testing.runner import Runner
@@ -112,6 +113,101 @@ class TestSutObject:
 
         assert await target.instance.run("hello") == "ok:hello"
         assert target.instance.predict(3) == 6
+
+    def test_captures_stdout_stderr_and_event_order(self):
+        def run() -> str:
+            sys.stdout.write("out-1")
+            sys.stderr.write("err-1")
+            sys.stdout.write("out-2")
+            return "ok"
+
+        target = SUT(run)
+
+        assert target.instance() == "ok"
+        assert target.stdout.text == "out-1out-2"
+        assert target.stderr.text == "err-1"
+        assert target.captured_output.combined.text == "out-1err-1out-2"
+        assert [
+            (event.stream, event.text) for event in target.captured_output.events
+        ] == [
+            ("stdout", "out-1"),
+            ("stderr", "err-1"),
+            ("stdout", "out-2"),
+        ]
+
+    def test_appends_output_across_multiple_calls(self):
+        def run(value: str) -> str:
+            print(value)
+            return value
+
+        target = SUT(run)
+
+        assert target.instance("first") == "first"
+        assert target.instance("second") == "second"
+        assert target.stdout.text == "first\nsecond\n"
+        assert target.stdout.lines == ("first", "second")
+
+    def test_clear_output_resets_current_context_state(self):
+        def run() -> None:
+            print("hello")
+
+        target = SUT(run)
+
+        target.instance()
+        assert target.stdout.text == "hello\n"
+
+        target.clear_output()
+
+        assert target.stdout.text == ""
+        assert target.stderr.text == ""
+        assert target.captured_output.events == ()
+
+    def test_wraps_instance_methods_with_output_capture(self):
+        class Service:
+            def run(self) -> None:
+                print("run")
+
+            def predict(self) -> None:
+                sys.stderr.write("predict\n")
+
+        target = SUT(Service(), methods=["run", "predict"])
+
+        target.instance.run()
+        target.instance.predict()
+
+        assert target.stdout.text == "run\n"
+        assert target.stderr.text == "predict\n"
+
+    def test_nested_sut_calls_duplicate_output_into_parent_and_child(self):
+        def run_child() -> None:
+            sys.stdout.write("child|")
+
+        child = SUT(run_child, name="child")
+
+        def run_parent() -> None:
+            sys.stdout.write("parent|")
+            child.instance()
+            sys.stderr.write("done|")
+
+        parent = SUT(run_parent, name="parent")
+
+        parent.instance()
+
+        assert child.captured_output.combined.text == "child|"
+        assert parent.captured_output.combined.text == "parent|child|done|"
+        assert parent.stdout.text == "parent|child|"
+        assert parent.stderr.text == "done|"
+
+    def test_lazy_installs_and_uninstalls_sys_capture_outside_runner(self):
+        def run() -> None:
+            print("hello")
+
+        target = SUT(run)
+
+        assert not SUTOutputCapture.is_sys_capture_installed()
+        target.instance()
+        assert not SUTOutputCapture.is_sys_capture_installed()
+        assert target.stdout.text == "hello\n"
 
     def test_explicit_name_wins(self):
         def run(value: int) -> int:
@@ -368,20 +464,21 @@ def traced_pipeline():
     return rue.SUT(run)
 
 async def test_sample(traced_pipeline):
-    assert traced_pipeline.get_sut_spans() == []
-    assert traced_pipeline.get_child_spans() == []
-    assert traced_pipeline.get_llm_calls() == []
+    assert traced_pipeline.root_spans == []
+    assert traced_pipeline.all_spans == []
+    assert traced_pipeline.llm_spans == []
+    assert traced_pipeline.stdout.text == ""
 
     assert await traced_pipeline.instance() == "ok"
-    assert {span.name for span in traced_pipeline.get_sut_spans()} == {
+    assert {span.name for span in traced_pipeline.root_spans} == {
         "sut.traced_pipeline.__call__"
     }
-    assert {span.name for span in traced_pipeline.get_child_spans()} == {
+    assert {span.name for span in traced_pipeline.all_spans} == {
         "sut.traced_pipeline.__call__",
         "child_step",
         "openai.responses.create",
     }
-    assert [span.name for span in traced_pipeline.get_llm_calls()] == [
+    assert [span.name for span in traced_pipeline.llm_spans] == [
         "openai.responses.create"
     ]
 """,
@@ -414,6 +511,7 @@ from rue.telemetry.otel.runtime import otel_runtime
 @rue.resource.sut(scope="{scope}")
 def shared_pipeline():
     async def run(step: str) -> str:
+        print(step)
         with otel_runtime.start_as_current_span(step):
             await asyncio.sleep(0.01)
         return step
@@ -421,17 +519,21 @@ def shared_pipeline():
     return rue.SUT(run)
 
 async def test_first(shared_pipeline):
-    assert shared_pipeline.get_child_spans() == []
+    assert shared_pipeline.all_spans == []
+    assert shared_pipeline.stdout.text == ""
     assert await shared_pipeline.instance("first_step") == "first_step"
-    assert {{span.name for span in shared_pipeline.get_child_spans()}} == {{
+    assert shared_pipeline.stdout.text == "first_step\\n"
+    assert {{span.name for span in shared_pipeline.all_spans}} == {{
         "sut.shared_pipeline.__call__",
         "first_step",
     }}
 
 async def test_second(shared_pipeline):
-    assert shared_pipeline.get_child_spans() == []
+    assert shared_pipeline.all_spans == []
+    assert shared_pipeline.stdout.text == ""
     assert await shared_pipeline.instance("second_step") == "second_step"
-    assert {{span.name for span in shared_pipeline.get_child_spans()}} == {{
+    assert shared_pipeline.stdout.text == "second_step\\n"
+    assert {{span.name for span in shared_pipeline.all_spans}} == {{
         "sut.shared_pipeline.__call__",
         "second_step",
     }}
