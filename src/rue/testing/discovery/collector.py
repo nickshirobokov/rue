@@ -9,6 +9,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Protocol, TypeVar
 
+from rue.resources.registry import Scope, registry
 from rue.testing.decorators.tag import TagData, get_tag_data, merge_tag_data
 from rue.testing.discovery.loader import RueImportSession
 from rue.testing.models import Modifier, TestDefinition
@@ -213,6 +214,33 @@ def _config_chain_for(path: Path, suite_root: Path) -> list[Path]:
     return configs
 
 
+_PYTEST_SCOPE_MAP: dict[str, Scope] = {
+    "function": Scope.CASE,
+    "class": Scope.SUITE,
+    "module": Scope.SUITE,
+    "package": Scope.SESSION,
+    "session": Scope.SESSION,
+}
+
+
+def _register_fixtures_from_module(module: ModuleType) -> None:
+    """Register pytest fixtures found in a module as Rue resources."""
+    for _name, obj in inspect.getmembers(module):
+        match (
+            getattr(obj, "_fixture_function_marker", None),
+            getattr(obj, "_pytestfixturefunction", None),
+        ):
+            case (marker, _) if marker is not None:
+                fn = getattr(obj, "_fixture_function", obj)
+            case (_, marker) if marker is not None:
+                fn = obj
+            case _:
+                continue
+        if marker.params is not None or registry.get(fn.__name__) is not None:
+            continue
+        registry.resource(fn, scope=_PYTEST_SCOPE_MAP.get(marker.scope or "function", Scope.CASE))
+
+
 def _collect_paths(
     paths: list[Path], *, explicit_root: Path | None
 ) -> list[TestDefinition]:
@@ -239,8 +267,10 @@ def _collect_paths(
     items: list[TestDefinition] = []
     for file_path in resolved_paths:
         for config_path in config_chains[file_path]:
-            session.load_module(config_path)
+            config_module = session.load_module(config_path)
+            _register_fixtures_from_module(config_module)
         module = session.load_module(file_path)
+        _register_fixtures_from_module(module)
         items.extend(_collect_from_module(module, file_path))
 
     return items

@@ -817,3 +817,171 @@ def test_collect_uses_fresh_import_session_after_file_changes(
     [second_item] = collect(tmp_path)
     second_item.fn()
     assert builtins.collected_values == [2]
+
+
+@pytest.mark.asyncio
+async def test_pytest_fixture_in_test_file_injected_into_rue_test(
+    tmp_path,
+    null_reporter,
+):
+    (tmp_path / "test_sample.py").write_text(
+        dedent(
+            """
+            import pytest
+            import rue
+
+            @pytest.fixture
+            def greeting():
+                return "hello"
+
+            @rue.test
+            def test_uses_fixture(greeting):
+                assert greeting == "hello"
+            """
+        )
+    )
+
+    items = collect(tmp_path)
+    run = await Runner(reporters=[null_reporter]).run(items=items)
+
+    assert run.result.passed == 1
+    assert run.result.failed == 0
+    assert run.result.errors == 0
+
+
+@pytest.mark.asyncio
+async def test_pytest_fixture_and_rue_resource_both_injected(
+    tmp_path,
+    null_reporter,
+):
+    (tmp_path / "test_sample.py").write_text(
+        dedent(
+            """
+            import pytest
+            import rue
+
+            @pytest.fixture
+            def multiplier():
+                return 3
+
+            @rue.resource
+            def base_value():
+                return 7
+
+            @rue.test
+            def test_mixed_di(multiplier, base_value):
+                assert multiplier * base_value == 21
+            """
+        )
+    )
+
+    items = collect(tmp_path)
+    run = await Runner(reporters=[null_reporter]).run(items=items)
+
+    assert run.result.passed == 1
+    assert run.result.failed == 0
+    assert run.result.errors == 0
+
+
+@pytest.mark.asyncio
+async def test_pytest_yield_fixture_teardown_runs(
+    tmp_path,
+    null_reporter,
+    monkeypatch,
+):
+    monkeypatch.setattr(builtins, "teardown_log", [], raising=False)
+    (tmp_path / "test_sample.py").write_text(
+        dedent(
+            """
+            import builtins
+            import pytest
+            import rue
+
+            @pytest.fixture
+            def tracked_resource():
+                builtins.teardown_log.append("setup")
+                yield "value"
+                builtins.teardown_log.append("teardown")
+
+            @rue.test
+            def test_uses_yield_fixture(tracked_resource):
+                assert tracked_resource == "value"
+            """
+        )
+    )
+
+    items = collect(tmp_path)
+    run = await Runner(reporters=[null_reporter]).run(items=items)
+
+    assert run.result.passed == 1
+    assert builtins.teardown_log == ["setup", "teardown"]
+
+
+@pytest.mark.asyncio
+async def test_pytest_fixture_in_conftest_injected_into_rue_test(
+    tmp_path,
+    null_reporter,
+):
+    (tmp_path / "conftest.py").write_text(
+        dedent(
+            """
+            import pytest
+
+            @pytest.fixture
+            def config_value():
+                return 42
+            """
+        )
+    )
+    (tmp_path / "test_sample.py").write_text(
+        dedent(
+            """
+            import rue
+
+            @rue.test
+            def test_uses_conftest_fixture(config_value):
+                assert config_value == 42
+            """
+        )
+    )
+
+    items = collect(tmp_path)
+    run = await Runner(reporters=[null_reporter]).run(items=items)
+
+    assert run.result.passed == 1
+    assert run.result.failed == 0
+    assert run.result.errors == 0
+
+
+@pytest.mark.asyncio
+async def test_rue_resource_takes_precedence_over_same_named_fixture(
+    tmp_path,
+    null_reporter,
+):
+    (tmp_path / "test_sample.py").write_text(
+        dedent(
+            """
+            import pytest
+            import rue
+
+            @pytest.fixture
+            def value():
+                return "from_fixture"
+
+            @rue.resource
+            def value():
+                return "from_resource"
+
+            @rue.test
+            def test_resource_wins(value):
+                assert value == "from_resource"
+            """
+        )
+    )
+
+    items = collect(tmp_path)
+    run = await Runner(reporters=[null_reporter]).run(items=items)
+
+    assert run.result.passed == 1
+    assert run.result.failed == 0
+    assert run.result.errors == 0
