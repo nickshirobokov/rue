@@ -49,10 +49,15 @@ def _iter_test_files(path: Path) -> list[Path]:
     return []
 
 
-def _iter_confrue_files(path: Path) -> list[Path]:
+def _iter_setup_files(path: Path) -> list[Path]:
     if not path.is_dir():
         return []
-    return sorted(path.glob("confrue_*.py"))
+    setup_files: list[Path] = []
+    conftest_path = path / "conftest.py"
+    if conftest_path.is_file():
+        setup_files.append(conftest_path)
+    setup_files.extend(sorted(path.glob("confrue_*.py")))
+    return setup_files
 
 
 def _is_test_root(expr: ast.expr) -> bool:
@@ -204,7 +209,7 @@ def _iter_ancestor_dirs(root: Path, directory: Path) -> list[Path]:
 def _config_chain_for(path: Path, suite_root: Path) -> list[Path]:
     configs: list[Path] = []
     for directory in _iter_ancestor_dirs(suite_root, path.parent):
-        configs.extend(_iter_confrue_files(directory))
+        configs.extend(_iter_setup_files(directory))
     return configs
 
 

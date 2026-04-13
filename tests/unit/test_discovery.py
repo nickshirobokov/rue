@@ -41,6 +41,47 @@ def test_collect_supports_same_dir_confrue_imports_without_pyproject(
 
 
 @pytest.mark.asyncio
+async def test_collect_supports_same_dir_conftest_imports_and_resources_without_pyproject(
+    tmp_path,
+    null_reporter,
+):
+    (tmp_path / "conftest.py").write_text(
+        dedent(
+            """
+            import rue
+
+            VALUE = 123
+
+            @rue.resource
+            def shared_value():
+                return VALUE
+            """
+        )
+    )
+    (tmp_path / "test_sample.py").write_text(
+        dedent(
+            """
+            import rue
+
+            from .conftest import VALUE
+
+            @rue.test
+            def test_value(shared_value):
+                assert VALUE == 123
+                assert shared_value == VALUE
+            """
+        )
+    )
+
+    items = collect(tmp_path)
+    run = await Runner(reporters=[null_reporter]).run(items=items)
+
+    assert run.result.failed == 0
+    assert run.result.errors == 0
+    assert run.result.passed == 1
+
+
+@pytest.mark.asyncio
 async def test_collect_autoloads_confrue_chain_in_order(
     tmp_path,
     monkeypatch,
@@ -117,6 +158,90 @@ async def test_collect_autoloads_confrue_chain_in_order(
     assert run.result.passed == 1
 
 
+def test_collect_autoloads_conftest_and_confrue_chain_in_order(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(builtins, "setup_log", [], raising=False)
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'tmp'\nversion = '0.0.0'\n"
+    )
+    nested = tmp_path / "nested"
+    nested.mkdir()
+
+    (tmp_path / "conftest.py").write_text(
+        dedent(
+            """
+            import builtins
+
+            ROOT_VALUE = 3
+            builtins.setup_log.append("root-conftest")
+            """
+        )
+    )
+    (tmp_path / "confrue_a.py").write_text(
+        dedent(
+            """
+            import builtins
+
+            from .conftest import ROOT_VALUE
+
+            builtins.setup_log.append(f"root-confrue:{ROOT_VALUE}")
+            """
+        )
+    )
+    (nested / "conftest.py").write_text(
+        dedent(
+            """
+            import builtins
+
+            from ..conftest import ROOT_VALUE
+
+            CHILD_VALUE = ROOT_VALUE + 1
+            builtins.setup_log.append(f"child-conftest:{CHILD_VALUE}")
+            """
+        )
+    )
+    (nested / "confrue_child.py").write_text(
+        dedent(
+            """
+            import builtins
+
+            from .conftest import CHILD_VALUE
+
+            builtins.setup_log.append(f"child-confrue:{CHILD_VALUE}")
+            """
+        )
+    )
+    (nested / "test_sample.py").write_text(
+        dedent(
+            """
+            import builtins
+            import rue
+
+            from .conftest import CHILD_VALUE
+
+            builtins.setup_log.append("test-module")
+
+            @rue.test
+            def test_value():
+                assert CHILD_VALUE == 4
+                assert builtins.setup_log == [
+                    "root-conftest",
+                    "root-confrue:3",
+                    "child-conftest:4",
+                    "child-confrue:4",
+                    "test-module",
+                ]
+            """
+        )
+    )
+
+    [item] = collect(nested)
+
+    item.fn()
+
+
 @pytest.mark.asyncio
 async def test_confrue_session_resources_resolve_hierarchically(
     tmp_path,
@@ -142,6 +267,86 @@ async def test_confrue_session_resources_resolve_hierarchically(
         )
     )
     (child / "confrue_child.py").write_text(
+        dedent(
+            """
+            import rue
+
+            @rue.resource(scope="session")
+            def shared_value():
+                return "child"
+            """
+        )
+    )
+    (tmp_path / "test_root.py").write_text(
+        dedent(
+            """
+            import rue
+
+            @rue.test
+            def test_root(shared_value):
+                assert shared_value == "root"
+            """
+        )
+    )
+    (child / "test_child.py").write_text(
+        dedent(
+            """
+            import rue
+
+            @rue.test
+            def test_child(shared_value):
+                assert shared_value == "child"
+            """
+        )
+    )
+    (sibling / "test_sibling.py").write_text(
+        dedent(
+            """
+            import rue
+
+            @rue.test
+            def test_sibling(shared_value):
+                assert shared_value == "root"
+            """
+        )
+    )
+
+    items = collect(tmp_path)
+    run = await Runner(
+        config=Config.model_construct(db_enabled=False),
+        reporters=[null_reporter],
+    ).run(items=items)
+
+    assert run.result.failed == 0
+    assert run.result.errors == 0
+    assert run.result.passed == 3
+
+
+@pytest.mark.asyncio
+async def test_conftest_session_resources_resolve_hierarchically(
+    tmp_path,
+    null_reporter,
+):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'tmp'\nversion = '0.0.0'\n"
+    )
+    child = tmp_path / "child"
+    sibling = tmp_path / "sibling"
+    child.mkdir()
+    sibling.mkdir()
+
+    (tmp_path / "conftest.py").write_text(
+        dedent(
+            """
+            import rue
+
+            @rue.resource(scope="session")
+            def shared_value():
+                return "root"
+            """
+        )
+    )
+    (child / "conftest.py").write_text(
         dedent(
             """
             import rue
@@ -285,6 +490,129 @@ async def test_same_named_confrue_metrics_preserve_provider_identity_and_modules
     assert {metric.metadata.identity.name for metric in metrics} == {"quality"}
     assert all(
         metric.metadata.collected_from_tests == {"test_shared"}
+        for metric in metrics
+    )
+    assert metrics[0].metadata.identity != metrics[1].metadata.identity
+    module_sets = [metric.metadata.collected_from_modules for metric in metrics]
+    assert any(
+        any(module.endswith("test_root.py") for module in modules)
+        for modules in module_sets
+    )
+    assert any(
+        any(module.endswith("child/test_child.py") for module in modules)
+        for modules in module_sets
+    )
+
+
+@pytest.mark.asyncio
+async def test_same_named_conftest_modules_preserve_identity_and_state(
+    tmp_path,
+    monkeypatch,
+    null_reporter,
+):
+    monkeypatch.setattr(
+        builtins,
+        "conftest_module_names",
+        [],
+        raising=False,
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'tmp'\nversion = '0.0.0'\n"
+    )
+    child = tmp_path / "child"
+    child.mkdir()
+
+    (tmp_path / "conftest.py").write_text(
+        dedent(
+            """
+            import rue
+            from rue import Metric
+
+            MODULE_NAME = __name__
+
+            @rue.resource(scope="session")
+            def provider_module():
+                return MODULE_NAME
+
+            @rue.resource.metric(scope="session")
+            def quality():
+                metric = Metric()
+                yield metric
+                yield metric.mean
+            """
+        )
+    )
+    (child / "conftest.py").write_text(
+        dedent(
+            """
+            import rue
+            from rue import Metric
+
+            MODULE_NAME = __name__
+
+            @rue.resource(scope="session")
+            def provider_module():
+                return MODULE_NAME
+
+            @rue.resource.metric(scope="session")
+            def quality():
+                metric = Metric()
+                yield metric
+                yield metric.mean
+            """
+        )
+    )
+    (tmp_path / "test_root.py").write_text(
+        dedent(
+            """
+            import builtins
+            import rue
+            from rue import metrics
+
+            @rue.test
+            def test_shared(provider_module, quality):
+                builtins.conftest_module_names.append(provider_module)
+                with metrics(quality):
+                    assert provider_module.endswith(".conftest")
+            """
+        )
+    )
+    (child / "test_child.py").write_text(
+        dedent(
+            """
+            import builtins
+            import rue
+            from rue import metrics
+
+            @rue.test
+            def test_shared(provider_module, quality):
+                builtins.conftest_module_names.append(provider_module)
+                with metrics(quality):
+                    assert provider_module.endswith(".conftest")
+            """
+        )
+    )
+
+    items = collect(tmp_path)
+    run = await Runner(
+        config=Config.model_construct(db_enabled=False),
+        reporters=[null_reporter],
+    ).run(items=items)
+
+    assert run.result.failed == 0
+    assert run.result.errors == 0
+    assert run.result.passed == 2
+    assert len(set(builtins.conftest_module_names)) == 2
+
+    metrics = sorted(
+        run.result.metric_results,
+        key=lambda result: result.metadata.identity.provider_path or "",
+    )
+    assert len(metrics) == 2
+    assert all(
+        (metric.metadata.identity.provider_path or "").endswith(
+            "conftest.py"
+        )
         for metric in metrics
     )
     assert metrics[0].metadata.identity != metrics[1].metadata.identity
@@ -451,7 +779,8 @@ def test_collect_items_share_confrue_session_across_selected_modules(
     assert builtins.confrue_counter == 1
 
 
-def test_collect_does_not_discover_confrue_modules(tmp_path):
+def test_collect_does_not_discover_setup_modules(tmp_path):
+    (tmp_path / "conftest.py").write_text("VALUE = 1\n")
     (tmp_path / "confrue_only.py").write_text("VALUE = 1\n")
 
     assert collect(tmp_path) == []

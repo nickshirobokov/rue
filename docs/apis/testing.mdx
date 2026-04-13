@@ -34,7 +34,7 @@ Register a function as a dependency injection resource.
 
 **Returns:** Decorated function registered as a resource
 
-`SESSION` resources are hierarchical. Same-name `SESSION` providers can coexist in different directories, and Rue picks the nearest ancestor provider for the requesting test module. Define those shared providers in `confrue_*.py` files.
+`SESSION` resources are hierarchical. Same-name `SESSION` providers can coexist in different directories, and Rue picks the nearest ancestor provider for the requesting test module. Define those shared providers in `conftest.py` or `confrue_*.py` files.
 
 **Example:**
 ```python

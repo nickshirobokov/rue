@@ -56,20 +56,22 @@ Rue discovers Python files matching `test_*.py`:
   </Tree.Folder>
 </Tree>
 
-Rue also loads `confrue_*.py` files as setup modules, not as tests. These files are the right place for shared helpers, shared resources, and directory-specific overrides:
+Rue also loads `conftest.py` and `confrue_*.py` files as setup modules, not as tests. These files are the right place for shared helpers, shared resources, and directory-specific overrides:
 
 <Tree>
   <Tree.Folder name="project" defaultOpen>
+    <Tree.File name="conftest.py ✓ Loaded as setup" />
     <Tree.File name="confrue_shared.py ✓ Loaded as setup" />
     <Tree.File name="test_chatbot.py ✓ Discovered as tests" />
     <Tree.Folder name="admin" defaultOpen>
+      <Tree.File name="conftest.py ✓ Loaded as setup" />
       <Tree.File name="confrue_admin.py ✓ Loaded as setup" />
       <Tree.File name="test_admin.py ✓ Discovered as tests" />
     </Tree.Folder>
   </Tree.Folder>
 </Tree>
 
-For each selected `test_*.py` module, Rue loads matching ancestor `confrue_*.py` files before importing the test module. Ancestors load from the suite root down to the test directory, and multiple `confrue_*.py` files in one directory load in lexicographic order.
+For each selected `test_*.py` module, Rue loads matching ancestor setup files before importing the test module. Ancestors load from the suite root down to the test directory. Within each directory, Rue loads `conftest.py` first, then `confrue_*.py` files in lexicographic order.
 
 ### Functions
 
@@ -113,14 +115,14 @@ class SupportBotSuite:
         pass
 ```
 
-## `confrue_*` Files
+## Shared Setup Files
 
-Use `confrue_*.py` files for setup that should apply to nearby tests:
+Use `conftest.py` or `confrue_*.py` for setup that should apply to nearby tests:
 - shared `SESSION` resources
 - reusable helpers and constants
 - directory-scoped overrides of same-name `SESSION` resources
 
-Keep test definitions in `test_*.py` files. Keep shared setup in `confrue_*.py` files.
+Keep test definitions in `test_*.py` files. Keep shared setup in `conftest.py` or `confrue_*.py` files.
 
 <Info>
   **Related docs**: [confrue Files (Concept)](/concepts/confrue-files), [Resource (Concept)](/concepts/resource)

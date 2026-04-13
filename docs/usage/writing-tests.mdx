@@ -30,12 +30,13 @@ Rue follows pytest-style discovery patterns to find test functions in your codeb
 - `test_agent.py` ✓
 - `helpers.py` ✗
 
-Rue also recognizes `confrue_*.py` files as shared setup modules:
+Rue also recognizes `conftest.py` and `confrue_*.py` files as shared setup modules:
+- `conftest.py` ✓ Loaded as setup
 - `confrue_shared.py` ✓ Loaded as setup
-- `confrue_db.py` ✓ Loaded as setup
+- `conftest.py` ✗ Not collected as a test module
 - `confrue_shared.py` ✗ Not collected as a test module
 
-For each selected test module, Rue loads matching ancestor `confrue_*.py` files before importing the `test_*.py` file itself. Ancestors load from the suite root down to the test directory, and multiple `confrue_*.py` files in the same directory load in lexicographic order.
+For each selected test module, Rue loads ancestor setup files before importing the `test_*.py` file itself. Ancestors load from the suite root down to the test directory. Within each directory, Rue loads `conftest.py` first, then `confrue_*.py` files in lexicographic order.
 
 **Functions**: Inside discovered files, Rue collects only tests marked by Rue decorators. Use `@rue.test` for a plain Rue test, or use another Rue test decorator such as `@rue.test.iterate...` or `@rue.test.tag...`:
 
@@ -70,25 +71,29 @@ class CustomerSupport:
 
 This makes mixed pytest/Rue files possible: pytest can still collect plain `test_*` functions, while Rue only collects the decorated ones.
 
-### Shared Setup With `confrue_*`
+### Shared Setup With `conftest.py` and `confrue_*`
 
-Use `confrue_*.py` files for reusable setup that should apply to a directory tree, especially shared helpers and `SESSION` resources.
+Use `conftest.py` or `confrue_*.py` for reusable setup that should apply to a directory tree, especially shared helpers and `SESSION` resources.
 
 ```text
 project/
+├── conftest.py
 ├── confrue_root.py
 ├── test_smoke.py
 └── api/
+    ├── conftest.py
     ├── confrue_api.py
     └── test_orders.py
 ```
 
 When Rue imports `api/test_orders.py`, it loads:
+- `conftest.py`
 - `confrue_root.py`
+- `api/conftest.py`
 - `api/confrue_api.py`
 - `api/test_orders.py`
 
-Keep actual tests in `test_*.py` files. Keep shared setup and directory-specific overrides in `confrue_*.py` files.
+Keep actual tests in `test_*.py` files. Keep shared setup and directory-specific overrides in `conftest.py` or `confrue_*.py` files.
 
 <Info>
   **Related docs**: [confrue Files (Concept)](/concepts/confrue-files), [Resource (Concept)](/concepts/resource)
@@ -255,7 +260,7 @@ Scopes: `"case"` (default), `"suite"`, `"session"`.
 
 `SESSION` resources are hierarchical: same-name providers can coexist, and Rue selects the nearest ancestor provider relative to the requesting test module. Without an active test context, resolution falls back to the flat/latest registered definition.
 
-In practice, put shared `SESSION` resources in `confrue_*.py` files so directory structure controls which override is active.
+In practice, put shared `SESSION` resources in `conftest.py` or `confrue_*.py` files so directory structure controls which override is active.
 
 **`@rue.resource.metric(scope="session")`** - Define a metric as a scoped, injectable measurement object
 

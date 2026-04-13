@@ -9,7 +9,7 @@ Using `@rue.resource` enables:
 - Sharing expensive setup across multiple tests (database connections, API clients)
 - Automatic teardown and cleanup with generator syntax
 - Scoping lifecycles at case, suite, or session level
-- Defining directory-scoped `SESSION` overrides through `confrue_*.py`
+- Defining directory-scoped `SESSION` overrides through `conftest.py` or `confrue_*.py`
 - Stacking resources to build complex dependency hierarchies
 
 <Note>
@@ -132,7 +132,7 @@ If multiple `SESSION` resources share the same name, Rue keeps them side by side
 
 `SESSION` resources are now best understood as directory-scoped shared resources, not as one global instance per name.
 
-Put same-name `SESSION` resources in `confrue_*.py` files when different parts of your test tree need different shared setup:
+Put same-name `SESSION` resources in `conftest.py` or `confrue_*.py` files when different parts of your test tree need different shared setup:
 
 ```text
 project/
@@ -187,7 +187,7 @@ Rules to remember:
 - If a `SESSION` resource is resolved outside an active test context, Rue falls back to the latest active registration.
 
 <Info>
-  Put shared `SESSION` resources in `confrue_*.py` files so the directory tree controls which provider is active. See [confrue Files](/concepts/confrue-files).
+  Put shared `SESSION` resources in `conftest.py` or `confrue_*.py` files so the directory tree controls which provider is active. See [confrue Files](/concepts/confrue-files).
 </Info>
 
 ## Stacking Resources: Dependency Injection
