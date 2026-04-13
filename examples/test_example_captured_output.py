@@ -1,10 +1,10 @@
 """Example: Inspecting SUT-owned stdout/stderr capture.
 
 Run with:
-    rue test examples/rue_example_captured_output.py
+    rue test examples/test_example_captured_output.py
 
 Run with live SUT output visible:
-    rue test examples/rue_example_captured_output.py -s
+    rue test examples/test_example_captured_output.py -s
 """
 
 import sys
@@ -30,6 +30,7 @@ def greeter():
     return rue.SUT(Greeter(), methods=["greet", "warn"])
 
 
+@rue.test
 def test_capture_stdout(greeter):
     result = greeter.instance.greet("Alice")
 
@@ -38,6 +39,7 @@ def test_capture_stdout(greeter):
     assert greeter.stderr.text == ""
 
 
+@rue.test
 def test_capture_stderr(greeter):
     greeter.instance.warn("Bob")
 
@@ -45,6 +47,7 @@ def test_capture_stderr(greeter):
     assert greeter.stderr.lines == ("warn:Bob",)
 
 
+@rue.test
 def test_capture_multiple_calls(greeter):
     greeter.instance.greet("Alice")
     greeter.instance.greet("Bob")
@@ -52,6 +55,7 @@ def test_capture_multiple_calls(greeter):
     assert greeter.stdout.lines == ("Hello, Alice!", "Hello, Bob!")
 
 
+@rue.test
 def test_clear_output(greeter):
     greeter.instance.greet("Alice")
     assert greeter.stdout.text == "Hello, Alice!\n"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import rue
+
 from rue.predicates import (
     follows_policy,
     has_conflicting_facts,
@@ -64,6 +66,7 @@ def simple_chatbot(text: str) -> str:
 # =============================== Run predicate tests ===============================
 
 
+@rue.test
 async def test_predicates_combining():
     answer = simple_chatbot(
         "What is the greatest rock band of all time? Be verbose."
@@ -80,6 +83,7 @@ async def test_predicates_combining():
     )
 
 
+@rue.test
 async def test_predicates_facts_and_topics():
     answer = simple_chatbot(
         "Tell me about France. Don't include sports, sociology, politics, religion."
@@ -93,6 +97,7 @@ async def test_predicates_facts_and_topics():
     assert not await has_topic(answer, "sports")
 
 
+@rue.test
 async def test_predicates_conflicting_and_unsupported_facts():
     answer = simple_chatbot("What is the greatest rock band of all time?")
 
@@ -111,6 +116,7 @@ async def test_predicates_conflicting_and_unsupported_facts():
     )
 
 
+@rue.test
 async def test_predicates_facts_match():
     answer = simple_chatbot("Tell me about France.")
 
@@ -125,6 +131,7 @@ async def test_predicates_facts_match():
     )
 
 
+@rue.test
 async def test_predicates_policy_follows():
     answer = simple_chatbot("What is the greatest rock band of all time?")
 
@@ -135,6 +142,7 @@ async def test_predicates_policy_follows():
     )
 
 
+@rue.test
 async def test_predicates_style_match():
     answer = simple_chatbot("Tell me about Germany.")
 
@@ -149,6 +157,7 @@ async def test_predicates_style_match():
     )
 
 
+@rue.test
 async def test_predicates_structure_match():
     answer = simple_chatbot("Tell me about Germany in markdown format.")
 

@@ -1,4 +1,4 @@
-"""Test discovery for rue_* files and pytest-style test names."""
+"""Test discovery for explicit Rue tests in test_* modules."""
 
 import ast
 import inspect
@@ -39,13 +39,13 @@ def _resolve_path(path: Path | str | None) -> Path:
     return path.resolve()
 
 
-def _iter_rue_files(path: Path) -> list[Path]:
+def _iter_test_files(path: Path) -> list[Path]:
     if path.is_file():
-        if path.name.startswith("rue_") and path.suffix == ".py":
+        if path.name.startswith("test_") and path.suffix == ".py":
             return [path]
         return []
     if path.is_dir():
-        return sorted(path.rglob("rue_*.py"))
+        return sorted(path.rglob("test_*.py"))
     return []
 
 
@@ -123,9 +123,7 @@ def _collect_static_from_module(path: Path) -> list[StaticTestReference]:
 
     for node in module.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name.startswith("test_") or any(
-                _is_rue_test_decorator(d) for d in node.decorator_list
-            ):
+            if any(_is_rue_test_decorator(d) for d in node.decorator_list):
                 refs.append(
                     StaticTestReference(
                         name=node.name,
@@ -137,13 +135,19 @@ def _collect_static_from_module(path: Path) -> list[StaticTestReference]:
                 )
             continue
 
-        if isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+        if isinstance(node, ast.ClassDef):
             class_tags = _extract_static_tags(node.decorator_list)
+            class_is_rue = any(
+                _is_rue_test_decorator(d) for d in node.decorator_list
+            )
             for class_node in node.body:
                 if isinstance(
                     class_node, (ast.FunctionDef, ast.AsyncFunctionDef)
                 ):
-                    if class_node.name.startswith("test_") or any(
+                    if (
+                        class_is_rue
+                        and class_node.name.startswith("test_")
+                    ) or any(
                         _is_rue_test_decorator(d)
                         for d in class_node.decorator_list
                     ):
@@ -167,7 +171,7 @@ def collect_static(path: Path | str | None = None) -> list[StaticTestReference]:
     resolved_path = _resolve_path(path)
     refs: list[StaticTestReference] = []
 
-    for file_path in _iter_rue_files(resolved_path):
+    for file_path in _iter_test_files(resolved_path):
         refs.extend(_collect_static_from_module(file_path))
 
     return refs
@@ -255,18 +259,17 @@ def _collect_from_module(
     items: list[TestDefinition] = []
 
     for name, obj in inspect.getmembers(module):
-        if inspect.isfunction(obj) and (
-            name.startswith("test_") or getattr(obj, "__rue_test__", False)
-        ):
+        if inspect.isfunction(obj) and getattr(obj, "__rue_test__", False):
             items.append(_build_item_for_callable(obj, name, module_path))
 
-        elif name.startswith("Test") and inspect.isclass(obj):
+        elif inspect.isclass(obj):
+            class_is_rue = getattr(obj, "__rue_test__", False)
             class_tags = get_tag_data(obj)
             for method_name, method in inspect.getmembers(
                 obj, predicate=inspect.isfunction
             ):
-                if method_name.startswith("test_") or getattr(
-                    method, "__rue_test__", False
+                if getattr(method, "__rue_test__", False) or (
+                    class_is_rue and method_name.startswith("test_")
                 ):
                     items.append(
                         _build_item_for_callable(
@@ -321,11 +324,11 @@ def collect(path: Path | str | None = None) -> list[TestDefinition]:
 
     Example:
         items = collect()  # Current directory
-        items = collect("rue_agents.py")  # Specific file
+        items = collect("test_agents.py")  # Specific file
         items = collect("./tests/")  # Directory
     """
     path = _resolve_path(path)
-    file_paths = _iter_rue_files(path)
+    file_paths = _iter_test_files(path)
     explicit_root = path if path.is_dir() else path.parent
     return _collect_paths(file_paths, explicit_root=explicit_root)
 

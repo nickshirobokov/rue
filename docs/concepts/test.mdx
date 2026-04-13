@@ -2,11 +2,11 @@
 title: "Test"
 ---
 
-**Tests** are the core building blocks of your AI system evaluations. Like pytest, Rue discovers and runs `test_*` functions and `Test*` class methods in `rue_*.py` files, each one checking how well your AI system performs.
+**Tests** are the core building blocks of your AI system evaluations. Like pytest, Rue works in `test_*.py` modules, but it collects only functions and classes marked through Rue decorators.
 
 ## Basic Usage
 
-The simplest test is a function whose name starts with `test_` inside a `rue_*.py` file. Rue automatically discovers and executes it.
+The simplest Rue test is a function in a `test_*.py` file marked with `@rue.test`. Other Rue test decorators such as `@rue.test.iterate...` and `@rue.test.tag...` also mark tests automatically.
 
 ```python
 import rue
@@ -16,7 +16,8 @@ from rue.predicates import has_unsupported_facts
 def chatbot(prompt: str) -> str:
     return call_llm(prompt)
 
-# Test function: discovered and run automatically
+# Test function: collected and run by Rue
+@rue.test
 async def test_chatbot_no_hallucinations():
     context = "Our store hours are 9 AM to 6 PM Monday-Saturday."
     response = chatbot("When are you open?")
@@ -31,7 +32,7 @@ Run all test functions in your project:
 uv run rue test
 ```
 
-Rue discovers all `test_*` functions, executes them, and generates a report - just like pytest but for AI system evaluation.
+Rue executes the Rue-marked tests it discovers and generates a report - just like pytest, but scoped to Rue tests in mixed files.
 
 ## Discovery
 
@@ -39,14 +40,14 @@ Rue follows pytest's discovery patterns, finding tests in files, functions, and 
 
 ### Files
 
-Rue discovers Python files matching `rue_*.py`:
+Rue discovers Python files matching `test_*.py`:
 
 <Tree>
   <Tree.Folder name="project" defaultOpen>
-    <Tree.File name="rue_chatbot.py ✓ Discovered" />
-    <Tree.File name="rue_agent.py ✓ Discovered" />
+    <Tree.File name="test_chatbot.py ✓ Discovered" />
+    <Tree.File name="test_agent.py ✓ Discovered" />
     <Tree.Folder name="tests" defaultOpen>
-      <Tree.File name="rue_rag.py ✓ Discovered" />
+      <Tree.File name="test_rag.py ✓ Discovered" />
       <Tree.File name="helpers.py ✗ Not discovered" />
     </Tree.Folder>
     <Tree.Folder name="src" defaultOpen>
@@ -60,27 +61,29 @@ Rue also loads `confrue_*.py` files as setup modules, not as tests. These files 
 <Tree>
   <Tree.Folder name="project" defaultOpen>
     <Tree.File name="confrue_shared.py ✓ Loaded as setup" />
-    <Tree.File name="rue_chatbot.py ✓ Discovered as tests" />
+    <Tree.File name="test_chatbot.py ✓ Discovered as tests" />
     <Tree.Folder name="admin" defaultOpen>
       <Tree.File name="confrue_admin.py ✓ Loaded as setup" />
-      <Tree.File name="rue_admin.py ✓ Discovered as tests" />
+      <Tree.File name="test_admin.py ✓ Discovered as tests" />
     </Tree.Folder>
   </Tree.Folder>
 </Tree>
 
-For each selected `rue_*.py` module, Rue loads matching ancestor `confrue_*.py` files before importing the test module. Ancestors load from the suite root down to the test directory, and multiple `confrue_*.py` files in one directory load in lexicographic order.
+For each selected `test_*.py` module, Rue loads matching ancestor `confrue_*.py` files before importing the test module. Ancestors load from the suite root down to the test directory, and multiple `confrue_*.py` files in one directory load in lexicographic order.
 
 ### Functions
 
-Within discovered files, Rue collects functions starting with `test_`:
+Within discovered files, Rue collects only functions marked by Rue decorators:
 
 ```python
-# rue_agents.py
+# test_agents.py
+import rue
 
+@rue.test
 def test_weather_agent():     # ✓ Collected
     pass
 
-def test_calculator():        # ✓ Collected
+def test_calculator():        # ✗ Rue ignores this; pytest can still collect it
     pass
 
 def helper_function():         # ✗ Not collected (no test_ prefix)
@@ -89,24 +92,25 @@ def helper_function():         # ✗ Not collected (no test_ prefix)
 
 ### Classes
 
-Classes starting with `Test` are discovered, and their `test_*` methods become test cases:
+Class names are ignored. Rue collects class-based tests only when the class or method is marked with a Rue decorator:
 
 ```python
-# rue_agents.py
+# test_agents.py
+import rue
 
-class TestCustomerSupport:    # ✓ Class discovered
+@rue.test
+class CustomerSupport:
 
     def test_greeting(self):   # ✓ Method collected
         pass
 
-    def test_farewell(self):   # ✓ Method collected
+    @rue.test
+    def helper(self):          # ✓ Method collected
         pass
 
-    def helper(self):           # ✗ Not collected
+class SupportBotSuite:
+    def test_farewell(self):   # ✗ Not collected
         pass
-
-class SupportBotSuite:         # ✗ Not discovered (missing Test prefix)
-    pass
 ```
 
 ## `confrue_*` Files
@@ -116,7 +120,7 @@ Use `confrue_*.py` files for setup that should apply to nearby tests:
 - reusable helpers and constants
 - directory-scoped overrides of same-name `SESSION` resources
 
-Keep test definitions in `rue_*.py` files. Keep shared setup in `confrue_*.py` files.
+Keep test definitions in `test_*.py` files. Keep shared setup in `confrue_*.py` files.
 
 <Info>
   **Related docs**: [confrue Files (Concept)](/concepts/confrue-files), [Resource (Concept)](/concepts/resource)
@@ -142,6 +146,7 @@ def accuracy():
     assert metric.mean > 0.8
 
 # Test function with injected dependencies
+@rue.test
 def test_chatbot_accuracy(chatbot, accuracy: Metric):
     # chatbot and accuracy automatically injected by name
 
@@ -161,14 +166,17 @@ def test_chatbot_accuracy(chatbot, accuracy: Metric):
 Rue automatically detects and runs async functions:
 
 ```python
+import rue
 from rue.predicates import follows_policy
 
 # Sync test function
+@rue.test
 def test_sync_test(calculator):
     result = calculator.add(2, 2)
     assert result == 4
 
 # Async test function - automatically detected
+@rue.test
 async def test_async_test(chatbot):
     response = await chatbot.ask_async("Hello")
 
@@ -180,12 +188,15 @@ async def test_async_test(chatbot):
 Resources can be async too:
 
 ```python
+import rue
+
 @rue.resource
 async def async_database():
     conn = await connect_async()
     yield conn
     await conn.close()
 
+@rue.test
 async def test_query(async_database):
     result = await async_database.query("SELECT 1")
     assert result
@@ -451,9 +462,12 @@ Rue's dependency injection system enables better resource management and test is
 
 **Don't do this:**
 ```python
-# rue_agent.py
+# test_agent.py
 from app import agent  # Global import
 
+import rue
+
+@rue.test
 def test_weather_queries():
     # Using global - can't control lifecycle or swap implementations
     response = agent("What's the weather?")
@@ -462,7 +476,7 @@ def test_weather_queries():
 
 **Do this:**
 ```python
-# rue_agent.py
+# test_agent.py
 import rue
 from app import agent as production_agent
 
@@ -473,6 +487,7 @@ def agent():
     yield instance
     instance.cleanup()
 
+@rue.test
 def test_weather_queries(agent):
     # Injected - lifecycle is managed automatically and usage can be tracked
     response = agent("What's the weather?")
@@ -491,7 +506,7 @@ Group related tests in classes for better organization and shared tags/setup:
 
 **Don't do this:**
 ```python
-# rue_support.py - flat functions with repeated tags
+# test_support.py - flat functions with repeated tags
 
 @rue.test.tag("customer-support", "greeting")
 def test_support_greeting_casual():
@@ -512,7 +527,7 @@ def test_support_farewell_formal():
 
 **Do this:**
 ```python
-# rue_support.py - organized in classes
+# test_support.py - organized in classes
 
 @rue.test.tag("customer-support")
 class TestSupportGreetings:

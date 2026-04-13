@@ -6,10 +6,10 @@ This example shows how to:
 3. Persist local trace files with the `OtelReporter`
 
 Run with default OpenTelemetry capture:
-    uv run rue test examples/rue_example_otel_spans.py
+    uv run rue test examples/test_example_otel_spans.py
 
 Persist local trace files too:
-    uv run rue test examples/rue_example_otel_spans.py --reporter ConsoleReporter --reporter OtelReporter
+    uv run rue test examples/test_example_otel_spans.py --reporter ConsoleReporter --reporter OtelReporter
 """
 
 import asyncio
@@ -68,6 +68,7 @@ def agent_with_external_client():
     return rue.SUT(run)
 
 
+@rue.test
 def test_simple_sut_works(simple_sut):
     """A callable SUT produces one root span per call."""
     result = simple_sut.instance("Hello, world!")
@@ -78,6 +79,7 @@ def test_simple_sut_works(simple_sut):
     assert spans[0].name == "sut.simple_sut.__call__"
 
 
+@rue.test
 async def test_async_sut_works(async_sut):
     """Async SUT calls are traced too."""
     result = await async_sut.instance("Async question")
@@ -88,6 +90,7 @@ async def test_async_sut_works(async_sut):
     assert spans[0].name == "sut.async_sut.__call__"
 
 
+@rue.test
 def test_pipeline_works(pipeline_sut):
     """Wrapped methods show up as SUT child spans."""
     result = pipeline_sut.instance.run("What is Python?")
@@ -104,6 +107,7 @@ def test_pipeline_works(pipeline_sut):
     assert all_names == root_names
 
 
+@rue.test
 def test_sut_span_attributes(simple_sut):
     """Captured SUT spans include name, method, and IO metadata."""
     result = simple_sut.instance("processed: test input")
@@ -116,6 +120,7 @@ def test_sut_span_attributes(simple_sut):
     assert result in span.attributes["sut.output"]
 
 
+@rue.test
 def test_repeated_calls_create_multiple_spans(simple_sut):
     """Each call within one test execution creates a new SUT span."""
     result1 = simple_sut.instance("First call")
@@ -128,6 +133,7 @@ def test_repeated_calls_create_multiple_spans(simple_sut):
     assert all(span.name == "sut.simple_sut.__call__" for span in spans)
 
 
+@rue.test
 def test_external_client_pattern(agent_with_external_client):
     """Instrumented SDK spans would appear in `llm_spans`."""
     result = agent_with_external_client.instance("Summarize this document")

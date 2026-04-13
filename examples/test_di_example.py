@@ -37,22 +37,26 @@ async def async_db():
 # === Test Functions ===
 
 
+@rue.test
 def test_config_has_url(config):
     """Test that config resource provides api_url."""
     assert "api_url" in config
     assert config["api_url"].startswith("https://")
 
 
+@rue.test
 def test_client_connects(api_client):
     """Test that api_client resource is connected."""
     assert api_client["connected"] is True
 
 
+@rue.test
 def test_model_is_loaded(expensive_model):
     """Test suite-scoped resource."""
     assert expensive_model == "loaded-model-v1"
 
 
+@rue.test
 async def test_async_db_works(async_db):
     """Async test with async resource."""
     assert async_db["connected"] is True
@@ -61,6 +65,7 @@ async def test_async_db_works(async_db):
     assert len(async_db["data"]) == 1
 
 
+@rue.test
 def test_multiple_resources(config, api_client, expensive_model):
     """Test with multiple resource dependencies."""
     assert config is not None
@@ -71,6 +76,7 @@ def test_multiple_resources(config, api_client, expensive_model):
 # === Test Classes ===
 
 
+@rue.test
 class TestAPITests:
     """Group related tests in a class."""
 

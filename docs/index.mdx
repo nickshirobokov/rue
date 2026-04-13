@@ -5,7 +5,7 @@ description: "Rue is a Python framework for testing AI agents. It follows pytest
 
 ## The mental model
 
-Rue discovers `test_*` functions and `Test` classes in `rue_*.py` files, and then calls them.
+Rue discovers `test_*.py` modules, filters them down to Rue-marked tests, and then calls those tests.
 - Deterministic components? Hardcode values.
 - Slightly non-deterministic behavior? Parametrize with multiple inputs.
 - Probabilistic contracts? Wrap values into list[Case] and collect metrics.
@@ -20,6 +20,5 @@ Resources are fixtures. Register SUT factories with `@rue.resource.sut` and othe
 Let's go!
 
 `uv add rue`
-
 
 

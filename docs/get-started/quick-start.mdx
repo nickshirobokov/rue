@@ -12,7 +12,7 @@ uv add rue
 </Step>
 <Step title="Create your first test">
 
-Create `rue_store_chatbot.py` and register the chatbot as a SUT factory:
+Create `test_store_chatbot.py`. Rue discovers `test_*.py` modules and collects only tests marked with Rue decorators, so plain Rue tests should use `@rue.test`:
 
 ```python
 import rue
@@ -23,6 +23,7 @@ from rue.predicates import has_unsupported_facts, follows_policy
 def store_chatbot():
     return SUT(call_llm)
 
+@rue.test
 async def test_chatbot_no_hallucinations(store_chatbot):
     context = "Store hours: 9 AM - 6 PM, Monday-Saturday. Closed Sundays."
     response = store_chatbot.instance("When are you open?")

@@ -20,7 +20,7 @@ Run tests from specific paths:
 
 ```bash
 uv run rue test tests/
-uv run rue test rue_chatbot.py rue_agent.py
+uv run rue test test_chatbot.py test_agent.py
 ```
 
 ## Filtering Tests
@@ -42,6 +42,8 @@ uv run rue test -k "(fast or smoke) and not flaky"
 ```
 
 Keyword matching is substring-based: `-k agent` matches `test_agent_response`, `test_weather_agent`, etc.
+
+Rue still applies its own collection rules after path and keyword filtering, so in mixed files it will run only the tests marked with Rue decorators.
 
 ### By Tags
 

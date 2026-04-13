@@ -2,7 +2,7 @@
 title: "confrue Files"
 ---
 
-`confrue_*.py` files are Rue's shared setup modules. Use them for resources, helpers, and directory-scoped overrides that should apply to nearby tests. Put actual tests in `rue_*.py` files.
+`confrue_*.py` files are Rue's shared setup modules. Use them for resources, helpers, and directory-scoped overrides that should apply to nearby tests. Put actual tests in `test_*.py` files.
 
 ## What `confrue_*` Files Are For
 
@@ -14,13 +14,13 @@ title: "confrue Files"
 
 ## Loading Behavior
 
-For each selected `rue_*.py` test module, Rue loads matching `confrue_*.py` files before importing the test module itself.
+For each selected `test_*.py` test module, Rue loads matching `confrue_*.py` files before importing the test module itself.
 
 Loading rules:
 1. Rue walks from the suite root down to the selected test module's directory.
 2. In each directory on that path, Rue loads matching `confrue_*.py` files.
 3. Multiple `confrue_*.py` files in the same directory load in lexicographic order.
-4. The selected `rue_*.py` module loads last.
+4. The selected `test_*.py` module loads last.
 
 ```text
 project/
@@ -28,16 +28,16 @@ project/
 ├── confrue_b.py
 └── api/
     ├── confrue_api.py
-    └── rue_orders.py
+    └── test_orders.py
 ```
 
-When Rue imports `api/rue_orders.py`, it loads:
+When Rue imports `api/test_orders.py`, it loads:
 1. `confrue_a.py`
 2. `confrue_b.py`
 3. `api/confrue_api.py`
-4. `api/rue_orders.py`
+4. `api/test_orders.py`
 
-Because Rue imports these modules together, relative imports between `confrue_*` files and nearby `rue_*.py` files work normally.
+Because Rue imports these modules together, relative imports between `confrue_*` files and nearby `test_*.py` files work normally.
 
 ## How They Affect Resources
 
@@ -68,13 +68,19 @@ def api_base_url():
 ```
 
 ```python
-# admin/rue_admin.py
+# admin/test_admin.py
+import rue
+
+@rue.test
 def test_admin_api(api_base_url):
     assert api_base_url == "https://admin.example.com"
 ```
 
 ```python
-# rue_public.py
+# test_public.py
+import rue
+
+@rue.test
 def test_public_api(api_base_url):
     assert api_base_url == "https://public.example.com"
 ```
@@ -83,7 +89,7 @@ If a `SESSION` resource is resolved outside an active test context, Rue falls ba
 
 ## Recommendations
 
-- Put tests in `rue_*.py`.
+- Put tests in `test_*.py`.
 - Put shared setup in `confrue_*.py`.
 - Use `confrue_*.py` for `SESSION` resources that should follow directory hierarchy.
 - Keep the files focused on reusable setup, not assertions.

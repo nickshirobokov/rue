@@ -137,10 +137,10 @@ Put same-name `SESSION` resources in `confrue_*.py` files when different parts o
 ```text
 project/
 ├── confrue_root.py
-├── rue_public.py
+├── test_public.py
 └── admin/
     ├── confrue_admin.py
-    └── rue_admin.py
+    └── test_admin.py
 ```
 
 ```python
@@ -162,13 +162,19 @@ def settings():
 ```
 
 ```python
-# rue_public.py
+# test_public.py
+import rue
+
+@rue.test
 def test_public(settings):
     assert settings["mode"] == "public"
 ```
 
 ```python
-# admin/rue_admin.py
+# admin/test_admin.py
+import rue
+
+@rue.test
 def test_admin(settings):
     assert settings["mode"] == "admin"
 ```

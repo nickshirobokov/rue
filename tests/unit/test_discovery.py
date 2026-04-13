@@ -21,11 +21,14 @@ def test_collect_supports_same_dir_confrue_imports_without_pyproject(
     tmp_path,
 ):
     (tmp_path / "confrue_shared.py").write_text("VALUE = 123\n")
-    (tmp_path / "rue_sample.py").write_text(
+    (tmp_path / "test_sample.py").write_text(
         dedent(
             """
+            import rue
+
             from .confrue_shared import VALUE
 
+            @rue.test
             def test_value():
                 assert VALUE == 123
             """
@@ -86,13 +89,15 @@ async def test_collect_autoloads_confrue_chain_in_order(
             """
         )
     )
-    (nested / "rue_sample.py").write_text(
+    (nested / "test_sample.py").write_text(
         dedent(
             """
             import builtins
+            import rue
 
             from ..confrue_a import shared_value
 
+            @rue.test
             def test_value(shared_value):
                 assert shared_value == 7
                 assert builtins.confrue_log == [
@@ -147,25 +152,34 @@ async def test_confrue_session_resources_resolve_hierarchically(
             """
         )
     )
-    (tmp_path / "rue_root.py").write_text(
+    (tmp_path / "test_root.py").write_text(
         dedent(
             """
+            import rue
+
+            @rue.test
             def test_root(shared_value):
                 assert shared_value == "root"
             """
         )
     )
-    (child / "rue_child.py").write_text(
+    (child / "test_child.py").write_text(
         dedent(
             """
+            import rue
+
+            @rue.test
             def test_child(shared_value):
                 assert shared_value == "child"
             """
         )
     )
-    (sibling / "rue_sibling.py").write_text(
+    (sibling / "test_sibling.py").write_text(
         dedent(
             """
+            import rue
+
+            @rue.test
             def test_sibling(shared_value):
                 assert shared_value == "root"
             """
@@ -230,22 +244,26 @@ async def test_same_named_confrue_metrics_preserve_provider_identity_and_modules
             """
         )
     )
-    (tmp_path / "rue_root.py").write_text(
+    (tmp_path / "test_root.py").write_text(
         dedent(
             """
+            import rue
             from rue import metrics
 
+            @rue.test
             def test_shared(quality):
                 with metrics(quality):
                     assert True
             """
         )
     )
-    (child / "rue_child.py").write_text(
+    (child / "test_child.py").write_text(
         dedent(
             """
+            import rue
             from rue import metrics
 
+            @rue.test
             def test_shared(quality):
                 with metrics(quality):
                     assert True
@@ -272,11 +290,11 @@ async def test_same_named_confrue_metrics_preserve_provider_identity_and_modules
     assert metrics[0].metadata.identity != metrics[1].metadata.identity
     module_sets = [metric.metadata.collected_from_modules for metric in metrics]
     assert any(
-        any(module.endswith("rue_root.py") for module in modules)
+        any(module.endswith("test_root.py") for module in modules)
         for modules in module_sets
     )
     assert any(
-        any(module.endswith("child/rue_child.py") for module in modules)
+        any(module.endswith("child/test_child.py") for module in modules)
         for modules in module_sets
     )
 
@@ -297,12 +315,19 @@ async def test_collect_runs_class_based_tests_with_resource_injection(
             """
         )
     )
-    module_path = tmp_path / "rue_class_sample.py"
+    module_path = tmp_path / "test_class_sample.py"
     module_path.write_text(
         dedent(
             """
-            class TestMath:
+            import rue
+
+            @rue.test
+            class MathChecks:
                 def test_value(self, shared_value):
+                    assert shared_value == 7
+
+                @rue.test
+                def helper(self, shared_value):
                     assert shared_value == 7
             """
         )
@@ -312,10 +337,79 @@ async def test_collect_runs_class_based_tests_with_resource_injection(
     run = await Runner(reporters=[null_reporter]).run(items=items)
 
     assert [item.full_name for item in items] == [
-        "rue_class_sample::TestMath::test_value"
+        "test_class_sample::MathChecks::helper",
+        "test_class_sample::MathChecks::test_value",
     ]
-    assert run.result.passed == 1
-    assert run.result.executions[0].item.class_name == "TestMath"
+    assert run.result.passed == 2
+    assert all(
+        execution.item.class_name == "MathChecks"
+        for execution in run.result.executions
+    )
+
+
+def test_collect_supports_individually_decorated_methods_in_plain_classes(
+    tmp_path,
+):
+    module_path = tmp_path / "test_method_marker.py"
+    module_path.write_text(
+        dedent(
+            """
+            import rue
+
+            class HelperSuite:
+                def test_pytest_only(self):
+                    assert False
+
+                @rue.test
+                def helper(self):
+                    assert True
+            """
+        )
+    )
+
+    items = collect(module_path)
+
+    assert [item.full_name for item in items] == [
+        "test_method_marker::HelperSuite::helper"
+    ]
+
+
+def test_collect_ignores_plain_pytest_tests_in_mixed_files(tmp_path):
+    module_path = tmp_path / "test_mixed.py"
+    module_path.write_text(
+        dedent(
+            """
+            import rue
+
+            def test_pytest_only():
+                assert False
+
+            @rue.test
+            def test_rue_only():
+                assert True
+            """
+        )
+    )
+
+    items = collect(module_path)
+
+    assert [item.name for item in items] == ["test_rue_only"]
+
+
+def test_collect_ignores_rue_prefixed_files(tmp_path):
+    (tmp_path / "rue_legacy.py").write_text(
+        dedent(
+            """
+            import rue
+
+            @rue.test
+            def test_old():
+                assert True
+            """
+        )
+    )
+
+    assert collect(tmp_path) == []
 
 
 def test_collect_items_share_confrue_session_across_selected_modules(
@@ -335,9 +429,11 @@ def test_collect_items_share_confrue_session_across_selected_modules(
             """
         )
     )
-    (tmp_path / "rue_good.py").write_text("def test_good():\n    assert True\n")
-    (tmp_path / "rue_good_two.py").write_text(
-        "def test_good_two():\n    assert True\n"
+    (tmp_path / "test_good.py").write_text(
+        "from rue import test\n\n@test\ndef test_good():\n    assert True\n"
+    )
+    (tmp_path / "test_good_two.py").write_text(
+        "from rue import test\n\n@test\ndef test_good_two():\n    assert True\n"
     )
 
     bad_dir = tmp_path / "bad"
@@ -345,7 +441,9 @@ def test_collect_items_share_confrue_session_across_selected_modules(
     (bad_dir / "confrue_bad.py").write_text(
         'raise RuntimeError("must not import")\n'
     )
-    (bad_dir / "rue_bad.py").write_text("def test_bad():\n    assert True\n")
+    (bad_dir / "test_bad.py").write_text(
+        'from rue import test\n\nraise RuntimeError("must not import")\n\n@test\ndef test_bad():\n    assert True\n'
+    )
 
     items = TestCollector([], [], "good").collect([str(tmp_path)])
 
@@ -365,13 +463,15 @@ def test_collect_uses_fresh_import_session_after_file_changes(
 ):
     monkeypatch.setattr(builtins, "collected_values", [], raising=False)
     (tmp_path / "confrue_shared.py").write_text("VALUE = 1\n")
-    module_path = tmp_path / "rue_sample.py"
+    module_path = tmp_path / "test_sample.py"
     module_path.write_text(
         dedent(
             """
             import builtins
+            import rue
             from .confrue_shared import VALUE
 
+            @rue.test
             def test_value():
                 builtins.collected_values.append(VALUE)
             """

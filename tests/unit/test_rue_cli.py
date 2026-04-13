@@ -55,12 +55,19 @@ def test_filter_items_applies_tag_logic():
 
 
 def test_collect_static_extracts_names_and_tags(tmp_path):
-    module_path = tmp_path / "rue_sample.py"
+    module_path = tmp_path / "test_sample.py"
     module_path.write_text(
         dedent(
             """
             import rue
             from rue import test
+
+            def test_pytest_only():
+                pass
+
+            @rue.test
+            def helper():
+                pass
 
             @test.tag("smoke")
             @test.tag.inline
@@ -69,10 +76,14 @@ def test_collect_static_extracts_names_and_tags(tmp_path):
 
             @rue.test.tag("suite")
             @rue.test.tag.skip(reason="skip suite")
-            class TestFlows:
+            class Flows:
                 @test.tag("fast")
                 @test.tag.xfail(reason="known")
                 def test_nested(self):
+                    pass
+
+                @rue.test
+                def helper_nested(self):
                     pass
             """
         )
@@ -81,34 +92,65 @@ def test_collect_static_extracts_names_and_tags(tmp_path):
     refs = collect_static(module_path)
     refs_by_name = {ref.full_name: ref for ref in refs}
 
-    assert "rue_sample::test_top" in refs_by_name
-    assert refs_by_name["rue_sample::test_top"].tags == frozenset(
+    assert "test_sample::helper" in refs_by_name
+    assert refs_by_name["test_sample::helper"].tags == frozenset()
+
+    assert "test_sample::test_top" in refs_by_name
+    assert refs_by_name["test_sample::test_top"].tags == frozenset(
         {"smoke", "inline"}
     )
 
-    assert "rue_sample::TestFlows::test_nested" in refs_by_name
-    assert refs_by_name["rue_sample::TestFlows::test_nested"].tags == frozenset(
+    assert "test_sample::Flows::test_nested" in refs_by_name
+    assert refs_by_name["test_sample::Flows::test_nested"].tags == frozenset(
         {"suite", "skip", "fast", "xfail"}
     )
+    assert "test_sample::Flows::helper_nested" in refs_by_name
+    assert refs_by_name["test_sample::Flows::helper_nested"].tags == frozenset(
+        {"suite", "skip"}
+    )
+    assert "test_sample::test_pytest_only" not in refs_by_name
+
+
+def test_collect_static_ignores_legacy_rue_prefixed_files(tmp_path):
+    module_path = tmp_path / "rue_sample.py"
+    module_path.write_text(
+        dedent(
+            """
+            import rue
+
+            @rue.test
+            def test_top():
+                pass
+            """
+        )
+    )
+
+    assert collect_static(tmp_path) == []
 
 
 def test_collect_items_keyword_avoids_importing_unselected_modules(tmp_path):
-    good_module = tmp_path / "rue_good.py"
+    good_module = tmp_path / "test_good.py"
     good_module.write_text(
         dedent(
             """
+            import rue
+
+            @rue.test
             def test_good():
                 assert True
             """
         )
     )
 
-    bad_module = tmp_path / "rue_bad.py"
+    bad_module = tmp_path / "test_bad.py"
     bad_module.write_text(
         dedent(
             """
+            import rue
+
             raise RuntimeError("must not import")
 
+            @rue.test
             def test_bad():
                 pass
             """
@@ -124,12 +166,13 @@ def test_collect_items_keyword_avoids_importing_unselected_modules(tmp_path):
 
 
 def test_collect_items_same_file_ignores_unselected_invalid_test(tmp_path):
-    mixed_module = tmp_path / "rue_mixed.py"
+    mixed_module = tmp_path / "test_mixed.py"
     mixed_module.write_text(
         dedent(
             """
             from rue import test
 
+            @test
             def test_good():
                 assert True
 
