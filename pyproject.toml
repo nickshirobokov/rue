@@ -21,6 +21,7 @@ dependencies = [
     "opentelemetry-instrumentation-anthropic>=0.49.0",
     "pydantic-ai>=1.67.0",
     "typer>=0.24.1",
+    "tomlkit>=0.14.0",
 ]
 
 classifiers = [
@@ -33,6 +34,8 @@ classifiers = [
 [project.urls]
 Repository = "https://github.com/NickSherrow/rue"
 
+[project.entry-points.pytest11]
+rue = "rue.pytest_plugin"
 [dependency-groups]
 dev = [
     "pre-commit>=4.4.0",

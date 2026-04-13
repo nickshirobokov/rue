@@ -2,15 +2,16 @@ from pathlib import Path
 from textwrap import dedent
 from uuid import uuid4
 
+from tomlkit import parse
 from typer.testing import CliRunner
 
 from rue.cli import app
-from rue.testing.discovery import KeywordMatcher, TestCollector
 from rue.config import Config
 from rue.storage.sqlite import SQLiteStore
 from rue.testing import TestDefinition
-from rue.testing.discovery import collect_static
+from rue.testing.discovery import KeywordMatcher, TestCollector, collect_static
 from rue.testing.models.run import Run, RunEnvironment, RunResult
+
 
 runner = CliRunner()
 
@@ -279,3 +280,34 @@ def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(monkeypatch):
 
     result = runner.invoke(app, ["test", "--run-id", str(uuid4()), "--no-db"])
     assert result.exit_code == 0
+
+
+def test_rue_init_writes_pytest_entrypoint(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "demo"\n')
+    result = runner.invoke(app, ["init"])
+    assert result.exit_code == 0
+    doc = parse(pyproject.read_text())
+    rue_ep = doc["project"]["entry-points"]["pytest11"]["rue"]
+    assert rue_ep == "rue.pytest_plugin"
+
+
+def test_rue_init_fails_without_pyproject(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["init"])
+    assert result.exit_code == 1
+
+
+def test_rue_init_second_invocation_reports_already_installed(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "demo"\n')
+    assert runner.invoke(app, ["init"]).exit_code == 0
+    text_after_first = pyproject.read_text()
+    second = runner.invoke(app, ["init"])
+    assert second.exit_code == 0
+    assert "already installed" in second.stdout.lower()
+    assert pyproject.read_text() == text_after_first
