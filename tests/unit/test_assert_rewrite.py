@@ -16,10 +16,11 @@ from rue.testing.discovery import collect
 
 
 def test_rewritten_assert_collects_predicate_results(tmp_path):
-    mod_name = f"rue_{uuid4().hex}"
+    mod_name = f"test_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(
         """
+from rue import test
 from rue.resources import ResourceIdentity, Scope
 from rue.resources.metrics.base import Metric, MetricMetadata
 from rue.predicates import predicate
@@ -28,6 +29,7 @@ from rue.predicates import predicate
 def equals(actual, reference):
     return actual == reference
 
+@test
 def test_sample():
     m = Metric(metadata=MetricMetadata(identity=ResourceIdentity(name="m", scope=Scope.SESSION)))
     m.add_record([1, 2, 3])
@@ -58,16 +60,18 @@ def test_sample():
 
 
 def test_rewritten_assert_failure_sets_error_message_and_raises(tmp_path):
-    mod_name = f"rue_{uuid4().hex}"
+    mod_name = f"test_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(
         """
+from rue import test
 from rue.predicates import predicate
 
 @predicate
 def equals(actual, reference):
     return actual == reference
 
+@test
 def test_fail():
     assert equals(1, 2), "nope"
 """.lstrip()
@@ -93,16 +97,18 @@ def test_fail():
 
 
 def test_rewritten_multiple_asserts_record_multiple_metric_values(tmp_path):
-    mod_name = f"rue_{uuid4().hex}"
+    mod_name = f"test_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(
         """
+from rue import test
 from rue.predicates import predicate
 
 @predicate
 def equals(actual, reference):
     return actual == reference
 
+@test
 def test_metric_capture_multi():
     assert equals(1, 1)
     assert equals(1, 2), "nope"
@@ -141,7 +147,7 @@ async def test_rewritten_asserts_inside_metric_functions_are_collected(
     tmp_path,
 ):
     registry.reset()
-    mod_name = f"rue_{uuid4().hex}"
+    mod_name = f"test_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(
         """
@@ -155,6 +161,7 @@ def my_metric():
     yield m
     assert False, "nope"
 
+@rue.test
 def test_dummy():
     pass
 """.lstrip()
@@ -180,10 +187,13 @@ def test_dummy():
 
 
 def test_assertion_repr_major_cases(tmp_path):
-    mod_name = f"rue_{uuid4().hex}"
+    mod_name = f"test_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(
         """
+from rue import test
+
+@test
 def test_repr_cases():
     t1 = 5
     t2 = 10
@@ -235,10 +245,13 @@ def test_repr_cases():
 
 
 def test_assertion_repr_multiline_assert(tmp_path):
-    mod_name = f"rue_{uuid4().hex}"
+    mod_name = f"test_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(
         """
+from rue import test
+
+@test
 def test_multiline_assert():
     def func(x):
         return x + 1

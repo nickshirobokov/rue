@@ -1,4 +1,4 @@
-"""Test discovery for rue_* files and pytest-style test names."""
+"""Test discovery for explicit Rue tests in test_* modules."""
 
 import ast
 import inspect
@@ -9,6 +9,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Protocol, TypeVar
 
+from rue.resources.registry import Scope, registry
 from rue.testing.decorators.tag import TagData, get_tag_data, merge_tag_data
 from rue.testing.discovery.loader import RueImportSession
 from rue.testing.models import Modifier, TestDefinition
@@ -39,20 +40,25 @@ def _resolve_path(path: Path | str | None) -> Path:
     return path.resolve()
 
 
-def _iter_rue_files(path: Path) -> list[Path]:
+def _iter_test_files(path: Path) -> list[Path]:
     if path.is_file():
-        if path.name.startswith("rue_") and path.suffix == ".py":
+        if path.name.startswith("test_") and path.suffix == ".py":
             return [path]
         return []
     if path.is_dir():
-        return sorted(path.rglob("rue_*.py"))
+        return sorted(path.rglob("test_*.py"))
     return []
 
 
-def _iter_confrue_files(path: Path) -> list[Path]:
+def _iter_setup_files(path: Path) -> list[Path]:
     if not path.is_dir():
         return []
-    return sorted(path.glob("confrue_*.py"))
+    setup_files: list[Path] = []
+    conftest_path = path / "conftest.py"
+    if conftest_path.is_file():
+        setup_files.append(conftest_path)
+    setup_files.extend(sorted(path.glob("confrue_*.py")))
+    return setup_files
 
 
 def _is_test_root(expr: ast.expr) -> bool:
@@ -123,9 +129,7 @@ def _collect_static_from_module(path: Path) -> list[StaticTestReference]:
 
     for node in module.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name.startswith("test_") or any(
-                _is_rue_test_decorator(d) for d in node.decorator_list
-            ):
+            if any(_is_rue_test_decorator(d) for d in node.decorator_list):
                 refs.append(
                     StaticTestReference(
                         name=node.name,
@@ -137,13 +141,19 @@ def _collect_static_from_module(path: Path) -> list[StaticTestReference]:
                 )
             continue
 
-        if isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+        if isinstance(node, ast.ClassDef):
             class_tags = _extract_static_tags(node.decorator_list)
+            class_is_rue = any(
+                _is_rue_test_decorator(d) for d in node.decorator_list
+            )
             for class_node in node.body:
                 if isinstance(
                     class_node, (ast.FunctionDef, ast.AsyncFunctionDef)
                 ):
-                    if class_node.name.startswith("test_") or any(
+                    if (
+                        class_is_rue
+                        and class_node.name.startswith("test_")
+                    ) or any(
                         _is_rue_test_decorator(d)
                         for d in class_node.decorator_list
                     ):
@@ -167,7 +177,7 @@ def collect_static(path: Path | str | None = None) -> list[StaticTestReference]:
     resolved_path = _resolve_path(path)
     refs: list[StaticTestReference] = []
 
-    for file_path in _iter_rue_files(resolved_path):
+    for file_path in _iter_test_files(resolved_path):
         refs.extend(_collect_static_from_module(file_path))
 
     return refs
@@ -200,8 +210,35 @@ def _iter_ancestor_dirs(root: Path, directory: Path) -> list[Path]:
 def _config_chain_for(path: Path, suite_root: Path) -> list[Path]:
     configs: list[Path] = []
     for directory in _iter_ancestor_dirs(suite_root, path.parent):
-        configs.extend(_iter_confrue_files(directory))
+        configs.extend(_iter_setup_files(directory))
     return configs
+
+
+_PYTEST_SCOPE_MAP: dict[str, Scope] = {
+    "function": Scope.CASE,
+    "class": Scope.SUITE,
+    "module": Scope.SUITE,
+    "package": Scope.SESSION,
+    "session": Scope.SESSION,
+}
+
+
+def _register_fixtures_from_module(module: ModuleType) -> None:
+    """Register pytest fixtures found in a module as Rue resources."""
+    for _name, obj in inspect.getmembers(module):
+        match (
+            getattr(obj, "_fixture_function_marker", None),
+            getattr(obj, "_pytestfixturefunction", None),
+        ):
+            case (marker, _) if marker is not None:
+                fn = getattr(obj, "_fixture_function", obj)
+            case (_, marker) if marker is not None:
+                fn = obj
+            case _:
+                continue
+        if marker.params is not None or registry.get(fn.__name__) is not None:
+            continue
+        registry.resource(fn, scope=_PYTEST_SCOPE_MAP.get(marker.scope or "function", Scope.CASE))
 
 
 def _collect_paths(
@@ -230,8 +267,10 @@ def _collect_paths(
     items: list[TestDefinition] = []
     for file_path in resolved_paths:
         for config_path in config_chains[file_path]:
-            session.load_module(config_path)
+            config_module = session.load_module(config_path)
+            _register_fixtures_from_module(config_module)
         module = session.load_module(file_path)
+        _register_fixtures_from_module(module)
         items.extend(_collect_from_module(module, file_path))
 
     return items
@@ -255,18 +294,17 @@ def _collect_from_module(
     items: list[TestDefinition] = []
 
     for name, obj in inspect.getmembers(module):
-        if inspect.isfunction(obj) and (
-            name.startswith("test_") or getattr(obj, "__rue_test__", False)
-        ):
+        if inspect.isfunction(obj) and getattr(obj, "__rue_test__", False):
             items.append(_build_item_for_callable(obj, name, module_path))
 
-        elif name.startswith("Test") and inspect.isclass(obj):
+        elif inspect.isclass(obj):
+            class_is_rue = getattr(obj, "__rue_test__", False)
             class_tags = get_tag_data(obj)
             for method_name, method in inspect.getmembers(
                 obj, predicate=inspect.isfunction
             ):
-                if method_name.startswith("test_") or getattr(
-                    method, "__rue_test__", False
+                if getattr(method, "__rue_test__", False) or (
+                    class_is_rue and method_name.startswith("test_")
                 ):
                     items.append(
                         _build_item_for_callable(
@@ -321,11 +359,11 @@ def collect(path: Path | str | None = None) -> list[TestDefinition]:
 
     Example:
         items = collect()  # Current directory
-        items = collect("rue_agents.py")  # Specific file
+        items = collect("test_agents.py")  # Specific file
         items = collect("./tests/")  # Directory
     """
     path = _resolve_path(path)
-    file_paths = _iter_rue_files(path)
+    file_paths = _iter_test_files(path)
     explicit_root = path if path.is_dir() else path.parent
     return _collect_paths(file_paths, explicit_root=explicit_root)
 

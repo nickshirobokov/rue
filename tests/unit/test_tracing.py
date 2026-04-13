@@ -13,7 +13,7 @@ from rue.testing.runner import Runner
 
 
 def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
-    mod_name = f"rue_{uuid4().hex}"
+    mod_name = f"test_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(source.lstrip())
     return mod_name, mod_path
@@ -64,6 +64,7 @@ def traced_pipeline():
 
     return rue.SUT(run)
 
+@rue.test
 def test_sample(traced_pipeline):
     assert traced_pipeline.root_spans == []
     assert traced_pipeline.all_spans == []
@@ -103,6 +104,7 @@ def traced_pipeline():
 
     return rue.SUT(run)
 
+@rue.test
 async def test_sample(traced_pipeline):
     assert traced_pipeline.root_spans == []
     assert traced_pipeline.all_spans == []

@@ -27,7 +27,7 @@ def clean_registry():
 
 
 def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
-    mod_name = f"rue_{uuid4().hex}"
+    mod_name = f"test_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(source.lstrip())
     return mod_name, mod_path
@@ -321,6 +321,7 @@ def traced_sut():
         return x * 2
     return rue.SUT(run)
 
+@rue.test
 def test_sample(traced_sut):
     assert traced_sut.instance(5) == 10
 """,
@@ -343,6 +344,7 @@ class Pipeline:
 def traced_callable_object():
     return rue.SUT(Pipeline())
 
+@rue.test
 def test_sample(traced_callable_object):
     assert traced_callable_object.instance(3) == 12
 """,
@@ -365,6 +367,7 @@ class Service:
 def traced_service():
     return rue.SUT(Service(), methods=["run"])
 
+@rue.test
 async def test_sample(traced_service):
     assert await traced_service.instance.run("hello") == "ok:hello"
 """,
@@ -421,6 +424,9 @@ async def test_sample(traced_service):
             trace_reporter=trace_reporter,
             monkeypatch=monkeypatch,
             source="""
+import rue
+
+@rue.test
 def test_sample():
     assert True
 """,
@@ -463,6 +469,7 @@ def traced_pipeline():
 
     return rue.SUT(run)
 
+@rue.test
 async def test_sample(traced_pipeline):
     assert traced_pipeline.root_spans == []
     assert traced_pipeline.all_spans == []
@@ -518,6 +525,7 @@ def shared_pipeline():
 
     return rue.SUT(run)
 
+@rue.test
 async def test_first(shared_pipeline):
     assert shared_pipeline.all_spans == []
     assert shared_pipeline.stdout.text == ""
@@ -528,6 +536,7 @@ async def test_first(shared_pipeline):
         "first_step",
     }}
 
+@rue.test
 async def test_second(shared_pipeline):
     assert shared_pipeline.all_spans == []
     assert shared_pipeline.stdout.text == ""

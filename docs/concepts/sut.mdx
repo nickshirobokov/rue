@@ -37,7 +37,7 @@ SUT trace accessors work only when OpenTelemetry is enabled. Rue enables it by d
 <Step title="Decorate the system under test">
 
 ```python
-# tests/rue_agent.py
+# tests/test_agent.py
 import rue
 from rue import SUT
 
@@ -51,8 +51,10 @@ def weather_agent():
 <Step title="Inject into a `test` and assert on OpenTelemetry">
 
 ```python
-# tests/rue_agent.py
+# tests/test_agent.py
+import rue
 
+@rue.test
 def test_weather_agent_calls_tools(weather_agent):
     out = weather_agent.instance("What's the weather in SF?")
 
@@ -155,7 +157,7 @@ Rue also records:
 
 ### 1. Create isolated helpers; don't touch your production code
 
-Many evaluation frameworks require developers to modify their production codebase to instrument OpenTelemetry traces. Rue avoids this pattern. The best way to introduce SUTs to your suite is to create isolated wrapper functions within your `rue_*.py` files.
+Many evaluation frameworks require developers to modify their production codebase to instrument OpenTelemetry traces. Rue avoids this pattern. The best way to introduce SUTs to your suite is to create isolated wrapper functions within your `test_*.py` files.
 
 **Don't do this:**
 ```python
@@ -171,7 +173,7 @@ def agent():
 
 **Do this:**
 ```python
-# tests/rue_agent.py
+# tests/test_agent.py
 import rue
 from rue import SUT
 
@@ -183,6 +185,7 @@ def marketing_agent():
     """Q&A system that answers questions about marketing concepts."""
     return SUT(partial(prod_agent, domain="marketing"))
 
+@rue.test
 def test_marketing_agent_invokes(marketing_agent):
     out = marketing_agent.instance("What's CAC?")
     assert out

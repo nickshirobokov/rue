@@ -259,12 +259,14 @@ class TestRunner:
         monkeypatch: pytest.MonkeyPatch,
         null_reporter,
     ):
-        module_path = tmp_path / "rue_fail_fast.py"
+        module_path = tmp_path / "test_fail_fast.py"
         module_path.write_text(
             dedent(
                 """
                 import builtins
+                import rue
 
+                @rue.test
                 def test_fail_fast():
                     builtins.fail_fast_events.append("before")
                     assert False, "first failure"

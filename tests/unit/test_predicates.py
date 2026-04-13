@@ -50,7 +50,7 @@ async def async_returns_result(
 
 
 def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
-    mod_name = f"rue_{uuid4().hex}"
+    mod_name = f"test_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(source.lstrip())
     return mod_name, mod_path
@@ -142,6 +142,7 @@ async def test_async_predicate_collects_returned_result_without_normalizing():
         (
             """
 from rue.predicates import predicate
+from rue import test
 
 @predicate
 def equals(
@@ -157,6 +158,7 @@ def equals(
         return actual == reference
     return actual.casefold() == reference.casefold()
 
+@test
 def test_sample():
     assert equals(
         "abc",
@@ -247,6 +249,7 @@ async def test_runner_collects_predicate_results_and_trace_data_into_db(
         db_enabled=True,
         db_path=db_path,
         source="""
+from rue import test
 from rue.predicates import predicate
 
 @predicate
@@ -260,6 +263,7 @@ def equals(
 ) -> bool:
     return actual == reference
 
+@test
 def test_sample():
     assert equals("a", "b"), "predicate failed"
 """,
@@ -326,6 +330,9 @@ async def test_predicate_does_not_trace_outside_runner_even_after_runtime_config
         trace_reporter=trace_reporter,
         monkeypatch=monkeypatch,
         source="""
+from rue import test
+
+@test
 def test_sample():
     assert True
 """,
@@ -349,6 +356,7 @@ async def test_predicate_trace_always_records_content_attributes(
         trace_reporter=trace_reporter,
         monkeypatch=monkeypatch,
         source="""
+from rue import test
 from rue.predicates import predicate
 
 @predicate
@@ -363,6 +371,7 @@ def equals(
     _ = confidence, message
     return actual == reference
 
+@test
 def test_sample():
     assert equals("abc", "xyz", strict=False, confidence=0.25, message="secret") is False
 """,

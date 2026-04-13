@@ -1,10 +1,12 @@
 """Example rue tests demonstrating imperative outcomes (skip, fail, xfail)."""
 
 import os
+import sys
 
 import rue
 
 
+@rue.test
 def test_skip_when_env_missing():
     """Skip test if required environment variable is not set."""
     if "API_KEY" not in os.environ:
@@ -13,11 +15,13 @@ def test_skip_when_env_missing():
     assert os.environ["API_KEY"] is not None
 
 
+@rue.test
 def test_skip_unconditionally():
     """Skip a test unconditionally."""
     rue.skip("not implemented yet")
 
 
+@rue.test
 def test_fail_on_invalid_state():
     """Explicitly fail when detecting invalid state."""
     data = {"status": "error"}
@@ -28,6 +32,7 @@ def test_fail_on_invalid_state():
     assert data["status"] == "ok"
 
 
+@rue.test
 def test_xfail_known_bug():
     """Mark test as expected failure for a known bug."""
     rue.xfail("issue #42: division by zero not handled")
@@ -36,9 +41,9 @@ def test_xfail_known_bug():
     assert result == 0
 
 
+@rue.test
 def test_conditional_xfail():
     """Conditionally mark as expected failure."""
-    import sys
 
     if sys.version_info < (3, 12):
         rue.xfail("feature requires Python 3.12+")
@@ -46,11 +51,13 @@ def test_conditional_xfail():
     assert True
 
 
+@rue.test
 async def test_async_skip():
     """Skip works in async tests too."""
     rue.skip("async feature not ready")
 
 
+@rue.test
 class TestOutcomeTests:
     """Outcomes work in class methods."""
 

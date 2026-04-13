@@ -1,10 +1,10 @@
 """Examples showing how to inspect OpenTelemetry spans through SUTs.
 
 Run with default OpenTelemetry capture:
-    uv run rue test examples/rue_example_otel_trace.py
+    uv run rue test examples/test_example_otel_trace.py
 
 Persist local trace files too:
-    uv run rue test examples/rue_example_otel_trace.py --reporter ConsoleReporter --reporter OtelReporter
+    uv run rue test examples/test_example_otel_trace.py --reporter ConsoleReporter --reporter OtelReporter
 """
 
 import rue
@@ -38,6 +38,7 @@ def multi_step_pipeline():
     return rue.SUT(Pipeline(), methods=["run", "retrieve", "generate"])
 
 
+@rue.test
 def test_sut_accessors_start_empty(simple_pipeline):
     """SUT trace accessors are empty until the SUT is called."""
     assert simple_pipeline.root_spans == []
@@ -45,6 +46,7 @@ def test_sut_accessors_start_empty(simple_pipeline):
     assert simple_pipeline.llm_spans == []
 
 
+@rue.test
 def test_inspect_simple_sut_span(simple_pipeline):
     """Inspect the root span for a callable SUT."""
     query = "hello world"
@@ -67,6 +69,7 @@ def test_inspect_simple_sut_span(simple_pipeline):
     assert result in span.attributes["sut.output"]
 
 
+@rue.test
 def test_access_span_ids(simple_pipeline):
     """ReadableSpan exposes OpenTelemetry trace and span identifiers."""
     simple_pipeline.instance("get ids")
@@ -79,6 +82,7 @@ def test_access_span_ids(simple_pipeline):
     assert len(otel_span_id) == 16
 
 
+@rue.test
 def test_query_all_spans(multi_step_pipeline):
     """Wrapped methods appear in the SUT span subtree."""
     result = multi_step_pipeline.instance.run("test query")
@@ -97,6 +101,7 @@ def test_query_all_spans(multi_step_pipeline):
     assert all_names == root_names
 
 
+@rue.test
 def test_assert_on_trace_data(multi_step_pipeline):
     """Span relationships and attributes can be asserted directly."""
     multi_step_pipeline.instance.run("assertion test")

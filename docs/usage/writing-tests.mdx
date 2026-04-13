@@ -2,7 +2,7 @@
 title: "Writing Tests"
 ---
 
-Rue is intentionally “pytest-shaped”: you write plain Python, Rue discovers `test_*` cases, injects dependencies by parameter name (like pytest fixtures), runs them, and reports results.
+Rue is intentionally “pytest-shaped”: you write plain Python, Rue discovers `test_*.py` modules, collects only explicitly marked Rue tests, injects dependencies by parameter name (like pytest fixtures), runs them, and reports results.
 
 This page focuses on **how to write tests** and (importantly) **where the behavior lives in the codebase**, so you can trust what’s happening.
 
@@ -10,7 +10,7 @@ This page focuses on **how to write tests** and (importantly) **where the behavi
 
 | pytest | rue |
 | --- | --- |
-| `def test_*(): ...` | `def test_*(): ...` |
+| `def test_*(): ...` | `@rue.test` + `def test_*(): ...` |
 | `@pytest.fixture` | `@rue.resource` |
 | `@pytest.mark.parametrize(...)` | `@rue.test.iterate.params(...)` |
 | `@pytest.mark.skip(...)` | `@rue.test.tag.skip(...)` |
@@ -25,58 +25,75 @@ Rue follows pytest-style discovery patterns to find test functions in your codeb
   **Related docs**: [Test (Concept)](/concepts/test), [Testing (API)](/apis/testing)
 </Info>
 
-**Files**: Rue discovers Python files matching `rue_*.py`:
-- `rue_chatbot.py` ✓
-- `rue_agent.py` ✓
+**Files**: Rue discovers Python files matching `test_*.py`:
+- `test_chatbot.py` ✓
+- `test_agent.py` ✓
 - `helpers.py` ✗
 
-Rue also recognizes `confrue_*.py` files as shared setup modules:
+Rue also recognizes `conftest.py` and `confrue_*.py` files as shared setup modules:
+- `conftest.py` ✓ Loaded as setup
 - `confrue_shared.py` ✓ Loaded as setup
-- `confrue_db.py` ✓ Loaded as setup
+- `conftest.py` ✗ Not collected as a test module
 - `confrue_shared.py` ✗ Not collected as a test module
 
-For each selected test module, Rue loads matching ancestor `confrue_*.py` files before importing the `rue_*.py` file itself. Ancestors load from the suite root down to the test directory, and multiple `confrue_*.py` files in the same directory load in lexicographic order.
+For each selected test module, Rue loads ancestor setup files before importing the `test_*.py` file itself. Ancestors load from the suite root down to the test directory. Within each directory, Rue loads `conftest.py` first, then `confrue_*.py` files in lexicographic order.
 
-**Functions**: Inside discovered files, Rue collects functions starting with `test_`:
+**Functions**: Inside discovered files, Rue collects only tests marked by Rue decorators. Use `@rue.test` for a plain Rue test, or use another Rue test decorator such as `@rue.test.iterate...` or `@rue.test.tag...`:
 
 ```python
-def test_weather_agent():  # ✓ Discovered
+import rue
+
+@rue.test
+def test_weather_agent():  # ✓ Rue collects this
     pass
 
-def helper_function():      # ✗ Not discovered
+def test_pytest_only():      # ✗ Rue ignores this, pytest can still collect it
+    pass
+
+def helper_function():       # ✗ Not discovered
     pass
 ```
 
-**Classes**: Classes starting with `Test` are discovered, and their `test_*` methods become test cases:
+**Classes**: Class names no longer matter. Rue collects methods from a class only when the class itself is Rue-decorated, or when individual methods are Rue-decorated:
 
 ```python
-class TestCustomerSupport:     # ✓ Discovered
-    def test_greeting(self):    # ✓ Collected
+import rue
+
+@rue.test
+class CustomerSupport:
+    def test_greeting(self):    # ✓ Collected because the class is marked
         pass
 
-    def helper(self):            # ✗ Not collected
+    @rue.test
+    def helper(self):            # ✓ Collected because the method is marked
         pass
 ```
 
-### Shared Setup With `confrue_*`
+This makes mixed pytest/Rue files possible: pytest can still collect plain `test_*` functions, while Rue only collects the decorated ones.
 
-Use `confrue_*.py` files for reusable setup that should apply to a directory tree, especially shared helpers and `SESSION` resources.
+### Shared Setup With `conftest.py` and `confrue_*`
+
+Use `conftest.py` or `confrue_*.py` for reusable setup that should apply to a directory tree, especially shared helpers and `SESSION` resources.
 
 ```text
 project/
+├── conftest.py
 ├── confrue_root.py
-├── rue_smoke.py
+├── test_smoke.py
 └── api/
+    ├── conftest.py
     ├── confrue_api.py
-    └── rue_orders.py
+    └── test_orders.py
 ```
 
-When Rue imports `api/rue_orders.py`, it loads:
+When Rue imports `api/test_orders.py`, it loads:
+- `conftest.py`
 - `confrue_root.py`
+- `api/conftest.py`
 - `api/confrue_api.py`
-- `api/rue_orders.py`
+- `api/test_orders.py`
 
-Keep actual tests in `rue_*.py` files. Keep shared setup and directory-specific overrides in `confrue_*.py` files.
+Keep actual tests in `test_*.py` files. Keep shared setup and directory-specific overrides in `conftest.py` or `confrue_*.py` files.
 
 <Info>
   **Related docs**: [confrue Files (Concept)](/concepts/confrue-files), [Resource (Concept)](/concepts/resource)
@@ -84,7 +101,7 @@ Keep actual tests in `rue_*.py` files. Keep shared setup and directory-specific 
 
 ## Modifiers
 
-Modifiers are **decorators** that change how a test is *collected* and/or *executed*. Some modifiers expand a single test into many cases (like parametrization or dataset iteration), while others change execution semantics (like repeating a case, or marking it as skipped/xfail). Apply them to `test_*` functions or `Test*` classes.
+Modifiers are **decorators** that change how a test is *collected* and/or *executed*. Some modifiers expand a single test into many cases (like parametrization or dataset iteration), while others change execution semantics (like repeating a case, or marking it as skipped/xfail). These decorators already mark the test for Rue collection, so you do not need to stack `@rue.test` on top of them.
 
 <Info>
   **Related docs**: [Testing (API)](/apis/testing), [Case (Concept)](/concepts/case)
@@ -196,8 +213,10 @@ def test_mostly_correct(llm):
 By default, synchronous tests (`def test_*`) run in a worker thread via `asyncio.to_thread(...)` so the event loop stays responsive. Use `@rue.test.tag.inline` when a sync test must run on the main event-loop thread (for example, thread-sensitive libraries).
 
 ```python
+import rue
 import threading
 
+@rue.test
 def test_default_threaded():
     # Runs in a worker thread by default.
     assert threading.current_thread() is not threading.main_thread()
@@ -229,6 +248,7 @@ def database():
 def ml_model():
     return load_model()  # Shared across the run for the active provider
 
+@rue.test
 def test_query(database, ml_model):
     # Both injected automatically
     result = database.query("SELECT 1")
@@ -240,7 +260,7 @@ Scopes: `"case"` (default), `"suite"`, `"session"`.
 
 `SESSION` resources are hierarchical: same-name providers can coexist, and Rue selects the nearest ancestor provider relative to the requesting test module. Without an active test context, resolution falls back to the flat/latest registered definition.
 
-In practice, put shared `SESSION` resources in `confrue_*.py` files so directory structure controls which override is active.
+In practice, put shared `SESSION` resources in `conftest.py` or `confrue_*.py` files so directory structure controls which override is active.
 
 **`@rue.resource.metric(scope="session")`** - Define a metric as a scoped, injectable measurement object
 
@@ -353,9 +373,9 @@ def test_classifier(input, expected, classifier, accuracy: Metric):
 **Important:** Rue's assertion transformation only applies when you run files through Rue's test runner:
 
 ```bash
-uv run rue test rue_my_tests.py  # ✓ Transformed assertions
-python rue_my_tests.py           # ✗ Standard Python behavior
-uv run rue_my_tests.py           # ✗ Standard Python behavior
+uv run rue test test_my_tests.py  # ✓ Transformed assertions
+python test_my_tests.py           # ✗ Standard Python behavior
+uv run test_my_tests.py           # ✗ Standard Python behavior
 ```
 
 ### Assert messages

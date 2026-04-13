@@ -19,12 +19,14 @@ uv add rue
 
 Follow pytest habits...
 
-- Create 'rue_*.py' files
-- Write 'def test_*' functions
+- Create `test_*.py` files
+- Mark plain Rue tests with `@rue.test`
 - Use 'rue.resource' instead of 'pytest.fixture'
-- Put shared suite setup, shared resources, and directory-specific overrides in `confrue_*.py` files. See [confrue files](docs/concepts/confrue-files.mdx)
+- Put shared suite setup, shared resources, and directory-specific overrides in `conftest.py` or `confrue_*.py` files. Rue loads `conftest.py` first in each directory. See [confrue files](docs/concepts/confrue-files.mdx)
 - Add 'assert' expressions within the functions
 - Run 'uv run rue test'
+
+Rue only collects tests marked through Rue decorators, so pytest and Rue tests can live side by side in the same `test_*.py` module.
 
 ...while leveraging Rue APIs.
 - Use 'with metrics()' context to turn failed assertions into quality metrics

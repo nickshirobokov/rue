@@ -2,6 +2,8 @@
 title: "Rue Testing APIs"
 ---
 
+Rue discovers `test_*.py` modules and collects only tests marked by Rue decorators. Use `@test` for plain Rue tests; `@test.iterate...` and `@test.tag...` also mark tests automatically.
+
 ## Decorators
 
 ### @resource
@@ -32,7 +34,7 @@ Register a function as a dependency injection resource.
 
 **Returns:** Decorated function registered as a resource
 
-`SESSION` resources are hierarchical. Same-name `SESSION` providers can coexist in different directories, and Rue picks the nearest ancestor provider for the requesting test module. Define those shared providers in `confrue_*.py` files.
+`SESSION` resources are hierarchical. Same-name `SESSION` providers can coexist in different directories, and Rue picks the nearest ancestor provider for the requesting test module. Define those shared providers in `conftest.py` or `confrue_*.py` files.
 
 **Example:**
 ```python
@@ -58,6 +60,7 @@ def authenticated_client():
     yield client
     client.logout()
 
+@rue.test
 def test_test(api_client, database, authenticated_client):
     # All resources automatically injected
     pass
@@ -114,6 +117,7 @@ def search_agent():
     sut.validate_cases(cases, "__call__")
     return sut
 
+@rue.test
 def test_test(agent, rag):
     # Injected values are SUT objects. Call the traced instance or wrapped methods.
     context = retrieve("Privacy policy")
@@ -122,6 +126,35 @@ def test_test(agent, rag):
         context=context,
     )
 ```
+
+---
+
+### @test
+
+Mark a plain function or class as a Rue test container.
+
+**Signature:**
+```python
+@test
+```
+
+**Returns:** The target with Rue collection metadata attached
+
+**Example:**
+```python
+import rue
+
+@rue.test
+def test_health_check(api):
+    assert api.is_healthy()
+
+@rue.test
+class SupportFlows:
+    def test_greeting(self, bot):
+        assert bot.reply("hello")
+```
+
+Use this when the test has no other Rue modifier. If you already use `@rue.test.iterate...` or `@rue.test.tag...`, those decorators already mark the test.
 
 ---
 
@@ -250,6 +283,7 @@ By default, synchronous tests are offloaded to a worker thread via `asyncio.to_t
 import threading
 import rue
 
+@rue.test
 def test_default_threaded():
     # Default sync behavior: worker thread.
     assert threading.current_thread() is not threading.main_thread()
