@@ -22,6 +22,7 @@ from rue.storage.sqlite.migrations import MigrationError, MigrationRunner
 from rue.testing.models.definition import TestDefinition
 from rue.testing.models.result import TestExecution, TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
+from rue.testing.models.spec import TestLocator, TestSpec
 
 
 DEFAULT_DB_NAME = ".rue/rue.db"
@@ -547,16 +548,22 @@ class SQLiteStore(Store):
         tags = set(json.loads(tags_json)) if tags_json else set()
 
         definition = TestDefinition(
-            name=row["test_name"],
+            spec=TestSpec(
+                locator=TestLocator(
+                    module_path=Path(row["file_path"]) if row["file_path"] else Path(),
+                    function_name=row["test_name"],
+                    class_name=row["class_name"],
+                ),
+                is_async=False,
+                params=(),
+                modifiers=(),
+                tags=frozenset(tags),
+                skip_reason=row["skip_reason"],
+                xfail_reason=row["xfail_reason"],
+                suffix=row["suffix"],
+                case_id=UUID(row["case_id"]) if row["case_id"] else None,
+            ),
             fn=lambda: None,
-            module_path=Path(row["file_path"]) if row["file_path"] else Path(),
-            is_async=False,
-            class_name=row["class_name"],
-            tags=tags,
-            skip_reason=row["skip_reason"],
-            xfail_reason=row["xfail_reason"],
-            suffix=row["suffix"],
-            case_id=UUID(row["case_id"]) if row["case_id"] else None,
         )
 
         result = TestResult(

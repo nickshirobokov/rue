@@ -73,6 +73,7 @@ packages = ["src/rue"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 filterwarnings = ["ignore::pytest.PytestCollectionWarning"]
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 80

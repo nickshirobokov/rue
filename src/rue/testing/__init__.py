@@ -2,7 +2,6 @@
 
 from ..resources import resource
 from .decorators import iterate, tag, test
-from .discovery import collect
 from .models import (
     Case,
     CaseGroup,
@@ -23,7 +22,6 @@ __all__ = [
     "TestDefinition",
     "TestExecution",
     "TestStatus",
-    "collect",
     "fail",
     "resource",
     "skip",

@@ -6,14 +6,14 @@ from rue.resources import ResourceResolver, registry
 from rue.testing.execution.single import SingleTest
 from rue.testing.models import IterateModifier, TestDefinition, TestStatus
 from rue.testing.tracing import TestTracer
+from tests.unit.factories import make_definition
 
 
 def make_item(fn=None, *, modifiers=None) -> TestDefinition:
-    return TestDefinition(
-        name="test_sample",
+    return make_definition(
+        "test_sample",
         fn=fn or (lambda: None),
-        module_path=Path("test_sample.py"),
-        is_async=False,
+        module_path="test_sample.py",
         modifiers=modifiers or [],
     )
 

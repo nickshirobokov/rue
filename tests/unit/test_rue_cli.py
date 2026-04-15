@@ -1,5 +1,4 @@
 from pathlib import Path
-from textwrap import dedent
 from uuid import uuid4
 
 from tomlkit import parse
@@ -9,8 +8,9 @@ from rue.cli import app
 from rue.config import Config
 from rue.storage.sqlite import SQLiteStore
 from rue.testing import TestDefinition
-from rue.testing.discovery import KeywordMatcher, TestCollector, collect_static
+from rue.testing.discovery import CollectionPlan
 from rue.testing.models.run import Run, RunEnvironment, RunResult
+from tests.unit.factories import make_definition
 
 
 runner = CliRunner()
@@ -21,175 +21,7 @@ def dummy() -> None:
 
 
 def make_item(name: str, tags: set[str], suffix: str | None = None) -> TestDefinition:
-    return TestDefinition(
-        name=name,
-        fn=dummy,
-        module_path=Path("module.py"),
-        is_async=False,
-        params=[],
-        tags=tags,
-        suffix=suffix,
-    )
-
-
-def test_keyword_matcher_supports_boolean_logic():
-    matcher = KeywordMatcher("foo and not bar")
-    assert matcher.match("foo_case")
-    assert not matcher.match("bar_case")
-    assert not matcher.match("other")
-
-
-def test_filter_items_applies_tag_logic():
-    items = [
-        make_item("test_fast", {"fast", "smoke"}),
-        make_item("test_slow", {"slow"}),
-    ]
-
-    filtered = TestCollector(include_tags=["smoke"], exclude_tags=[], keyword=None).filter(items)
-    assert [item.name for item in filtered] == ["test_fast"]
-
-    filtered = TestCollector(include_tags=[], exclude_tags=["slow"], keyword=None).filter(items)
-    assert [item.name for item in filtered] == ["test_fast"]
-
-    filtered = TestCollector(include_tags=[], exclude_tags=[], keyword="slow").filter(items)
-    assert [item.name for item in filtered] == ["test_slow"]
-
-
-def test_collect_static_extracts_names_and_tags(tmp_path):
-    module_path = tmp_path / "test_sample.py"
-    module_path.write_text(
-        dedent(
-            """
-            import rue
-            from rue import test
-
-            def test_pytest_only():
-                pass
-
-            @rue.test
-            def helper():
-                pass
-
-            @test.tag("smoke")
-            @test.tag.inline
-            def test_top():
-                pass
-
-            @rue.test.tag("suite")
-            @rue.test.tag.skip(reason="skip suite")
-            class Flows:
-                @test.tag("fast")
-                @test.tag.xfail(reason="known")
-                def test_nested(self):
-                    pass
-
-                @rue.test
-                def helper_nested(self):
-                    pass
-            """
-        )
-    )
-
-    refs = collect_static(module_path)
-    refs_by_name = {ref.full_name: ref for ref in refs}
-
-    assert "test_sample::helper" in refs_by_name
-    assert refs_by_name["test_sample::helper"].tags == frozenset()
-
-    assert "test_sample::test_top" in refs_by_name
-    assert refs_by_name["test_sample::test_top"].tags == frozenset(
-        {"smoke", "inline"}
-    )
-
-    assert "test_sample::Flows::test_nested" in refs_by_name
-    assert refs_by_name["test_sample::Flows::test_nested"].tags == frozenset(
-        {"suite", "skip", "fast", "xfail"}
-    )
-    assert "test_sample::Flows::helper_nested" in refs_by_name
-    assert refs_by_name["test_sample::Flows::helper_nested"].tags == frozenset(
-        {"suite", "skip"}
-    )
-    assert "test_sample::test_pytest_only" not in refs_by_name
-
-
-def test_collect_static_ignores_legacy_rue_prefixed_files(tmp_path):
-    module_path = tmp_path / "rue_sample.py"
-    module_path.write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.test
-            def test_top():
-                pass
-            """
-        )
-    )
-
-    assert collect_static(tmp_path) == []
-
-
-def test_collect_items_keyword_avoids_importing_unselected_modules(tmp_path):
-    good_module = tmp_path / "test_good.py"
-    good_module.write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.test
-            def test_good():
-                assert True
-            """
-        )
-    )
-
-    bad_module = tmp_path / "test_bad.py"
-    bad_module.write_text(
-        dedent(
-            """
-            import rue
-
-            raise RuntimeError("must not import")
-
-            @rue.test
-            def test_bad():
-                pass
-            """
-        )
-    )
-
-    items = TestCollector(include_tags=[], exclude_tags=[], keyword="good").collect(
-        [str(tmp_path)]
-    )
-
-    assert len(items) == 1
-    assert items[0].name == "test_good"
-
-
-def test_collect_items_same_file_ignores_unselected_invalid_test(tmp_path):
-    mixed_module = tmp_path / "test_mixed.py"
-    mixed_module.write_text(
-        dedent(
-            """
-            from rue import test
-
-            @test
-            def test_good():
-                assert True
-
-            @test.iterate.cases()
-            def test_bad(case):
-                assert case
-            """
-        )
-    )
-
-    items = TestCollector(include_tags=[], exclude_tags=[], keyword="good").collect(
-        [str(tmp_path)]
-    )
-
-    assert len(items) == 1
-    assert items[0].name == "test_good"
+    return make_definition(name, fn=dummy, module_path="module.py", tags=tags, suffix=suffix)
 
 
 class TestResolveReporters:
@@ -244,18 +76,22 @@ def test_run_tests_returns_2_when_run_id_already_exists(
         )
     )
 
-    collected = False
+    planned = False
 
-    def _collect(self, paths):
-        nonlocal collected
-        collected = True
-        return [make_item("test_ok", set())]
+    def _plan(self, paths):
+        nonlocal planned
+        planned = True
+        return CollectionPlan(suite_root=Path.cwd())
 
     async def _fail_run(self, items=None, path=None, run_id=None):
         msg = "Runner.run should not be called when duplicate run_id exists"
         raise AssertionError(msg)
 
-    monkeypatch.setattr("rue.cli.TestCollector.collect", _collect)
+    monkeypatch.setattr("rue.cli.TestSelector.plan", _plan)
+    monkeypatch.setattr(
+        "rue.cli.TestLoader.materialize_plan",
+        lambda self, plan: [make_item("test_ok", set())],
+    )
     monkeypatch.setattr("rue.cli.Runner.run", _fail_run)
 
     result = runner.invoke(
@@ -268,14 +104,18 @@ def test_run_tests_returns_2_when_run_id_already_exists(
             str(existing_run_id),
         ],
     )
-    assert collected is True
+    assert planned is True
     assert result.exit_code == 2
 
 
 def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(monkeypatch):
     monkeypatch.setattr(
-        "rue.cli.TestCollector.collect",
-        lambda self, paths: [make_item("test_ok", set())],
+        "rue.cli.TestSelector.plan",
+        lambda self, paths: CollectionPlan(suite_root=Path.cwd()),
+    )
+    monkeypatch.setattr(
+        "rue.cli.TestLoader.materialize_plan",
+        lambda self, plan: [make_item("test_ok", set())],
     )
 
     result = runner.invoke(app, ["test", "--run-id", str(uuid4()), "--no-db"])

@@ -23,6 +23,7 @@ from rue.testing.models import (
     TestResult,
     TestStatus,
 )
+from tests.unit.factories import make_definition
 
 
 class FakeLive:
@@ -70,18 +71,7 @@ def make_item(
     suffix: str | None = None,
     case_id: UUID | None = None,
 ) -> TestDefinition:
-    return TestDefinition(
-        name=name,
-        fn=lambda: None,
-        module_path=Path(module_path),
-        is_async=False,
-        params=[],
-        class_name=None,
-        modifiers=[],
-        tags=set(),
-        suffix=suffix,
-        case_id=case_id,
-    )
+    return make_definition(name, module_path=module_path, suffix=suffix, case_id=case_id)
 
 
 def make_execution(

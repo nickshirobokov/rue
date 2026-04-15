@@ -15,6 +15,7 @@ from rue.storage.sqlite.store import MAX_STORED_RUNS
 from rue.testing.models.definition import TestDefinition
 from rue.testing.models.result import TestExecution, TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
+from tests.unit.factories import make_definition
 
 
 def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
@@ -24,21 +25,14 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     start_time = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     end_time = datetime(2024, 1, 1, 12, 5, tzinfo=UTC)
 
-    definition = TestDefinition(
-        name="test_one",
-        fn=lambda: None,
-        module_path=Path("tests/test_sample.py"),
-        is_async=False,
+    definition = make_definition(
+        "test_one",
+        module_path="tests/test_sample.py",
         tags={"smoke"},
         suffix="{'slug': 'sample'}",
         case_id=case_id,
     )
-    sub_definition = TestDefinition(
-        name="test_sub",
-        fn=lambda: None,
-        module_path=Path("tests/test_sample.py"),
-        is_async=False,
-    )
+    sub_definition = make_definition("test_sub", module_path="tests/test_sample.py")
 
     sub_execution = TestExecution(
         definition=sub_definition,
@@ -199,12 +193,7 @@ def test_sqlite_store_assertions_and_predicates(
         predicate_results=[predicate_result],
     )
 
-    definition = TestDefinition(
-        name="test_one",
-        fn=lambda: None,
-        module_path=Path("tests/test_sample.py"),
-        is_async=False,
-    )
+    definition = make_definition("test_one", module_path="tests/test_sample.py")
     execution = TestExecution(
         definition=definition,
         result=TestResult(

@@ -23,6 +23,7 @@ from rue.resources import (
     resource,
 )
 from rue.testing.models import TestDefinition
+from tests.unit.factories import make_definition
 
 
 def _make_item(
@@ -32,14 +33,7 @@ def _make_item(
     module_path: Path | None = None,
 ) -> TestDefinition:
     """Create a minimal TestDefinition for testing."""
-    return TestDefinition(
-        name=name,
-        fn=lambda: None,
-        module_path=module_path or Path("test.py"),
-        is_async=False,
-        suffix=suffix,
-        case_id=case_id,
-    )
+    return make_definition(name, module_path=module_path or Path("test.py"), suffix=suffix, case_id=case_id)
 
 
 def _register_resource_source(

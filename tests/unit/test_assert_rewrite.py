@@ -12,7 +12,7 @@ from rue.context.collectors import (
 from rue.context.runtime import CURRENT_TEST, TestContext, bind
 from rue.resources import ResourceIdentity, ResourceResolver, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
-from rue.testing.discovery import collect
+from tests.unit.factories import materialize_tests
 
 
 def test_rewritten_assert_collects_predicate_results(tmp_path):
@@ -38,7 +38,7 @@ def test_sample():
     )
 
     try:
-        [item] = collect(mod_path)
+        [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         ctx = TestContext(item=item)
         with (
@@ -78,7 +78,7 @@ def test_fail():
     )
 
     try:
-        [item] = collect(mod_path)
+        [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         ctx = TestContext(item=item)
         with (
@@ -116,7 +116,7 @@ def test_metric_capture_multi():
     )
 
     try:
-        [item] = collect(mod_path)
+        [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         ctx = TestContext(item=item)
         m = Metric(
@@ -168,7 +168,7 @@ def test_dummy():
     )
 
     try:
-        [item] = collect(mod_path)
+        [item] = materialize_tests(mod_path)
         resolver = ResourceResolver(registry)
         metric_results: list[MetricResult] = []
         with bind(CURRENT_METRIC_RESULTS, metric_results):
@@ -218,7 +218,7 @@ def test_repr_cases():
     )
 
     try:
-        [item] = collect(mod_path)
+        [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
             item.fn()
@@ -265,7 +265,7 @@ def test_multiline_assert():
     )
 
     try:
-        [item] = collect(mod_path)
+        [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
             item.fn()

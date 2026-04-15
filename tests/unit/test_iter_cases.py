@@ -12,6 +12,7 @@ from rue.testing.models import (
     GroupsIterateModifier,
     TestDefinition,
 )
+from tests.unit.factories import make_definition
 
 
 def test_iterate_cases_decorator_rejects_invalid_threshold():
@@ -48,11 +49,10 @@ def test_runner_iterate_cases_preserves_case_identity_and_metadata(null_reporter
     def test_collect_case(case):
         seen_cases.append(case)
 
-    item = TestDefinition(
-        name="test_collect_case",
+    item = make_definition(
+        "test_collect_case",
         fn=test_collect_case,
-        module_path=Path("sample.py"),
-        is_async=False,
+        module_path="sample.py",
         params=["case"],
         modifiers=[CasesIterateModifier(cases=tuple(cases), min_passes=2)],
     )
@@ -79,11 +79,10 @@ def test_runner_iterate_cases_passes_when_threshold_is_met(null_reporter):
         if case.inputs["x"] >= 4:
             raise AssertionError("fail")
 
-    item = TestDefinition(
-        name="test_partial_pass",
+    item = make_definition(
+        "test_partial_pass",
         fn=test_partial_pass,
-        module_path=Path("sample.py"),
-        is_async=False,
+        module_path="sample.py",
         params=["case"],
         modifiers=[CasesIterateModifier(cases=tuple(cases), min_passes=3)],
     )
@@ -111,11 +110,10 @@ def test_runner_iterate_cases_fails_when_threshold_is_not_met(null_reporter):
         if case.inputs["x"] > 2:
             raise AssertionError("fail")
 
-    item = TestDefinition(
-        name="test_mostly_fail",
+    item = make_definition(
+        "test_mostly_fail",
         fn=test_mostly_fail,
-        module_path=Path("sample.py"),
-        is_async=False,
+        module_path="sample.py",
         params=["case"],
         modifiers=[CasesIterateModifier(cases=tuple(cases), min_passes=3)],
     )
@@ -161,11 +159,10 @@ def test_runner_iterate_groups_injects_group_and_case_and_nests(
     def test_collect_group_case(group, case):
         seen_pairs.append((group.name, case.id))
 
-    item = TestDefinition(
-        name="test_collect_group_case",
+    item = make_definition(
+        "test_collect_group_case",
         fn=test_collect_group_case,
-        module_path=Path("sample.py"),
-        is_async=False,
+        module_path="sample.py",
         params=["group", "case"],
         modifiers=[GroupsIterateModifier(groups=tuple(groups), min_passes=2)],
     )
@@ -211,11 +208,10 @@ def test_runner_iterate_groups_uses_group_and_outer_min_passes(
         if group.name == "beta" and case.inputs["x"] == 2:
             raise AssertionError("beta fail")
 
-    item = TestDefinition(
-        name="test_group_threshold",
+    item = make_definition(
+        "test_group_threshold",
         fn=test_group_threshold,
-        module_path=Path("sample.py"),
-        is_async=False,
+        module_path="sample.py",
         params=["group", "case"],
         modifiers=[GroupsIterateModifier(groups=tuple(groups), min_passes=1)],
     )

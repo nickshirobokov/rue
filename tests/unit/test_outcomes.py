@@ -8,21 +8,13 @@ from rue.testing import TestStatus, fail, skip, xfail
 from rue.testing.models import TestDefinition
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
 from rue.testing.runner import Runner
+from tests.unit.factories import make_definition
 
 
 def make_item(
     fn, name: str | None = None, is_async: bool = False
 ) -> TestDefinition:
-    return TestDefinition(
-        fn=fn,
-        name=name or fn.__name__,
-        module_path=Path("test_module.py"),
-        is_async=is_async,
-        params=[],
-        class_name=None,
-        modifiers=[],
-        tags=set(),
-    )
+    return make_definition(name or fn.__name__, fn=fn, is_async=is_async)
 
 
 @pytest.mark.parametrize(

@@ -17,6 +17,7 @@ from rue.context.runtime import (
 from rue.resources import ResourceIdentity, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata
 from rue.testing.models import TestDefinition
+from tests.unit.factories import make_definition
 
 
 def _make_item(
@@ -25,14 +26,7 @@ def _make_item(
     case_id=None,
 ) -> TestDefinition:
     """Create a minimal TestDefinition for testing."""
-    return TestDefinition(
-        name=name,
-        fn=lambda: None,
-        module_path=Path("test.py"),
-        is_async=False,
-        suffix=suffix,
-        case_id=case_id,
-    )
+    return make_definition(name=name, module_path="test.py", suffix=suffix, case_id=case_id)
 
 
 @pytest.fixture(autouse=True)

@@ -5,6 +5,7 @@ import pytest
 
 from rue.testing import Runner, test as t_decorator
 from rue.testing.models import IterateModifier, TestDefinition
+from tests.unit.factories import make_definition
 
 
 def test_iterate_decorator_validation():
@@ -41,12 +42,10 @@ def test_runner_iterate_passes_when_minimum_threshold_is_met(null_reporter):
             return
         raise AssertionError("flake")
 
-    repeat_item = TestDefinition(
-        name="test_flaky",
+    repeat_item = make_definition(
+        "test_flaky",
         fn=test_flaky,
-        module_path=Path("sample.py"),
-        is_async=False,
-        params=[],
+        module_path="sample.py",
         modifiers=[IterateModifier(count=5, min_passes=3)],
         tags={"iterate"},
     )
@@ -76,12 +75,10 @@ def test_runner_iterate_fails_when_threshold_is_not_met(null_reporter):
             return
         raise AssertionError("fail")
 
-    repeat_item = TestDefinition(
-        name="test_mostly_fail",
+    repeat_item = make_definition(
+        "test_mostly_fail",
         fn=test_mostly_fail,
-        module_path=Path("sample.py"),
-        is_async=False,
-        params=[],
+        module_path="sample.py",
         modifiers=[IterateModifier(count=5, min_passes=3)],
         tags={"iterate"},
     )

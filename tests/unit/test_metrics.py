@@ -20,6 +20,7 @@ from rue.resources import ResourceIdentity, ResourceResolver, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
 from rue.resources.metrics.decorator import metric
 from rue.testing.models import TestDefinition
+from tests.unit.factories import make_definition
 
 
 def _metric(name: str = "") -> Metric:
@@ -37,14 +38,7 @@ def _make_item(
     case_id: UUID | None = None,
 ) -> TestDefinition:
     """Create a minimal TestDefinition for testing."""
-    return TestDefinition(
-        name=name,
-        fn=lambda: None,
-        module_path=module_path or Path("test.py"),
-        is_async=False,
-        suffix=suffix,
-        case_id=case_id,
-    )
+    return make_definition(name, module_path=module_path or Path("test.py"), suffix=suffix, case_id=case_id)
 
 
 def test_metric_computations():

@@ -1,26 +1,28 @@
 """Test discovery."""
 
-from rue.testing.discovery.collector import (
+from rue.testing.discovery.loader import (
+    RueImportSession,
+    RueModuleLoader,
+    TestLoader,
+    default_transformer_pipeline,
+)
+from rue.testing.discovery.plan import CollectionPlan, SetupFileRef
+from rue.testing.discovery.selector import (
     Filterable,
     KeywordMatcher,
-    StaticTestReference,
-    TestCollector,
-    collect,
-    collect_paths,
-    collect_static,
+    TestSelector,
 )
-from rue.testing.discovery.loader import RueImportSession, RueModuleLoader
 from rue.testing.models import TestDefinition
 
 __all__ = [
+    "CollectionPlan",
     "Filterable",
     "KeywordMatcher",
     "RueImportSession",
     "RueModuleLoader",
-    "StaticTestReference",
-    "TestCollector",
+    "SetupFileRef",
     "TestDefinition",
-    "collect",
-    "collect_paths",
-    "collect_static",
+    "TestLoader",
+    "TestSelector",
+    "default_transformer_pipeline",
 ]

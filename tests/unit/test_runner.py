@@ -20,7 +20,6 @@ from rue.reports.otel import DEFAULT_OTEL_OUTPUT_ROOT, MAX_STORED_OTEL_RUNS
 from rue.resources import ResourceRegistry, registry, resource
 from rue.resources.sut import sut
 from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
-from rue.testing.discovery import collect
 from rue.testing.environment import _filter_env_vars
 from rue.testing.models import (
     ParameterSet,
@@ -32,6 +31,7 @@ from rue.testing.models import (
     TestStatus,
 )
 from rue.testing.runner import Runner
+from tests.unit.factories import make_definition, materialize_tests
 
 
 @pytest.fixture(autouse=True)
@@ -54,15 +54,11 @@ def make_item(
     case_id: UUID | None = None,
 ) -> TestDefinition:
     """Helper to create TestDefinition for testing."""
-    return TestDefinition(
+    return make_definition(
+        name or fn.__name__,
         fn=fn,
-        name=name or fn.__name__,
-        module_path=Path("test_module.py"),
         is_async=is_async,
         params=params or [],
-        class_name=None,
-        modifiers=[],
-        tags=set(),
         skip_reason=skip_reason,
         xfail_reason=xfail_reason,
         xfail_strict=xfail_strict,
@@ -280,7 +276,7 @@ class TestRunner:
         result = await Runner(
             reporters=[null_reporter],
             fail_fast=True,
-        ).run(items=collect(module_path))
+        ).run(items=materialize_tests(module_path))
 
         execution = result.result.executions[0]
         assert result.result.failed == 1
@@ -648,13 +644,11 @@ class TestOpenTelemetry:
             _ = value
             await asyncio.sleep(0)
 
-        item = TestDefinition(
+        item = make_definition(
+            "test_params_trace",
             fn=test_case,
-            name="test_params_trace",
-            module_path=Path("test_module.py"),
             is_async=True,
             params=["value"],
-            class_name=None,
             modifiers=[
                 ParamsIterateModifier(
                     parameter_sets=(
@@ -664,7 +658,6 @@ class TestOpenTelemetry:
                     min_passes=2,
                 )
             ],
-            tags=set(),
         )
 
         reporter = EventReporter()
@@ -915,20 +908,17 @@ class TestConcurrency:
         async def params_case(delay: float) -> None:
             await asyncio.sleep(delay)
 
-        return TestDefinition(
+        return make_definition(
+            name,
             fn=params_case,
-            name=name,
-            module_path=Path("test_module.py"),
             is_async=True,
             params=["delay"],
-            class_name=None,
             modifiers=[
                 ParamsIterateModifier(
                     parameter_sets=parameter_sets,
                     min_passes=len(parameter_sets),
                 )
             ],
-            tags=set(),
         )
 
     @pytest.mark.asyncio

@@ -26,7 +26,6 @@ from rue.resources.metrics.base import MetricResult
 from rue.resources.sut.output import SUTOutputCapture
 from rue.storage import SQLiteStore
 from rue.telemetry.otel.runtime import otel_runtime
-from rue.testing.discovery import collect
 from rue.testing.environment import capture_environment
 from rue.testing.execution import DefaultTestFactory
 from rue.testing.execution.interfaces import Test
@@ -52,13 +51,15 @@ class Runner:
         reporters: Optional reporters. Defaults to all registered reporters.
 
     Examples:
-        # Sequential execution (default reporters)
-        runner = Runner()
-        result = await runner.run(path="tests/")
+        # Build items with TestSelector + TestLoader, then run.
+        # runner = Runner()
+        # plan = TestSelector(include_tags, exclude_tags, keyword).plan(paths)
+        # items = TestLoader(plan.suite_root).materialize_plan(plan)
+        # result = await runner.run(items)
 
-        # Concurrent execution with 5 workers
-        runner = Runner(config=Config(concurrency=5))
-        result = await runner.run(path="tests/")
+        # Concurrent execution with 5 workers (same item preparation as above)
+        # runner = Runner(config=Config(concurrency=5))
+        # result = await runner.run(items)
     """
 
     DEFAULT_MAX_CONCURRENCY = 10
@@ -192,15 +193,15 @@ class Runner:
 
     async def run(
         self,
-        items: list[TestDefinition] | None = None,
-        path: str | None = None,
+        items: list[TestDefinition],
+        *,
         run_id: UUID | str | None = None,
     ) -> Run:
         """Run tests and return results.
 
         Args:
-            items: Pre-collected test items, or None to discover.
-            path: Path to discover tests from if items not provided.
+            items: Test definitions to execute (discover via TestSelector and
+                TestLoader before calling).
             run_id: Optional UUID for this run. Overrides constructor-level run_id.
 
         Returns:
@@ -224,9 +225,6 @@ class Runner:
 
         if self.config.otel:
             otel_runtime.configure()
-
-        if items is None:
-            items = collect(path)
 
         if not items:
             await self._notify_no_tests_found()

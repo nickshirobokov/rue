@@ -8,8 +8,8 @@ from uuid import uuid4
 import pytest
 
 from rue.config import Config
-from rue.testing.discovery import collect
 from rue.testing.runner import Runner
+from tests.unit.factories import materialize_tests
 
 
 def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
@@ -30,7 +30,7 @@ async def _run_module_with_tracing(
 
     try:
         monkeypatch.chdir(tmp_path)
-        items = collect(mod_path)
+        items = materialize_tests(mod_path)
         runner = Runner(
             config=Config.model_construct(otel=True, db_enabled=False),
             reporters=[trace_reporter],
