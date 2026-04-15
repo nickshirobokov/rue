@@ -29,7 +29,7 @@ def metric(
     | Callable[P, AsyncGenerator[Metric | CalculatedValue, Any]]
     | None = None,
     *,
-    scope: Scope | str = Scope.SESSION,
+    scope: Scope | str = Scope.PROCESS,
 ) -> Any:
     """Register a metric resource and capture its final result.
 
@@ -48,9 +48,9 @@ def metric(
     fn : callable, optional
         The generator/async-generator function to register. If None, returns a
         decorator.
-    scope : Scope or str, default Scope.SESSION
-        The lifecycle scope of the metric resource. Can be "case", "suite",
-        or "session".
+    scope : Scope or str, default Scope.PROCESS
+        The lifecycle scope of the metric resource. Can be "test", "module",
+        or "process".
     """
     if fn is None:
         return lambda f: metric(f, scope=scope)

@@ -524,4 +524,4 @@ def test_materialize_rewrites_pytest_fixture_aliases_to_resources(tmp_path):
 
     assert item.spec.name == "test_uses_fixture"
     assert registry.get("greeting") is not None
-    assert registry.get("greeting").identity.scope == Scope.SUITE
+    assert registry.get("greeting").identity.scope == Scope.MODULE

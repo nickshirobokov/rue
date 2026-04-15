@@ -22,9 +22,9 @@ class ResourceRegistry:
 
     def __init__(self) -> None:
         self._definitions: dict[str, ResourceDef] = {}
-        self._session_definitions: dict[str, list[ResourceDef]] = {}
+        self._process_definitions: dict[str, list[ResourceDef]] = {}
         self._builtin_definitions: dict[str, ResourceDef] = {}
-        self._builtin_session_definitions: dict[str, list[ResourceDef]] = {}
+        self._builtin_process_definitions: dict[str, list[ResourceDef]] = {}
 
     @staticmethod
     def _resource_origin(
@@ -46,14 +46,14 @@ class ResourceRegistry:
 
     def _register(self, definition: ResourceDef) -> None:
         ident = definition.identity
-        if ident.scope == Scope.SESSION:
-            session_defs = self._session_definitions.setdefault(
+        if ident.scope == Scope.PROCESS:
+            process_defs = self._process_definitions.setdefault(
                 ident.name, []
             )
-            session_defs.append(definition)
+            process_defs.append(definition)
 
             current = self._definitions.get(ident.name)
-            if current is None or current.identity.scope == Scope.SESSION:
+            if current is None or current.identity.scope == Scope.PROCESS:
                 self._definitions[ident.name] = definition
             return
 
@@ -63,7 +63,7 @@ class ResourceRegistry:
         self,
         fn: Callable[P, T] | None = None,
         *,
-        scope: Scope | str = Scope.CASE,
+        scope: Scope | str = Scope.TEST,
         on_resolve: Callable[[Any], Any] | None = None,
         on_injection: Callable[[Any], Any] | None = None,
         on_teardown: Callable[[Any], Any] | None = None,
@@ -121,22 +121,22 @@ class ResourceRegistry:
     def mark_builtin(self, name: str) -> None:
         """Preserve the current resource under the given name across resets."""
         self._builtin_definitions[name] = self._require(name)
-        if name in self._session_definitions:
-            self._builtin_session_definitions[name] = list(
-                self._session_definitions[name]
+        if name in self._process_definitions:
+            self._builtin_process_definitions[name] = list(
+                self._process_definitions[name]
             )
             return
-        self._builtin_session_definitions.pop(name, None)
+        self._builtin_process_definitions.pop(name, None)
 
     def reset(self) -> None:
         """Reset to builtin registrations only."""
         self._definitions.clear()
         self._definitions.update(self._builtin_definitions)
-        self._session_definitions.clear()
-        self._session_definitions.update(
+        self._process_definitions.clear()
+        self._process_definitions.update(
             {
                 name: list(definitions)
-                for name, definitions in self._builtin_session_definitions.items()
+                for name, definitions in self._builtin_process_definitions.items()
             }
         )
 
@@ -148,28 +148,28 @@ class ResourceRegistry:
         """Select the active definition for one DI lookup."""
         if (
             name not in self._definitions
-            and name not in self._session_definitions
+            and name not in self._process_definitions
         ):
             msg = f"Unknown resource: {name}"
             raise ValueError(msg)
 
         definition = self._definitions.get(name)
-        if definition is not None and definition.identity.scope != Scope.SESSION:
+        if definition is not None and definition.identity.scope != Scope.PROCESS:
             return SelectedResource(definition=definition)
 
         selected: ResourceDef | None = None
         selected_depth = -1
         if request_path is not None:
             request_dir = request_path.resolve().parent
-            for session_definition in self._session_definitions.get(name, []):
-                origin_dir = session_definition.identity.origin_dir
+            for process_definition in self._process_definitions.get(name, []):
+                origin_dir = process_definition.identity.origin_dir
                 if origin_dir is None:
                     continue
                 if not request_dir.is_relative_to(origin_dir):
                     continue
                 depth = len(origin_dir.parts)
                 if depth >= selected_depth:
-                    selected = session_definition
+                    selected = process_definition
                     selected_depth = depth
 
         if selected is not None:
@@ -185,7 +185,7 @@ registry = ResourceRegistry()
 def resource(
     fn: Callable[P, T] | None = None,
     *,
-    scope: Scope | str = Scope.CASE,
+    scope: Scope | str = Scope.TEST,
     on_resolve: Callable[[Any], Any] | None = None,
     on_injection: Callable[[Any], Any] | None = None,
     on_teardown: Callable[[Any], Any] | None = None,

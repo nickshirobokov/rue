@@ -6,6 +6,7 @@ from typing import Any, cast
 from rue.resources.models import Scope
 from rue.resources.registry import registry as default_registry, resource
 
+
 def decorate_pytest_fixture_as_resource(
     fn=None,
     *,
@@ -22,13 +23,13 @@ def decorate_pytest_fixture_as_resource(
             case Scope():
                 mapped_scope = scope
             case "function":
-                mapped_scope = Scope.CASE
+                mapped_scope = Scope.TEST
             case "class" | "module":
-                mapped_scope = Scope.SUITE
+                mapped_scope = Scope.MODULE
             case "package" | "session":
-                mapped_scope = Scope.SESSION
+                mapped_scope = Scope.PROCESS
             case _:
-                mapped_scope = Scope.CASE
+                mapped_scope = Scope.TEST
         return resource(fn, scope=mapped_scope)
 
     if fn is not None:

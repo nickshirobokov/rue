@@ -593,7 +593,7 @@ class SQLiteStore(Store):
         scope = (
             Scope(scope_str)
             if scope_str in {s.value for s in Scope}
-            else Scope.SESSION
+            else Scope.PROCESS
         )
 
         first_at = row["first_recorded_at"]

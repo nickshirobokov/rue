@@ -10,9 +10,9 @@ from typing import Any
 class Scope(Enum):
     """Resource lifecycle scope."""
 
-    CASE = "case"  # Fresh instance per test
-    SUITE = "suite"  # Shared across tests in same file
-    SESSION = "session"  # Shared across entire test run
+    TEST = "test"  # Fresh instance per test
+    MODULE = "module"  # Shared across tests in same file
+    PROCESS = "process"  # Shared across entire test run
 
 
 @dataclass(frozen=True, slots=True)

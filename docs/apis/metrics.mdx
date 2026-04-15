@@ -13,7 +13,7 @@ Register a metric resource that yields a Metric instance and optionally a final 
 @metric(
     fn: Callable | None = None,
     *,
-    scope: Scope | str = Scope.SESSION,
+    scope: Scope | str = Scope.PROCESS,
 )
 ```
 
@@ -22,7 +22,7 @@ Register a metric resource that yields a Metric instance and optionally a final 
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `fn` | `Callable \| None` | `None` | Generator or async generator function |
-| `scope` | `Scope \| str` | `Scope.SESSION` | Lifecycle scope: `"case"`, `"suite"`, or `"session"` |
+| `scope` | `Scope \| str` | `Scope.PROCESS` | Lifecycle scope: `"test"`, `"module"`, or `"process"` |
 
 **Returns:** Decorated function registered as a metric resource
 
@@ -49,7 +49,7 @@ def accuracy():
     # Assert on aggregate quality
     assert metric.mean > 0.8, f"Accuracy too low: {metric.mean}"
 
-@rue.resource.metric(scope="suite")
+@rue.resource.metric(scope="module")
 def latency_ms():
     """Track latency within a suite."""
     metric = Metric()
@@ -161,7 +161,7 @@ Metadata tracking metric lifecycle and contributors.
 |------|------|-------------|
 | `last_item_recorded_at` | `datetime \| None` | Timestamp of most recent value |
 | `first_item_recorded_at` | `datetime \| None` | Timestamp of first value |
-| `scope` | `Scope` | Lifecycle scope (SESSION, SUITE, CASE) |
+| `scope` | `Scope` | Lifecycle scope (PROCESS, MODULE, TEST) |
 | `collected_from_tests` | `set[str]` | Names of test functions that contributed |
 | `collected_from_resources` | `set[str]` | Names of resources that contributed |
 | `collected_from_cases` | `set[str]` | Case IDs that contributed, falling back to case labels when IDs are unavailable |

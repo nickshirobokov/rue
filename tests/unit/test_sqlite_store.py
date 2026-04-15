@@ -55,7 +55,7 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         last_item_recorded_at=end_time,
         identity=ResourceIdentity(
             name="latency_ms",
-            scope=Scope.CASE,
+            scope=Scope.TEST,
             provider_path="/tmp/project/confrue_root.py",
             provider_dir="/tmp/project",
         ),
@@ -71,7 +71,7 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         dependencies=[
             ResourceIdentity(
                 name="overall_latency",
-                scope=Scope.SESSION,
+                scope=Scope.PROCESS,
                 provider_path="/tmp/project/confrue_root.py",
                 provider_dir="/tmp/project",
             )
@@ -123,7 +123,7 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     assert len(loaded.result.metric_results) == 1
     assert loaded.result.metric_results[0].metadata.identity.name == "latency_ms"
     assert loaded.result.metric_results[0].value == 12.5
-    assert loaded.result.metric_results[0].metadata.identity.scope == Scope.CASE
+    assert loaded.result.metric_results[0].metadata.identity.scope == Scope.TEST
     assert loaded.result.metric_results[0].metadata.collected_from_modules == {
         "tests/test_sample.py"
     }
@@ -136,7 +136,7 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     assert loaded.result.metric_results[0].dependencies == [
         ResourceIdentity(
             name="overall_latency",
-            scope=Scope.SESSION,
+            scope=Scope.PROCESS,
             provider_path="/tmp/project/confrue_root.py",
             provider_dir="/tmp/project",
         )
@@ -206,7 +206,7 @@ def test_sqlite_store_assertions_and_predicates(
     )
 
     metric_metadata = MetricMetadata(
-        identity=ResourceIdentity(name="count", scope=Scope.SESSION)
+        identity=ResourceIdentity(name="count", scope=Scope.PROCESS)
     )
     metric_assertion = AssertionResult(
         expression_repr=AssertionRepr(

@@ -99,7 +99,7 @@ Metrics can be scoped to different lifecycle levels. This enables tracking both 
 
 ```python
 # Session scope: collects data across the entire test run
-@rue.resource.metric(scope="session")
+@rue.resource.metric(scope="process")
 def average_hallucinations_per_case():
     metric = Metric()
     yield metric
@@ -108,7 +108,7 @@ def average_hallucinations_per_case():
     assert metric.mean < 2  # Average hallucinations should be less than 2
 
 # Case scope: creates a new metric instance for each test case
-@rue.resource.metric(scope="case")
+@rue.resource.metric(scope="test")
 def case_hallucinations_count(average_hallucinations_per_case: Metric):
     metric = Metric()
     yield metric
@@ -131,9 +131,9 @@ def test_geography_bot(
 ```
 
 Available scopes:
-- `"session"`: One metric instance for the entire test run (default)
-- `"suite"`: One instance per test file/module
-- `"case"`: New instance for each parametrized test case
+- `"process"`: One metric instance for the entire test run (default)
+- `"module"`: One instance per test file/module
+- `"test"`: New instance for each parametrized test case
 
 ## Composite Metrics via Dependency Injection
 
@@ -239,7 +239,7 @@ Choose scope based on what you're measuring. Use case-level metrics for per-test
 
 ```python
 # Case scope: Track each test case individually
-@rue.resource.metric(scope="case")
+@rue.resource.metric(scope="test")
 def case_latency():
     metric = Metric()
     yield metric
@@ -248,7 +248,7 @@ def case_latency():
     assert metric.p95 < 1000  # Each case's p95 under 1 second
 
 # Session scope: Track overall system performance
-@rue.resource.metric(scope="session")
+@rue.resource.metric(scope="process")
 def overall_latency():
     metric = Metric()
     yield metric

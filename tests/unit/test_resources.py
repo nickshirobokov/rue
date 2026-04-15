@@ -101,7 +101,7 @@ class TestResourceDecorator:
         defn = registry.get(name)
         assert defn is not None
         assert defn.identity.name == name
-        assert defn.identity.scope == Scope.CASE
+        assert defn.identity.scope == Scope.TEST
         assert defn.is_async == expected_flags["is_async"]
         assert defn.is_generator == expected_flags["is_generator"]
         assert defn.is_async_generator == expected_flags["is_async_generator"]
@@ -156,22 +156,22 @@ class TestResourceDecorator:
     @pytest.mark.parametrize(
         ("scope_value", "expected_scope", "name"),
         [
-            ("suite", Scope.SUITE, "suite_resource"),
-            (Scope.SESSION, Scope.SESSION, "session_resource"),
+            ("module", Scope.MODULE, "suite_resource"),
+            (Scope.PROCESS, Scope.PROCESS, "session_resource"),
         ],
     )
     def test_scope_normalization(self, scope_value, expected_scope, name):
-        if expected_scope == Scope.SUITE:
+        if expected_scope == Scope.MODULE:
 
             @resource(scope=scope_value)
             def suite_resource():
-                return "suite"
+                return "module"
 
         else:
 
             @resource(scope=scope_value)
             def session_resource():
-                return "session"
+                return "process"
 
         defn = registry.get(name)
         assert defn is not None
@@ -201,7 +201,7 @@ class TestResourceDecorator:
 
 
 class TestResourceRegistry:
-    def test_registers_definitions_and_session_index(self, tmp_path):
+    def test_registers_definitions_and_process_index(self, tmp_path):
         custom_registry = ResourceRegistry()
         root = tmp_path / "project"
         child = root / "tests" / "child"
@@ -211,7 +211,7 @@ class TestResourceRegistry:
         _register_resource_source(
             root / "confrue_root.py",
             """
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
                 return "root"
             """,
@@ -220,7 +220,7 @@ class TestResourceRegistry:
         _register_resource_source(
             child / "confrue_child.py",
             """
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
                 return "child"
             """,
@@ -229,10 +229,10 @@ class TestResourceRegistry:
 
         definition = custom_registry.get("shared")
         assert definition is not None
-        assert definition.identity.scope == Scope.SESSION
+        assert definition.identity.scope == Scope.PROCESS
         assert definition.identity.origin_dir == child.resolve()
 
-    def test_select_picks_nearest_ancestor_session_definition(self, tmp_path):
+    def test_select_picks_nearest_ancestor_process_definition(self, tmp_path):
         custom_registry = ResourceRegistry()
         root = tmp_path / "project"
         child = root / "tests" / "child"
@@ -243,7 +243,7 @@ class TestResourceRegistry:
         _register_resource_source(
             root / "confrue_root.py",
             """
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
                 return "root"
             """,
@@ -252,7 +252,7 @@ class TestResourceRegistry:
         _register_resource_source(
             child / "confrue_child.py",
             """
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
                 return "child"
             """,
@@ -270,7 +270,7 @@ class TestResourceRegistry:
         assert child_selected.definition.identity.origin_dir == child.resolve()
         assert sibling_selected.definition.identity.origin_dir == root.resolve()
 
-    def test_non_session_definition_wins_over_session_definition(
+    def test_non_process_definition_wins_over_process_definition(
         self, tmp_path
     ):
         custom_registry = ResourceRegistry()
@@ -280,20 +280,20 @@ class TestResourceRegistry:
         _register_resource_source(
             root / "confrue_root.py",
             """
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
-                return "session"
+                return "process"
             """,
             resource_decorator=custom_registry.resource,
         )
 
-        @custom_registry.resource(scope=Scope.SUITE)
+        @custom_registry.resource(scope=Scope.MODULE)
         def shared():
-            return "suite"
+            return "module"
 
         selected = custom_registry.select("shared", root / "rue_test.py")
 
-        assert selected.definition.identity.scope == Scope.SUITE
+        assert selected.definition.identity.scope == Scope.MODULE
         assert selected.definition.identity.name == "shared"
         assert selected.definition.identity.provider_dir is not None
 
@@ -304,7 +304,7 @@ class TestResourceRegistry:
         def builtin_resource():
             return "builtin"
 
-        @custom_registry.resource(scope=Scope.SESSION)
+        @custom_registry.resource(scope=Scope.PROCESS)
         def builtin_session():
             return "builtin-session"
 
@@ -315,7 +315,7 @@ class TestResourceRegistry:
         def extra_resource():
             return "extra"
 
-        @custom_registry.resource(scope=Scope.SESSION)
+        @custom_registry.resource(scope=Scope.PROCESS)
         def builtin_session():
             return "override"
 
@@ -368,10 +368,10 @@ class TestResourceResolver:
         assert await resolver.resolve(name) == expected
 
     @pytest.mark.asyncio
-    async def test_caches_case_scope(self):
+    async def test_caches_test_scope(self):
         call_count = 0
 
-        @resource(scope="case")
+        @resource(scope="test")
         def counted():
             nonlocal call_count
             call_count += 1
@@ -504,17 +504,17 @@ class TestResourceTeardown:
         assert teardown_called
 
     @pytest.mark.asyncio
-    async def test_teardown_scope_case(self):
+    async def test_teardown_scope_test(self):
         case_torn = False
         suite_torn = False
 
-        @resource(scope="case")
+        @resource(scope="test")
         def case_res():
             yield "case"
             nonlocal case_torn
             case_torn = True
 
-        @resource(scope="suite")
+        @resource(scope="module")
         def suite_res():
             yield "suite"
             nonlocal suite_torn
@@ -524,7 +524,7 @@ class TestResourceTeardown:
         await resolver.resolve("case_res")
         await resolver.resolve("suite_res")
 
-        await resolver.teardown_scope(Scope.CASE)
+        await resolver.teardown_scope(Scope.TEST)
         assert case_torn
         assert not suite_torn
 
@@ -535,7 +535,7 @@ class TestResourceTeardown:
     async def test_teardown_clears_cache(self):
         call_count = 0
 
-        @resource(scope="case")
+        @resource(scope="test")
         def counted_case():
             nonlocal call_count
             call_count += 1
@@ -545,20 +545,20 @@ class TestResourceTeardown:
         v1 = await resolver.resolve("counted_case")
         assert v1 == 1
 
-        await resolver.teardown_scope(Scope.CASE)
+        await resolver.teardown_scope(Scope.TEST)
 
         v2 = await resolver.resolve("counted_case")
         assert v2 == 2
 
 
-class TestForkForCase:
-    """Tests for fork_for_case and parent/child isolation."""
+class TestForkForTest:
+    """Tests for fork_for_test and parent/child isolation."""
 
     @pytest.mark.asyncio
-    async def test_child_case_scope_isolated(self):
+    async def test_child_test_scope_isolated(self):
         call_count = 0
 
-        @resource(scope="case")
+        @resource(scope="test")
         def case_val():
             nonlocal call_count
             call_count += 1
@@ -568,15 +568,15 @@ class TestForkForCase:
         parent_val = await parent.resolve("case_val")
         assert parent_val == 1
 
-        child = parent.fork_for_case()
+        child = parent.fork_for_test()
         child_val = await child.resolve("case_val")
         assert child_val == 2  # New instance for child
 
     @pytest.mark.parametrize(
         ("scope", "name"),
         [
-            (Scope.SUITE, "shared_suite"),
-            (Scope.SESSION, "shared_session"),
+            (Scope.MODULE, "shared_module"),
+            (Scope.PROCESS, "shared_process"),
         ],
     )
     @pytest.mark.asyncio
@@ -588,10 +588,10 @@ class TestForkForCase:
         create_count = 0
         teardown_count = 0
 
-        if scope == Scope.SUITE:
+        if scope == Scope.MODULE:
 
             @resource(scope=scope)
-            async def shared_suite():
+            async def shared_module():
                 nonlocal create_count, teardown_count
                 create_count += 1
                 await asyncio.sleep(0.02)
@@ -601,7 +601,7 @@ class TestForkForCase:
         else:
 
             @resource(scope=scope)
-            async def shared_session():
+            async def shared_process():
                 nonlocal create_count, teardown_count
                 create_count += 1
                 await asyncio.sleep(0.02)
@@ -609,7 +609,7 @@ class TestForkForCase:
                 teardown_count += 1
 
         parent = ResourceResolver(registry)
-        children = [parent.fork_for_case() for _ in range(8)]
+        children = [parent.fork_for_test() for _ in range(8)]
         values = await asyncio.gather(
             *[child.resolve(name) for child in children]
         )
@@ -621,11 +621,11 @@ class TestForkForCase:
         assert teardown_count == 1
 
 
-class TestHierarchicalSessionResources:
-    """Tests for conftest-style SESSION resource lookup."""
+class TestHierarchicalProcessResources:
+    """Tests for conftest-style PROCESS resource lookup."""
 
     @pytest.mark.asyncio
-    async def test_nearest_ancestor_session_resource_wins(self, tmp_path):
+    async def test_nearest_ancestor_process_resource_wins(self, tmp_path):
         root = tmp_path / "project"
         child = root / "tests" / "child"
         root.mkdir(parents=True)
@@ -634,7 +634,7 @@ class TestHierarchicalSessionResources:
         _register_resource_source(
             root / "confrue_root.py",
             """
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
                 return "root"
             """,
@@ -642,7 +642,7 @@ class TestHierarchicalSessionResources:
         _register_resource_source(
             child / "confrue_child.py",
             """
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
                 return "child"
             """,
@@ -673,7 +673,7 @@ class TestHierarchicalSessionResources:
         _register_resource_source(
             root / "confrue_root.py",
             """
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
                 return "root"
             """,
@@ -681,7 +681,7 @@ class TestHierarchicalSessionResources:
         _register_resource_source(
             branch / "confrue_branch.py",
             """
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
                 return "branch"
             """,
@@ -695,7 +695,7 @@ class TestHierarchicalSessionResources:
             assert await resolver.resolve("shared") == "root"
 
     @pytest.mark.asyncio
-    async def test_parent_session_dependency_uses_requesting_test_chain(
+    async def test_parent_process_dependency_uses_requesting_test_chain(
         self,
         tmp_path,
     ):
@@ -707,11 +707,11 @@ class TestHierarchicalSessionResources:
         _register_resource_source(
             root / "confrue_root.py",
             """
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
                 return "root"
 
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def consumer(shared):
                 return f"consumer:{shared}"
             """,
@@ -719,7 +719,7 @@ class TestHierarchicalSessionResources:
         _register_resource_source(
             child / "confrue_child.py",
             """
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
                 return "child"
             """,
@@ -745,7 +745,7 @@ class TestHierarchicalSessionResources:
         _register_resource_source(
             root / "confrue_root.py",
             """
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
                 return "root"
             """,
@@ -753,7 +753,7 @@ class TestHierarchicalSessionResources:
         _register_resource_source(
             child / "confrue_child.py",
             """
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
                 return "child"
             """,
@@ -763,7 +763,7 @@ class TestHierarchicalSessionResources:
         assert await resolver.resolve("shared") == "child"
 
     @pytest.mark.asyncio
-    async def test_hierarchical_session_resources_use_distinct_cache_keys(
+    async def test_hierarchical_process_resources_use_distinct_cache_keys(
         self,
         tmp_path,
         monkeypatch,
@@ -779,7 +779,7 @@ class TestHierarchicalSessionResources:
             """
             import builtins
 
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
                 builtins.session_events.append("root_create")
                 yield "root"
@@ -791,7 +791,7 @@ class TestHierarchicalSessionResources:
             """
             import builtins
 
-            @resource(scope=Scope.SESSION)
+            @resource(scope=Scope.PROCESS)
             def shared():
                 builtins.session_events.append("child_create")
                 yield "child"
@@ -822,7 +822,7 @@ class TestHierarchicalSessionResources:
         cache_keys = [
             key
             for key in resolver._cache
-            if key.scope == Scope.SESSION and key.name == "shared"
+            if key.scope == Scope.PROCESS and key.name == "shared"
         ]
         assert len(cache_keys) == 2
         assert {key.provider_dir for key in cache_keys} == {
@@ -897,7 +897,7 @@ class TestResourceHooks:
             nonlocal teardown_hook_called
             teardown_hook_called = True
 
-        @resource(scope="case", on_teardown=on_teardown_hook)
+        @resource(scope="test", on_teardown=on_teardown_hook)
         def case_gen():
             yield "case_value"
 
@@ -905,7 +905,7 @@ class TestResourceHooks:
         await resolver.resolve("case_gen")
 
         assert not teardown_hook_called
-        await resolver.teardown_scope(Scope.CASE)
+        await resolver.teardown_scope(Scope.TEST)
         assert teardown_hook_called
 
     @pytest.mark.asyncio
@@ -1013,11 +1013,11 @@ class TestResourceResolutionErrors:
 
     @pytest.mark.asyncio
     async def test_circular_suite_dependency_raises_error(self):
-        @resource(scope="suite")
+        @resource(scope="module")
         async def shared_left(shared_right):
             return shared_right
 
-        @resource(scope="suite")
+        @resource(scope="module")
         async def shared_right(shared_left):
             return shared_left
 
@@ -1047,7 +1047,7 @@ class TestResourceResolutionErrors:
         def raise_on_teardown(_value):
             raise RuntimeError("hook teardown failed")
 
-        @resource(scope=Scope.CASE, on_teardown=raise_on_teardown)
+        @resource(scope=Scope.TEST, on_teardown=raise_on_teardown)
         def resource_with_teardown_errors():
             yield "value"
             raise RuntimeError("generator teardown failed")
@@ -1058,7 +1058,7 @@ class TestResourceResolutionErrors:
         )
 
         with pytest.raises(ExceptionGroup) as exc_info:
-            await resolver.teardown_scope(Scope.CASE)
+            await resolver.teardown_scope(Scope.TEST)
 
         messages = {str(error) for error in exc_info.value.exceptions}
         assert any(

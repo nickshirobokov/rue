@@ -20,7 +20,7 @@ def api_client(config):
     return {"url": config["api_url"], "connected": True}
 
 
-@rue.resource(scope="suite")
+@rue.resource(scope="module")
 def expensive_model():
     """Suite-scoped resource - shared across all tests in this file."""
     return "loaded-model-v1"

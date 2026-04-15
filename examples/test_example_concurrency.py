@@ -17,7 +17,7 @@ import asyncio
 import rue
 
 
-@rue.resource(scope="suite")
+@rue.resource(scope="module")
 async def shared_client():
     """Suite-scoped resource shared across concurrent tests."""
     await asyncio.sleep(0.1)  # Simulate connection setup

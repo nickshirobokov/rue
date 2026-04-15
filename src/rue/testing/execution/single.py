@@ -87,7 +87,7 @@ class SingleTest(ExecutableTest):
 
         exec_id = uuid4()
 
-        forked_resolver = resolver.fork_for_case()
+        forked_resolver = resolver.fork_for_test()
 
         assertion_results: list[AssertionResult] = []
         error: BaseException | None = None
@@ -139,7 +139,7 @@ class SingleTest(ExecutableTest):
 
             with bind(CURRENT_TEST, ctx):
                 try:
-                    await forked_resolver.teardown_scope(Scope.CASE)
+                    await forked_resolver.teardown_scope(Scope.TEST)
                 except Exception as teardown_err:
                     logger.warning(
                         f"Error during resource teardown: {teardown_err}"

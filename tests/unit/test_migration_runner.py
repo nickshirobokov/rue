@@ -280,7 +280,7 @@ class TestMigrationRunner:
         assert "provider_scope" in columns
         assert "collected_from_modules_json" in columns
         assert "depends_on_metrics_json" in columns
-        assert provider == ("quality", "session", None, None)
+        assert provider == ("quality", "process", None, None)
         conn.close()
 
     def test_corrupted_db_no_user_version(self, sqlite_db_path: Path) -> None:

@@ -6,9 +6,9 @@ title: "confrue Files"
 
 ## What `confrue_*` Files Are For
 
-- Shared `SESSION` resources
+- Shared `PROCESS` resources
 - Shared setup helpers and constants
-- Directory-specific overrides of same-name `SESSION` resources
+- Directory-specific overrides of same-name `PROCESS` resources
 
 `confrue_*.py` files and `conftest.py` are not collected as tests.
 
@@ -45,9 +45,9 @@ Because Rue imports these modules together, relative imports between `conftest.p
 
 ## How They Affect Resources
 
-`conftest.py` and `confrue_*.py` can both host shared `SESSION` resources. `confrue_*.py` remains useful when you want multiple Rue-specific setup modules in one directory.
+`conftest.py` and `confrue_*.py` can both host shared `PROCESS` resources. `confrue_*.py` remains useful when you want multiple Rue-specific setup modules in one directory.
 
-If multiple `SESSION` resources share the same name:
+If multiple `PROCESS` resources share the same name:
 - Rue picks the nearest ancestor provider for the requesting test module.
 - Child directories can override parent directories.
 - Sibling branches do not see each other's child overrides.
@@ -57,7 +57,7 @@ If multiple `SESSION` resources share the same name:
 # confrue_root.py
 import rue
 
-@rue.resource(scope="session")
+@rue.resource(scope="process")
 def api_base_url():
     return "https://public.example.com"
 ```
@@ -66,7 +66,7 @@ def api_base_url():
 # admin/confrue_admin.py
 import rue
 
-@rue.resource(scope="session")
+@rue.resource(scope="process")
 def api_base_url():
     return "https://admin.example.com"
 ```
@@ -89,14 +89,14 @@ def test_public_api(api_base_url):
     assert api_base_url == "https://public.example.com"
 ```
 
-If a `SESSION` resource is resolved outside an active test context, Rue falls back to the latest active registration. During normal test runs, the requesting test module decides which provider is active.
+If a `PROCESS` resource is resolved outside an active test context, Rue falls back to the latest active registration. During normal test runs, the requesting test module decides which provider is active.
 
 ## Recommendations
 
 - Put tests in `test_*.py`.
 - Put shared setup in `conftest.py` or `confrue_*.py`.
 - Use `confrue_*.py` when you want multiple Rue setup modules in one directory.
-- Use `conftest.py` or `confrue_*.py` for `SESSION` resources that should follow directory hierarchy.
+- Use `conftest.py` or `confrue_*.py` for `PROCESS` resources that should follow directory hierarchy.
 - Keep the files focused on reusable setup, not assertions.
 
 <Info>

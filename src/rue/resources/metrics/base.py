@@ -64,7 +64,7 @@ class MetricMetadata:
 
     last_item_recorded_at: datetime | None = None
     first_item_recorded_at: datetime | None = None
-    identity: ResourceIdentity = field(default=ResourceIdentity(name="", scope=Scope.SESSION))
+    identity: ResourceIdentity = field(default=ResourceIdentity(name="", scope=Scope.PROCESS))
     collected_from_tests: set[str] = field(default_factory=set)
     collected_from_resources: set[str] = field(default_factory=set)
     collected_from_cases: set[str] = field(default_factory=set)

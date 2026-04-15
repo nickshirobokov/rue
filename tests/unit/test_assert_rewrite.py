@@ -31,7 +31,7 @@ def equals(actual, reference):
 
 @test
 def test_sample():
-    m = Metric(metadata=MetricMetadata(identity=ResourceIdentity(name="m", scope=Scope.SESSION)))
+    m = Metric(metadata=MetricMetadata(identity=ResourceIdentity(name="m", scope=Scope.PROCESS)))
     m.add_record([1, 2, 3])
     assert equals(1, 1) and (m.len == 3)
 """.lstrip()
@@ -122,7 +122,7 @@ def test_metric_capture_multi():
         m = Metric(
             metadata=MetricMetadata(
                 identity=ResourceIdentity(
-                    name="assert_outcomes", scope=Scope.SESSION
+                    name="assert_outcomes", scope=Scope.PROCESS
                 )
             )
         )
@@ -157,7 +157,7 @@ from rue.resources.metrics.base import Metric, MetricMetadata
 
 @rue.resource.metric
 def my_metric():
-    m = Metric(metadata=MetricMetadata(identity=ResourceIdentity(name="m", scope=Scope.SESSION)))
+    m = Metric(metadata=MetricMetadata(identity=ResourceIdentity(name="m", scope=Scope.PROCESS)))
     yield m
     assert False, "nope"
 

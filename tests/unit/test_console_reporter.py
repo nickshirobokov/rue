@@ -107,7 +107,7 @@ def render_to_text(renderable) -> str:
 def make_metric_result(
     name: str,
     *,
-    scope: Scope = Scope.SESSION,
+    scope: Scope = Scope.PROCESS,
     value=1.0,
     assertion_results: list[AssertionResult] | None = None,
     tests: set[str] | None = None,
@@ -695,7 +695,7 @@ async def test_metrics_verbose_mode_groups_case_metrics_into_instances_panel():
     run.result.metric_results = [
         make_metric_result(
             "case_accuracy",
-            scope=Scope.CASE,
+            scope=Scope.TEST,
             value=1.0,
             assertion_results=[passing],
             tests={"test_shared"},
@@ -707,7 +707,7 @@ async def test_metrics_verbose_mode_groups_case_metrics_into_instances_panel():
         ),
         make_metric_result(
             "case_accuracy",
-            scope=Scope.CASE,
+            scope=Scope.TEST,
             value=0.0,
             assertion_results=[failing],
             tests={"test_shared"},
@@ -725,7 +725,7 @@ async def test_metrics_verbose_mode_groups_case_metrics_into_instances_panel():
     assert "OVERVIEW" in text
     assert "BREAKDOWN" in text
     assert "case_accuracy" in text
-    assert "case ×2" in text
+    assert "test ×2" in text
     assert "Instances" in text
     assert "[case-a]" in text
     assert "[case-b]" in text
@@ -859,7 +859,7 @@ def test_metrics_overview_assertion_summary_substitutes_resolved_value_with_dim_
         passed=True,
     )
     group = MetricGroup(
-        key=ResourceIdentity(name="accuracy", scope=Scope.SESSION),
+        key=ResourceIdentity(name="accuracy", scope=Scope.PROCESS),
         metrics=[],
     )
     group.metrics = [

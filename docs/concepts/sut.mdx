@@ -78,7 +78,7 @@ import rue
 from rue import SUT
 from demo_app.weather import weather_agent as prod_weather_agent
 
-@rue.resource.sut(scope="session")
+@rue.resource.sut(scope="process")
 def weather_agent():
     return SUT(prod_weather_agent)
 ```

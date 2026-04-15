@@ -72,12 +72,12 @@ def test_metrics_records_assertion_passed_and_reads_test_context_for_metadata():
 
     m1 = Metric(
         metadata=MetricMetadata(
-            identity=ResourceIdentity(name="m1", scope=Scope.SESSION)
+            identity=ResourceIdentity(name="m1", scope=Scope.PROCESS)
         )
     )
     m2 = Metric(
         metadata=MetricMetadata(
-            identity=ResourceIdentity(name="m2", scope=Scope.SESSION)
+            identity=ResourceIdentity(name="m2", scope=Scope.PROCESS)
         )
     )
 

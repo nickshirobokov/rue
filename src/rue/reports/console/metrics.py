@@ -34,9 +34,9 @@ if TYPE_CHECKING:
 
 
 _SCOPE_ORDER = {
-    Scope.SESSION: 0,
-    Scope.SUITE: 1,
-    Scope.CASE: 2,
+    Scope.PROCESS: 0,
+    Scope.MODULE: 1,
+    Scope.TEST: 2,
 }
 _METRIC_PREFIX_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 

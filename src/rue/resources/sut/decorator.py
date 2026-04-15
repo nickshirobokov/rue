@@ -13,7 +13,7 @@ from rue.resources.sut.base import SUT
 def sut(
     fn: Callable[..., Any] | None = None,
     *,
-    scope: Scope | str = Scope.CASE,
+    scope: Scope | str = Scope.TEST,
 ) -> Any:
     """Register a SUT resource factory."""
     if fn is None:

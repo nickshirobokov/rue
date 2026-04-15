@@ -1210,7 +1210,7 @@ class TestResourceTeardown:
     async def test_case_resources_torn_down_between_tests(self, null_reporter):
         teardown_count = 0
 
-        @resource(scope="case")
+        @resource(scope="test")
         def case_res():
             yield "value"
             nonlocal teardown_count
@@ -1234,7 +1234,7 @@ class TestResourceTeardown:
     async def test_suite_resources_shared(self, null_reporter):
         create_count = 0
 
-        @resource(scope="suite")
+        @resource(scope="module")
         def suite_res():
             nonlocal create_count
             create_count += 1
@@ -1263,7 +1263,7 @@ class TestResourceTeardown:
         create_count = 0
         teardown_count = 0
 
-        @resource(scope="session")
+        @resource(scope="process")
         async def session_res():
             nonlocal create_count, teardown_count
             create_count += 1
@@ -1415,7 +1415,7 @@ class TestResourceResolutionErrors:
     ):
         """Test that errors in suite-scope resources affect all subsequent tests."""
 
-        @resource(scope="suite")
+        @resource(scope="module")
         def suite_resource():
             raise RuntimeError("Suite resource failed")
 

@@ -54,7 +54,7 @@ class ResourceResolver:
         )
 
     def _owner_resolver_for_scope(self, scope: Scope) -> "ResourceResolver":
-        if scope in {Scope.SUITE, Scope.SESSION} and self._parent is not None:
+        if scope in {Scope.MODULE, Scope.PROCESS} and self._parent is not None:
             return self._parent._owner_resolver_for_scope(scope)
         return self
 
@@ -133,15 +133,15 @@ class ResourceResolver:
                     ) from e
 
         self._cache[cache_key] = value
-        if definition.identity.scope in {Scope.SUITE, Scope.SESSION} and self._parent:
+        if definition.identity.scope in {Scope.MODULE, Scope.PROCESS} and self._parent:
             self._parent._cache[cache_key] = value
         return value
 
-    def fork_for_case(self) -> "ResourceResolver":
-        """Create a child resolver for isolated CASE-scope execution."""
+    def fork_for_test(self) -> "ResourceResolver":
+        """Create a child resolver for isolated TEST-scope execution."""
         child = ResourceResolver(self._registry, parent=self)
         for key, value in self._cache.items():
-            if key.scope in {Scope.SUITE, Scope.SESSION}:
+            if key.scope in {Scope.MODULE, Scope.PROCESS}:
                 child._cache[key] = value
         return child
 
@@ -151,7 +151,7 @@ class ResourceResolver:
         definition: ResourceDef,
         generator: Generator[Any, None, None] | AsyncGenerator[Any, None],
     ) -> None:
-        if key.scope in {Scope.SUITE, Scope.SESSION} and self._parent:
+        if key.scope in {Scope.MODULE, Scope.PROCESS} and self._parent:
             self._parent._register_teardown(key, definition, generator)
             return
         self._teardowns.append((key, definition, generator))
@@ -193,7 +193,7 @@ class ResourceResolver:
 
             if cache_key in owner._cache:
                 value = owner._cache[cache_key]
-            elif definition.identity.scope in {Scope.SUITE, Scope.SESSION}:
+            elif definition.identity.scope in {Scope.MODULE, Scope.PROCESS}:
                 lock = owner._shared_creation_locks.setdefault(
                     cache_key, asyncio.Lock()
                 )
