@@ -3,11 +3,8 @@
 import ast
 from typing import Any, cast
 
-from rue.resources.registry import (
-    Scope,
-    registry as default_registry,
-    resource,
-)
+from rue.resources.models import Scope
+from rue.resources.registry import registry as default_registry, resource
 
 def decorate_pytest_fixture_as_resource(
     fn=None,

@@ -15,7 +15,8 @@ from rue.context.runtime import (
     CURRENT_RESOURCE_RESOLVER,
     bind,
 )
-from rue.resources.registry import ResourceIdentity, Scope, resource
+from rue.resources.models import ResourceIdentity, Scope
+from rue.resources.registry import resource
 
 from .base import CalculatedValue, Metric, MetricResult
 

@@ -5,7 +5,8 @@ from collections.abc import Callable
 from typing import Any
 
 from rue.context.runtime import CURRENT_TEST, CURRENT_TEST_TRACER
-from rue.resources.registry import Scope, resource
+from rue.resources.models import Scope
+from rue.resources.registry import resource
 from rue.resources.sut.base import SUT
 
 

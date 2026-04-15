@@ -1,13 +1,7 @@
 """Resource injection system."""
 
-from rue.resources.registry import (
-    ResourceDef,
-    ResourceIdentity,
-    Scope,
-    ResourceRegistry,
-    registry,
-    resource,
-)
+from rue.resources.models import ResourceDef, ResourceIdentity, Scope
+from rue.resources.registry import ResourceRegistry, registry, resource
 from rue.resources.resolver import ResourceResolver
 
 

@@ -22,7 +22,7 @@ from pydantic import validate_call
 
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.runtime import CURRENT_TEST
-from rue.resources.registry import ResourceIdentity, Scope
+from rue.resources.models import ResourceIdentity, Scope
 
 
 if TYPE_CHECKING:

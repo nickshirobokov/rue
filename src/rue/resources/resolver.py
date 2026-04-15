@@ -15,12 +15,8 @@ from rue.context.runtime import (
     CURRENT_TEST,
     bind,
 )
-from rue.resources.registry import (
-    ResourceDef,
-    ResourceIdentity,
-    ResourceRegistry,
-    Scope,
-)
+from rue.resources.models import ResourceDef, ResourceIdentity, Scope
+from rue.resources.registry import ResourceRegistry
 
 
 _RESOLUTION_PATH: ContextVar[tuple[ResourceIdentity, ...]] = ContextVar(

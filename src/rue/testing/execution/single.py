@@ -23,7 +23,7 @@ from rue.context.runtime import (
     bind,
 )
 from rue.resources import ResourceResolver
-from rue.resources.resolver import Scope
+from rue.resources.models import Scope
 from rue.testing.execution.interfaces import ExecutableTest
 from rue.testing.models import (
     LoadedTestDef,
