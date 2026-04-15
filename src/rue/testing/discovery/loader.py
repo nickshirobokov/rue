@@ -25,10 +25,9 @@ from rue.resources.registry import (
     registry as default_registry,
 )
 from rue.testing.decorators.tag import TagData, get_tag_data, merge_tag_data
-from rue.testing.discovery.plan import CollectionPlan
 from rue.testing.models.definition import TestDefinition
 from rue.testing.models.modifiers import Modifier
-from rue.testing.models.spec import TestLocator, TestSpec
+from rue.testing.models.spec import TestLocator, TestSpec, TestSpecCollection
 
 
 TFunction = TypeVar("TFunction", ast.FunctionDef, ast.AsyncFunctionDef)
@@ -419,8 +418,8 @@ def _inspect_module_specs(
 class TestLoader:
     """Materializes :class:`TestSpec` objects into live :class:`TestDefinition` instances.
 
-    Safe to construct in any process.  Given the same :class:`CollectionPlan`
-    (suite root + session_id + setup file chain), two ``TestLoader`` instances
+    Safe to construct in any process.  Given the same :class:`TestSpecCollection`
+    (suite root + setup file chain), two ``TestLoader`` instances
     in two different processes will import modules under identical synthetic
     names — a prerequisite for pickle-safe function objects and consistent
     ``__module__`` attributes across processes.
@@ -456,18 +455,20 @@ class TestLoader:
         module = self._session.load_module(path)
         _register_fixtures_from_module(module, self._registry)
 
-    def materialize_plan(self, plan: CollectionPlan) -> list[TestDefinition]:
-        """Resolve every spec in a plan to a live TestDefinition."""
-        if not plan.specs:
+    def materialize_plan(
+        self, collection: TestSpecCollection
+    ) -> list[TestDefinition]:
+        """Resolve every spec in a collection to a live TestDefinition."""
+        if not collection.specs:
             return []
 
         by_module: dict[Path, list[TestSpec]] = {}
-        for spec in plan.specs:
+        for spec in collection.specs:
             by_module.setdefault(spec.module_path, []).append(spec)
 
         items: list[TestDefinition] = []
         for module_path, requested_specs in by_module.items():
-            for setup_ref in plan.setup_chain_for(module_path):
+            for setup_ref in collection.setup_chain_for(module_path):
                 self.prepare_setup(setup_ref.path)
 
             live_specs = self._module_specs_for(module_path)

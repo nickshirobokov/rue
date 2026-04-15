@@ -16,7 +16,7 @@ from typer import Argument, Option, Typer
 
 from rue.cli.db import DatabaseCommands, db_app
 from rue.config import load_config
-from rue.testing.discovery import KeywordMatcher, TestLoader, TestSelector
+from rue.testing.discovery import KeywordMatcher, TestLoader, TestSpecCollector
 from rue.testing.runner import Runner
 
 
@@ -170,7 +170,7 @@ def test(
         exclude_tags=exclude_tags,
     )
 
-    selector = TestSelector(
+    collector = TestSpecCollector(
         include_tags, exclude_tags, keyword or runner_config.keyword
     )
 
@@ -180,11 +180,11 @@ def test(
         capture_output=not show_output,
     )
 
-    plan = selector.plan(resolved_paths)
+    collection = collector.build_spec_collection(resolved_paths)
     items = TestLoader(
-        plan.suite_root,
+        collection.suite_root,
         registry=runner.resource_registry,
-    ).materialize_plan(plan)
+    ).materialize_plan(collection)
 
     if runner_config.db_enabled and run_id and runner.run_id_exists(run_id):
         Console().print(f"[red]run_id '{run_id}' already exists[/red]")
@@ -204,4 +204,4 @@ def main() -> None:
     app(argv, standalone_mode=False)
 
 
-__all__ = ["DatabaseCommands", "KeywordMatcher", "TestSelector", "main"]
+__all__ = ["DatabaseCommands", "KeywordMatcher", "TestSpecCollector", "main"]

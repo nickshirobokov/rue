@@ -8,7 +8,7 @@ from rue.cli import app
 from rue.config import Config
 from rue.storage.sqlite import SQLiteStore
 from rue.testing import TestDefinition
-from rue.testing.discovery import CollectionPlan
+from rue.testing.models.spec import TestSpecCollection
 from rue.testing.models.run import Run, RunEnvironment, RunResult
 from tests.unit.factories import make_definition
 
@@ -78,16 +78,16 @@ def test_run_tests_returns_2_when_run_id_already_exists(
 
     planned = False
 
-    def _plan(self, paths):
+    def _build(self, paths, **kwargs):
         nonlocal planned
         planned = True
-        return CollectionPlan(suite_root=Path.cwd())
+        return TestSpecCollection(suite_root=Path.cwd())
 
     async def _fail_run(self, items=None, path=None, run_id=None):
         msg = "Runner.run should not be called when duplicate run_id exists"
         raise AssertionError(msg)
 
-    monkeypatch.setattr("rue.cli.TestSelector.plan", _plan)
+    monkeypatch.setattr("rue.cli.TestSpecCollector.build_spec_collection", _build)
     monkeypatch.setattr(
         "rue.cli.TestLoader.materialize_plan",
         lambda self, plan: [make_item("test_ok", set())],
@@ -110,8 +110,8 @@ def test_run_tests_returns_2_when_run_id_already_exists(
 
 def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(monkeypatch):
     monkeypatch.setattr(
-        "rue.cli.TestSelector.plan",
-        lambda self, paths: CollectionPlan(suite_root=Path.cwd()),
+        "rue.cli.TestSpecCollector.build_spec_collection",
+        lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
         "rue.cli.TestLoader.materialize_plan",

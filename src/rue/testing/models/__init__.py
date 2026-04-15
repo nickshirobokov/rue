@@ -12,7 +12,12 @@ from rue.testing.models.modifiers import (
 from rue.testing.models.result import TestExecution, TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
 from rue.testing.models.case import Case, CaseGroup
-from rue.testing.models.spec import TestLocator, TestSpec
+from rue.testing.models.spec import (
+    SetupFileRef,
+    TestLocator,
+    TestSpec,
+    TestSpecCollection,
+)
 
 
 __all__ = [
@@ -22,9 +27,11 @@ __all__ = [
     "Run",
     "RunEnvironment",
     "RunResult",
+    "SetupFileRef",
     "TestDefinition",
     "TestLocator",
     "TestSpec",
+    "TestSpecCollection",
     "CasesIterateModifier",
     "IterateModifier",
     "Modifier",

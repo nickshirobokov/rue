@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from rue.resources import ResourceRegistry, registry as default_registry
-from rue.testing.discovery import TestLoader, TestSelector
+from rue.testing.discovery import TestLoader, TestSpecCollector
 from rue.testing.models import TestDefinition
 from rue.testing.models.modifiers import Modifier
 from rue.testing.models.spec import TestLocator, TestSpec
@@ -54,12 +54,12 @@ def make_definition(
 
 
 def materialize_tests(
-    path: str | Path | None = None,
+    path: str | Path,
     *,
     resource_registry: ResourceRegistry = default_registry,
 ) -> list[TestDefinition]:
-    plan = TestSelector((), (), None).plan(path)
+    collection = TestSpecCollector((), (), None).build_spec_collection((path,))
     return TestLoader(
-        plan.suite_root,
+        collection.suite_root,
         registry=resource_registry,
-    ).materialize_plan(plan)
+    ).materialize_plan(collection)

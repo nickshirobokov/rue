@@ -1,13 +1,18 @@
 import builtins
+from pathlib import Path
 from textwrap import dedent
 
 import pytest
 
 from rue.resources import registry
-from rue.testing.discovery import KeywordMatcher, TestLoader, TestSelector
-from rue.testing.models import ParameterSet, ParamsIterateModifier
+from rue.testing.discovery import KeywordMatcher, TestLoader, TestSpecCollector
+from rue.testing.models import (
+    ParameterSet,
+    ParamsIterateModifier,
+    TestLocator,
+    TestSpec,
+)
 from rue.testing.runner import Runner
-from tests.unit.factories import make_definition
 
 
 @pytest.fixture(autouse=True)
@@ -25,25 +30,39 @@ def write_files(root, files):
 
 
 def materialize(path):
-    plan = TestSelector((), (), None).plan(path)
+    plan = TestSpecCollector((), (), None).build_spec_collection((path,))
     return TestLoader(plan.suite_root, registry=registry).materialize_plan(plan)
 
 
 def test_selector_filters_by_tags_and_keyword():
     items = [
-        make_definition("test_fast", module_path="test_sample.py", tags={"fast", "smoke"}),
-        make_definition("test_slow", module_path="test_sample.py", tags={"slow"}),
+        TestSpec(
+            locator=TestLocator(Path("test_sample.py"), "test_fast"),
+            is_async=False,
+            params=(),
+            modifiers=(),
+            tags=frozenset({"fast", "smoke"}),
+        ),
+        TestSpec(
+            locator=TestLocator(Path("test_sample.py"), "test_slow"),
+            is_async=False,
+            params=(),
+            modifiers=(),
+            tags=frozenset({"slow"}),
+        ),
     ]
 
     assert KeywordMatcher("fast and not slow").match("test_fast")
     assert not KeywordMatcher("fast and not slow").match("test_slow")
 
-    selected = TestSelector(["smoke"], ["slow"], "fast").filter(items)
+    selected = TestSpecCollector(["smoke"], ["slow"], "fast").filter_specs(
+        items
+    )
 
     assert [item.name for item in selected] == ["test_fast"]
 
 
-def test_plan_collection_discovers_rue_tests_and_static_tags(tmp_path):
+def test_selector_plan_discovers_rue_tests_and_static_tags(tmp_path):
     write_files(
         tmp_path,
         {
@@ -78,11 +97,12 @@ def test_plan_collection_discovers_rue_tests_and_static_tags(tmp_path):
         },
     )
 
-    specs_by_name = {
-        spec.full_name: spec.tags
-        for spec in TestSelector((), (), None).plan(tmp_path).specs
-    }
+    plan = TestSpecCollector((), (), None).build_spec_collection(
+        (tmp_path,), explicit_root=tmp_path
+    )
+    specs_by_name = {spec.full_name: spec.tags for spec in plan.specs}
 
+    assert plan.suite_root == tmp_path
     assert specs_by_name == {
         "test_sample::helper": frozenset(),
         "test_sample::test_top": frozenset({"smoke", "inline"}),
@@ -93,7 +113,7 @@ def test_plan_collection_discovers_rue_tests_and_static_tags(tmp_path):
     }
 
 
-def test_plan_collection_ignores_setup_and_legacy_modules(tmp_path):
+def test_selector_plan_ignores_setup_and_legacy_modules(tmp_path):
     write_files(
         tmp_path,
         {
@@ -117,7 +137,8 @@ def test_plan_collection_ignores_setup_and_legacy_modules(tmp_path):
     )
 
     assert [
-        spec.full_name for spec in TestSelector((), (), None).plan(tmp_path).specs
+        spec.full_name
+        for spec in TestSpecCollector((), (), None).build_spec_collection((tmp_path,)).specs
     ] == ["test_real::test_real"]
 
 
@@ -144,7 +165,7 @@ def test_selector_skips_unselected_modules_before_import(tmp_path):
         },
     )
 
-    plan = TestSelector([], [], "good").plan([str(tmp_path)])
+    plan = TestSpecCollector([], [], "good").build_spec_collection([str(tmp_path)])
     items = TestLoader(plan.suite_root, registry=registry).materialize_plan(plan)
 
     assert [item.name for item in items] == ["test_good"]
@@ -170,7 +191,7 @@ def test_materialize_plan_skips_unselected_invalid_tests_in_same_module(
         },
     )
 
-    plan = TestSelector([], [], "good").plan([str(tmp_path)])
+    plan = TestSpecCollector([], [], "good").build_spec_collection([str(tmp_path)])
     items = TestLoader(plan.suite_root, registry=registry).materialize_plan(plan)
 
     assert [item.name for item in items] == ["test_good"]
@@ -200,7 +221,7 @@ def test_materialize_plan_enriches_runtime_metadata(tmp_path):
         },
     )
 
-    plan = TestSelector((), (), None).plan(tmp_path / "test_metadata.py")
+    plan = TestSpecCollector((), (), None).build_spec_collection((tmp_path / "test_metadata.py",))
     planned_specs = {spec.name: spec for spec in plan.specs}
 
     assert planned_specs["test_inline_skip"].params == ()
@@ -404,7 +425,7 @@ def test_materialize_uses_single_session_for_selected_modules(
         },
     )
 
-    plan = TestSelector([], [], "good").plan([str(tmp_path)])
+    plan = TestSpecCollector([], [], "good").build_spec_collection([str(tmp_path)])
     items = TestLoader(plan.suite_root, registry=registry).materialize_plan(plan)
 
     assert [item.name for item in items] == ["test_good", "test_good_two"]

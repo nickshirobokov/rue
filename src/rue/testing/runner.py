@@ -51,10 +51,12 @@ class Runner:
         reporters: Optional reporters. Defaults to all registered reporters.
 
     Examples:
-        # Build items with TestSelector + TestLoader, then run.
+        # Build items with TestSpecCollector + TestLoader, then run.
         # runner = Runner()
-        # plan = TestSelector(include_tags, exclude_tags, keyword).plan(paths)
-        # items = TestLoader(plan.suite_root).materialize_plan(plan)
+        # collection = TestSpecCollector(
+        #     include_tags, exclude_tags, keyword
+        # ).build_spec_collection(resolved_paths)
+        # items = TestLoader(collection.suite_root).materialize_plan(collection)
         # result = await runner.run(items)
 
         # Concurrent execution with 5 workers (same item preparation as above)
@@ -200,7 +202,7 @@ class Runner:
         """Run tests and return results.
 
         Args:
-            items: Test definitions to execute (discover via TestSelector and
+            items: Test definitions to execute (discover via TestSpecCollector and
                 TestLoader before calling).
             run_id: Optional UUID for this run. Overrides constructor-level run_id.
 

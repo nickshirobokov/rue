@@ -6,23 +6,21 @@ from rue.testing.discovery.loader import (
     TestLoader,
     default_transformer_pipeline,
 )
-from rue.testing.discovery.plan import CollectionPlan, SetupFileRef
-from rue.testing.discovery.selector import (
-    Filterable,
+from rue.testing.discovery.collector import (
     KeywordMatcher,
-    TestSelector,
+    TestSpecCollector,
 )
+from rue.testing.models.spec import SetupFileRef, TestSpecCollection
 from rue.testing.models import TestDefinition
 
 __all__ = [
-    "CollectionPlan",
-    "Filterable",
     "KeywordMatcher",
     "RueImportSession",
     "RueModuleLoader",
     "SetupFileRef",
     "TestDefinition",
     "TestLoader",
-    "TestSelector",
+    "TestSpecCollection",
+    "TestSpecCollector",
     "default_transformer_pipeline",
 ]
