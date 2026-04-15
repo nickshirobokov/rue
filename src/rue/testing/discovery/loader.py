@@ -24,7 +24,7 @@ from rue.resources.fixtures_collector import (
     RewritePytestFixtureDecoratorsTransformer,
 )
 from rue.testing.decorators.tag import get_tag_data, merge_tag_data
-from rue.testing.models.definition import TestDefinition
+from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.spec import TestSpec, TestSpecCollection
 
 
@@ -322,7 +322,7 @@ class RueModuleLoader(importlib.abc.SourceLoader):
 
 
 class TestLoader:
-    """Materializes :class:`TestSpec` objects into live :class:`TestDefinition` instances.
+    """Materializes :class:`TestSpec` objects into live :class:`LoadedTestDef` instances.
 
     Safe to construct in any process.  Given the same :class:`TestSpecCollection`
     (suite root + setup file chain), two ``TestLoader`` instances
@@ -354,8 +354,8 @@ class TestLoader:
 
     def load_from_collection(
         self, collection: TestSpecCollection
-    ) -> list[TestDefinition]:
-        """Resolve every spec in a collection to a live TestDefinition."""
+    ) -> list[LoadedTestDef]:
+        """Resolve every spec in a collection to a live LoadedTestDef."""
         if not collection.specs:
             return []
 
@@ -363,7 +363,7 @@ class TestLoader:
         for spec in collection.specs:
             by_module.setdefault(spec.module_path, []).append(spec)
 
-        items: list[TestDefinition] = []
+        items: list[LoadedTestDef] = []
         for module_path, requested_specs in by_module.items():
             for setup_ref in collection.setup_chain_for(module_path):
                 self.prepare_setup(setup_ref.path)
@@ -376,8 +376,8 @@ class TestLoader:
 
     def load_definition(
         self, spec: TestSpec, module: ModuleType | None = None
-    ) -> TestDefinition:
-        """Resolve a spec to a live TestDefinition by importing its module.
+    ) -> LoadedTestDef:
+        """Resolve a spec to a live LoadedTestDef by importing its module.
 
         When ``module`` is omitted, the module is imported through the session
         (with AST transformations applied).  The callable is looked up by name
@@ -410,4 +410,4 @@ class TestLoader:
         combined_tags = merge_tag_data(parent_tags, get_tag_data(fn))
         spec.update_tags(combined_tags)
         spec.get_execution_from_fn(fn)
-        return TestDefinition(spec=spec, fn=fn)
+        return LoadedTestDef(spec=spec, fn=fn)

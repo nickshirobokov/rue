@@ -24,9 +24,9 @@ from rue.context.runtime import (
 )
 from rue.resources import ResourceResolver
 from rue.resources.resolver import Scope
-from rue.testing.execution.interfaces import Test
+from rue.testing.execution.interfaces import ExecutableTest
 from rue.testing.models import (
-    TestDefinition,
+    LoadedTestDef,
     TestExecution,
     TestResult,
     TestStatus,
@@ -39,10 +39,10 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class SingleTest(Test):
+class SingleTest(ExecutableTest):
     """Executes a single test directly."""
 
-    definition: TestDefinition
+    definition: LoadedTestDef
     params: dict[str, Any]
     tracer: TestTracer
     semaphore: asyncio.Semaphore | None = None

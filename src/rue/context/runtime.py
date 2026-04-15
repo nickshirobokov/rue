@@ -11,7 +11,7 @@ from uuid import UUID
 if TYPE_CHECKING:
     from rue.resources.registry import ResourceDef
     from rue.resources.resolver import ResourceResolver
-    from rue.testing.models import TestDefinition
+    from rue.testing.models import LoadedTestDef
     from rue.testing.runner import Runner
     from rue.testing.tracing import TestTracer
 
@@ -23,7 +23,7 @@ T = TypeVar("T")
 class TestContext:
     __test__ = False
 
-    item: TestDefinition
+    item: LoadedTestDef
     execution_id: UUID | None = None
 
 

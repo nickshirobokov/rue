@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 from opentelemetry.trace import StatusCode
 
-from rue.testing.models import TestDefinition, TestResult, TestStatus
+from rue.testing.models import LoadedTestDef, TestResult, TestStatus
 from rue.testing.tracing import TestTracer
 from tests.unit.factories import make_definition as _make_definition
 
@@ -44,7 +44,7 @@ class FakeSpanScope:
 
 def make_definition(
     *, suffix: str | None = None, case_id: UUID | None = None
-) -> TestDefinition:
+) -> LoadedTestDef:
     return _make_definition("test_traced", module_path="test_traced.py", suffix=suffix, case_id=case_id)
 
 

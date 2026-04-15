@@ -10,14 +10,14 @@ from uuid import UUID
 
 from rue.config import Config
 from rue.testing.execution.composite import CompositeTest
-from rue.testing.execution.interfaces import Test
+from rue.testing.execution.interfaces import ExecutableTest
 from rue.testing.execution.single import SingleTest
 from rue.testing.models import (
     CasesIterateModifier,
     GroupsIterateModifier,
     IterateModifier,
     ParamsIterateModifier,
-    TestDefinition,
+    LoadedTestDef,
 )
 from rue.testing.tracing import TestTracer
 
@@ -35,9 +35,9 @@ class DefaultTestFactory:
 
     def build(
         self,
-        definition: TestDefinition,
+        definition: LoadedTestDef,
         params: dict[str, Any] | None = None,
-    ) -> Test:
+    ) -> ExecutableTest:
         """Recursively build the full test tree from definition."""
         params = params or {}
         modifiers = definition.spec.modifiers

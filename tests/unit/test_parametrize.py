@@ -3,7 +3,7 @@ from pathlib import Path
 
 from rue.resources import registry, resource
 from rue.testing import Runner, test as t_decorator
-from rue.testing.models import ParameterSet, ParamsIterateModifier, TestDefinition
+from rue.testing.models import ParameterSet, ParamsIterateModifier
 from tests.unit.factories import make_definition
 
 

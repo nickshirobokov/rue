@@ -6,19 +6,19 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
-from rue.testing.execution.interfaces import Test
-from rue.testing.models.definition import TestDefinition
+from rue.testing.execution.interfaces import ExecutableTest
+from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.result import TestExecution, TestResult, TestStatus
 from rue.resources.resolver import ResourceResolver
 
 
 @dataclass
-class CompositeTest(Test):
+class CompositeTest(ExecutableTest):
     """Executes pre-built child tests concurrently and aggregates results."""
 
-    definition: TestDefinition
+    definition: LoadedTestDef
     min_passes: int
-    children: list[Test] = field(default_factory=list)
+    children: list[ExecutableTest] = field(default_factory=list)
     on_complete: Callable | None = None
 
     async def execute(self, resolver: ResourceResolver) -> TestExecution:

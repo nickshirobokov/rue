@@ -19,7 +19,7 @@ from rue.resources.metrics.base import (
 )
 from rue.storage.base import Store
 from rue.storage.sqlite.migrations import MigrationError, MigrationRunner
-from rue.testing.models.definition import TestDefinition
+from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.result import TestExecution, TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
 from rue.testing.models.spec import TestLocator, TestSpec
@@ -548,7 +548,7 @@ class SQLiteStore(Store):
         tags_json = row["tags_json"]
         tags = set(json.loads(tags_json)) if tags_json else set()
 
-        definition = TestDefinition(
+        definition = LoadedTestDef(
             spec=TestSpec(
                 locator=TestLocator(
                     module_path=Path(row["file_path"]) if row["file_path"] else Path(),

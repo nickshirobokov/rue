@@ -5,7 +5,7 @@ import threading
 from pathlib import Path
 
 from rue.testing import Runner, test as t_decorator
-from rue.testing.models import IterateModifier, TestDefinition
+from rue.testing.models import IterateModifier
 from tests.unit.factories import make_definition
 
 

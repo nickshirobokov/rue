@@ -18,7 +18,7 @@ from rue.resources.metrics.base import (
 from rue.resources.sut.output import SUTOutputCapture
 from rue.testing.models import (
     Run,
-    TestDefinition,
+    LoadedTestDef,
     TestExecution,
     TestResult,
     TestStatus,
@@ -70,12 +70,12 @@ def make_item(
     *,
     suffix: str | None = None,
     case_id: UUID | None = None,
-) -> TestDefinition:
+) -> LoadedTestDef:
     return make_definition(name, module_path=module_path, suffix=suffix, case_id=case_id)
 
 
 def make_execution(
-    item: TestDefinition,
+    item: LoadedTestDef,
     status: TestStatus,
     duration_ms: float,
     *,

@@ -20,7 +20,7 @@ from .shared import STATUS_STYLES, safe_relative_path
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from rue.testing.models.definition import TestDefinition
+    from rue.testing.models.loaded import LoadedTestDef
     from rue.testing.models.result import TestExecution, TestResult
 
     from .reporter import ConsoleReporter
@@ -58,7 +58,7 @@ class OutputMode(ABC):
     def print_completed_module(
         self,
         path: Path,
-        items: list[TestDefinition],
+        items: list[LoadedTestDef],
         state: ConsoleReporter,
     ) -> None:
         for item in items:
@@ -116,7 +116,7 @@ class CompactMode(OutputMode):
     def print_completed_module(
         self,
         path: Path,
-        items: list[TestDefinition],
+        items: list[LoadedTestDef],
         state: ConsoleReporter,
     ) -> None:
         rel = safe_relative_path(path)
@@ -208,7 +208,7 @@ class VerboseMode(OutputMode):
         return Group(*trees) if trees else Text("")
 
     def _early_sub_executions(
-        self, item: TestDefinition, state: ConsoleReporter
+        self, item: LoadedTestDef, state: ConsoleReporter
     ) -> list[TestExecution]:
         """Sub-executions that completed before the parent finished."""
         return [
@@ -222,7 +222,7 @@ class VerboseMode(OutputMode):
     def print_completed_module(
         self,
         path: Path,
-        items: list[TestDefinition],
+        items: list[LoadedTestDef],
         state: ConsoleReporter,
     ) -> None:
         rel = safe_relative_path(path)
@@ -265,7 +265,7 @@ class VerboseMode(OutputMode):
 
     def _build_live_item_line(
         self,
-        item: TestDefinition,
+        item: LoadedTestDef,
         execution: TestExecution | None,
     ) -> RenderableType:
         if execution is None:

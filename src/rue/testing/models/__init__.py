@@ -1,6 +1,6 @@
 """Testing models - pure data classes."""
 
-from rue.testing.models.definition import TestDefinition
+from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.modifiers import (
     CasesIterateModifier,
     GroupsIterateModifier,
@@ -28,7 +28,7 @@ __all__ = [
     "RunEnvironment",
     "RunResult",
     "SetupFileRef",
-    "TestDefinition",
+    "LoadedTestDef",
     "TestLocator",
     "TestSpec",
     "TestSpecCollection",

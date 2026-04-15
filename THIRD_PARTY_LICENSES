@@ -27,7 +27,7 @@ The following files contain code derived from that project:
 - src/rue/testing/discovery/collector.py
 - src/rue/testing/environment.py
 - src/rue/testing/models/__init__.py
-- src/rue/testing/models/definition.py
+- src/rue/testing/models/loaded.py
 - src/rue/testing/models/modifiers.py
 - src/rue/testing/models/result.py
 - src/rue/testing/models/run.py

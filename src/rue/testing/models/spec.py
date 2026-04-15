@@ -47,7 +47,7 @@ class TestSpec:
     Contains every piece of metadata needed to understand and schedule a
     test, but holds no live Python objects (no callables, no module
     references). A worker process deserializes this and passes it to
-    ``TestLoader.load_definition()`` to obtain a runnable ``TestDefinition``.
+    ``TestLoader.load_definition()`` to obtain a runnable ``LoadedTestDef``.
     """
 
     locator: TestLocator
@@ -125,7 +125,7 @@ class TestSpecCollection:
     :meth:`~rue.testing.discovery.collector.TestSpecCollector.build_spec_collection`
     in the parent process and passed to
     :class:`~rue.testing.discovery.loader.TestLoader` to reconstruct live
-    :class:`~rue.testing.models.definition.TestDefinition` objects locally.
+    :class:`~rue.testing.models.loaded.LoadedTestDef` objects locally.
 
     * ``suite_root`` — used to create a :class:`RueImportSession` with the
       same deterministic synthetic package names as the parent.

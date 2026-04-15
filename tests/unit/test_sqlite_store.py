@@ -12,7 +12,7 @@ from rue.resources.metrics.base import (
 )
 from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.store import MAX_STORED_RUNS
-from rue.testing.models.definition import TestDefinition
+from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.result import TestExecution, TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
 from tests.unit.factories import make_definition

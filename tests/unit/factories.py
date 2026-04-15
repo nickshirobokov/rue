@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from rue.testing.discovery import TestLoader, TestSpecCollector
-from rue.testing.models import TestDefinition
+from rue.testing.models import LoadedTestDef
 from rue.testing.models.modifiers import Modifier
 from rue.testing.models.spec import TestLocator, TestSpec
 
@@ -29,8 +29,8 @@ def make_definition(
     fail_fast: bool = False,
     suffix: str | None = None,
     case_id: UUID | None = None,
-) -> TestDefinition:
-    """Build a TestDefinition for use in unit tests without needing a real module."""
+) -> LoadedTestDef:
+    """Build a LoadedTestDef for use in unit tests without needing a real module."""
     spec = TestSpec(
         locator=TestLocator(
             module_path=Path(module_path),
@@ -49,11 +49,11 @@ def make_definition(
         suffix=suffix,
         case_id=case_id,
     )
-    return TestDefinition(spec=spec, fn=fn or (lambda: None), fail_fast=fail_fast)
+    return LoadedTestDef(spec=spec, fn=fn or (lambda: None), fail_fast=fail_fast)
 
 
 def materialize_tests(
     path: str | Path,
-) -> list[TestDefinition]:
+) -> list[LoadedTestDef]:
     collection = TestSpecCollector((), (), None).build_spec_collection((path,))
     return TestLoader(collection.suite_root).load_from_collection(collection)

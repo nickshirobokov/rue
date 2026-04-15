@@ -6,7 +6,7 @@ from .models import (
     Case,
     CaseGroup,
     Run,
-    TestDefinition,
+    LoadedTestDef,
     TestExecution,
     TestStatus,
 )
@@ -19,7 +19,7 @@ __all__ = [
     "CaseGroup",
     "Run",
     "Runner",
-    "TestDefinition",
+    "LoadedTestDef",
     "TestExecution",
     "TestStatus",
     "fail",

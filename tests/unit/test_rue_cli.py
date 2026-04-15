@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 from rue.cli import app
 from rue.config import Config
 from rue.storage.sqlite import SQLiteStore
-from rue.testing import TestDefinition
+from rue.testing import LoadedTestDef
 from rue.testing.models.spec import TestSpecCollection
 from rue.testing.models.run import Run, RunEnvironment, RunResult
 from tests.unit.factories import make_definition
@@ -20,7 +20,7 @@ def dummy() -> None:
     return None
 
 
-def make_item(name: str, tags: set[str], suffix: str | None = None) -> TestDefinition:
+def make_item(name: str, tags: set[str], suffix: str | None = None) -> LoadedTestDef:
     return make_definition(name, fn=dummy, module_path="module.py", tags=tags, suffix=suffix)
 
 

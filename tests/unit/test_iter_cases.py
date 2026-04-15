@@ -10,7 +10,6 @@ from rue.testing.models import (
     CaseGroup,
     CasesIterateModifier,
     GroupsIterateModifier,
-    TestDefinition,
 )
 from tests.unit.factories import make_definition
 

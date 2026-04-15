@@ -7,7 +7,7 @@ from enum import Enum
 from uuid import UUID, uuid4
 
 from rue.assertions.base import AssertionResult
-from rue.testing.models.definition import TestDefinition
+from rue.testing.models.loaded import LoadedTestDef
 
 
 class TestStatus(Enum):
@@ -62,7 +62,7 @@ class TestExecution:
 
     __test__ = False  # Prevent pytest from collecting this as a test class
 
-    definition: TestDefinition
+    definition: LoadedTestDef
     result: TestResult
     execution_id: UUID = field(default_factory=uuid4)
     sub_executions: list[TestExecution] = field(default_factory=list)

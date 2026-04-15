@@ -28,8 +28,8 @@ from rue.testing.models import TestStatus
 
 if TYPE_CHECKING:
     from rue.config import Config
-    from rue.testing import TestDefinition
-    from rue.testing.execution.interfaces import Test
+    from rue.testing import LoadedTestDef
+    from rue.testing.execution.interfaces import ExecutableTest
     from rue.testing.models.result import TestExecution
     from rue.testing.models.run import Run, RunEnvironment
 
@@ -55,12 +55,12 @@ class ConsoleReporter(Reporter):
         self._stderr_capture = StderrCapture()
         self._captured_renderer = CapturedOutputRenderer()
         self._lock = asyncio.Lock()
-        self.items: list[TestDefinition] = []
+        self.items: list[LoadedTestDef] = []
         self.item_ids: set[int] = set()
-        self.items_by_file: dict[Path, list[TestDefinition]] = {}
+        self.items_by_file: dict[Path, list[LoadedTestDef]] = {}
         self.total_tests: int = 0
         self.completed_count: int = 0
-        self.tests: dict[int, Test] = {}
+        self.tests: dict[int, ExecutableTest] = {}
         self.executions: dict[int, TestExecution] = {}
         self.failures: list[TestExecution] = []
         self._status_counts: dict[TestStatus, int] = {}
@@ -160,7 +160,7 @@ class ConsoleReporter(Reporter):
         self.console.print("[yellow]No tests found.[/yellow]")
 
     async def on_collection_complete(
-        self, items: list[TestDefinition], run: Run
+        self, items: list[LoadedTestDef], run: Run
     ) -> None:
         if self._live is not None:
             self._live.stop()
@@ -197,11 +197,11 @@ class ConsoleReporter(Reporter):
             self._live.start()
         self._stderr_capture.start()
 
-    async def on_tests_ready(self, tests: list[Test]) -> None:
+    async def on_tests_ready(self, tests: list[ExecutableTest]) -> None:
         for test in tests:
             self.tests[id(test.definition)] = test
 
-    async def on_test_start(self, item: TestDefinition) -> None:
+    async def on_test_start(self, item: LoadedTestDef) -> None:
         if self._live is not None:
             self._live.update(self._build_live_display(), refresh=True)
 

@@ -9,7 +9,7 @@ from uuid import UUID
 from opentelemetry.trace import Span, StatusCode
 
 from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
-from rue.testing.models import TestDefinition, TestResult
+from rue.testing.models import LoadedTestDef, TestResult
 
 
 @dataclass(slots=True)
@@ -38,7 +38,7 @@ class TestTracer:
             return None
         return format(self.otel_root_span.get_span_context().trace_id, "032x")
 
-    def start_otel_root_span(self, definition: TestDefinition) -> Span | None:
+    def start_otel_root_span(self, definition: LoadedTestDef) -> Span | None:
         if not self.otel_enabled:
             return None
 

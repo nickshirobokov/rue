@@ -14,7 +14,7 @@ from rue.reports.base import Reporter
 if TYPE_CHECKING:
     from rue.config import Config
     from rue.telemetry.otel.runtime import OtelTraceSession
-    from rue.testing import TestDefinition
+    from rue.testing import LoadedTestDef
     from rue.testing.models.result import TestExecution
     from rue.testing.models.run import Run
     from rue.testing.tracing import TestTracer
@@ -39,7 +39,7 @@ class OtelReporter(Reporter):
     async def on_no_tests_found(self) -> None:
         return None
 
-    async def on_collection_complete(self, items: list[TestDefinition], run: Run) -> None:
+    async def on_collection_complete(self, items: list[LoadedTestDef], run: Run) -> None:
         _ = items, run
         self._prepared_run_ids.clear()
         return None

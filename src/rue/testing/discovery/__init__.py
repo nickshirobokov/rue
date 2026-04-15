@@ -10,14 +10,14 @@ from rue.testing.discovery.collector import (
     TestSpecCollector,
 )
 from rue.testing.models.spec import SetupFileRef, TestSpecCollection
-from rue.testing.models import TestDefinition
+from rue.testing.models import LoadedTestDef
 
 __all__ = [
     "KeywordMatcher",
     "RueImportSession",
     "RueModuleLoader",
     "SetupFileRef",
-    "TestDefinition",
+    "LoadedTestDef",
     "TestLoader",
     "TestSpecCollection",
     "TestSpecCollector",

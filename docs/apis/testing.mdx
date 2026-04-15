@@ -595,7 +595,7 @@ Execute discovered tests and return a `Run`.
 **Run methods:**
 ```python
 await runner.run(
-    items: list[TestDefinition] | None = None,
+    items: list[LoadedTestDef] | None = None,
     path: str | None = None,
     run_id: UUID | str | None = None,
 ) -> Run

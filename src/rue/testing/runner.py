@@ -28,11 +28,11 @@ from rue.storage import SQLiteStore
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.environment import capture_environment
 from rue.testing.execution import DefaultTestFactory
-from rue.testing.execution.interfaces import Test
+from rue.testing.execution.interfaces import ExecutableTest
 from rue.testing.models import (
     Run,
     TestExecution,
-    TestDefinition,
+    LoadedTestDef,
     TestResult,
     TestStatus,
 )
@@ -124,13 +124,13 @@ class Runner:
         await asyncio.gather(*[r.on_no_tests_found() for r in self.reporters])
 
     async def _notify_collection_complete(
-        self, items: list[TestDefinition], run: Run
+        self, items: list[LoadedTestDef], run: Run
     ) -> None:
         await asyncio.gather(
             *[r.on_collection_complete(items, run) for r in self.reporters]
         )
 
-    async def _notify_test_start(self, item: TestDefinition) -> None:
+    async def _notify_test_start(self, item: LoadedTestDef) -> None:
         await asyncio.gather(*[r.on_test_start(item) for r in self.reporters])
 
     async def _on_execution_complete(self, execution: TestExecution) -> None:
@@ -195,7 +195,7 @@ class Runner:
 
     async def run(
         self,
-        items: list[TestDefinition],
+        items: list[LoadedTestDef],
         *,
         run_id: UUID | str | None = None,
     ) -> Run:
@@ -292,7 +292,7 @@ class Runner:
     async def _execute_run(
         self,
         *,
-        items: list[TestDefinition],
+        items: list[LoadedTestDef],
         resolver: ResourceResolver,
         run: Run,
     ) -> None:
@@ -305,7 +305,7 @@ class Runner:
             on_complete=self._on_execution_complete,
             on_trace_collected=self._notify_trace_collected,
         )
-        self._built_tests: dict[int, Test] = {}
+        self._built_tests: dict[int, ExecutableTest] = {}
         for item in items:
             if not item.spec.definition_error:
                 self._built_tests[id(item)] = self._factory.build(item)
@@ -319,7 +319,7 @@ class Runner:
             await resolver.teardown()
 
     async def _execute_item(
-        self, item: TestDefinition, resolver: ResourceResolver
+        self, item: LoadedTestDef, resolver: ResourceResolver
     ) -> TestExecution:
         """Execute a single test with error handling."""
         if item.spec.definition_error:
@@ -355,7 +355,7 @@ class Runner:
         return execution
 
     async def _run_sequential(
-        self, items: list[TestDefinition], resolver: ResourceResolver, run: Run
+        self, items: list[LoadedTestDef], resolver: ResourceResolver, run: Run
     ) -> None:
         """Run tests sequentially."""
         failures = 0
@@ -376,14 +376,14 @@ class Runner:
                     break
 
     async def _run_concurrent(
-        self, items: list[TestDefinition], resolver: ResourceResolver, run: Run
+        self, items: list[LoadedTestDef], resolver: ResourceResolver, run: Run
     ) -> None:
         """Run tests concurrently."""
         state_lock = asyncio.Lock()
         failures = 0
         results: list[TestExecution | None] = [None] * len(items)
 
-        async def run_one(idx: int, item: TestDefinition) -> None:
+        async def run_one(idx: int, item: LoadedTestDef) -> None:
             nonlocal failures
 
             async with state_lock:

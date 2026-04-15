@@ -1,4 +1,4 @@
-"""Test definition model — process-bound pair of spec + live callable."""
+"""Loaded test definition — process-bound pair of spec + live callable."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from rue.testing.models.spec import TestSpec
 
 
 @dataclass
-class TestDefinition:
+class LoadedTestDef:
     """A discovered test function ready for execution in the current process.
 
     Pairs a serializable :class:`TestSpec` with the live callable resolved

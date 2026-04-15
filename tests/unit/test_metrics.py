@@ -19,7 +19,7 @@ from rue.context.runtime import (
 from rue.resources import ResourceIdentity, ResourceResolver, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
 from rue.resources.metrics.decorator import metric
-from rue.testing.models import TestDefinition
+from rue.testing.models import LoadedTestDef
 from tests.unit.factories import make_definition
 
 
@@ -36,8 +36,8 @@ def _make_item(
     module_path: Path | None = None,
     suffix: str | None = None,
     case_id: UUID | None = None,
-) -> TestDefinition:
-    """Create a minimal TestDefinition for testing."""
+) -> LoadedTestDef:
+    """Create a minimal LoadedTestDef for testing."""
     return make_definition(name, module_path=module_path or Path("test.py"), suffix=suffix, case_id=case_id)
 
 
