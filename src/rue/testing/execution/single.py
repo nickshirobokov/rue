@@ -52,7 +52,7 @@ class SingleTest(Test):
 
     def __post_init__(self) -> None:
         """Validate that this test has no modifiers."""
-        if self.definition.modifiers:
+        if self.definition.spec.modifiers:
             raise ValueError("SingleTest should not have modifiers")
 
     async def execute(self, resolver: ResourceResolver) -> TestExecution:
@@ -71,13 +71,13 @@ class SingleTest(Test):
                 await self.on_complete(execution)
             return execution
 
-        if self.definition.skip_reason:
+        if self.definition.spec.skip_reason:
             execution = TestExecution(
                 definition=self.definition,
                 result=TestResult(
                     status=TestStatus.SKIPPED,
                     duration_ms=0,
-                    error=Exception(self.definition.skip_reason),
+                    error=Exception(self.definition.spec.skip_reason),
                 ),
                 execution_id=uuid4(),
             )
@@ -155,7 +155,7 @@ class SingleTest(Test):
                     assertion_results=assertion_results,
                 )
             else:
-                expect_failure = self.definition.xfail_reason is not None
+                expect_failure = self.definition.spec.xfail_reason is not None
                 failed_assertions = [
                     ar for ar in assertion_results if not ar.passed
                 ]
@@ -187,10 +187,10 @@ class SingleTest(Test):
                         else:
                             result_error = error
                     # xfail test passed when it shouldn't have (strict mode)
-                    case (_, _, True) if self.definition.xfail_strict:
+                    case (_, _, True) if self.definition.spec.xfail_strict:
                         status = TestStatus.FAILED
                         result_error = AssertionError(
-                            self.definition.xfail_reason or "xfail test passed"
+                            self.definition.spec.xfail_reason or "xfail test passed"
                         )
                     # xfail test passed unexpectedly (non-strict)
                     case (_, _, True):
@@ -227,10 +227,10 @@ class SingleTest(Test):
         """Resolve test parameters from resources."""
         kwargs = dict(self.params)
         with (
-            bind(CURRENT_RESOURCE_CONSUMER, self.definition.name),
+            bind(CURRENT_RESOURCE_CONSUMER, self.definition.spec.name),
             bind(CURRENT_RESOURCE_CONSUMER_KIND, "test"),
         ):
-            for param in self.definition.params:
+            for param in self.definition.spec.params:
                 if param not in kwargs:
                     kwargs[param] = await resolver.resolve(param)
         return kwargs
@@ -240,12 +240,12 @@ class SingleTest(Test):
         fn = self.definition.fn
         instance = None
 
-        if self.definition.class_name:
-            cls = fn.__globals__.get(self.definition.class_name)
+        if self.definition.spec.class_name:
+            cls = fn.__globals__.get(self.definition.spec.class_name)
 
             if cls is None:
                 raise RuntimeError(
-                    f"Test class '{self.definition.class_name}' not found for test '{self.definition.name}'"
+                    f"Test class '{self.definition.spec.class_name}' not found for test '{self.definition.spec.name}'"
                 )
 
             instance = cls()
@@ -256,9 +256,9 @@ class SingleTest(Test):
             else partial(fn, **kwargs)
         )
 
-        if self.definition.is_async:
+        if self.definition.spec.is_async:
             await call()
-        elif self.definition.inline:
+        elif self.definition.spec.inline:
             call()
         else:
             await asyncio.to_thread(call)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 from uuid import UUID
 
@@ -40,7 +40,7 @@ class DefaultTestFactory:
     ) -> Test:
         """Recursively build the full test tree from definition."""
         params = params or {}
-        modifiers = definition.modifiers  # tuple[Modifier, ...]
+        modifiers = definition.spec.modifiers
 
         if not modifiers:
             return SingleTest(
@@ -62,7 +62,14 @@ class DefaultTestFactory:
         if isinstance(mod, IterateModifier):
             children = [
                 self.build(
-                    definition.with_spec(modifiers=rest_tuple, suffix=f"iterate={i}"),
+                    replace(
+                        definition,
+                        spec=replace(
+                            definition.spec,
+                            modifiers=rest_tuple,
+                            suffix=f"iterate={i}",
+                        ),
+                    ),
                     params,
                 )
                 for i in range(mod.count)
@@ -77,10 +84,14 @@ class DefaultTestFactory:
         if isinstance(mod, CasesIterateModifier):
             children = [
                 self.build(
-                    definition.with_spec(
-                        modifiers=rest_tuple,
-                        suffix=repr(c.metadata) if c.metadata else None,
-                        case_id=c.id,
+                    replace(
+                        definition,
+                        spec=replace(
+                            definition.spec,
+                            modifiers=rest_tuple,
+                            suffix=repr(c.metadata) if c.metadata else None,
+                            case_id=c.id,
+                        ),
                     ),
                     {**params, "case": c},
                 )
@@ -96,15 +107,19 @@ class DefaultTestFactory:
         if isinstance(mod, GroupsIterateModifier):
             children = [
                 self.build(
-                    definition.with_spec(
-                        modifiers=(
-                            CasesIterateModifier(
-                                cases=tuple(g.cases),
-                                min_passes=g.min_passes,
+                    replace(
+                        definition,
+                        spec=replace(
+                            definition.spec,
+                            modifiers=(
+                                CasesIterateModifier(
+                                    cases=tuple(g.cases),
+                                    min_passes=g.min_passes,
+                                ),
+                                *rest_tuple,
                             ),
-                            *rest_tuple,
+                            suffix=g.name,
                         ),
-                        suffix=g.name,
                     ),
                     {**params, "group": g},
                 )
@@ -120,7 +135,14 @@ class DefaultTestFactory:
         if isinstance(mod, ParamsIterateModifier):
             children = [
                 self.build(
-                    definition.with_spec(modifiers=rest_tuple, suffix=ps.suffix),
+                    replace(
+                        definition,
+                        spec=replace(
+                            definition.spec,
+                            modifiers=rest_tuple,
+                            suffix=ps.suffix,
+                        ),
+                    ),
                     {**params, **ps.values},
                 )
                 for ps in mod.parameter_sets

@@ -103,14 +103,14 @@ class CompactMode(OutputMode):
         return Group(*lines) if lines else Text("")
 
     def print_test(self, execution: TestExecution, state: ConsoleReporter) -> None:
-        item = execution.item
+        definition = execution.definition
         style = STATUS_STYLES[execution.result.status]
-        if state.current_module != item.module_path:
+        if state.current_module != definition.spec.module_path:
             if state.current_module is not None:
                 self.console.print()
-            rel = safe_relative_path(item.module_path)
+            rel = safe_relative_path(definition.spec.module_path)
             self.console.print(f" • {rel.as_posix()} ", end="")
-            state.current_module = item.module_path
+            state.current_module = definition.spec.module_path
         self.console.print(Text(style.symbol, style=style.color), end="")
 
     def print_completed_module(
@@ -140,8 +140,8 @@ class VerboseMode(OutputMode):
         return True
 
     def _get_modifier_suffix(self, execution: TestExecution) -> str:
-        if execution.definition.modifiers and execution.sub_executions:
-            return f"[{execution.definition.modifiers[0].display_name}]"
+        if execution.definition.spec.modifiers and execution.sub_executions:
+            return f"[{execution.definition.spec.modifiers[0].display_name}]"
         return ""
 
     def _render_test_line(
@@ -215,8 +215,8 @@ class VerboseMode(OutputMode):
             ex
             for item_id, ex in state.executions.items()
             if item_id not in state.item_ids
-            and ex.definition.name == item.name
-            and ex.definition.module_path == item.module_path
+            and ex.definition.spec.name == item.spec.name
+            and ex.definition.spec.module_path == item.spec.module_path
         ]
 
     def print_completed_module(
@@ -236,19 +236,19 @@ class VerboseMode(OutputMode):
         state.current_module = path
 
     def print_test(self, execution: TestExecution, state: ConsoleReporter) -> None:
-        item = execution.item
-        if state.current_module != item.module_path:
-            rel = safe_relative_path(item.module_path)
+        definition = execution.definition
+        if state.current_module != definition.spec.module_path:
+            rel = safe_relative_path(definition.spec.module_path)
             if state.current_module is not None:
                 self.console.print(Text(""))
             self.console.print(Text(f"• {rel.as_posix()}"))
-            state.current_module = item.module_path
+            state.current_module = definition.spec.module_path
 
         if execution.sub_executions:
             modifier_suffix = self._get_modifier_suffix(execution)
             self.console.print(
                 self._render_test_line(
-                    f"{item.full_name}{modifier_suffix}", execution.result
+                    f"{definition.spec.full_name}{modifier_suffix}", execution.result
                 )
             )
             for renderable in self._iter_sub_executions(
@@ -258,7 +258,9 @@ class VerboseMode(OutputMode):
         else:
             extra = execution.result.status_repr
             self.console.print(
-                self._render_test_line(item.full_name, execution.result, extra=extra)
+                self._render_test_line(
+                    definition.spec.full_name, execution.result, extra=extra
+                )
             )
 
     def _build_live_item_line(
@@ -267,14 +269,14 @@ class VerboseMode(OutputMode):
         execution: TestExecution | None,
     ) -> RenderableType:
         if execution is None:
-            text = Text.from_markup(f"{item.full_name} [dim]⋯ running[/dim]")
+            text = Text.from_markup(f"{item.spec.full_name} [dim]⋯ running[/dim]")
             return self._render_spinner_line(text)
         result = execution.result
         style = STATUS_STYLES[result.status]
         extra = result.status_repr
         modifier_suffix = self._get_modifier_suffix(execution)
         text = Text()
-        text.append(f"{item.full_name}{modifier_suffix} ")
+        text.append(f"{item.spec.full_name}{modifier_suffix} ")
         text.append(f"({result.duration_ms:.1f}ms) ", style="dim")
         if extra:
             text.append(f"{extra} ", style="dim")
@@ -298,7 +300,7 @@ class VerboseMode(OutputMode):
                 if child_exec.sub_executions:
                     self._add_live_sub_executions(node, child_exec.sub_executions, state)
             elif isinstance(child, CompositeTest):
-                pending = f"[{child.definition.suffix or 'case'}]"
+                pending = f"[{child.definition.spec.suffix or 'case'}]"
                 node = parent.add(
                     Text.from_markup(f"{escape(pending)} [dim]⋯[/dim]")
                 )

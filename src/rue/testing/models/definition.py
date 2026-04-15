@@ -4,12 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
-from uuid import UUID
 
-from rue.testing.models.modifiers import Modifier
-from rue.testing.models.spec import TestLocator, TestSpec
+from rue.testing.models.spec import TestSpec
 
 
 @dataclass
@@ -30,84 +27,3 @@ class TestDefinition:
     spec: TestSpec
     fn: Callable[..., Any]
     fail_fast: bool = field(default=False)
-
-    # ------------------------------------------------------------------
-    # Delegating properties — forward reads to spec so existing call
-    # sites (runner, single, factory, reports …) work unchanged.
-    # ------------------------------------------------------------------
-
-    @property
-    def name(self) -> str:
-        return self.spec.name
-
-    @property
-    def module_path(self) -> Path:
-        return self.spec.module_path
-
-    @property
-    def class_name(self) -> str | None:
-        return self.spec.class_name
-
-    @property
-    def is_async(self) -> bool:
-        return self.spec.is_async
-
-    @property
-    def params(self) -> tuple[str, ...]:
-        return self.spec.params
-
-    @property
-    def modifiers(self) -> tuple[Modifier, ...]:
-        return self.spec.modifiers
-
-    @property
-    def tags(self) -> frozenset[str]:
-        return self.spec.tags
-
-    @property
-    def skip_reason(self) -> str | None:
-        return self.spec.skip_reason
-
-    @property
-    def xfail_reason(self) -> str | None:
-        return self.spec.xfail_reason
-
-    @property
-    def xfail_strict(self) -> bool:
-        return self.spec.xfail_strict
-
-    @property
-    def definition_error(self) -> str | None:
-        return self.spec.definition_error
-
-    @property
-    def inline(self) -> bool:
-        return self.spec.inline
-
-    @property
-    def suffix(self) -> str | None:
-        return self.spec.suffix
-
-    @property
-    def case_id(self) -> UUID | None:
-        return self.spec.case_id
-
-    @property
-    def full_name(self) -> str:
-        return self.spec.full_name
-
-    @property
-    def label(self) -> str | None:
-        return self.spec.label
-
-    @property
-    def locator(self) -> TestLocator:
-        return self.spec.locator
-
-    def with_spec(self, **kwargs) -> TestDefinition:
-        """Return a new TestDefinition with selected spec fields replaced."""
-        return TestDefinition(
-            spec=self.spec.with_changes(**kwargs),
-            fn=self.fn,
-            fail_fast=self.fail_fast,
-        )

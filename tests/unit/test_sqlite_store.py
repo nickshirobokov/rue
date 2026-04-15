@@ -117,8 +117,8 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     assert loaded.result.failed == 1
     assert loaded.result.total == 1
     assert len(loaded.result.executions) == 1
-    assert loaded.result.executions[0].definition.suffix == "{'slug': 'sample'}"
-    assert loaded.result.executions[0].definition.case_id == case_id
+    assert loaded.result.executions[0].definition.spec.suffix == "{'slug': 'sample'}"
+    assert loaded.result.executions[0].definition.spec.case_id == case_id
     assert len(loaded.result.executions[0].sub_executions) == 1
     assert len(loaded.result.metric_results) == 1
     assert loaded.result.metric_results[0].metadata.identity.name == "latency_ms"

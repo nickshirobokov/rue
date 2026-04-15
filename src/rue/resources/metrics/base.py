@@ -165,18 +165,18 @@ class Metric:
         with self._values_lock:
             test_ctx = CURRENT_TEST.get()
             if test_ctx is not None:
-                if test_ctx.item.name:
-                    self.metadata.collected_from_tests.add(test_ctx.item.name)
-                if test_ctx.item.module_path:
+                if test_ctx.item.spec.name:
+                    self.metadata.collected_from_tests.add(test_ctx.item.spec.name)
+                if test_ctx.item.spec.module_path:
                     self.metadata.collected_from_modules.add(
-                        str(test_ctx.item.module_path)
+                        str(test_ctx.item.spec.module_path)
                     )
-                if test_ctx.item.case_id:
+                if test_ctx.item.spec.case_id:
                     self.metadata.collected_from_cases.add(
-                        str(test_ctx.item.case_id)
+                        str(test_ctx.item.spec.case_id)
                     )
-                elif test_ctx.item.suffix:
-                    self.metadata.collected_from_cases.add(test_ctx.item.suffix)
+                elif test_ctx.item.spec.suffix:
+                    self.metadata.collected_from_cases.add(test_ctx.item.spec.suffix)
 
             if self.metadata.first_item_recorded_at is None:
                 self.metadata.first_item_recorded_at = datetime.now(UTC)

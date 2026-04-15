@@ -56,7 +56,7 @@ class Runner:
         # collection = TestSpecCollector(
         #     include_tags, exclude_tags, keyword
         # ).build_spec_collection(resolved_paths)
-        # items = TestLoader(collection.suite_root).materialize_plan(collection)
+        # items = TestLoader(collection.suite_root).load_from_collection(collection)
         # result = await runner.run(items)
 
         # Concurrent execution with 5 workers (same item preparation as above)
@@ -307,7 +307,7 @@ class Runner:
         )
         self._built_tests: dict[int, Test] = {}
         for item in items:
-            if not item.definition_error:
+            if not item.spec.definition_error:
                 self._built_tests[id(item)] = self._factory.build(item)
         await self._notify_tests_ready(list(self._built_tests.values()))
         try:
@@ -322,13 +322,13 @@ class Runner:
         self, item: TestDefinition, resolver: ResourceResolver
     ) -> TestExecution:
         """Execute a single test with error handling."""
-        if item.definition_error:
+        if item.spec.definition_error:
             execution = TestExecution(
                 definition=item,
                 result=TestResult(
                     status=TestStatus.ERROR,
                     duration_ms=0,
-                    error=ValueError(item.definition_error),
+                    error=ValueError(item.spec.definition_error),
                 ),
                 execution_id=uuid4(),
             )

@@ -181,10 +181,7 @@ def test(
     )
 
     collection = collector.build_spec_collection(resolved_paths)
-    items = TestLoader(
-        collection.suite_root,
-        registry=runner.resource_registry,
-    ).materialize_plan(collection)
+    items = TestLoader(collection.suite_root).load_from_collection(collection)
 
     if runner_config.db_enabled and run_id and runner.run_id_exists(run_id):
         Console().print(f"[red]run_id '{run_id}' already exists[/red]")

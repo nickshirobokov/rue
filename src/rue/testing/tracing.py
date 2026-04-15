@@ -43,19 +43,19 @@ class TestTracer:
             return None
 
         scope = otel_runtime.start_as_current_span(
-            f"test.{definition.full_name}"
+            f"test.{definition.spec.full_name}"
         )
         span = scope.__enter__()
         self._otel_root_span_scope = scope
         self.otel_root_span = span
-        span.set_attribute("test.name", definition.name)
-        span.set_attribute("test.module", str(definition.module_path))
-        if definition.tags:
-            span.set_attribute("test.tags", list(definition.tags))
-        if definition.suffix:
-            span.set_attribute("test.suffix", definition.suffix)
-        if definition.case_id:
-            span.set_attribute("test.case_id", str(definition.case_id))
+        span.set_attribute("test.name", definition.spec.name)
+        span.set_attribute("test.module", str(definition.spec.module_path))
+        if definition.spec.tags:
+            span.set_attribute("test.tags", list(definition.spec.tags))
+        if definition.spec.suffix:
+            span.set_attribute("test.suffix", definition.spec.suffix)
+        if definition.spec.case_id:
+            span.set_attribute("test.case_id", str(definition.spec.case_id))
         return span
 
     def start_otel_trace(

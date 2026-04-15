@@ -942,7 +942,7 @@ class TestResourceHooks:
         def hook(value):
             nonlocal received_name
             if test_ctx := CURRENT_TEST.get():
-                received_name = test_ctx.item.name
+                received_name = test_ctx.item.spec.name
             else:
                 received_name = "unknown"
             return value

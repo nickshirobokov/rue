@@ -201,18 +201,19 @@ class SQLiteStore(Store):
             while stack:
                 execution, parent_id = stack.pop()
                 defn = execution.definition
+                spec = defn.spec
                 error = execution.result.error
                 error_msg = str(error) if error else None
                 error_tb = self._format_traceback(error) if error else None
-                test_name = getattr(defn, "name", str(defn))
-                module_path = getattr(defn, "module_path", None)
+                test_name = spec.name
+                module_path = spec.module_path
                 file_path = str(module_path) if module_path else None
-                class_name = getattr(defn, "class_name", None)
-                suffix = getattr(defn, "suffix", None)
-                tags: set[str] = getattr(defn, "tags", set())
-                skip_reason = getattr(defn, "skip_reason", None)
-                xfail_reason = getattr(defn, "xfail_reason", None)
-                case_id = getattr(defn, "case_id", None)
+                class_name = spec.class_name
+                suffix = spec.suffix
+                tags: set[str] = set(spec.tags)
+                skip_reason = spec.skip_reason
+                xfail_reason = spec.xfail_reason
+                case_id = spec.case_id
                 execution_id = str(execution.execution_id)
 
                 execution_rows.append(

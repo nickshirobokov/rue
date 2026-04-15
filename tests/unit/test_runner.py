@@ -96,21 +96,21 @@ class EventReporter(Reporter):
     async def on_test_start(self, item: TestDefinition) -> None:
         self._started_ids.add(id(item))
         elapsed = time.perf_counter() - self.start_time
-        self.event_times.append(("start", item.name, elapsed))
-        self.event_order.append(("start", item.name))
+        self.event_times.append(("start", item.spec.name, elapsed))
+        self.event_order.append(("start", item.spec.name))
 
     async def on_execution_complete(self, execution: TestExecution) -> None:
         elapsed = time.perf_counter() - self.start_time
-        if id(execution.item) in self._started_ids:
-            self.event_times.append(("complete", execution.item.name, elapsed))
-            self.event_order.append(("complete", execution.item.name))
+        if id(execution.definition) in self._started_ids:
+            self.event_times.append(("complete", execution.definition.spec.name, elapsed))
+            self.event_order.append(("complete", execution.definition.spec.name))
         else:
-            label = execution.item.suffix or (
-                str(execution.item.case_id)
-                if execution.item.case_id
+            label = execution.definition.spec.suffix or (
+                str(execution.definition.spec.case_id)
+                if execution.definition.spec.case_id
                 else ""
             )
-            self.subtest_event_times.append((execution.item.name, label, elapsed))
+            self.subtest_event_times.append((execution.definition.spec.name, label, elapsed))
 
     async def on_run_complete(self, _rue_run) -> None:
         self.run_complete_elapsed = time.perf_counter() - self.start_time
@@ -569,14 +569,14 @@ class TestOpenTelemetry:
             payload = payloads_by_execution[execution.execution_id]
             expected_child = (
                 "first_step"
-                if execution.item.name == "test_first"
+                if execution.definition.spec.name == "test_first"
                 else "second_step"
             )
             assert {span["name"] for span in payload["spans"]} == {
-                f"test.{execution.item.full_name}",
+                f"test.{execution.definition.spec.full_name}",
                 (
                     "sut.first_agent.__call__"
-                    if execution.item.name == "test_first"
+                    if execution.definition.spec.name == "test_first"
                     else "sut.second_agent.__call__"
                 ),
                 expected_child,
@@ -994,11 +994,11 @@ class TestConcurrency:
         completed = {
             name for kind, name in reporter.event_order if kind == "complete"
         }
-        assert started == completed == {item.name for item in items}
+        assert started == completed == {item.spec.name for item in items}
 
         for item in items:
-            start_idx = reporter.event_order.index(("start", item.name))
-            complete_idx = reporter.event_order.index(("complete", item.name))
+            start_idx = reporter.event_order.index(("start", item.spec.name))
+            complete_idx = reporter.event_order.index(("complete", item.spec.name))
             assert start_idx < complete_idx
 
     @pytest.mark.asyncio
@@ -1059,14 +1059,14 @@ class TestConcurrency:
         parent_complete_elapsed = next(
             elapsed
             for kind, name, elapsed in reporter.event_times
-            if kind == "complete" and name == item.name
+            if kind == "complete" and name == item.spec.name
         )
         assert max(
             elapsed
             for _parent, _suffix, elapsed in reporter.subtest_event_times
         ) <= (parent_complete_elapsed)
         execution = test_run.result.executions[0]
-        assert [sub.item.suffix for sub in execution.sub_executions] == [
+        assert [sub.definition.spec.suffix for sub in execution.sub_executions] == [
             "slow",
             "fast",
             "mid",
@@ -1199,7 +1199,7 @@ class TestResultOrdering:
         result = await runner.run(items=items)
 
         # Results should be in discovery order, not completion order
-        names = [r.item.name for r in result.result.executions]
+        names = [r.definition.spec.name for r in result.result.executions]
         assert names == ["test_0", "test_1", "test_2"]
 
 

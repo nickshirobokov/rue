@@ -73,7 +73,7 @@ class ResourceResolver:
         test_ctx = CURRENT_TEST.get()
         if test_ctx is None:
             return None
-        return test_ctx.item.module_path.resolve()
+        return test_ctx.item.spec.module_path.resolve()
 
     async def _apply_on_injection(
         self,

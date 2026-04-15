@@ -4,7 +4,7 @@ from textwrap import dedent
 
 import pytest
 
-from rue.resources import registry
+from rue.resources import Scope, registry
 from rue.testing.discovery import KeywordMatcher, TestLoader, TestSpecCollector
 from rue.testing.models import (
     ParameterSet,
@@ -31,7 +31,7 @@ def write_files(root, files):
 
 def materialize(path):
     plan = TestSpecCollector((), (), None).build_spec_collection((path,))
-    return TestLoader(plan.suite_root, registry=registry).materialize_plan(plan)
+    return TestLoader(plan.suite_root).load_from_collection(plan)
 
 
 def test_selector_filters_by_tags_and_keyword():
@@ -166,12 +166,12 @@ def test_selector_skips_unselected_modules_before_import(tmp_path):
     )
 
     plan = TestSpecCollector([], [], "good").build_spec_collection([str(tmp_path)])
-    items = TestLoader(plan.suite_root, registry=registry).materialize_plan(plan)
+    items = TestLoader(plan.suite_root).load_from_collection(plan)
 
-    assert [item.name for item in items] == ["test_good"]
+    assert [item.spec.name for item in items] == ["test_good"]
 
 
-def test_materialize_plan_skips_unselected_invalid_tests_in_same_module(
+def test_load_from_collection_skips_unselected_invalid_tests_in_same_module(
     tmp_path,
 ):
     write_files(
@@ -192,12 +192,12 @@ def test_materialize_plan_skips_unselected_invalid_tests_in_same_module(
     )
 
     plan = TestSpecCollector([], [], "good").build_spec_collection([str(tmp_path)])
-    items = TestLoader(plan.suite_root, registry=registry).materialize_plan(plan)
+    items = TestLoader(plan.suite_root).load_from_collection(plan)
 
-    assert [item.name for item in items] == ["test_good"]
+    assert [item.spec.name for item in items] == ["test_good"]
 
 
-def test_materialize_plan_enriches_runtime_metadata(tmp_path):
+def test_load_from_collection_enriches_runtime_metadata(tmp_path):
     write_files(
         tmp_path,
         {
@@ -230,21 +230,21 @@ def test_materialize_plan_enriches_runtime_metadata(tmp_path):
     assert planned_specs["test_expected_failure"].xfail_reason is None
     assert planned_specs["test_bad"].definition_error is None
 
-    items = TestLoader(plan.suite_root, registry=registry).materialize_plan(plan)
-    items_by_name = {item.name: item for item in items}
-    [modifier] = items_by_name["test_inline_skip"].modifiers
+    items = TestLoader(plan.suite_root).load_from_collection(plan)
+    items_by_name = {item.spec.name: item for item in items}
+    [modifier] = items_by_name["test_inline_skip"].spec.modifiers
 
-    assert items_by_name["test_inline_skip"].params == ("value",)
-    assert items_by_name["test_inline_skip"].skip_reason == "skip me"
-    assert items_by_name["test_inline_skip"].inline is True
+    assert items_by_name["test_inline_skip"].spec.params == ("value",)
+    assert items_by_name["test_inline_skip"].spec.skip_reason == "skip me"
+    assert items_by_name["test_inline_skip"].spec.inline is True
     assert isinstance(modifier, ParamsIterateModifier)
     assert modifier.parameter_sets == (
         ParameterSet(values={"value": 1}, suffix="one"),
     )
-    assert items_by_name["test_expected_failure"].xfail_reason == "known"
-    assert items_by_name["test_expected_failure"].xfail_strict is True
+    assert items_by_name["test_expected_failure"].spec.xfail_reason == "known"
+    assert items_by_name["test_expected_failure"].spec.xfail_strict is True
     assert (
-        items_by_name["test_bad"].definition_error
+        items_by_name["test_bad"].spec.definition_error
         == "iterate.params() requires at least one value set"
     )
 
@@ -377,10 +377,10 @@ def test_materialize_collects_class_based_and_method_marked_tests(tmp_path):
         },
     )
 
-    assert [item.full_name for item in materialize(tmp_path)] == [
-        "test_class_sample::HelperSuite::extra",
-        "test_class_sample::MathChecks::helper",
+    assert [item.spec.full_name for item in materialize(tmp_path)] == [
         "test_class_sample::MathChecks::test_value",
+        "test_class_sample::MathChecks::helper",
+        "test_class_sample::HelperSuite::extra",
     ]
 
 
@@ -426,9 +426,9 @@ def test_materialize_uses_single_session_for_selected_modules(
     )
 
     plan = TestSpecCollector([], [], "good").build_spec_collection([str(tmp_path)])
-    items = TestLoader(plan.suite_root, registry=registry).materialize_plan(plan)
+    items = TestLoader(plan.suite_root).load_from_collection(plan)
 
-    assert [item.name for item in items] == ["test_good", "test_good_two"]
+    assert [item.spec.name for item in items] == ["test_good", "test_good_two"]
     assert builtins.confrue_counter == 1
 
 
@@ -499,3 +499,29 @@ def test_materialize_uses_deterministic_module_names(tmp_path):
 
     assert first_item.fn.__module__ == second_item.fn.__module__
     assert "rue_discovery" in first_item.fn.__module__
+
+
+def test_materialize_rewrites_pytest_fixture_aliases_to_resources(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "test_sample.py": """
+                import pytest as pt
+                import rue
+
+                @pt.fixture(scope="module")
+                def greeting():
+                    return "hello"
+
+                @rue.test
+                def test_uses_fixture(greeting):
+                    assert greeting == "hello"
+            """
+        },
+    )
+
+    [item] = materialize(tmp_path)
+
+    assert item.spec.name == "test_uses_fixture"
+    assert registry.get("greeting") is not None
+    assert registry.get("greeting").identity.scope == Scope.SUITE

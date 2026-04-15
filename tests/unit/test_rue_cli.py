@@ -89,8 +89,8 @@ def test_run_tests_returns_2_when_run_id_already_exists(
 
     monkeypatch.setattr("rue.cli.TestSpecCollector.build_spec_collection", _build)
     monkeypatch.setattr(
-        "rue.cli.TestLoader.materialize_plan",
-        lambda self, plan: [make_item("test_ok", set())],
+        "rue.cli.TestLoader.load_from_collection",
+        lambda self, collection: [make_item("test_ok", set())],
     )
     monkeypatch.setattr("rue.cli.Runner.run", _fail_run)
 
@@ -114,8 +114,8 @@ def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(monkeypatch):
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.TestLoader.materialize_plan",
-        lambda self, plan: [make_item("test_ok", set())],
+        "rue.cli.TestLoader.load_from_collection",
+        lambda self, collection: [make_item("test_ok", set())],
     )
 
     result = runner.invoke(app, ["test", "--run-id", str(uuid4()), "--no-db"])

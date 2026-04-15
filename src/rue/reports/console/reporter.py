@@ -169,7 +169,7 @@ class ConsoleReporter(Reporter):
         self.item_ids = {id(item) for item in items}
         self.items_by_file = {}
         for item in items:
-            self.items_by_file.setdefault(item.module_path, []).append(item)
+            self.items_by_file.setdefault(item.spec.module_path, []).append(item)
         self.total_tests = len(items)
         self.completed_count = 0
         self.tests = {}
@@ -218,7 +218,7 @@ class ConsoleReporter(Reporter):
                     self.failures.append(execution)
 
             if self._live is not None:
-                module_path = execution.definition.module_path
+                module_path = execution.definition.spec.module_path
                 if (
                     module_path not in self.completed_modules
                     and all(id(i) in self.executions for i in self.items_by_file.get(module_path, []))

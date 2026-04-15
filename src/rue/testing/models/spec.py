@@ -10,12 +10,15 @@ ordered list of :class:`TestSpec` objects produced during discovery.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+import inspect
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
 if TYPE_CHECKING:
+    from rue.testing.decorators.tag import TagData
     from rue.testing.models.modifiers import Modifier
 
 
@@ -37,14 +40,14 @@ class TestLocator:
         return f"{self.module_path.stem}::{self.function_name}"
 
 
-@dataclass(frozen=True)
+@dataclass
 class TestSpec:
     """Fully serializable test specification produced during discovery.
 
     Contains every piece of metadata needed to understand and schedule a
     test, but holds no live Python objects (no callables, no module
     references). A worker process deserializes this and passes it to
-    ``TestLoader.materialize()`` to obtain a runnable ``TestDefinition``.
+    ``TestLoader.load_definition()`` to obtain a runnable ``TestDefinition``.
     """
 
     locator: TestLocator
@@ -60,7 +63,7 @@ class TestSpec:
     suffix: str | None = None
     case_id: UUID | None = None
 
-    # --- Convenience properties mirroring TestDefinition's interface ---
+    # --- Convenience accessors derived from locator / case fields ---
 
     @property
     def name(self) -> str:
@@ -86,9 +89,20 @@ class TestSpec:
             return str(self.case_id)
         return None
 
-    def with_changes(self, **kwargs) -> TestSpec:
-        """Return a new TestSpec with selected fields replaced."""
-        return replace(self, **kwargs)
+    def update_tags(self, data: TagData) -> None:
+        self.tags = frozenset(data.tags)
+        self.skip_reason = data.skip_reason
+        self.xfail_reason = data.xfail_reason
+        self.xfail_strict = data.xfail_strict
+        self.inline = data.inline
+
+    def get_execution_from_fn(self, fn: Callable[..., Any]) -> None:
+        self.is_async = inspect.iscoroutinefunction(fn)
+        self.params = tuple(
+            name for name in inspect.signature(fn).parameters if name != "self"
+        )
+        self.modifiers = tuple(reversed(getattr(fn, "__rue_modifiers__", ())))
+        self.definition_error = getattr(fn, "__rue_definition_error__", None)
 
 
 @dataclass(frozen=True)

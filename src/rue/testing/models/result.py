@@ -68,11 +68,6 @@ class TestExecution:
     sub_executions: list[TestExecution] = field(default_factory=list)
 
     @property
-    def item(self) -> TestDefinition:
-        """The test item that was executed."""
-        return self.definition
-
-    @property
     def status(self) -> TestStatus:
         """Convenience access to result status."""
         return self.result.status
@@ -84,7 +79,7 @@ class TestExecution:
 
     @property
     def label(self) -> str:
-        dlabel = self.definition.label
+        dlabel = self.definition.spec.label
         if dlabel:
             return dlabel
         if self.execution_id:

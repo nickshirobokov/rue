@@ -428,7 +428,7 @@ class JsonFileReporter(Reporter):
     async def on_test_complete(self, execution: TestExecution) -> None:
         # Record each test result
         self.results.append({
-            "name": execution.item.full_name,
+            "name": execution.definition.spec.full_name,
             "status": execution.status.value,
             "duration_ms": execution.result.duration_ms,
             "passed": execution.status.value == "passed"

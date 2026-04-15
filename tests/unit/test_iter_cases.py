@@ -64,10 +64,10 @@ def test_runner_iterate_cases_preserves_case_identity_and_metadata(null_reporter
 
     assert run_result.result.passed == 1
     assert seen_cases == cases
-    assert [sub.definition.suffix for sub in execution.sub_executions] == [
+    assert [sub.definition.spec.suffix for sub in execution.sub_executions] == [
         repr(case.metadata) for case in cases
     ]
-    assert [sub.definition.case_id for sub in execution.sub_executions] == [
+    assert [sub.definition.spec.case_id for sub in execution.sub_executions] == [
         case.id for case in cases
     ]
 
@@ -174,7 +174,7 @@ def test_runner_iterate_groups_injects_group_and_case_and_nests(
 
     assert run_result.result.passed == 1
     assert len(seen_pairs) == 3
-    assert [sub.definition.suffix for sub in execution.sub_executions] == [
+    assert [sub.definition.spec.suffix for sub in execution.sub_executions] == [
         "alpha",
         "beta",
     ]
