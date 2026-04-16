@@ -9,9 +9,9 @@ from typing import Any
 from uuid import UUID
 
 from rue.config import Config
-from rue.testing.execution.composite import CompositeTest
 from rue.testing.execution.interfaces import ExecutableTest
-from rue.testing.execution.single import SingleTest
+from rue.testing.execution.local.composite import LocalCompositeTest
+from rue.testing.execution.local.single import LocalSingleTest
 from rue.testing.models import (
     CasesIterateModifier,
     GroupsIterateModifier,
@@ -43,7 +43,7 @@ class DefaultTestFactory:
         modifiers = definition.spec.modifiers
 
         if not modifiers:
-            return SingleTest(
+            return LocalSingleTest(
                 definition=definition,
                 params=params,
                 tracer=TestTracer(
@@ -74,7 +74,7 @@ class DefaultTestFactory:
                 )
                 for i in range(mod.count)
             ]
-            return CompositeTest(
+            return LocalCompositeTest(
                 definition=definition,
                 min_passes=mod.min_passes,
                 children=children,
@@ -97,7 +97,7 @@ class DefaultTestFactory:
                 )
                 for c in mod.cases
             ]
-            return CompositeTest(
+            return LocalCompositeTest(
                 definition=definition,
                 min_passes=mod.min_passes,
                 children=children,
@@ -125,7 +125,7 @@ class DefaultTestFactory:
                 )
                 for g in mod.groups
             ]
-            return CompositeTest(
+            return LocalCompositeTest(
                 definition=definition,
                 min_passes=mod.min_passes,
                 children=children,
@@ -147,7 +147,7 @@ class DefaultTestFactory:
                 )
                 for ps in mod.parameter_sets
             ]
-            return CompositeTest(
+            return LocalCompositeTest(
                 definition=definition,
                 min_passes=mod.min_passes,
                 children=children,

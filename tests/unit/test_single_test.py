@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from rue.resources import ResourceResolver, registry
-from rue.testing.execution.single import SingleTest
+from rue.testing.execution.local.single import LocalSingleTest
 from rue.testing.models import IterateModifier, LoadedTestDef, TestStatus
 from rue.testing.tracing import TestTracer
 from tests.unit.factories import make_definition
@@ -29,7 +29,7 @@ async def test_single_test_executes_without_runner():
     def test_body():
         called.append("called")
 
-    test = SingleTest(
+    test = LocalSingleTest(
         definition=make_item(test_body),
         params={},
         tracer=make_tracer(),
@@ -43,9 +43,9 @@ async def test_single_test_executes_without_runner():
 
 def test_single_test_rejects_modifiers():
     with pytest.raises(
-        ValueError, match="SingleTest should not have modifiers"
+        ValueError, match="LocalSingleTest should not have modifiers"
     ):
-        SingleTest(
+        LocalSingleTest(
             definition=make_item(
                 modifiers=[IterateModifier(count=2, min_passes=2)]
             ),

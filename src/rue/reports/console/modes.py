@@ -12,7 +12,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
-from rue.testing.execution.composite import CompositeTest
+from rue.testing.execution.local.composite import LocalCompositeTest
 from rue.testing.models import TestStatus
 
 from .shared import STATUS_STYLES, safe_relative_path
@@ -198,7 +198,7 @@ class VerboseMode(OutputMode):
                 branch = tree.add(self._build_live_item_line(item, execution))
                 if execution is not None and execution.sub_executions:
                     self._add_live_sub_executions(branch, execution.sub_executions, state)
-                elif isinstance(test, CompositeTest) and execution is None:
+                elif isinstance(test, LocalCompositeTest) and execution is None:
                     self._add_live_composite_children(branch, test, state)
                 elif execution is None:
                     early = self._early_sub_executions(item, state)
@@ -284,7 +284,7 @@ class VerboseMode(OutputMode):
         return text
 
     def _add_live_composite_children(
-        self, parent: Tree, test: CompositeTest, state: ConsoleReporter
+        self, parent: Tree, test: LocalCompositeTest, state: ConsoleReporter
     ) -> None:
         for child in test.children:
             child_exec = state.executions.get(id(child.definition))
@@ -299,7 +299,7 @@ class VerboseMode(OutputMode):
                 node = parent.add(text)
                 if child_exec.sub_executions:
                     self._add_live_sub_executions(node, child_exec.sub_executions, state)
-            elif isinstance(child, CompositeTest):
+            elif isinstance(child, LocalCompositeTest):
                 pending = f"[{child.definition.spec.suffix or 'case'}]"
                 node = parent.add(
                     Text.from_markup(f"{escape(pending)} [dim]⋯[/dim]")

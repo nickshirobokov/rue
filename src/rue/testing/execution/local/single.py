@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class SingleTest(ExecutableTest):
+class LocalSingleTest(ExecutableTest):
     """Executes a single test directly."""
 
     definition: LoadedTestDef
@@ -53,7 +53,7 @@ class SingleTest(ExecutableTest):
     def __post_init__(self) -> None:
         """Validate that this test has no modifiers."""
         if self.definition.spec.modifiers:
-            raise ValueError("SingleTest should not have modifiers")
+            raise ValueError("LocalSingleTest should not have modifiers")
 
     async def execute(self, resolver: ResourceResolver) -> TestExecution:
         """Execute the test and return result."""

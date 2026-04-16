@@ -13,7 +13,7 @@ from rue.resources.resolver import ResourceResolver
 
 
 @dataclass
-class CompositeTest(ExecutableTest):
+class LocalCompositeTest(ExecutableTest):
     """Executes pre-built child tests concurrently and aggregates results."""
 
     definition: LoadedTestDef
