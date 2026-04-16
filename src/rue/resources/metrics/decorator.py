@@ -15,7 +15,7 @@ from rue.context.runtime import (
     CURRENT_RESOURCE_RESOLVER,
     bind,
 )
-from rue.resources.models import ResourceIdentity, Scope
+from rue.resources.models import ResourceSpec, Scope
 from rue.resources.registry import resource
 
 from .base import CalculatedValue, Metric, MetricResult
@@ -63,7 +63,7 @@ def metric(
     def on_resolve_hook(m: Metric) -> Metric:
         scope_val = scope if isinstance(scope, Scope) else Scope(scope)
         ident = m.metadata.identity
-        m.metadata.identity = ResourceIdentity(
+        m.metadata.identity = ResourceSpec(
             name=name,
             scope=scope_val,
             provider_path=ident.provider_path,
@@ -113,13 +113,13 @@ def metric(
                                 metadata,
                                 identity=replace(
                                     ident,
-                                    provider_path=provider.identity.provider_path,
-                                    provider_dir=provider.identity.provider_dir,
+                                    provider_path=provider.spec.provider_path,
+                                    provider_dir=provider.spec.provider_dir,
                                 ),
                             )
                         dependencies = (
                             resolver.direct_dependencies_for(
-                                provider.identity
+                                provider.spec
                             )
                             if provider is not None and resolver is not None
                             else []
@@ -171,13 +171,13 @@ def metric(
                                 metadata,
                                 identity=replace(
                                     ident,
-                                    provider_path=provider.identity.provider_path,
-                                    provider_dir=provider.identity.provider_dir,
+                                    provider_path=provider.spec.provider_path,
+                                    provider_dir=provider.spec.provider_dir,
                                 ),
                             )
                         dependencies = (
                             resolver.direct_dependencies_for(
-                                provider.identity
+                                provider.spec
                             )
                             if provider is not None and resolver is not None
                             else []

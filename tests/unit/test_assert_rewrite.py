@@ -10,7 +10,7 @@ from rue.context.collectors import (
     CURRENT_METRIC_RESULTS,
 )
 from rue.context.runtime import CURRENT_TEST, TestContext, bind
-from rue.resources import ResourceIdentity, ResourceResolver, Scope, registry
+from rue.resources import ResourceSpec, ResourceResolver, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
 from tests.unit.factories import materialize_tests
 
@@ -21,7 +21,7 @@ def test_rewritten_assert_collects_predicate_results(tmp_path):
     mod_path.write_text(
         """
 from rue import test
-from rue.resources import ResourceIdentity, Scope
+from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.base import Metric, MetricMetadata
 from rue.predicates import predicate
 
@@ -31,7 +31,7 @@ def equals(actual, reference):
 
 @test
 def test_sample():
-    m = Metric(metadata=MetricMetadata(identity=ResourceIdentity(name="m", scope=Scope.PROCESS)))
+    m = Metric(metadata=MetricMetadata(identity=ResourceSpec(name="m", scope=Scope.PROCESS)))
     m.add_record([1, 2, 3])
     assert equals(1, 1) and (m.len == 3)
 """.lstrip()
@@ -121,7 +121,7 @@ def test_metric_capture_multi():
         ctx = TestContext(item=item)
         m = Metric(
             metadata=MetricMetadata(
-                identity=ResourceIdentity(
+                identity=ResourceSpec(
                     name="assert_outcomes", scope=Scope.PROCESS
                 )
             )
@@ -152,12 +152,12 @@ async def test_rewritten_asserts_inside_metric_functions_are_collected(
     mod_path.write_text(
         """
 import rue
-from rue.resources import ResourceIdentity, Scope
+from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.base import Metric, MetricMetadata
 
 @rue.resource.metric
 def my_metric():
-    m = Metric(metadata=MetricMetadata(identity=ResourceIdentity(name="m", scope=Scope.PROCESS)))
+    m = Metric(metadata=MetricMetadata(identity=ResourceSpec(name="m", scope=Scope.PROCESS)))
     yield m
     assert False, "nope"
 

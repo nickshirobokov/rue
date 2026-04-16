@@ -100,8 +100,8 @@ class TestResourceDecorator:
 
         defn = registry.get(name)
         assert defn is not None
-        assert defn.identity.name == name
-        assert defn.identity.scope == Scope.TEST
+        assert defn.spec.name == name
+        assert defn.spec.scope == Scope.TEST
         assert defn.is_async == expected_flags["is_async"]
         assert defn.is_generator == expected_flags["is_generator"]
         assert defn.is_async_generator == expected_flags["is_async_generator"]
@@ -175,7 +175,7 @@ class TestResourceDecorator:
 
         defn = registry.get(name)
         assert defn is not None
-        assert defn.identity.scope == expected_scope
+        assert defn.spec.scope == expected_scope
 
     def test_detects_dependencies(self):
         @resource
@@ -188,7 +188,7 @@ class TestResourceDecorator:
 
         defn = registry.get("dependent")
         assert defn is not None
-        assert defn.dependencies == ["base", "other"]
+        assert defn.spec.dependencies == ("base", "other")
 
     def test_ignores_self_and_cls_in_dependencies(self):
         @resource
@@ -197,7 +197,7 @@ class TestResourceDecorator:
 
         defn = registry.get("dependent")
         assert defn is not None
-        assert defn.dependencies == ["base", "other"]
+        assert defn.spec.dependencies == ("base", "other")
 
 
 class TestResourceRegistry:
@@ -229,8 +229,8 @@ class TestResourceRegistry:
 
         definition = custom_registry.get("shared")
         assert definition is not None
-        assert definition.identity.scope == Scope.PROCESS
-        assert definition.identity.origin_dir == child.resolve()
+        assert definition.spec.scope == Scope.PROCESS
+        assert definition.spec.origin_dir == child.resolve()
 
     def test_select_picks_nearest_ancestor_process_definition(self, tmp_path):
         custom_registry = ResourceRegistry()
@@ -267,8 +267,8 @@ class TestResourceRegistry:
             sibling / "rue_sibling.py",
         )
 
-        assert child_selected.definition.identity.origin_dir == child.resolve()
-        assert sibling_selected.definition.identity.origin_dir == root.resolve()
+        assert child_selected.definition.spec.origin_dir == child.resolve()
+        assert sibling_selected.definition.spec.origin_dir == root.resolve()
 
     def test_non_process_definition_wins_over_process_definition(
         self, tmp_path
@@ -293,9 +293,9 @@ class TestResourceRegistry:
 
         selected = custom_registry.select("shared", root / "rue_test.py")
 
-        assert selected.definition.identity.scope == Scope.MODULE
-        assert selected.definition.identity.name == "shared"
-        assert selected.definition.identity.provider_dir is not None
+        assert selected.definition.spec.scope == Scope.MODULE
+        assert selected.definition.spec.name == "shared"
+        assert selected.definition.spec.provider_dir is not None
 
     def test_reset_restores_builtin_resources(self):
         custom_registry = ResourceRegistry()
@@ -415,7 +415,7 @@ class TestResourceResolver:
                 [
                     identity.name
                     for identity in resolver.direct_dependencies_for(
-                        provider.identity
+                        provider.spec
                     )
                 ]
             )
@@ -431,7 +431,7 @@ class TestResourceResolver:
                 [
                     identity.name
                     for identity in resolver.direct_dependencies_for(
-                        provider.identity
+                        provider.spec
                     )
                 ]
             )

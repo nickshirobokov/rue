@@ -11,7 +11,7 @@ from uuid import UUID
 
 from rue.assertions.base import AssertionResult
 from rue.predicates.models import PredicateResult
-from rue.resources import ResourceIdentity, Scope
+from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.base import (
     CalculatedValue,
     MetricMetadata,
@@ -403,7 +403,7 @@ class SQLiteStore(Store):
         return json.dumps(list(items)) if items else None
 
     def _to_json_resource_identities(
-        self, items: list[ResourceIdentity]
+        self, items: list[ResourceSpec]
     ) -> str | None:
         if not items:
             return None
@@ -598,7 +598,7 @@ class SQLiteStore(Store):
 
         first_at = row["first_recorded_at"]
         last_at = row["last_recorded_at"]
-        identity = ResourceIdentity(
+        identity = ResourceSpec(
             name=row["name"],
             scope=scope,
             provider_path=row["provider_path"]
@@ -650,11 +650,11 @@ class SQLiteStore(Store):
 
     def _from_json_resource_identities(
         self, json_str: str | None
-    ) -> list[ResourceIdentity]:
+    ) -> list[ResourceSpec]:
         if not json_str:
             return []
         return [
-            ResourceIdentity(
+            ResourceSpec(
                 name=item["name"],
                 scope=Scope(item["scope"]),
                 provider_path=item.get("provider_path"),

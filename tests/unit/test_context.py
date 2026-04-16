@@ -14,7 +14,7 @@ from rue.context.runtime import (
     TestContext as Ctx,
     bind,
 )
-from rue.resources import ResourceIdentity, Scope, registry
+from rue.resources import ResourceSpec, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata
 from rue.testing.models import LoadedTestDef
 from tests.unit.factories import make_definition
@@ -72,12 +72,12 @@ def test_metrics_records_assertion_passed_and_reads_test_context_for_metadata():
 
     m1 = Metric(
         metadata=MetricMetadata(
-            identity=ResourceIdentity(name="m1", scope=Scope.PROCESS)
+            identity=ResourceSpec(name="m1", scope=Scope.PROCESS)
         )
     )
     m2 = Metric(
         metadata=MetricMetadata(
-            identity=ResourceIdentity(name="m2", scope=Scope.PROCESS)
+            identity=ResourceSpec(name="m2", scope=Scope.PROCESS)
         )
     )
 

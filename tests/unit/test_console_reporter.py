@@ -10,7 +10,7 @@ from rich.console import Console
 from rue.assertions.base import AssertionRepr, AssertionResult
 from rue.reports.console import ConsoleReporter
 from rue.reports.console.metrics import MetricGroup
-from rue.resources import ResourceIdentity, Scope
+from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.base import (
     MetricMetadata,
     MetricResult,
@@ -116,11 +116,11 @@ def make_metric_result(
     modules: set[str] | None = None,
     provider_path: str | None = None,
     provider_dir: str | None = None,
-    depends_on: list[ResourceIdentity] | None = None,
+    depends_on: list[ResourceSpec] | None = None,
     execution_id: UUID | None = None,
 ) -> MetricResult:
     metadata = MetricMetadata(
-        identity=ResourceIdentity(
+        identity=ResourceSpec(
             name=name,
             scope=scope,
             provider_path=provider_path,
@@ -859,7 +859,7 @@ def test_metrics_overview_assertion_summary_substitutes_resolved_value_with_dim_
         passed=True,
     )
     group = MetricGroup(
-        key=ResourceIdentity(name="accuracy", scope=Scope.PROCESS),
+        key=ResourceSpec(name="accuracy", scope=Scope.PROCESS),
         metrics=[],
     )
     group.metrics = [

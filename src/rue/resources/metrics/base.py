@@ -22,7 +22,7 @@ from pydantic import validate_call
 
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.runtime import CURRENT_TEST
-from rue.resources.models import ResourceIdentity, Scope
+from rue.resources.models import ResourceSpec, Scope
 
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ class MetricMetadata:
         Timestamp of the most recently recorded value.
     first_item_recorded_at : datetime, optional
         Timestamp of the first recorded value.
-    identity : ResourceIdentity
+    identity : ResourceSpec
         Name, scope, and provider origin for the metric.
     collected_from_tests : set of str
         Names of tests that contributed to this metric.
@@ -64,7 +64,7 @@ class MetricMetadata:
 
     last_item_recorded_at: datetime | None = None
     first_item_recorded_at: datetime | None = None
-    identity: ResourceIdentity = field(default=ResourceIdentity(name="", scope=Scope.PROCESS))
+    identity: ResourceSpec = field(default=ResourceSpec(name="", scope=Scope.PROCESS))
     collected_from_tests: set[str] = field(default_factory=set)
     collected_from_resources: set[str] = field(default_factory=set)
     collected_from_cases: set[str] = field(default_factory=set)
@@ -490,7 +490,7 @@ class MetricResult:
     metadata : MetricMetadata
         Snapshot of metadata describing where/when the metric was recorded
         (identity, contributors, timestamps).
-    dependencies : list[ResourceIdentity]
+    dependencies : list[ResourceSpec]
         Direct resource dependencies for the metric provider.
     assertion_results : list[AssertionResult]
         Assertion results collected while the metric resource was running.
@@ -503,7 +503,7 @@ class MetricResult:
     metadata: MetricMetadata
     assertion_results: list[AssertionResult]
     value: CalculatedValue
-    dependencies: list[ResourceIdentity] = field(default_factory=list)
+    dependencies: list[ResourceSpec] = field(default_factory=list)
     execution_id: UUID | None = None
 
     @property

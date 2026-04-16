@@ -73,11 +73,12 @@ class TestBuildBlueprint:
 
         blueprint = resolver.build_blueprint(["config"])
 
-        assert len(blueprint.entries) == 1
-        entry = blueprint.entries[0]
-        assert entry.strategy == TransferStrategy.SERIALIZE
-        assert entry.serialized_value is not None
-        assert len(blueprint.resolution_order) == 0
+        assert len(blueprint.res_specs) == 1
+        identity = blueprint.res_specs[0]
+        assert identity.strategy == TransferStrategy.SERIALIZE
+        assert blueprint.resolution_order == (identity,)
+        assert identity in blueprint.serialized_values
+        assert isinstance(blueprint.serialized_values[identity], bytes)
 
     async def test_non_serializable_resource_tagged_re_resolve(self):
         @resource(scope=Scope.PROCESS)
@@ -89,17 +90,15 @@ class TestBuildBlueprint:
 
         blueprint = resolver.build_blueprint(["lock_res"])
 
-        assert len(blueprint.entries) == 1
-        entry = blueprint.entries[0]
-        assert entry.strategy == TransferStrategy.RE_RESOLVE
-        assert entry.serialized_value is None
-        assert blueprint.resolution_order == (entry.identity,)
+        assert len(blueprint.res_specs) == 1
+        identity = blueprint.res_specs[0]
+        assert identity.strategy == TransferStrategy.RE_RESOLVE
+        assert blueprint.resolution_order == (identity,)
 
     async def test_mixed_dependency_chain(self):
         """A(serializable) -> B(non-serializable, depends on A).
 
-        Blueprint should contain both, with only B in
-        resolution_order.
+        Blueprint should contain both in resolution_order (B after A).
         """
 
         @resource(scope=Scope.PROCESS)
@@ -116,14 +115,23 @@ class TestBuildBlueprint:
 
         blueprint = resolver.build_blueprint(["db_conn"])
 
-        entry_map = {e.identity.name: e for e in blueprint.entries}
-        assert len(entry_map) == 2
+        identity_map = {i.name: i for i in blueprint.res_specs}
+        assert len(identity_map) == 2
 
-        assert entry_map["base_config"].strategy == TransferStrategy.SERIALIZE
-        assert entry_map["db_conn"].strategy == TransferStrategy.RE_RESOLVE
+        assert (
+            identity_map["base_config"].strategy
+            == TransferStrategy.SERIALIZE
+        )
+        assert (
+            identity_map["db_conn"].strategy
+            == TransferStrategy.RE_RESOLVE
+        )
 
-        assert len(blueprint.resolution_order) == 1
-        assert blueprint.resolution_order[0].name == "db_conn"
+        assert len(blueprint.resolution_order) == 2
+        order_names = [i.name for i in blueprint.resolution_order]
+        assert order_names.index("base_config") < order_names.index(
+            "db_conn"
+        )
 
     async def test_dependencies_captured_correctly(self):
         @resource(scope=Scope.PROCESS)
@@ -139,10 +147,9 @@ class TestBuildBlueprint:
 
         blueprint = resolver.build_blueprint(["dep_b"])
 
-        entry_map = {e.identity.name: e for e in blueprint.entries}
-        dep_b_entry = entry_map["dep_b"]
-        dep_names = [d.name for d in dep_b_entry.dependencies]
-        assert "dep_a" in dep_names
+        identity_map = {i.name: i for i in blueprint.res_specs}
+        dep_b_identity = identity_map["dep_b"]
+        assert "dep_a" in dep_b_identity.dependencies
 
     async def test_test_scope_excluded(self):
         @resource(scope=Scope.TEST)
@@ -161,7 +168,7 @@ class TestBuildBlueprint:
             ["shared", "per_test"]
         )
 
-        names = {e.identity.name for e in blueprint.entries}
+        names = {identity.name for identity in blueprint.res_specs}
         assert "shared" in names
         assert "per_test" not in names
 
@@ -180,12 +187,10 @@ class TestBuildBlueprint:
 
         assert blueprint.request_path == "/project/tests/test_foo.py"
 
-    async def test_empty_blueprint_for_unknown_names(self):
+    def test_build_blueprint_requires_cached_resources(self):
         resolver = ResourceResolver(registry)
-        blueprint = resolver.build_blueprint(["nonexistent"])
-
-        assert len(blueprint.entries) == 0
-        assert len(blueprint.resolution_order) == 0
+        with pytest.raises(ValueError, match="nonexistent"):
+            resolver.build_blueprint(["nonexistent"])
 
     async def test_transitive_dependencies_included(self):
         """A -> B -> C: requesting C should include A, B, C."""
@@ -208,11 +213,11 @@ class TestBuildBlueprint:
 
         blueprint = resolver.build_blueprint(["level_c"])
 
-        names = {e.identity.name for e in blueprint.entries}
+        names = {identity.name for identity in blueprint.res_specs}
         assert names == {"level_a", "level_b", "level_c"}
 
     async def test_topological_order_respects_dependencies(self):
-        """RE_RESOLVE entries appear after their dependencies."""
+        """RE_RESOLVE identities appear after their dependencies."""
 
         @resource(scope=Scope.PROCESS)
         def top():
@@ -238,7 +243,7 @@ class TestBuildBlueprint:
 
 
 class TestBuildFromBlueprint:
-    async def test_deserializes_serialize_entries(self):
+    async def test_worker_resolves_serialize_entries(self):
         @resource(scope=Scope.PROCESS)
         def config():
             return {"key": "value"}
@@ -255,6 +260,27 @@ class TestBuildFromBlueprint:
         values = list(cache.values())
         assert len(values) == 1
         assert values[0] == {"key": "value"}
+
+    async def test_hydrated_cache_uses_registry_identity_lookup(self):
+        call_count = 0
+
+        @resource(scope=Scope.PROCESS)
+        def config():
+            nonlocal call_count
+            call_count += 1
+            return {"key": "value"}
+
+        resolver = ResourceResolver(registry)
+        await resolver.resolve("config")
+        assert call_count == 1
+
+        blueprint = resolver.build_blueprint(["config"])
+        worker = await ResourceResolver.build_from_blueprint(
+            blueprint, registry
+        )
+
+        assert await worker.resolve("config") == {"key": "value"}
+        assert call_count == 1
 
     async def test_re_resolves_non_serializable(self):
         call_count = 0
@@ -391,9 +417,10 @@ class TestRoundTrip:
 
 class TestEdgeCases:
     async def test_generator_serializable_yield(self):
-        """Generator with serializable yield → SERIALIZE.
+        """Generator with serializable yield → SERIALIZE; worker hydrates bytes.
 
-        Teardown stays in main process.
+        The worker receives the materialized value only; the parent resolver
+        still owns the generator and runs its teardown.
         """
         teardown_ran = False
 
@@ -408,17 +435,18 @@ class TestEdgeCases:
 
         blueprint = resolver.build_blueprint(["gen_config"])
 
-        entry = blueprint.entries[0]
-        assert entry.strategy == TransferStrategy.SERIALIZE
+        identity = blueprint.res_specs[0]
+        assert identity.strategy == TransferStrategy.SERIALIZE
+        assert identity in blueprint.serialized_values
 
-        # Worker gets the deserialized value, no teardown
         worker = await ResourceResolver.build_from_blueprint(
             blueprint, registry
         )
+        assert await worker.resolve("gen_config") == {"setting": True}
         await worker.teardown()
         assert not teardown_ran
 
-        # Main process teardown still works
+        teardown_ran = False
         await resolver.teardown()
         assert teardown_ran
 
@@ -441,8 +469,8 @@ class TestEdgeCases:
         assert resolve_count == 1
 
         blueprint = resolver.build_blueprint(["gen_lock"])
-        entry = blueprint.entries[0]
-        assert entry.strategy == TransferStrategy.RE_RESOLVE
+        identity = blueprint.res_specs[0]
+        assert identity.strategy == TransferStrategy.RE_RESOLVE
 
         await ResourceResolver.build_from_blueprint(blueprint, registry)
         assert resolve_count == 2
@@ -450,7 +478,7 @@ class TestEdgeCases:
     async def test_empty_blueprint_hydration(self):
         """Empty blueprint → empty resolver."""
         blueprint = ResourceBlueprint(
-            entries=(),
+            res_specs=(),
             resolution_order=(),
             request_path=None,
         )
@@ -460,7 +488,7 @@ class TestEdgeCases:
         assert len(worker.cached_identities) == 0
 
     async def test_all_serializable(self):
-        """All resources serializable → no resolution_order."""
+        """All resources serializable → resolution_order follows dependencies."""
 
         @resource(scope=Scope.PROCESS)
         def a():
@@ -476,10 +504,12 @@ class TestEdgeCases:
         blueprint = resolver.build_blueprint(["b"])
 
         assert all(
-            e.strategy == TransferStrategy.SERIALIZE
-            for e in blueprint.entries
+            identity.strategy == TransferStrategy.SERIALIZE
+            for identity in blueprint.res_specs
         )
-        assert len(blueprint.resolution_order) == 0
+        assert len(blueprint.resolution_order) == 2
+        order_names = [i.name for i in blueprint.resolution_order]
+        assert order_names.index("a") < order_names.index("b")
 
     async def test_all_non_serializable(self):
         """All resources non-serializable → all in resolution_order."""
@@ -499,8 +529,8 @@ class TestEdgeCases:
         blueprint = resolver.build_blueprint(["lock_b"])
 
         assert all(
-            e.strategy == TransferStrategy.RE_RESOLVE
-            for e in blueprint.entries
+            identity.strategy == TransferStrategy.RE_RESOLVE
+            for identity in blueprint.res_specs
         )
         assert len(blueprint.resolution_order) == 2
 
@@ -519,5 +549,5 @@ class TestEdgeCases:
 
         blueprint = resolver.build_blueprint(["mod_res"])
 
-        assert len(blueprint.entries) == 1
-        assert blueprint.entries[0].identity.scope == Scope.MODULE
+        assert len(blueprint.res_specs) == 1
+        assert blueprint.res_specs[0].scope == Scope.MODULE

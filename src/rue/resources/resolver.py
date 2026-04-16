@@ -5,6 +5,7 @@ import inspect
 from collections import deque
 from collections.abc import AsyncGenerator, Generator
 from contextvars import ContextVar
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -18,9 +19,8 @@ from rue.context.runtime import (
 )
 from rue.resources.models import (
     ResourceBlueprint,
-    ResourceDef,
-    ResourceIdentity,
-    ResourceTransferEntry,
+    LoadedResourceDef,
+    ResourceSpec,
     Scope,
     TransferStrategy,
 )
@@ -32,7 +32,7 @@ from rue.resources.serialization import (
 )
 
 
-_RESOLUTION_PATH: ContextVar[tuple[ResourceIdentity, ...]] = ContextVar(
+_RESOLUTION_PATH: ContextVar[tuple[ResourceSpec, ...]] = ContextVar(
     "resource_resolution_path",
     default=(),
 )
@@ -48,33 +48,33 @@ class ResourceResolver:
         parent: "ResourceResolver | None" = None,
     ) -> None:
         self._registry = registry
-        self._cache: dict[ResourceIdentity, Any] = {}
+        self._cache: dict[ResourceSpec, Any] = {}
         self._teardowns: list[
             tuple[
-                ResourceIdentity,
-                ResourceDef,
+                ResourceSpec,
+                LoadedResourceDef,
                 Generator[Any, None, None] | AsyncGenerator[Any, None],
             ]
         ] = []
         self._parent = parent
-        self._pending: dict[ResourceIdentity, asyncio.Task[Any]] = {}
+        self._pending: dict[ResourceSpec, asyncio.Task[Any]] = {}
         self._shared_dependency_graph: dict[
-            ResourceIdentity, list[ResourceIdentity]
+            ResourceSpec, list[ResourceSpec]
         ] = parent._shared_dependency_graph if parent is not None else {}
 
     @property
-    def cached_identities(self) -> dict[ResourceIdentity, Any]:
+    def cached_identities(self) -> dict[ResourceSpec, Any]:
         """Return a shallow copy of the identity-to-value cache."""
         return dict(self._cache)
 
     @property
-    def dependency_graph(self) -> dict[ResourceIdentity, list[ResourceIdentity]]:
+    def dependency_graph(self) -> dict[ResourceSpec, list[ResourceSpec]]:
         """Return a shallow copy of the shared dependency graph."""
         return dict(self._shared_dependency_graph)
 
     def direct_dependencies_for(
-        self, identity: ResourceIdentity
-    ) -> list[ResourceIdentity]:
+        self, identity: ResourceSpec
+    ) -> list[ResourceSpec]:
         return list(self._shared_dependency_graph.get(identity, []))
 
     async def resolve(self, name: str) -> Any:
@@ -85,7 +85,7 @@ class ResourceResolver:
             else test_ctx.item.spec.module_path.resolve()
         )
         definition = self._registry.select(name, request_path).definition
-        identity = definition.identity
+        identity = definition.spec
         scope = identity.scope
 
         path = _RESOLUTION_PATH.get()
@@ -108,9 +108,9 @@ class ResourceResolver:
             missing = object()
             parent = CURRENT_RESOURCE_PROVIDER.get()
             if parent is not None:
-                direct = self._shared_dependency_graph.get(parent.identity)
+                direct = self._shared_dependency_graph.get(parent.spec)
                 if direct is None:
-                    direct = self._shared_dependency_graph[parent.identity] = []
+                    direct = self._shared_dependency_graph[parent.spec] = []
                 if identity not in direct:
                     direct.append(identity)
 
@@ -134,6 +134,13 @@ class ResourceResolver:
 
             if owner is not self:
                 self._cache[identity] = value
+
+            if identity.strategy is TransferStrategy.UNKNOWN:
+                identity.assign_transfer_strategy(
+                    TransferStrategy.SERIALIZE
+                    if check_serializable(value)
+                    else TransferStrategy.RE_RESOLVE
+                )
 
             with (
                 bind(CURRENT_RESOURCE_PROVIDER, definition),
@@ -208,15 +215,15 @@ class ResourceResolver:
         owner = self._owner_resolver_for_scope(scope)
         matching: list[
             tuple[
-                ResourceIdentity,
-                ResourceDef,
+                ResourceSpec,
+                LoadedResourceDef,
                 Generator[Any, None, None] | AsyncGenerator[Any, None],
             ]
         ] = []
         to_keep: list[
             tuple[
-                ResourceIdentity,
-                ResourceDef,
+                ResourceSpec,
+                LoadedResourceDef,
                 Generator[Any, None, None] | AsyncGenerator[Any, None],
             ]
         ] = []
@@ -245,12 +252,27 @@ class ResourceResolver:
         closure = self._collect_blueprint_closure(
             resource_names, self._cache, self._shared_dependency_graph
         )
-        entries = self._build_blueprint_entries(closure, self._cache)
-        resolution_order = self._topological_sort_blueprint_entries(entries)
+        identities = [
+            replace(
+                identity,
+                dependencies=tuple(d.name for d in dependencies),
+            )
+            for identity, dependencies in closure.items()
+        ]
+        resolution_order = self._topological_sort_blueprint_identities(
+            identities
+        )
+        serialized_values: dict[ResourceSpec, bytes] = {}
+        for identity in identities:
+            if identity.strategy is TransferStrategy.SERIALIZE:
+                serialized_values[identity] = serialize_value(
+                    self._cache[identity]
+                )
         return ResourceBlueprint(
-            entries=tuple(entries),
+            res_specs=tuple(identities),
             resolution_order=tuple(resolution_order),
             request_path=(str(request_path) if request_path else None),
+            serialized_values=serialized_values,
         )
 
     @classmethod
@@ -264,16 +286,12 @@ class ResourceResolver:
             Path(blueprint.request_path) if blueprint.request_path else None
         )
 
-        for entry in blueprint.entries:
-            if (
-                entry.strategy == TransferStrategy.SERIALIZE
-                and entry.serialized_value is not None
-            ):
-                resolver._cache[entry.identity] = deserialize_value(
-                    entry.serialized_value
-                )
-
         for identity in blueprint.resolution_order:
+            if identity in blueprint.serialized_values:
+                resolver._cache[identity] = deserialize_value(
+                    blueprint.serialized_values[identity]
+                )
+                continue
             definition = registry.select(identity.name, request_path).definition
             await resolver._resolve_uncached(
                 name=identity.name,
@@ -291,8 +309,8 @@ class ResourceResolver:
         self,
         *,
         name: str,
-        definition: ResourceDef,
-        cache_key: ResourceIdentity,
+        definition: LoadedResourceDef,
+        cache_key: ResourceSpec,
     ) -> Any:
         with (
             bind(CURRENT_RESOURCE_PROVIDER, definition),
@@ -304,11 +322,11 @@ class ResourceResolver:
             ):
                 kwargs = {
                     dependency: await self.resolve(dependency)
-                    for dependency in definition.dependencies
+                    for dependency in cache_key.dependencies
                 }
 
             match definition:
-                case ResourceDef(is_async_generator=True):
+                case LoadedResourceDef(is_async_generator=True):
                     generator = cast(
                         AsyncGenerator[Any, None], definition.fn(**kwargs)
                     )
@@ -316,7 +334,7 @@ class ResourceResolver:
                     self._teardowns.append(
                         (cache_key, definition, generator)
                     )
-                case ResourceDef(is_generator=True):
+                case LoadedResourceDef(is_generator=True):
                     generator = cast(
                         Generator[Any, None, None], definition.fn(**kwargs)
                     )
@@ -324,7 +342,7 @@ class ResourceResolver:
                     self._teardowns.append(
                         (cache_key, definition, generator)
                     )
-                case ResourceDef(is_async=True):
+                case LoadedResourceDef(is_async=True):
                     value = await definition.fn(**kwargs)
                 case _:
                     value = definition.fn(**kwargs)
@@ -353,17 +371,19 @@ class ResourceResolver:
     @staticmethod
     def _collect_blueprint_closure(
         resource_names: list[str],
-        cache: dict[ResourceIdentity, Any],
-        dep_graph: dict[ResourceIdentity, list[ResourceIdentity]],
-    ) -> dict[ResourceIdentity, list[ResourceIdentity]]:
+        cache: dict[ResourceSpec, Any],
+        dep_graph: dict[ResourceSpec, list[ResourceSpec]],
+    ) -> dict[ResourceSpec, list[ResourceSpec]]:
         """Expand resource names into a full dependency closure."""
         name_to_identity = {identity.name: identity for identity in cache}
-        closure: dict[ResourceIdentity, list[ResourceIdentity]] = {}
-        visited: set[ResourceIdentity] = set()
-        queue: deque[ResourceIdentity] = deque(
-            name_to_identity[name]
-            for name in resource_names
-            if name in name_to_identity
+        for name in resource_names:
+            if name not in name_to_identity:
+                msg = f"Resource {name!r} is not present in the resolver cache"
+                raise ValueError(msg)
+        closure: dict[ResourceSpec, list[ResourceSpec]] = {}
+        visited: set[ResourceSpec] = set()
+        queue: deque[ResourceSpec] = deque(
+            name_to_identity[name] for name in resource_names
         )
 
         while queue:
@@ -387,83 +407,42 @@ class ResourceResolver:
         return closure
 
     @staticmethod
-    def _build_blueprint_entries(
-        closure: dict[ResourceIdentity, list[ResourceIdentity]],
-        cache: dict[ResourceIdentity, Any],
-    ) -> list[ResourceTransferEntry]:
-        """Classify and build transfer entries."""
-        entries: list[ResourceTransferEntry] = []
-
-        for identity, dependencies in closure.items():
-            serialized_value = None
-            try:
-                value = cache[identity]
-            except KeyError:
-                strategy = TransferStrategy.UNKNOWN
-            else:
-                strategy = (
-                    TransferStrategy.SERIALIZE
-                    if check_serializable(value)
-                    else TransferStrategy.RE_RESOLVE
-                )
-                if strategy is TransferStrategy.SERIALIZE:
-                    serialized_value = serialize_value(value)
-
-            entries.append(
-                ResourceTransferEntry(
-                    identity=identity,
-                    strategy=strategy,
-                    serialized_value=serialized_value,
-                    dependencies=tuple(dependencies),
-                )
-            )
-
-        return entries
-
-    @staticmethod
-    def _topological_sort_blueprint_entries(
-        entries: list[ResourceTransferEntry],
-    ) -> list[ResourceIdentity]:
-        """Topologically sort RE_RESOLVE and UNKNOWN entries."""
-        entry_map = {
-            entry.identity: entry
-            for entry in entries
-            if entry.strategy
-            in (TransferStrategy.RE_RESOLVE, TransferStrategy.UNKNOWN)
-        }
-        if not entry_map:
+    def _topological_sort_blueprint_identities(
+        identities: list[ResourceSpec],
+    ) -> list[ResourceSpec]:
+        """Topologically sort blueprint identities for worker resolution."""
+        identity_map = {identity.name: identity for identity in identities}
+        if not identity_map:
             return []
 
-        in_degree = dict.fromkeys(entry_map, 0)
-        dependents: dict[ResourceIdentity, list[ResourceIdentity]] = {
-            identity: [] for identity in entry_map
+        in_degree = dict.fromkeys(identity_map, 0)
+        dependents: dict[str, list[str]] = {
+            name: [] for name in identity_map
         }
 
-        for identity, entry in entry_map.items():
-            for dependency in entry.dependencies:
-                if dependency in entry_map:
-                    in_degree[identity] += 1
-                    dependents[dependency].append(identity)
+        for name, identity in identity_map.items():
+            for dependency in identity.dependencies:
+                if dependency in identity_map:
+                    in_degree[name] += 1
+                    dependents[dependency].append(name)
 
-        queue: deque[ResourceIdentity] = deque(
-            identity
-            for identity, degree in in_degree.items()
-            if degree == 0
+        queue: deque[str] = deque(
+            name for name, degree in in_degree.items() if degree == 0
         )
-        order: list[ResourceIdentity] = []
+        order: list[ResourceSpec] = []
 
         while queue:
-            identity = queue.popleft()
-            order.append(identity)
-            for dependent in dependents[identity]:
+            name = queue.popleft()
+            order.append(identity_map[name])
+            for dependent in dependents[name]:
                 in_degree[dependent] -= 1
                 if in_degree[dependent] == 0:
                     queue.append(dependent)
 
-        if len(order) != len(entry_map):
+        if len(order) != len(identity_map):
             resolved = {identity.name for identity in order}
-            unresolved = {identity.name for identity in entry_map} - resolved
-            msg = f"Circular dependency in RE_RESOLVE resources: {unresolved}"
+            unresolved = set(identity_map) - resolved
+            msg = f"Circular dependency in blueprint resources: {unresolved}"
             raise RuntimeError(msg)
 
         return order

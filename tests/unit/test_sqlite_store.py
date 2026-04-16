@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from rue.assertions.base import AssertionRepr, AssertionResult
 from rue.predicates.models import PredicateResult
-from rue.resources import ResourceIdentity, Scope
+from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.base import (
     MetricMetadata,
     MetricResult,
@@ -53,7 +53,7 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     metric_metadata = MetricMetadata(
         first_item_recorded_at=start_time,
         last_item_recorded_at=end_time,
-        identity=ResourceIdentity(
+        identity=ResourceSpec(
             name="latency_ms",
             scope=Scope.TEST,
             provider_path="/tmp/project/confrue_root.py",
@@ -69,7 +69,7 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         assertion_results=[],
         value=12.5,
         dependencies=[
-            ResourceIdentity(
+            ResourceSpec(
                 name="overall_latency",
                 scope=Scope.PROCESS,
                 provider_path="/tmp/project/confrue_root.py",
@@ -134,7 +134,7 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         "/tmp/project"
     )
     assert loaded.result.metric_results[0].dependencies == [
-        ResourceIdentity(
+        ResourceSpec(
             name="overall_latency",
             scope=Scope.PROCESS,
             provider_path="/tmp/project/confrue_root.py",
@@ -206,7 +206,7 @@ def test_sqlite_store_assertions_and_predicates(
     )
 
     metric_metadata = MetricMetadata(
-        identity=ResourceIdentity(name="count", scope=Scope.PROCESS)
+        identity=ResourceSpec(name="count", scope=Scope.PROCESS)
     )
     metric_assertion = AssertionResult(
         expression_repr=AssertionRepr(

@@ -16,7 +16,7 @@ from rue.context.runtime import (
     TestContext as Ctx,
     bind,
 )
-from rue.resources import ResourceIdentity, ResourceResolver, Scope, registry
+from rue.resources import ResourceSpec, ResourceResolver, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
 from rue.resources.metrics.decorator import metric
 from rue.testing.models import LoadedTestDef
@@ -26,7 +26,7 @@ from tests.unit.factories import make_definition
 def _metric(name: str = "") -> Metric:
     return Metric(
         metadata=MetricMetadata(
-            identity=ResourceIdentity(name=name, scope=Scope.PROCESS)
+            identity=ResourceSpec(name=name, scope=Scope.PROCESS)
         )
     )
 
@@ -109,7 +109,7 @@ def test_metric_result_is_collected_when_collector_is_active():
     with bind(CURRENT_METRIC_RESULTS, results):
         MetricResult(
             metadata=MetricMetadata(
-                identity=ResourceIdentity(name="x", scope=Scope.PROCESS)
+                identity=ResourceSpec(name="x", scope=Scope.PROCESS)
             ),
             assertion_results=[],
             value=1,
@@ -307,5 +307,5 @@ async def test_metric_decorator_records_metric_dependencies():
     assert "accuracy" in by_name
     assert by_name["accuracy"].dependencies == [
         by_name["overall_quality"].metadata.identity,
-        registry.select("clock", None).definition.identity,
+        registry.select("clock", None).definition.spec,
     ]

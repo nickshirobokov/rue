@@ -9,7 +9,7 @@ from uuid import UUID
 
 
 if TYPE_CHECKING:
-    from rue.resources.models import ResourceDef
+    from rue.resources.models import LoadedResourceDef
     from rue.resources.resolver import ResourceResolver
     from rue.testing.models import LoadedTestDef
     from rue.testing.runner import Runner
@@ -45,7 +45,7 @@ CURRENT_RESOURCE_CONSUMER: ContextVar[str | None] = ContextVar(
 CURRENT_RESOURCE_CONSUMER_KIND: ContextVar[str | None] = ContextVar(
     "current_resource_consumer_kind", default=None
 )
-CURRENT_RESOURCE_PROVIDER: ContextVar[ResourceDef | None] = ContextVar(
+CURRENT_RESOURCE_PROVIDER: ContextVar[LoadedResourceDef | None] = ContextVar(
     "current_resource_provider", default=None
 )
 CURRENT_RESOURCE_RESOLVER: ContextVar[ResourceResolver | None] = ContextVar(

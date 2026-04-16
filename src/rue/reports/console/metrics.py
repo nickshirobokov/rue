@@ -16,7 +16,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
-from rue.resources import ResourceIdentity, Scope
+from rue.resources import ResourceSpec, Scope
 
 from .shared import (
     format_assertion_result,
@@ -66,7 +66,7 @@ class MetricValue:
 
 @dataclass(slots=True)
 class MetricGroup:
-    key: ResourceIdentity
+    key: ResourceSpec
     metrics: list[MetricResult] = field(default_factory=list)
     display_name: str = ""
 
@@ -84,8 +84,8 @@ class MetricGroup:
 
     def is_interesting(
         self,
-        parents: dict[ResourceIdentity, set[ResourceIdentity]],
-        children: dict[ResourceIdentity, set[ResourceIdentity]],
+        parents: dict[ResourceSpec, set[ResourceSpec]],
+        children: dict[ResourceSpec, set[ResourceSpec]],
     ) -> bool:
         return (
             self.has_failures
@@ -123,9 +123,9 @@ class MetricsRenderer:
     def __init__(self) -> None:
         self._groups: list[MetricGroup] = []
         self._execution_lookup: dict[UUID, TestExecution] = {}
-        self._group_lookup: dict[ResourceIdentity, MetricGroup] = {}
-        self._parents: dict[ResourceIdentity, set[ResourceIdentity]] = {}
-        self._children: dict[ResourceIdentity, set[ResourceIdentity]] = {}
+        self._group_lookup: dict[ResourceSpec, MetricGroup] = {}
+        self._parents: dict[ResourceSpec, set[ResourceSpec]] = {}
+        self._children: dict[ResourceSpec, set[ResourceSpec]] = {}
 
     def render(
         self,
@@ -163,7 +163,7 @@ class MetricsRenderer:
         return renderables
 
     def _build_groups(self, metric_results: list[MetricResult]) -> list[MetricGroup]:
-        grouped: dict[ResourceIdentity, MetricGroup] = {}
+        grouped: dict[ResourceSpec, MetricGroup] = {}
         for metric in metric_results:
             key = metric.metadata.identity
             group = grouped.setdefault(key, MetricGroup(key=key))
@@ -193,11 +193,11 @@ class MetricsRenderer:
         return groups
 
     def _build_graph(self) -> tuple[
-        dict[ResourceIdentity, set[ResourceIdentity]],
-        dict[ResourceIdentity, set[ResourceIdentity]],
+        dict[ResourceSpec, set[ResourceSpec]],
+        dict[ResourceSpec, set[ResourceSpec]],
     ]:
-        parents: dict[ResourceIdentity, set[ResourceIdentity]] = {}
-        children: dict[ResourceIdentity, set[ResourceIdentity]] = {}
+        parents: dict[ResourceSpec, set[ResourceSpec]] = {}
+        children: dict[ResourceSpec, set[ResourceSpec]] = {}
 
         for group in self._groups:
             for metric in group.metrics:
@@ -313,7 +313,7 @@ class MetricsRenderer:
         self._populate_tree(tree, root_key, highlight=group.key, seen={root_key})
         return tree
 
-    def _find_root(self, key: ResourceIdentity) -> ResourceIdentity:
+    def _find_root(self, key: ResourceSpec) -> ResourceSpec:
         roots = self._parents.get(key, set())
         if len(roots) != 1:
             return key
@@ -328,10 +328,10 @@ class MetricsRenderer:
     def _populate_tree(
         self,
         tree: Tree,
-        key: ResourceIdentity,
+        key: ResourceSpec,
         *,
-        highlight: ResourceIdentity,
-        seen: set[ResourceIdentity],
+        highlight: ResourceSpec,
+        seen: set[ResourceSpec],
     ) -> None:
         for child_key in sorted(
             self._children.get(key, set()),

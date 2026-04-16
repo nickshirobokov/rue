@@ -1,10 +1,9 @@
 """Resource injection system."""
 
 from rue.resources.models import (
+    LoadedResourceDef,
     ResourceBlueprint,
-    ResourceDef,
-    ResourceIdentity,
-    ResourceTransferEntry,
+    ResourceSpec,
     Scope,
     TransferStrategy,
 )
@@ -13,12 +12,11 @@ from rue.resources.resolver import ResourceResolver
 
 
 __all__ = [
+    "LoadedResourceDef",
     "ResourceBlueprint",
-    "ResourceDef",
-    "ResourceIdentity",
+    "ResourceSpec",
     "ResourceRegistry",
     "ResourceResolver",
-    "ResourceTransferEntry",
     "Scope",
     "TransferStrategy",
     "registry",

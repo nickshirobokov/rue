@@ -24,13 +24,25 @@ class TransferStrategy(Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class ResourceIdentity:
-    """Canonical identity for one resolved resource provider."""
+class ResourceSpec:
+    """Canonical spec for one resolved resource provider."""
 
     name: str
     scope: Scope
     provider_path: str | None = None
     provider_dir: str | None = None
+    _strategy: TransferStrategy = field(
+        default=TransferStrategy.UNKNOWN,
+        compare=False,
+    )
+    dependencies: tuple[str, ...] = field(default=(), compare=False)
+
+    @property
+    def strategy(self) -> TransferStrategy:
+        return self._strategy
+
+    def assign_transfer_strategy(self, value: TransferStrategy) -> None:
+        object.__setattr__(self, "_strategy", value)
 
     @property
     def origin_path(self) -> Path | None:
@@ -46,15 +58,14 @@ class ResourceIdentity:
 
 
 @dataclass(slots=True, eq=False)
-class ResourceDef:
+class LoadedResourceDef:
     """Definition of a registered resource."""
 
-    identity: ResourceIdentity
+    spec: ResourceSpec
     fn: Callable[..., Any]
     is_async: bool
     is_generator: bool
     is_async_generator: bool
-    dependencies: list[str] = field(default_factory=list)
     on_resolve: Callable[[Any], Any] | None = None
     on_injection: Callable[[Any], Any] | None = None
     on_teardown: Callable[[Any], Any] | None = None
@@ -64,23 +75,16 @@ class ResourceDef:
 class SelectedResource:
     """Selected resource provider for one resolution request."""
 
-    definition: ResourceDef
-
-
-@dataclass(frozen=True, slots=True)
-class ResourceTransferEntry:
-    """One resource's transfer plan within a blueprint."""
-
-    identity: ResourceIdentity
-    strategy: TransferStrategy
-    serialized_value: bytes | None
-    dependencies: tuple[ResourceIdentity, ...]
+    definition: LoadedResourceDef
 
 
 @dataclass(frozen=True, slots=True)
 class ResourceBlueprint:
     """Complete transfer payload for reconstructing resources in a worker."""
 
-    entries: tuple[ResourceTransferEntry, ...]
-    resolution_order: tuple[ResourceIdentity, ...]
+    res_specs: tuple[ResourceSpec, ...]
+    resolution_order: tuple[ResourceSpec, ...]
     request_path: str | None
+    serialized_values: dict[ResourceSpec, bytes] = field(
+        default_factory=dict,
+    )
