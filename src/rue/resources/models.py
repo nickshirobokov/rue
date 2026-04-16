@@ -15,6 +15,14 @@ class Scope(Enum):
     PROCESS = "process"  # Shared across entire test run
 
 
+class TransferStrategy(Enum):
+    """How a resolved resource should be transferred to a worker process."""
+
+    SERIALIZE = "serialize"
+    RE_RESOLVE = "re_resolve"
+    UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True, slots=True)
 class ResourceIdentity:
     """Canonical identity for one resolved resource provider."""
@@ -57,3 +65,22 @@ class SelectedResource:
     """Selected resource provider for one resolution request."""
 
     definition: ResourceDef
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceTransferEntry:
+    """One resource's transfer plan within a blueprint."""
+
+    identity: ResourceIdentity
+    strategy: TransferStrategy
+    serialized_value: bytes | None
+    dependencies: tuple[ResourceIdentity, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceBlueprint:
+    """Complete transfer payload for reconstructing resources in a worker."""
+
+    entries: tuple[ResourceTransferEntry, ...]
+    resolution_order: tuple[ResourceIdentity, ...]
+    request_path: str | None
