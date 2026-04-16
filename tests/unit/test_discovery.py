@@ -345,7 +345,13 @@ def test_materialize_imports_nested_setup_chain_in_order(tmp_path, monkeypatch):
         },
     )
 
-    [item] = materialize(tmp_path / "nested")
+    plan = TestSpecCollector((), (), None).build_spec_collection(
+        (tmp_path / "nested",)
+    )
+    [item] = TestLoader(plan.suite_root).load_from_collection(plan)
+
+    assert item.suite_root == plan.suite_root
+    assert item.setup_chain == plan.setup_chain_for(item.spec.module_path)
 
     item.fn()
 

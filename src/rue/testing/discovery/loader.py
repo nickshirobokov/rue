@@ -25,7 +25,7 @@ from rue.resources.fixtures_collector import (
 )
 from rue.testing.decorators.tag import get_tag_data, merge_tag_data
 from rue.testing.models.loaded import LoadedTestDef
-from rue.testing.models.spec import TestSpec, TestSpecCollection
+from rue.testing.models.spec import SetupFileRef, TestSpec, TestSpecCollection
 
 
 TFunction = TypeVar("TFunction", ast.FunctionDef, ast.AsyncFunctionDef)
@@ -365,17 +365,28 @@ class TestLoader:
 
         items: list[LoadedTestDef] = []
         for module_path, requested_specs in by_module.items():
-            for setup_ref in collection.setup_chain_for(module_path):
+            setup_chain = collection.setup_chain_for(module_path)
+            for setup_ref in setup_chain:
                 self.prepare_setup(setup_ref.path)
 
             module = self._session.load_module(module_path.resolve())
             for spec in requested_specs:
-                items.append(self.load_definition(spec, module=module))
+                items.append(
+                    self.load_definition(
+                        spec,
+                        module=module,
+                        setup_chain=setup_chain,
+                    )
+                )
 
         return items
 
     def load_definition(
-        self, spec: TestSpec, module: ModuleType | None = None
+        self,
+        spec: TestSpec,
+        module: ModuleType | None = None,
+        *,
+        setup_chain: tuple[SetupFileRef, ...] = (),
     ) -> LoadedTestDef:
         """Resolve a spec to a live LoadedTestDef by importing its module.
 
@@ -410,4 +421,9 @@ class TestLoader:
         combined_tags = merge_tag_data(parent_tags, get_tag_data(fn))
         spec.update_tags(combined_tags)
         spec.get_execution_from_fn(fn)
-        return LoadedTestDef(spec=spec, fn=fn)
+        return LoadedTestDef(
+            spec=spec,
+            fn=fn,
+            suite_root=self._suite_root,
+            setup_chain=setup_chain,
+        )

@@ -10,6 +10,7 @@ from rue.testing.models import (
     CaseGroup,
     CasesIterateModifier,
     GroupsIterateModifier,
+    SetupFileRef,
 )
 from tests.unit.factories import make_definition
 
@@ -44,6 +45,8 @@ def test_runner_iterate_cases_preserves_case_identity_and_metadata(null_reporter
         Case(inputs={"x": 1}, metadata={"slug": "one"}),
         Case(inputs={"x": 2}, metadata={"slug": "two"}),
     ]
+    suite_root = Path("suite")
+    setup_chain = (SetupFileRef(path=Path("conftest.py"), kind="conftest"),)
 
     def test_collect_case(case):
         seen_cases.append(case)
@@ -54,6 +57,8 @@ def test_runner_iterate_cases_preserves_case_identity_and_metadata(null_reporter
         module_path="sample.py",
         params=["case"],
         modifiers=[CasesIterateModifier(cases=tuple(cases), min_passes=2)],
+        suite_root=suite_root,
+        setup_chain=setup_chain,
     )
 
     run_result = asyncio.run(
@@ -68,6 +73,14 @@ def test_runner_iterate_cases_preserves_case_identity_and_metadata(null_reporter
     ]
     assert [sub.definition.spec.case_id for sub in execution.sub_executions] == [
         case.id for case in cases
+    ]
+    assert [sub.definition.suite_root for sub in execution.sub_executions] == [
+        suite_root,
+        suite_root,
+    ]
+    assert [sub.definition.setup_chain for sub in execution.sub_executions] == [
+        setup_chain,
+        setup_chain,
     ]
 
 

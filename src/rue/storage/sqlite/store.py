@@ -565,6 +565,9 @@ class SQLiteStore(Store):
                 case_id=UUID(row["case_id"]) if row["case_id"] else None,
             ),
             fn=lambda: None,
+            suite_root=(
+                Path(row["file_path"]).parent if row["file_path"] else Path()
+            ),
         )
 
         result = TestResult(

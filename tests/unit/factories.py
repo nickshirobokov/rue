@@ -8,7 +8,7 @@ from uuid import UUID
 from rue.testing.discovery import TestLoader, TestSpecCollector
 from rue.testing.models import LoadedTestDef
 from rue.testing.models.modifiers import Modifier
-from rue.testing.models.spec import TestLocator, TestSpec
+from rue.testing.models.spec import SetupFileRef, TestLocator, TestSpec
 
 
 def make_definition(
@@ -29,11 +29,14 @@ def make_definition(
     fail_fast: bool = False,
     suffix: str | None = None,
     case_id: UUID | None = None,
+    suite_root: str | Path | None = None,
+    setup_chain: tuple[SetupFileRef, ...] = (),
 ) -> LoadedTestDef:
     """Build a LoadedTestDef for use in unit tests without needing a real module."""
+    module_path = Path(module_path)
     spec = TestSpec(
         locator=TestLocator(
-            module_path=Path(module_path),
+            module_path=module_path,
             function_name=name,
             class_name=class_name,
         ),
@@ -49,7 +52,13 @@ def make_definition(
         suffix=suffix,
         case_id=case_id,
     )
-    return LoadedTestDef(spec=spec, fn=fn or (lambda: None), fail_fast=fail_fast)
+    return LoadedTestDef(
+        spec=spec,
+        fn=fn or (lambda: None),
+        suite_root=Path(suite_root) if suite_root is not None else module_path.parent,
+        setup_chain=setup_chain,
+        fail_fast=fail_fast,
+    )
 
 
 def materialize_tests(
