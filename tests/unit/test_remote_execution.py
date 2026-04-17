@@ -18,8 +18,11 @@ from rue.resources.models import Scope
 from rue.testing.execution.factory import DefaultTestFactory
 from rue.testing.execution.local.single import LocalSingleTest
 from rue.context.process_pool import CURRENT_PROCESS_POOL
-from rue.testing.execution.remote.single import (
+from rue.testing.execution.remote.models import (
     ExecutorPayload,
+    RemoteExecutionResult,
+)
+from rue.testing.execution.remote.single import (
     RemoteSingleTest,
 )
 from rue.testing.execution.types import ExecutionBackend
@@ -48,7 +51,7 @@ class FakePool:
     same instance can be bound to ``CURRENT_PROCESS_POOL``.
     """
 
-    def __init__(self, result: TestResult) -> None:
+    def __init__(self, result: RemoteExecutionResult) -> None:
         self._result = result
         self.submitted: list[tuple[Any, ...]] = []
 
@@ -193,7 +196,11 @@ class TestRemoteSingleTest:
             suite_root=tmp_path,
         )
 
-        expected = TestResult(status=TestStatus.PASSED, duration_ms=12.3)
+        expected = RemoteExecutionResult(
+            result=TestResult(status=TestStatus.PASSED, duration_ms=12.3),
+            worker_diff={},
+            ignored_paths={},
+        )
         remote = RemoteSingleTest(
             definition=definition,
             params={},
@@ -203,7 +210,7 @@ class TestRemoteSingleTest:
             execution = await remote.execute(ResourceResolver(registry))
 
         assert execution.definition is definition
-        assert execution.result is expected
+        assert execution.result is expected.result
         assert execution.status == TestStatus.PASSED
 
         assert len(pool.submitted) == 1
@@ -228,7 +235,13 @@ class TestRemoteSingleTest:
         )
 
         with bind_pool(
-            FakePool(TestResult(status=TestStatus.PASSED, duration_ms=0))
+            FakePool(
+                RemoteExecutionResult(
+                    result=TestResult(status=TestStatus.PASSED, duration_ms=0),
+                    worker_diff={},
+                    ignored_paths={},
+                )
+            )
         ) as pool:
             execution = await remote.execute(ResourceResolver(registry))
 
@@ -245,7 +258,13 @@ class TestRemoteSingleTest:
         )
 
         with bind_pool(
-            FakePool(TestResult(status=TestStatus.PASSED, duration_ms=0))
+            FakePool(
+                RemoteExecutionResult(
+                    result=TestResult(status=TestStatus.PASSED, duration_ms=0),
+                    worker_diff={},
+                    ignored_paths={},
+                )
+            )
         ) as pool:
             execution = await remote.execute(ResourceResolver(registry))
 
@@ -267,7 +286,13 @@ class TestRemoteSingleTest:
         )
 
         with bind_pool(
-            FakePool(TestResult(status=TestStatus.PASSED, duration_ms=0))
+            FakePool(
+                RemoteExecutionResult(
+                    result=TestResult(status=TestStatus.PASSED, duration_ms=0),
+                    worker_diff={},
+                    ignored_paths={},
+                )
+            )
         ):
             execution = await remote.execute(ResourceResolver(registry))
 
@@ -324,21 +349,12 @@ class TestRemoteEndToEnd:
         )
 
     @pytest.mark.asyncio
-    async def test_remote_test_with_mixed_resource_strategies(
+    async def test_remote_test_with_mixed_resource_states(
         self,
         tmp_path: Path,
         null_reporter: NullReporter,
     ):
-        """Remote run exercises all three resource transfer cases at once:
-
-        * ``plain_value`` — serializable, injected directly into the test →
-          SERIALIZE strategy, shipped in the blueprint.
-        * ``shared_lock`` — non-serializable (``threading.Lock``), injected
-          directly into the test → RE_RESOLVE strategy, re-resolved on the
-          worker via the registry populated by the setup chain.
-        * ``derived_value`` — serializable, depends on ``plain_value`` →
-          SERIALIZE strategy, dependency graph crosses the boundary.
-        """
+        """Remote run snapshots plain data, runtime fields, and dependencies."""
         module_path = tmp_path / "test_remote_resources.py"
         module_path.write_text(
             dedent(
@@ -375,5 +391,137 @@ class TestRemoteEndToEnd:
         run = await runner.run(items=items)
 
         assert run.result.passed == 1, run.result.executions[0].result.error
+        assert run.result.failed == 0
+        assert run.result.errors == 0
+
+    @pytest.mark.asyncio
+    async def test_remote_state_is_merged_back_to_parent(
+        self,
+        tmp_path: Path,
+        null_reporter: NullReporter,
+    ):
+        module_path = tmp_path / "test_remote_mergeback.py"
+        module_path.write_text(
+            dedent(
+                """
+                import rue
+                from rue.resources import resource
+                from rue.resources.models import Scope
+
+                @resource(scope=Scope.PROCESS)
+                def shared_state():
+                    return {"events": []}
+
+                @rue.test.backend("subprocess")
+                def test_remote(shared_state):
+                    shared_state["events"].append("worker")
+
+                @rue.test
+                def test_after(shared_state):
+                    assert shared_state["events"] == ["worker"]
+                """
+            )
+        )
+
+        items = materialize_tests(module_path)
+        runner = Runner(reporters=[null_reporter])
+        run = await runner.run(items=items)
+
+        assert run.result.passed == 2, [
+            execution.result.error for execution in run.result.executions
+        ]
+        assert run.result.failed == 0
+        assert run.result.errors == 0
+
+    @pytest.mark.asyncio
+    async def test_remote_test_scope_generator_teardown_runs_in_parent(
+        self,
+        tmp_path: Path,
+        null_reporter: NullReporter,
+    ):
+        module_path = tmp_path / "test_remote_parent_teardown.py"
+        module_path.write_text(
+            dedent(
+                """
+                import rue
+                from rue.resources import resource
+                from rue.resources.models import Scope
+
+                @resource(scope=Scope.PROCESS)
+                def events():
+                    return []
+
+                @resource(scope=Scope.TEST)
+                def case_state(events):
+                    state = {"events": events}
+                    yield state
+                    events.append("teardown")
+
+                @rue.test.backend("subprocess")
+                def test_remote(case_state):
+                    case_state["events"].append("worker")
+
+                @rue.test
+                def test_after(events):
+                    assert events == ["worker", "teardown"]
+                """
+            )
+        )
+
+        items = materialize_tests(module_path)
+        runner = Runner(reporters=[null_reporter])
+        run = await runner.run(items=items)
+
+        assert run.result.passed == 2, [
+            execution.result.error for execution in run.result.executions
+        ]
+        assert run.result.failed == 0
+        assert run.result.errors == 0
+
+    @pytest.mark.asyncio
+    async def test_remote_sut_output_is_merged_back_to_parent(
+        self,
+        tmp_path: Path,
+        null_reporter: NullReporter,
+    ):
+        module_path = tmp_path / "test_remote_sut_output.py"
+        module_path.write_text(
+            dedent(
+                """
+                import rue
+
+                class Greeter:
+                    def __init__(self) -> None:
+                        self.calls = []
+
+                    def greet(self, name: str) -> str:
+                        self.calls.append(name)
+                        message = f"Hello, {name}!"
+                        print(message)
+                        return message
+
+                @rue.resource.sut(scope="process")
+                def greeter():
+                    return rue.SUT(Greeter(), methods=["greet"])
+
+                @rue.test.backend("subprocess")
+                def test_remote(greeter):
+                    assert greeter.instance.greet("Alice") == "Hello, Alice!"
+                    assert greeter.stdout.text == "Hello, Alice!\\n"
+
+                @rue.test
+                def test_after(greeter):
+                    assert greeter.instance.calls == ["Alice"]
+                """
+            )
+        )
+
+        items = materialize_tests(module_path)
+        runner = Runner(reporters=[null_reporter])
+        run = await runner.run(items=items)
+
+        assert run.result.passed == 2, [
+            execution.result.error for execution in run.result.executions
+        ]
         assert run.result.failed == 0
         assert run.result.errors == 0

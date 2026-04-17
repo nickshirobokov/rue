@@ -15,14 +15,6 @@ class Scope(Enum):
     PROCESS = "process"  # Shared across entire test run
 
 
-class TransferStrategy(Enum):
-    """How a resolved resource should be transferred to a worker process."""
-
-    SERIALIZE = "serialize"
-    RE_RESOLVE = "re_resolve"
-    UNKNOWN = "unknown"
-
-
 @dataclass(frozen=True, slots=True)
 class ResourceSpec:
     """Canonical spec for one resolved resource provider."""
@@ -31,18 +23,7 @@ class ResourceSpec:
     scope: Scope
     provider_path: str | None = None
     provider_dir: str | None = None
-    _strategy: TransferStrategy = field(
-        default=TransferStrategy.UNKNOWN,
-        compare=False,
-    )
     dependencies: tuple[str, ...] = field(default=(), compare=False)
-
-    @property
-    def strategy(self) -> TransferStrategy:
-        return self._strategy
-
-    def assign_transfer_strategy(self, value: TransferStrategy) -> None:
-        object.__setattr__(self, "_strategy", value)
 
     @property
     def origin_path(self) -> Path | None:
@@ -55,6 +36,17 @@ class ResourceSpec:
         if self.provider_dir is None:
             return None
         return Path(self.provider_dir)
+
+    @property
+    def snapshot_key(self) -> str:
+        return "|".join(
+            (
+                self.scope.value,
+                self.name,
+                self.provider_path or "",
+                self.provider_dir or "",
+            )
+        )
 
 
 @dataclass(slots=True, eq=False)
@@ -83,8 +75,10 @@ class ResourceBlueprint:
     """Complete transfer payload for reconstructing resources in a worker."""
 
     res_specs: tuple[ResourceSpec, ...]
-    resolution_order: tuple[ResourceSpec, ...]
     request_path: str | None
-    serialized_values: dict[ResourceSpec, bytes] = field(
-        default_factory=dict,
+    root_ids: dict[str, int] = field(default_factory=dict)
+    nodes: dict[int, dict[str, Any]] = field(default_factory=dict)
+    ignored_paths: dict[str, list[str]] = field(default_factory=dict)
+    resolution_order: tuple[ResourceSpec, ...] = field(
+        default_factory=tuple,
     )

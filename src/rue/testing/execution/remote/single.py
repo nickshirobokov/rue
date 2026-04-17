@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
+
+from deepdiff import DeepDiff, Delta
 
 from rue.context.runtime import (
     CURRENT_RESOURCE_CONSUMER,
@@ -15,24 +16,12 @@ from rue.context.runtime import (
     bind,
 )
 from rue.resources import ResourceResolver
-from rue.resources.models import ResourceBlueprint, Scope
+from rue.resources.models import Scope
 from rue.testing.execution.interfaces import ExecutableTest
+from rue.testing.execution.remote.models import ExecutorPayload
 from rue.context.process_pool import get_process_pool
 from rue.testing.execution.remote.worker import run_remote_test
 from rue.testing.models import ExecutedTest, LoadedTestDef, TestResult, TestStatus
-from rue.testing.models.spec import SetupFileRef, TestSpec
-
-
-@dataclass(frozen=True, slots=True)
-class ExecutorPayload:
-    """Minimal, fully-serializable payload for remote test execution."""
-
-    spec: TestSpec
-    suite_root: Path
-    setup_chain: tuple[SetupFileRef, ...]
-    params: dict[str, Any]
-    blueprint: ResourceBlueprint
-    run_id: UUID | None = None
 
 
 @dataclass
@@ -95,7 +84,21 @@ class RemoteSingleTest(ExecutableTest):
             )
 
             future = get_process_pool().submit(run_remote_test, payload)
-            result = await asyncio.wrap_future(future)
+            remote_result = await asyncio.wrap_future(future)
+            parent_blueprint = forked.snapshot_blueprint(
+                payload.blueprint.res_specs,
+                request_path=self.definition.spec.module_path,
+            )
+            base_payload = forked.snapshot_payload(payload.blueprint)
+            parent_diff = DeepDiff(
+                base_payload,
+                forked.snapshot_payload(parent_blueprint),
+                verbose_level=2,
+            )
+            merged_payload = base_payload + Delta(parent_diff)
+            merged_payload = merged_payload + Delta(remote_result.worker_diff)
+            forked.apply_snapshot(merged_payload)
+            result = remote_result.result
         finally:
             await forked.teardown_scope(Scope.TEST)
 

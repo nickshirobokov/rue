@@ -22,14 +22,9 @@ from rue.resources.models import (
     LoadedResourceDef,
     ResourceSpec,
     Scope,
-    TransferStrategy,
 )
 from rue.resources.registry import ResourceRegistry
-from rue.resources.serialization import (
-    check_serializable,
-    deserialize_value,
-    serialize_value,
-)
+from rue.resources.snapshot import SnapshotApplier, SnapshotExporter
 
 
 _RESOLUTION_PATH: ContextVar[tuple[ResourceSpec, ...]] = ContextVar(
@@ -46,6 +41,7 @@ class ResourceResolver:
         registry: ResourceRegistry,
         *,
         parent: "ResourceResolver | None" = None,
+        shadow_mode: bool = False,
     ) -> None:
         self._registry = registry
         self._cache: dict[ResourceSpec, Any] = {}
@@ -61,6 +57,10 @@ class ResourceResolver:
         self._shared_dependency_graph: dict[
             ResourceSpec, list[ResourceSpec]
         ] = parent._shared_dependency_graph if parent is not None else {}
+        self._shadow_mode = shadow_mode
+        self._snapshot_object_ids: dict[int, int] = {}
+        self._snapshot_path_ids: dict[str, int] = {}
+        self._snapshot_next_id = 1
 
     @property
     def cached_identities(self) -> dict[ResourceSpec, Any]:
@@ -119,28 +119,32 @@ class ResourceResolver:
                 pending = owner._pending.get(identity)
                 created = pending is None
                 if created:
-                    pending = owner._pending[identity] = asyncio.create_task(
-                        owner._resolve_uncached(
+                    pending = owner._pending[identity] = (
+                        asyncio.get_running_loop().create_future()
+                    )
+                    try:
+                        value = await owner._resolve_uncached(
                             name=name,
                             definition=definition,
                             cache_key=identity,
                         )
-                    )
-                try:
-                    value = await pending
-                finally:
-                    if created:
+                    except Exception as error:
+                        pending.set_exception(error)
+                        pending.exception()
+                        raise
+                    else:
+                        pending.set_result(value)
+                    finally:
                         del owner._pending[identity]
+                else:
+                    try:
+                        value = await pending
+                    finally:
+                        if pending.cancelled():
+                            owner._pending.pop(identity, None)
 
             if owner is not self:
                 self._cache[identity] = value
-
-            if identity.strategy is TransferStrategy.UNKNOWN:
-                identity.assign_transfer_strategy(
-                    TransferStrategy.SERIALIZE
-                    if check_serializable(value)
-                    else TransferStrategy.RE_RESOLVE
-                )
 
             with (
                 bind(CURRENT_RESOURCE_PROVIDER, definition),
@@ -163,9 +167,17 @@ class ResourceResolver:
             for key, value in self._cache.items()
             if key.scope is not Scope.TEST
         }
+        child._snapshot_object_ids = dict(self._snapshot_object_ids)
+        child._snapshot_path_ids = dict(self._snapshot_path_ids)
+        child._snapshot_next_id = self._snapshot_next_id
         return child
 
     async def teardown(self) -> None:
+        if self._shadow_mode:
+            self._cache.clear()
+            self._teardowns.clear()
+            return
+
         teardown_errors: list[Exception] = []
 
         for key, definition, generator in reversed(self._teardowns):
@@ -212,6 +224,12 @@ class ResourceResolver:
 
     async def teardown_scope(self, scope: Scope) -> None:
         """Teardown only resources matching the given scope."""
+        if self._shadow_mode:
+            for key in tuple(self._cache):
+                if key.scope is scope:
+                    del self._cache[key]
+            return
+
         owner = self._owner_resolver_for_scope(scope)
         matching: list[
             tuple[
@@ -262,17 +280,26 @@ class ResourceResolver:
         resolution_order = self._topological_sort_blueprint_identities(
             identities
         )
-        serialized_values: dict[ResourceSpec, bytes] = {}
-        for identity in identities:
-            if identity.strategy is TransferStrategy.SERIALIZE:
-                serialized_values[identity] = serialize_value(
-                    self._cache[identity]
-                )
+        root_map = {
+            identity.snapshot_key: self._cache[identity]
+            for identity in identities
+        }
+        exporter = SnapshotExporter(
+            known_ids=self._snapshot_object_ids,
+            known_paths=self._snapshot_path_ids,
+            next_id=self._snapshot_next_id,
+        )
+        root_ids, nodes, ignored_paths = exporter.export_roots(root_map)
+        self._snapshot_object_ids = exporter.object_ids
+        self._snapshot_path_ids = exporter.path_ids
+        self._snapshot_next_id = exporter.next_id
         return ResourceBlueprint(
             res_specs=tuple(identities),
-            resolution_order=tuple(resolution_order),
             request_path=(str(request_path) if request_path else None),
-            serialized_values=serialized_values,
+            root_ids=root_ids,
+            nodes=nodes,
+            ignored_paths=ignored_paths,
+            resolution_order=tuple(resolution_order),
         )
 
     @classmethod
@@ -281,24 +308,100 @@ class ResourceResolver:
         blueprint: ResourceBlueprint,
         registry: ResourceRegistry,
     ) -> "ResourceResolver":
-        resolver = cls(registry)
+        resolver = cls(registry, shadow_mode=True)
         request_path = (
             Path(blueprint.request_path) if blueprint.request_path else None
         )
 
         for identity in blueprint.resolution_order:
-            if identity in blueprint.serialized_values:
-                resolver._cache[identity] = deserialize_value(
-                    blueprint.serialized_values[identity]
-                )
-                continue
             definition = registry.select(identity.name, request_path).definition
             await resolver._resolve_uncached(
                 name=identity.name,
                 definition=definition,
                 cache_key=identity,
             )
+        resolver.apply_snapshot(blueprint)
         return resolver
+
+    def snapshot_blueprint(
+        self,
+        identities: tuple[ResourceSpec, ...],
+        request_path: Path | None = None,
+    ) -> ResourceBlueprint:
+        identities_with_dependencies = tuple(
+            replace(
+                identity,
+                dependencies=tuple(
+                    dependency.name
+                    for dependency in self._shared_dependency_graph.get(
+                        identity,
+                        (),
+                    )
+                ),
+            )
+            for identity in identities
+        )
+        root_map = {
+            identity.snapshot_key: self._cache[identity]
+            for identity in identities
+            if identity in self._cache
+        }
+        exporter = SnapshotExporter(
+            known_ids=self._snapshot_object_ids,
+            known_paths=self._snapshot_path_ids,
+            next_id=self._snapshot_next_id,
+        )
+        root_ids, nodes, ignored_paths = exporter.export_roots(root_map)
+        self._snapshot_object_ids = exporter.object_ids
+        self._snapshot_path_ids = exporter.path_ids
+        self._snapshot_next_id = exporter.next_id
+        return ResourceBlueprint(
+            res_specs=identities_with_dependencies,
+            request_path=(str(request_path) if request_path else None),
+            root_ids=root_ids,
+            nodes=nodes,
+            ignored_paths=ignored_paths,
+            resolution_order=identities_with_dependencies,
+        )
+
+    def snapshot_payload(self, blueprint: ResourceBlueprint) -> dict[str, Any]:
+        return {
+            "root_ids": dict(blueprint.root_ids),
+            "nodes": {node_id: dict(node) for node_id, node in blueprint.nodes.items()},
+            "ignored_paths": {
+                root_key: list(paths)
+                for root_key, paths in blueprint.ignored_paths.items()
+            },
+        }
+
+    def apply_snapshot(self, blueprint: ResourceBlueprint | dict[str, Any]) -> None:
+        payload = (
+            self.snapshot_payload(blueprint)
+            if isinstance(blueprint, ResourceBlueprint)
+            else blueprint
+        )
+        roots = {
+            identity.snapshot_key: self._cache.get(identity)
+            for identity in self._cache
+        }
+        applier = SnapshotApplier(
+            payload,
+            object_ids=self._snapshot_object_ids,
+        )
+        patched_roots = applier.apply_roots(roots)
+        self._snapshot_object_ids = applier.object_ids
+        self._snapshot_next_id = max(
+            applier.nodes,
+            default=self._snapshot_next_id - 1,
+        ) + 1
+        key_to_identity = {
+            identity.snapshot_key: identity for identity in self._cache
+        }
+        for root_key, value in patched_roots.items():
+            identity = key_to_identity.get(root_key)
+            if identity is None:
+                continue
+            self._cache[identity] = value
 
     def _owner_resolver_for_scope(self, scope: Scope) -> "ResourceResolver":
         if scope is not Scope.TEST and self._parent is not None:
@@ -331,17 +434,19 @@ class ResourceResolver:
                         AsyncGenerator[Any, None], definition.fn(**kwargs)
                     )
                     value = await anext(generator)
-                    self._teardowns.append(
-                        (cache_key, definition, generator)
-                    )
+                    if not self._shadow_mode:
+                        self._teardowns.append(
+                            (cache_key, definition, generator)
+                        )
                 case LoadedResourceDef(is_generator=True):
                     generator = cast(
                         Generator[Any, None, None], definition.fn(**kwargs)
                     )
                     value = next(generator)
-                    self._teardowns.append(
-                        (cache_key, definition, generator)
-                    )
+                    if not self._shadow_mode:
+                        self._teardowns.append(
+                            (cache_key, definition, generator)
+                        )
                 case LoadedResourceDef(is_async=True):
                     value = await definition.fn(**kwargs)
                 case _:
@@ -388,15 +493,11 @@ class ResourceResolver:
 
         while queue:
             identity = queue.popleft()
-            if identity in visited or identity.scope is Scope.TEST:
+            if identity in visited:
                 continue
             visited.add(identity)
 
-            dependencies = [
-                dependency
-                for dependency in dep_graph.get(identity, ())
-                if dependency.scope is not Scope.TEST
-            ]
+            dependencies = list(dep_graph.get(identity, ()))
             closure[identity] = dependencies
             queue.extend(
                 dependency

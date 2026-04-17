@@ -1,17 +1,16 @@
-"""Tests for resource blueprint transfer helpers."""
+"""Tests for snapshot-based resource transfer helpers."""
+
+from __future__ import annotations
 
 import threading
+from contextvars import ContextVar
 from pathlib import Path
 
 import pytest
+from deepdiff import DeepDiff, Delta
 
-from rue.resources import (
-    ResourceResolver,
-    Scope,
-    registry,
-    resource,
-)
-from rue.resources.models import ResourceBlueprint, TransferStrategy
+from rue.resources import ResourceResolver, Scope, registry, resource
+from rue.resources.models import ResourceBlueprint
 from rue.resources.serialization import (
     check_serializable,
     deserialize_value,
@@ -26,9 +25,37 @@ def clean_registry():
     registry.reset()
 
 
-# -----------------------------------------------------------
-# Serialization helpers
-# -----------------------------------------------------------
+class SlotsState:
+    __slots__ = ("count", "_private", "_cache", "lock", "ctx")
+
+    def __init__(self) -> None:
+        self.count = 1
+        self._private = "secret"
+        self._cache = {"skip": True}
+        self.lock = threading.Lock()
+        self.ctx = ContextVar("slots_state_ctx", default=0)
+        self.ctx.set(5)
+
+
+def _merge_payloads(
+    resolver: ResourceResolver,
+    base: ResourceBlueprint,
+    current: ResourceBlueprint,
+    worker: ResourceBlueprint,
+) -> dict[str, object]:
+    base_payload = resolver.snapshot_payload(base)
+    parent_diff = DeepDiff(
+        base_payload,
+        resolver.snapshot_payload(current),
+        verbose_level=2,
+    )
+    worker_diff = DeepDiff(
+        base_payload,
+        resolver.snapshot_payload(worker),
+        verbose_level=2,
+    )
+    merged = base_payload + Delta(parent_diff)
+    return merged + Delta(worker_diff)
 
 
 class TestCheckSerializable:
@@ -57,120 +84,69 @@ class TestSerializeRoundTrip:
         assert restored == original
 
 
-# -----------------------------------------------------------
-# ResourceResolver.build_blueprint
-# -----------------------------------------------------------
-
-
 class TestBuildBlueprint:
-    async def test_serializable_resource_tagged_serialize(self):
-        @resource(scope=Scope.PROCESS)
-        def config():
-            return {"host": "localhost", "port": 8080}
-
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("config")
-
-        blueprint = resolver.build_blueprint(["config"])
-
-        assert len(blueprint.res_specs) == 1
-        identity = blueprint.res_specs[0]
-        assert identity.strategy == TransferStrategy.SERIALIZE
-        assert blueprint.resolution_order == (identity,)
-        assert identity in blueprint.serialized_values
-        assert isinstance(blueprint.serialized_values[identity], bytes)
-
-    async def test_non_serializable_resource_tagged_re_resolve(self):
-        @resource(scope=Scope.PROCESS)
-        def lock_res():
-            return threading.Lock()
-
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("lock_res")
-
-        blueprint = resolver.build_blueprint(["lock_res"])
-
-        assert len(blueprint.res_specs) == 1
-        identity = blueprint.res_specs[0]
-        assert identity.strategy == TransferStrategy.RE_RESOLVE
-        assert blueprint.resolution_order == (identity,)
-
-    async def test_mixed_dependency_chain(self):
-        """A(serializable) -> B(non-serializable, depends on A).
-
-        Blueprint should contain both in resolution_order (B after A).
-        """
-
-        @resource(scope=Scope.PROCESS)
-        def base_config():
-            return {"db": "postgres://localhost"}
-
-        @resource(scope=Scope.PROCESS)
-        def db_conn(base_config):
-            _ = base_config
-            return threading.Lock()
-
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("db_conn")
-
-        blueprint = resolver.build_blueprint(["db_conn"])
-
-        identity_map = {i.name: i for i in blueprint.res_specs}
-        assert len(identity_map) == 2
-
-        assert (
-            identity_map["base_config"].strategy
-            == TransferStrategy.SERIALIZE
-        )
-        assert (
-            identity_map["db_conn"].strategy
-            == TransferStrategy.RE_RESOLVE
-        )
-
-        assert len(blueprint.resolution_order) == 2
-        order_names = [i.name for i in blueprint.resolution_order]
-        assert order_names.index("base_config") < order_names.index(
-            "db_conn"
-        )
-
-    async def test_dependencies_captured_correctly(self):
-        @resource(scope=Scope.PROCESS)
-        def dep_a():
-            return "a"
-
-        @resource(scope=Scope.PROCESS)
-        def dep_b(dep_a):
-            return f"b+{dep_a}"
-
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("dep_b")
-
-        blueprint = resolver.build_blueprint(["dep_b"])
-
-        identity_map = {i.name: i for i in blueprint.res_specs}
-        dep_b_identity = identity_map["dep_b"]
-        assert "dep_a" in dep_b_identity.dependencies
-
-    async def test_test_scope_excluded(self):
+    async def test_includes_test_scope_in_snapshot_closure(self):
         @resource(scope=Scope.TEST)
         def per_test():
-            return "ephemeral"
+            return {"kind": "test"}
 
         @resource(scope=Scope.PROCESS)
         def shared():
-            return "durable"
+            return {"kind": "process"}
 
         resolver = ResourceResolver(registry)
         await resolver.resolve("shared")
         await resolver.resolve("per_test")
 
-        blueprint = resolver.build_blueprint(
-            ["shared", "per_test"]
-        )
+        blueprint = resolver.build_blueprint(["shared", "per_test"])
 
         names = {identity.name for identity in blueprint.res_specs}
-        assert "shared" in names
-        assert "per_test" not in names
+        assert names == {"shared", "per_test"}
+        assert set(blueprint.root_ids) == {
+            identity.snapshot_key for identity in blueprint.res_specs
+        }
+
+    async def test_records_ignored_runtime_fields(self):
+        @resource(scope=Scope.PROCESS)
+        def state():
+            return SlotsState()
+
+        resolver = ResourceResolver(registry)
+        await resolver.resolve("state")
+
+        blueprint = resolver.build_blueprint(["state"])
+        identity = blueprint.res_specs[0]
+        root_node = blueprint.nodes[blueprint.root_ids[identity.snapshot_key]]
+        attrs = set(root_node["attrs"])
+
+        assert "count" in attrs
+        assert "_private" in attrs
+        assert "_cache" not in attrs
+        assert "lock" not in attrs
+        assert blueprint.ignored_paths[identity.snapshot_key] == [
+            "_cache",
+            "lock",
+        ]
+
+    async def test_preserves_shared_reference_nodes(self):
+        @resource(scope=Scope.PROCESS)
+        def shared():
+            return {"value": 1}
+
+        @resource(scope=Scope.PROCESS)
+        def alias(shared):
+            return shared
+
+        resolver = ResourceResolver(registry)
+        await resolver.resolve("alias")
+
+        blueprint = resolver.build_blueprint(["alias"])
+        identity_map = {identity.name: identity for identity in blueprint.res_specs}
+
+        assert (
+            blueprint.root_ids[identity_map["shared"].snapshot_key]
+            == blueprint.root_ids[identity_map["alias"].snapshot_key]
+        )
 
     async def test_request_path_stored(self):
         @resource(scope=Scope.PROCESS)
@@ -192,362 +168,177 @@ class TestBuildBlueprint:
         with pytest.raises(ValueError, match="nonexistent"):
             resolver.build_blueprint(["nonexistent"])
 
-    async def test_transitive_dependencies_included(self):
-        """A -> B -> C: requesting C should include A, B, C."""
-
-        @resource(scope=Scope.PROCESS)
-        def level_a():
-            return "a"
-
-        @resource(scope=Scope.PROCESS)
-        def level_b(level_a):
-            return f"b({level_a})"
-
-        @resource(scope=Scope.PROCESS)
-        def level_c(level_b):
-            _ = level_b
-            return threading.Lock()
-
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("level_c")
-
-        blueprint = resolver.build_blueprint(["level_c"])
-
-        names = {identity.name for identity in blueprint.res_specs}
-        assert names == {"level_a", "level_b", "level_c"}
-
-    async def test_topological_order_respects_dependencies(self):
-        """RE_RESOLVE identities appear after their dependencies."""
-
-        @resource(scope=Scope.PROCESS)
-        def top():
-            return threading.Lock()
-
-        @resource(scope=Scope.PROCESS)
-        def bottom(top):
-            _ = top
-            return threading.Lock()
-
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("bottom")
-
-        blueprint = resolver.build_blueprint(["bottom"])
-
-        order_names = [i.name for i in blueprint.resolution_order]
-        assert order_names.index("top") < order_names.index("bottom")
-
-
-# -----------------------------------------------------------
-# ResourceResolver.build_from_blueprint
-# -----------------------------------------------------------
-
 
 class TestBuildFromBlueprint:
-    async def test_worker_resolves_serialize_entries(self):
-        @resource(scope=Scope.PROCESS)
-        def config():
-            return {"key": "value"}
-
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("config")
-
-        blueprint = resolver.build_blueprint(["config"])
-
-        worker = await ResourceResolver.build_from_blueprint(
-            blueprint, registry
-        )
-        cache = worker.cached_identities
-        values = list(cache.values())
-        assert len(values) == 1
-        assert values[0] == {"key": "value"}
-
-    async def test_hydrated_cache_uses_registry_identity_lookup(self):
-        call_count = 0
-
-        @resource(scope=Scope.PROCESS)
-        def config():
-            nonlocal call_count
-            call_count += 1
-            return {"key": "value"}
-
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("config")
-        assert call_count == 1
-
-        blueprint = resolver.build_blueprint(["config"])
-        worker = await ResourceResolver.build_from_blueprint(
-            blueprint, registry
-        )
-
-        assert await worker.resolve("config") == {"key": "value"}
-        assert call_count == 1
-
-    async def test_re_resolves_non_serializable(self):
-        call_count = 0
-
-        @resource(scope=Scope.PROCESS)
-        def lock_factory():
-            nonlocal call_count
-            call_count += 1
-            return threading.Lock()
-
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("lock_factory")
-        assert call_count == 1
-
-        blueprint = resolver.build_blueprint(["lock_factory"])
-        worker = await ResourceResolver.build_from_blueprint(
-            blueprint, registry
-        )
-
-        # Was re-resolved (called again)
-        assert call_count == 2
-        cache = worker.cached_identities
-        assert any(k.name == "lock_factory" for k in cache)
-
-    async def test_re_resolve_uses_deserialized_dependency(self):
-        """B(non-serializable) depends on A(serializable).
-
-        Worker should deserialize A and use it to re-resolve B.
-        """
-        received_config = None
-
-        @resource(scope=Scope.PROCESS)
-        def config():
-            return {"db": "postgres"}
-
-        @resource(scope=Scope.PROCESS)
-        def connection(config):
-            nonlocal received_config
-            received_config = config
-            return threading.Lock()
-
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("connection")
-
-        blueprint = resolver.build_blueprint(["connection"])
-        received_config = None
-
-        await ResourceResolver.build_from_blueprint(blueprint, registry)
-
-        assert received_config == {"db": "postgres"}
-
-    async def test_worker_fork_for_test(self):
-        @resource(scope=Scope.PROCESS)
-        def shared():
-            return "shared_value"
-
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("shared")
-
-        blueprint = resolver.build_blueprint(["shared"])
-        worker = await ResourceResolver.build_from_blueprint(
-            blueprint, registry
-        )
-
-        forked = worker.fork_for_test()
-        cache = forked.cached_identities
-        values = list(cache.values())
-        assert "shared_value" in values
-
-
-# -----------------------------------------------------------
-# Full round-trip integration
-# -----------------------------------------------------------
-
-
-class TestRoundTrip:
-    async def test_full_round_trip_mixed_resources(self):
-        """End-to-end: register -> resolve -> build -> hydrate.
-
-        Verifies that serializable values survive the round-trip
-        and non-serializable values are re-resolved correctly.
-        """
-
-        @resource(scope=Scope.PROCESS)
-        def app_config():
-            return {"env": "test", "debug": True}
-
-        @resource(scope=Scope.PROCESS)
-        def file_lock(app_config):
-            _ = app_config
-            return threading.Lock()
-
-        @resource(scope=Scope.MODULE)
-        def module_val():
-            return [1, 2, 3]
-
-        # Resolve everything in "main process"
-        main_resolver = ResourceResolver(registry)
-        await main_resolver.resolve("file_lock")
-        await main_resolver.resolve("module_val")
-
-        blueprint = main_resolver.build_blueprint(
-            ["file_lock", "module_val"]
-        )
-
-        # Hydrate in "worker process"
-        worker = await ResourceResolver.build_from_blueprint(
-            blueprint, registry
-        )
-        cache = worker.cached_identities
-        names = {k.name for k in cache}
-
-        assert "app_config" in names
-        assert "file_lock" in names
-        assert "module_val" in names
-
-        # Serializable values match
-        config_identity = next(
-            k for k in cache if k.name == "app_config"
-        )
-        assert cache[config_identity] == {"env": "test", "debug": True}
-
-        # Non-serializable values are valid instances
-        lock_identity = next(
-            k for k in cache if k.name == "file_lock"
-        )
-        assert isinstance(cache[lock_identity], type(threading.Lock()))
-
-
-# -----------------------------------------------------------
-# Edge cases
-# -----------------------------------------------------------
-
-
-class TestEdgeCases:
-    async def test_generator_serializable_yield(self):
-        """Generator with serializable yield → SERIALIZE; worker hydrates bytes.
-
-        The worker receives the materialized value only; the parent resolver
-        still owns the generator and runs its teardown.
-        """
-        teardown_ran = False
-
-        @resource(scope=Scope.PROCESS)
-        def gen_config():
-            yield {"setting": True}
-            nonlocal teardown_ran
-            teardown_ran = True
-
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("gen_config")
-
-        blueprint = resolver.build_blueprint(["gen_config"])
-
-        identity = blueprint.res_specs[0]
-        assert identity.strategy == TransferStrategy.SERIALIZE
-        assert identity in blueprint.serialized_values
-
-        worker = await ResourceResolver.build_from_blueprint(
-            blueprint, registry
-        )
-        assert await worker.resolve("gen_config") == {"setting": True}
-        await worker.teardown()
-        assert not teardown_ran
-
-        teardown_ran = False
-        await resolver.teardown()
-        assert teardown_ran
-
-    async def test_generator_non_serializable_yield(self):
-        """Generator with non-serializable yield → RE_RESOLVE.
-
-        Worker re-runs generator and manages teardown.
-        """
+    async def test_worker_replays_shadow_factories(self):
         resolve_count = 0
 
         @resource(scope=Scope.PROCESS)
-        def gen_lock():
+        def config():
             nonlocal resolve_count
             resolve_count += 1
-            lock = threading.Lock()
-            yield lock
+            return {"key": "value"}
 
         resolver = ResourceResolver(registry)
-        await resolver.resolve("gen_lock")
+        await resolver.resolve("config")
         assert resolve_count == 1
 
-        blueprint = resolver.build_blueprint(["gen_lock"])
-        identity = blueprint.res_specs[0]
-        assert identity.strategy == TransferStrategy.RE_RESOLVE
+        blueprint = resolver.build_blueprint(["config"])
+        worker = await ResourceResolver.build_from_blueprint(
+            blueprint,
+            registry,
+        )
 
-        await ResourceResolver.build_from_blueprint(blueprint, registry)
         assert resolve_count == 2
+        assert await worker.resolve("config") == {"key": "value"}
+
+    async def test_worker_applies_parent_state_over_shadow_defaults(self):
+        @resource(scope=Scope.PROCESS)
+        def shared():
+            return {"count": 0}
+
+        resolver = ResourceResolver(registry)
+        shared = await resolver.resolve("shared")
+        shared["count"] = 4
+
+        blueprint = resolver.build_blueprint(["shared"])
+        worker = await ResourceResolver.build_from_blueprint(
+            blueprint,
+            registry,
+        )
+
+        assert await worker.resolve("shared") == {"count": 4}
+
+    async def test_worker_hydrates_contextvar_values(self):
+        class Holder:
+            def __init__(self) -> None:
+                self.ctx = ContextVar("holder_ctx", default=0)
+                self.ctx.set(7)
+
+        @resource(scope=Scope.PROCESS)
+        def holder():
+            return Holder()
+
+        resolver = ResourceResolver(registry)
+        await resolver.resolve("holder")
+
+        blueprint = resolver.build_blueprint(["holder"])
+        worker = await ResourceResolver.build_from_blueprint(
+            blueprint,
+            registry,
+        )
+        hydrated = await worker.resolve("holder")
+
+        assert hydrated.ctx.get() == 7
 
     async def test_empty_blueprint_hydration(self):
-        """Empty blueprint → empty resolver."""
         blueprint = ResourceBlueprint(
             res_specs=(),
-            resolution_order=(),
             request_path=None,
         )
         worker = await ResourceResolver.build_from_blueprint(
-            blueprint, registry
+            blueprint,
+            registry,
         )
+
         assert len(worker.cached_identities) == 0
 
-    async def test_all_serializable(self):
-        """All resources serializable → resolution_order follows dependencies."""
 
+class TestRoundTrip:
+    async def test_parent_and_worker_diffs_use_worker_last_on_conflict(self):
         @resource(scope=Scope.PROCESS)
-        def a():
-            return 1
-
-        @resource(scope=Scope.PROCESS)
-        def b(a):
-            return a + 1
+        def shared():
+            return {"values": ["base"]}
 
         resolver = ResourceResolver(registry)
-        await resolver.resolve("b")
+        shared = await resolver.resolve("shared")
+        base = resolver.build_blueprint(["shared"])
 
-        blueprint = resolver.build_blueprint(["b"])
+        worker = await ResourceResolver.build_from_blueprint(base, registry)
+        worker_shared = await worker.resolve("shared")
 
-        assert all(
-            identity.strategy == TransferStrategy.SERIALIZE
-            for identity in blueprint.res_specs
+        shared["values"].append("parent")
+        worker_shared["values"].append("worker")
+
+        current = resolver.snapshot_blueprint(
+            base.res_specs,
+            request_path=Path("/tmp/test_shared.py"),
         )
-        assert len(blueprint.resolution_order) == 2
-        order_names = [i.name for i in blueprint.resolution_order]
-        assert order_names.index("a") < order_names.index("b")
+        worker_snapshot = worker.snapshot_blueprint(
+            base.res_specs,
+            request_path=Path("/tmp/test_shared.py"),
+        )
 
-    async def test_all_non_serializable(self):
-        """All resources non-serializable → all in resolution_order."""
+        resolver.apply_snapshot(
+            _merge_payloads(resolver, base, current, worker_snapshot)
+        )
 
+        assert shared["values"] == ["base", "worker"]
+
+    async def test_test_generator_teardown_mutates_parent_after_merge(self):
         @resource(scope=Scope.PROCESS)
-        def lock_a():
-            return threading.Lock()
+        def events():
+            return []
 
+        @resource(scope=Scope.TEST)
+        def case_state(events):
+            state = {"events": events, "body": []}
+            yield state
+            events.append("teardown")
+
+        parent = ResourceResolver(registry)
+        forked = parent.fork_for_test()
+        state = await forked.resolve("case_state")
+        base = forked.build_blueprint(["case_state"])
+
+        worker = await ResourceResolver.build_from_blueprint(base, registry)
+        worker_state = await worker.resolve("case_state")
+        worker_state["body"].append("worker")
+
+        current = forked.snapshot_blueprint(
+            base.res_specs,
+            request_path=Path("/tmp/test_case.py"),
+        )
+        worker_snapshot = worker.snapshot_blueprint(
+            base.res_specs,
+            request_path=Path("/tmp/test_case.py"),
+        )
+        forked.apply_snapshot(
+            _merge_payloads(forked, base, current, worker_snapshot)
+        )
+
+        assert state["body"] == ["worker"]
+        await forked.teardown_scope(Scope.TEST)
+        assert await parent.resolve("events") == ["teardown"]
+
+    async def test_slots_private_fields_and_runtime_ignores_round_trip(self):
         @resource(scope=Scope.PROCESS)
-        def lock_b(lock_a):
-            _ = lock_a
-            return threading.Lock()
+        def state():
+            return SlotsState()
 
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("lock_b")
+        parent = ResourceResolver(registry)
+        live = await parent.resolve("state")
+        base = parent.build_blueprint(["state"])
 
-        blueprint = resolver.build_blueprint(["lock_b"])
+        worker = await ResourceResolver.build_from_blueprint(base, registry)
+        worker_state = await worker.resolve("state")
+        worker_state.count = 8
+        worker_state._private = "worker"
+        worker_state.ctx.set(11)
 
-        assert all(
-            identity.strategy == TransferStrategy.RE_RESOLVE
-            for identity in blueprint.res_specs
+        current = parent.snapshot_blueprint(
+            base.res_specs,
+            request_path=Path("/tmp/test_slots.py"),
         )
-        assert len(blueprint.resolution_order) == 2
-
-        order_names = [i.name for i in blueprint.resolution_order]
-        assert order_names.index("lock_a") < order_names.index(
-            "lock_b"
+        worker_snapshot = worker.snapshot_blueprint(
+            base.res_specs,
+            request_path=Path("/tmp/test_slots.py"),
+        )
+        parent.apply_snapshot(
+            _merge_payloads(parent, base, current, worker_snapshot)
         )
 
-    async def test_module_scope_included_in_blueprint(self):
-        @resource(scope=Scope.MODULE)
-        def mod_res():
-            return "module_value"
-
-        resolver = ResourceResolver(registry)
-        await resolver.resolve("mod_res")
-
-        blueprint = resolver.build_blueprint(["mod_res"])
-
-        assert len(blueprint.res_specs) == 1
-        assert blueprint.res_specs[0].scope == Scope.MODULE
+        assert live.count == 8
+        assert live._private == "worker"
+        assert live.ctx.get() == 11
+        assert isinstance(live.lock, type(threading.Lock()))

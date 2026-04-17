@@ -21,6 +21,8 @@ import time
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
+from deepdiff import DeepDiff
+
 from rue.assertions.base import AssertionResult
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
@@ -34,24 +36,27 @@ from rue.resources import ResourceResolver
 from rue.resources.models import Scope
 from rue.resources.registry import registry as default_resource_registry
 from rue.testing.discovery.loader import TestLoader
+from rue.testing.execution.remote.models import (
+    ExecutorPayload,
+    RemoteExecutionResult,
+)
 from rue.testing.models import TestResult, TestStatus
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
 
 
 if TYPE_CHECKING:
-    from rue.testing.execution.remote.single import ExecutorPayload
     from rue.testing.models import LoadedTestDef
 
 
 logger = logging.getLogger(__name__)
 
 
-def run_remote_test(payload: ExecutorPayload) -> TestResult:
+def run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
     """Synchronous entrypoint submitted to a ProcessPoolExecutor worker."""
     return asyncio.run(_run_remote_test(payload))
 
 
-async def _run_remote_test(payload: ExecutorPayload) -> TestResult:
+async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
     loader = TestLoader(payload.suite_root)
     for ref in payload.setup_chain:
         loader.prepare_setup(ref.path)
@@ -65,6 +70,7 @@ async def _run_remote_test(payload: ExecutorPayload) -> TestResult:
         payload.blueprint,
         default_resource_registry,
     )
+    base_payload = resolver.snapshot_payload(payload.blueprint)
 
     assertion_results: list[AssertionResult] = []
     error: BaseException | None = None
@@ -94,22 +100,26 @@ async def _run_remote_test(payload: ExecutorPayload) -> TestResult:
 
     duration_ms = (time.perf_counter() - start) * 1000
 
-    with bind(CURRENT_TEST, ctx):
-        try:
-            await resolver.teardown_scope(Scope.TEST)
-        except Exception as teardown_err:
-            logger.warning(
-                f"Error during resource teardown: {teardown_err}"
-            )
-            if error is None:
-                error = teardown_err
+    worker_snapshot = resolver.snapshot_blueprint(
+        payload.blueprint.res_specs,
+        request_path=payload.spec.module_path,
+    )
+    worker_diff = DeepDiff(
+        base_payload,
+        resolver.snapshot_payload(worker_snapshot),
+        verbose_level=2,
+    )
 
     if imperative_outcome is not None:
-        return TestResult(
-            status=imperative_outcome,
-            duration_ms=duration_ms,
-            error=error,
-            assertion_results=assertion_results,
+        return RemoteExecutionResult(
+            result=TestResult(
+                status=imperative_outcome,
+                duration_ms=duration_ms,
+                error=error,
+                assertion_results=assertion_results,
+            ),
+            worker_diff=worker_diff,
+            ignored_paths=worker_snapshot.ignored_paths,
         )
 
     expect_failure = definition.spec.xfail_reason is not None
@@ -144,11 +154,15 @@ async def _run_remote_test(payload: ExecutorPayload) -> TestResult:
         case _:
             status, result_error = TestStatus.PASSED, None
 
-    return TestResult(
-        status=status,
-        duration_ms=duration_ms,
-        error=result_error,
-        assertion_results=assertion_results.copy(),
+    return RemoteExecutionResult(
+        result=TestResult(
+            status=status,
+            duration_ms=duration_ms,
+            error=result_error,
+            assertion_results=assertion_results.copy(),
+        ),
+        worker_diff=worker_diff,
+        ignored_paths=worker_snapshot.ignored_paths,
     )
 
 

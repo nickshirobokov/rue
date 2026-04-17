@@ -5,7 +5,6 @@ from rue.resources.models import (
     ResourceBlueprint,
     ResourceSpec,
     Scope,
-    TransferStrategy,
 )
 from rue.resources.registry import ResourceRegistry, registry, resource
 from rue.resources.resolver import ResourceResolver
@@ -18,7 +17,6 @@ __all__ = [
     "ResourceRegistry",
     "ResourceResolver",
     "Scope",
-    "TransferStrategy",
     "registry",
     "resource",
 ]
