@@ -25,7 +25,7 @@ from rue.testing.models import (
     ParameterSet,
     ParamsIterateModifier,
     RunResult,
-    TestExecution,
+    ExecutedTest,
     LoadedTestDef,
     TestResult,
     TestStatus,
@@ -99,7 +99,7 @@ class EventReporter(Reporter):
         self.event_times.append(("start", item.spec.name, elapsed))
         self.event_order.append(("start", item.spec.name))
 
-    async def on_execution_complete(self, execution: TestExecution) -> None:
+    async def on_execution_complete(self, execution: ExecutedTest) -> None:
         elapsed = time.perf_counter() - self.start_time
         if id(execution.definition) in self._started_ids:
             self.event_times.append(("complete", execution.definition.spec.name, elapsed))
@@ -132,27 +132,27 @@ class TestRunResult:
         result = RunResult()
         items = [make_item(lambda: None) for _ in range(6)]
         result.executions = [
-            TestExecution(
+            ExecutedTest(
                 definition=items[0],
                 result=TestResult(status=TestStatus.PASSED, duration_ms=1),
             ),
-            TestExecution(
+            ExecutedTest(
                 definition=items[1],
                 result=TestResult(status=TestStatus.FAILED, duration_ms=1),
             ),
-            TestExecution(
+            ExecutedTest(
                 definition=items[2],
                 result=TestResult(status=TestStatus.ERROR, duration_ms=1),
             ),
-            TestExecution(
+            ExecutedTest(
                 definition=items[3],
                 result=TestResult(status=TestStatus.SKIPPED, duration_ms=1),
             ),
-            TestExecution(
+            ExecutedTest(
                 definition=items[4],
                 result=TestResult(status=TestStatus.XFAILED, duration_ms=1),
             ),
-            TestExecution(
+            ExecutedTest(
                 definition=items[5],
                 result=TestResult(status=TestStatus.XPASSED, duration_ms=1),
             ),
@@ -1025,7 +1025,7 @@ class TestConcurrency:
             await asyncio.sleep(0.01)
 
         class CompleteFailureReporter(EventReporter):
-            async def on_execution_complete(self, execution: TestExecution) -> None:
+            async def on_execution_complete(self, execution: ExecutedTest) -> None:
                 raise RuntimeError("complete callback failed")
 
         runner = Runner(

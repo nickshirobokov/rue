@@ -31,7 +31,7 @@ from rue.testing.execution import DefaultTestFactory
 from rue.testing.execution.interfaces import ExecutableTest
 from rue.testing.models import (
     Run,
-    TestExecution,
+    ExecutedTest,
     LoadedTestDef,
     TestResult,
     TestStatus,
@@ -133,7 +133,7 @@ class Runner:
     async def _notify_test_start(self, item: LoadedTestDef) -> None:
         await asyncio.gather(*[r.on_test_start(item) for r in self.reporters])
 
-    async def _on_execution_complete(self, execution: TestExecution) -> None:
+    async def _on_execution_complete(self, execution: ExecutedTest) -> None:
         await asyncio.gather(
             *[r.on_execution_complete(execution) for r in self.reporters]
         )
@@ -320,10 +320,10 @@ class Runner:
 
     async def _execute_item(
         self, item: LoadedTestDef, resolver: ResourceResolver
-    ) -> TestExecution:
+    ) -> ExecutedTest:
         """Execute a single test with error handling."""
         if item.spec.definition_error:
-            execution = TestExecution(
+            execution = ExecutedTest(
                 definition=item,
                 result=TestResult(
                     status=TestStatus.ERROR,
@@ -342,7 +342,7 @@ class Runner:
             execution = await test.execute(resolver)
         except Exception as e:
             duration = (time.perf_counter() - t_start) * 1000
-            execution = TestExecution(
+            execution = ExecutedTest(
                 definition=item,
                 result=TestResult(
                     status=TestStatus.ERROR, duration_ms=duration, error=e
@@ -381,7 +381,7 @@ class Runner:
         """Run tests concurrently."""
         state_lock = asyncio.Lock()
         failures = 0
-        results: list[TestExecution | None] = [None] * len(items)
+        results: list[ExecutedTest | None] = [None] * len(items)
 
         async def run_one(idx: int, item: LoadedTestDef) -> None:
             nonlocal failures

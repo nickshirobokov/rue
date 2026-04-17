@@ -21,7 +21,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from rue.testing.models.loaded import LoadedTestDef
-    from rue.testing.models.result import TestExecution, TestResult
+    from rue.testing.models.executed import ExecutedTest
+    from rue.testing.models.result import TestResult
 
     from .reporter import ConsoleReporter
 
@@ -53,7 +54,7 @@ class OutputMode(ABC):
     def render_live(self, state: ConsoleReporter) -> RenderableType: ...
 
     @abstractmethod
-    def print_test(self, execution: TestExecution, state: ConsoleReporter) -> None: ...
+    def print_test(self, execution: ExecutedTest, state: ConsoleReporter) -> None: ...
 
     def print_completed_module(
         self,
@@ -78,7 +79,7 @@ class QuietMode(OutputMode):
         )
         return self._render_spinner_line(text)
 
-    def print_test(self, execution: TestExecution, state: ConsoleReporter) -> None:
+    def print_test(self, execution: ExecutedTest, state: ConsoleReporter) -> None:
         pass
 
 
@@ -102,7 +103,7 @@ class CompactMode(OutputMode):
             lines.append(self._render_spinner_line(line) if has_running else line)
         return Group(*lines) if lines else Text("")
 
-    def print_test(self, execution: TestExecution, state: ConsoleReporter) -> None:
+    def print_test(self, execution: ExecutedTest, state: ConsoleReporter) -> None:
         definition = execution.definition
         style = STATUS_STYLES[execution.result.status]
         if state.current_module != definition.spec.module_path:
@@ -139,7 +140,7 @@ class VerboseMode(OutputMode):
     def show_progress_bar(self) -> bool:
         return True
 
-    def _get_modifier_suffix(self, execution: TestExecution) -> str:
+    def _get_modifier_suffix(self, execution: ExecutedTest) -> str:
         if execution.definition.spec.modifiers and execution.sub_executions:
             return f"[{execution.definition.spec.modifiers[0].display_name}]"
         return ""
@@ -162,7 +163,7 @@ class VerboseMode(OutputMode):
         return text
 
     def _iter_sub_executions(
-        self, sub_executions: list[TestExecution], indent: int
+        self, sub_executions: list[ExecutedTest], indent: int
     ) -> list[RenderableType]:
         renderables: list[RenderableType] = []
         for sub in sub_executions:
@@ -209,7 +210,7 @@ class VerboseMode(OutputMode):
 
     def _early_sub_executions(
         self, item: LoadedTestDef, state: ConsoleReporter
-    ) -> list[TestExecution]:
+    ) -> list[ExecutedTest]:
         """Sub-executions that completed before the parent finished."""
         return [
             ex
@@ -235,7 +236,7 @@ class VerboseMode(OutputMode):
         self.console.print(tree)
         state.current_module = path
 
-    def print_test(self, execution: TestExecution, state: ConsoleReporter) -> None:
+    def print_test(self, execution: ExecutedTest, state: ConsoleReporter) -> None:
         definition = execution.definition
         if state.current_module != definition.spec.module_path:
             rel = safe_relative_path(definition.spec.module_path)
@@ -266,7 +267,7 @@ class VerboseMode(OutputMode):
     def _build_live_item_line(
         self,
         item: LoadedTestDef,
-        execution: TestExecution | None,
+        execution: ExecutedTest | None,
     ) -> RenderableType:
         if execution is None:
             text = Text.from_markup(f"{item.spec.full_name} [dim]⋯ running[/dim]")
@@ -309,7 +310,7 @@ class VerboseMode(OutputMode):
     def _add_live_sub_executions(
         self,
         parent: Tree,
-        sub_executions: list[TestExecution],
+        sub_executions: list[ExecutedTest],
         state: ConsoleReporter,
     ) -> None:
         for sub in sub_executions:

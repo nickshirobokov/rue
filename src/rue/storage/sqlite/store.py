@@ -20,7 +20,8 @@ from rue.resources.metrics.base import (
 from rue.storage.base import Store
 from rue.storage.sqlite.migrations import MigrationError, MigrationRunner
 from rue.testing.models.loaded import LoadedTestDef
-from rue.testing.models.result import TestExecution, TestResult, TestStatus
+from rue.testing.models.executed import ExecutedTest
+from rue.testing.models.result import TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
 from rue.testing.models.spec import TestLocator, TestSpec
 
@@ -195,7 +196,7 @@ class SQLiteStore(Store):
             )
 
             execution_rows: list[tuple[object, ...]] = []
-            stack: list[tuple[TestExecution, str | None]] = [
+            stack: list[tuple[ExecutedTest, str | None]] = [
                 (execution, None) for execution in run.result.executions
             ]
             while stack:
@@ -314,7 +315,7 @@ class SQLiteStore(Store):
         self,
         conn: sqlite3.Connection,
         run_id: UUID,
-        execution: TestExecution,
+        execution: ExecutedTest,
     ) -> None:
         for assertion in execution.result.assertion_results:
             assertion_id = self._save_assertion(
@@ -501,13 +502,13 @@ class SQLiteStore(Store):
             (row["run_id"],),
         ).fetchall()
 
-        executions_by_id: dict[str, TestExecution] = {}
+        executions_by_id: dict[str, ExecutedTest] = {}
         for exec_row in exec_rows:
             executions_by_id[exec_row["execution_id"]] = self._row_to_execution(
                 exec_row
             )
 
-        executions: list[TestExecution] = []
+        executions: list[ExecutedTest] = []
         for exec_row in exec_rows:
             execution = executions_by_id[exec_row["execution_id"]]
             parent_id = exec_row["parent_id"]
@@ -541,7 +542,7 @@ class SQLiteStore(Store):
             result=result,
         )
 
-    def _row_to_execution(self, row: sqlite3.Row) -> TestExecution:
+    def _row_to_execution(self, row: sqlite3.Row) -> ExecutedTest:
         error = (
             Exception(row["error_message"]) if row["error_message"] else None
         )
@@ -576,7 +577,7 @@ class SQLiteStore(Store):
             error=error,
         )
 
-        return TestExecution(
+        return ExecutedTest(
             definition=definition,
             result=result,
             execution_id=UUID(row["execution_id"]),

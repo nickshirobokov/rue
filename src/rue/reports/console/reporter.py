@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from rue.config import Config
     from rue.testing import LoadedTestDef
     from rue.testing.execution.interfaces import ExecutableTest
-    from rue.testing.models.result import TestExecution
+    from rue.testing.models.executed import ExecutedTest
     from rue.testing.models.run import Run, RunEnvironment
 
 
@@ -61,8 +61,8 @@ class ConsoleReporter(Reporter):
         self.total_tests: int = 0
         self.completed_count: int = 0
         self.tests: dict[int, ExecutableTest] = {}
-        self.executions: dict[int, TestExecution] = {}
-        self.failures: list[TestExecution] = []
+        self.executions: dict[int, ExecutedTest] = {}
+        self.failures: list[ExecutedTest] = []
         self._status_counts: dict[TestStatus, int] = {}
         self.current_module: Path | None = None
         self.completed_modules: set[Path] = set()
@@ -205,7 +205,7 @@ class ConsoleReporter(Reporter):
         if self._live is not None:
             self._live.update(self._build_live_display(), refresh=True)
 
-    async def on_execution_complete(self, execution: TestExecution) -> None:
+    async def on_execution_complete(self, execution: ExecutedTest) -> None:
         async with self._lock:
             self.executions[id(execution.definition)] = execution
 

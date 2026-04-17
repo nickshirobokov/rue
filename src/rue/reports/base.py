@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from rue.config import Config
     from rue.testing import LoadedTestDef
     from rue.testing.execution.interfaces import ExecutableTest
-    from rue.testing.models.result import TestExecution
+    from rue.testing.models.executed import ExecutedTest
     from rue.testing.models.run import Run
     from rue.testing.tracing import TestTracer
 
@@ -56,7 +56,7 @@ class Reporter(ABC, metaclass=ReporterMeta):
         return None
 
     @abstractmethod
-    async def on_execution_complete(self, execution: TestExecution) -> None:
+    async def on_execution_complete(self, execution: ExecutedTest) -> None:
         """Called when any test node (leaf or composite) completes."""
 
     @abstractmethod

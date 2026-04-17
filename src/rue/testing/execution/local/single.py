@@ -26,8 +26,8 @@ from rue.resources import ResourceResolver
 from rue.resources.models import Scope
 from rue.testing.execution.interfaces import ExecutableTest
 from rue.testing.models import (
+    ExecutedTest,
     LoadedTestDef,
-    TestExecution,
     TestResult,
     TestStatus,
 )
@@ -55,10 +55,10 @@ class LocalSingleTest(ExecutableTest):
         if self.definition.spec.modifiers:
             raise ValueError("LocalSingleTest should not have modifiers")
 
-    async def execute(self, resolver: ResourceResolver) -> TestExecution:
+    async def execute(self, resolver: ResourceResolver) -> ExecutedTest:
         """Execute the test and return result."""
         if self.is_stopped():
-            execution = TestExecution(
+            execution = ExecutedTest(
                 definition=self.definition,
                 result=TestResult(
                     status=TestStatus.SKIPPED,
@@ -72,7 +72,7 @@ class LocalSingleTest(ExecutableTest):
             return execution
 
         if self.definition.spec.skip_reason:
-            execution = TestExecution(
+            execution = ExecutedTest(
                 definition=self.definition,
                 result=TestResult(
                     status=TestStatus.SKIPPED,
@@ -212,7 +212,7 @@ class LocalSingleTest(ExecutableTest):
         if self.tracer.completed_otel_trace_session is not None and self.on_trace_collected:
             await self.on_trace_collected(self.tracer, exec_id)
 
-        execution = TestExecution(
+        execution = ExecutedTest(
             definition=self.definition,
             result=result,
             execution_id=exec_id,

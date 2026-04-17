@@ -9,7 +9,8 @@ from rue.testing.models.modifiers import (
     ParameterSet,
     ParamsIterateModifier,
 )
-from rue.testing.models.result import TestExecution, TestResult, TestStatus
+from rue.testing.models.executed import ExecutedTest
+from rue.testing.models.result import TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
 from rue.testing.models.case import Case, CaseGroup
 from rue.testing.models.spec import (
@@ -37,7 +38,7 @@ __all__ = [
     "Modifier",
     "ParameterSet",
     "ParamsIterateModifier",
-    "TestExecution",
+    "ExecutedTest",
     "TestResult",
     "TestStatus",
 ]

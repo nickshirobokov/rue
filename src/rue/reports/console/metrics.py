@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
     from rue.assertions import AssertionResult
     from rue.resources.metrics.base import MetricResult
-    from rue.testing.models.result import TestExecution
+    from rue.testing.models.executed import ExecutedTest
 
 
 _SCOPE_ORDER = {
@@ -122,7 +122,7 @@ class MetricGroup:
 class MetricsRenderer:
     def __init__(self) -> None:
         self._groups: list[MetricGroup] = []
-        self._execution_lookup: dict[UUID, TestExecution] = {}
+        self._execution_lookup: dict[UUID, ExecutedTest] = {}
         self._group_lookup: dict[ResourceSpec, MetricGroup] = {}
         self._parents: dict[ResourceSpec, set[ResourceSpec]] = {}
         self._children: dict[ResourceSpec, set[ResourceSpec]] = {}
@@ -131,14 +131,14 @@ class MetricsRenderer:
         self,
         metric_results: list[MetricResult],
         verbosity: int,
-        executions: list[TestExecution] | None = None,
+        executions: list[ExecutedTest] | None = None,
     ) -> list[RenderableType]:
         if not metric_results:
             return []
 
         self._groups = self._build_groups(metric_results)
         self._group_lookup = {g.key: g for g in self._groups}
-        lookup: dict[UUID, TestExecution] = {}
+        lookup: dict[UUID, ExecutedTest] = {}
         stack = list(executions or [])
         while stack:
             execution = stack.pop()

@@ -7,7 +7,7 @@ from .models import (
     CaseGroup,
     Run,
     LoadedTestDef,
-    TestExecution,
+    ExecutedTest,
     TestStatus,
 )
 from .outcomes import fail, skip, xfail
@@ -20,7 +20,7 @@ __all__ = [
     "Run",
     "Runner",
     "LoadedTestDef",
-    "TestExecution",
+    "ExecutedTest",
     "TestStatus",
     "fail",
     "resource",

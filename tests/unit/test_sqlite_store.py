@@ -13,7 +13,8 @@ from rue.resources.metrics.base import (
 from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.store import MAX_STORED_RUNS
 from rue.testing.models.loaded import LoadedTestDef
-from rue.testing.models.result import TestExecution, TestResult, TestStatus
+from rue.testing.models.executed import ExecutedTest
+from rue.testing.models.result import TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
 from tests.unit.factories import make_definition
 
@@ -34,12 +35,12 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     )
     sub_definition = make_definition("test_sub", module_path="tests/test_sample.py")
 
-    sub_execution = TestExecution(
+    sub_execution = ExecutedTest(
         definition=sub_definition,
         result=TestResult(status=TestStatus.PASSED, duration_ms=10.0),
         execution_id=sub_execution_id,
     )
-    execution = TestExecution(
+    execution = ExecutedTest(
         definition=definition,
         result=TestResult(
             status=TestStatus.FAILED,
@@ -194,7 +195,7 @@ def test_sqlite_store_assertions_and_predicates(
     )
 
     definition = make_definition("test_one", module_path="tests/test_sample.py")
-    execution = TestExecution(
+    execution = ExecutedTest(
         definition=definition,
         result=TestResult(
             status=TestStatus.FAILED,

@@ -19,7 +19,7 @@ from rue.resources.sut.output import SUTOutputCapture
 from rue.testing.models import (
     Run,
     LoadedTestDef,
-    TestExecution,
+    ExecutedTest,
     TestResult,
     TestStatus,
 )
@@ -81,9 +81,9 @@ def make_execution(
     *,
     error: Exception | None = None,
     assertion_results: list[AssertionResult] | None = None,
-    sub_executions: list[TestExecution] | None = None,
-) -> TestExecution:
-    return TestExecution(
+    sub_executions: list[ExecutedTest] | None = None,
+) -> ExecutedTest:
+    return ExecutedTest(
         definition=item,
         result=TestResult(
             status=status,

@@ -340,12 +340,12 @@ class Reporter(ABC):
     async def on_subtest_complete(
         self,
         parent: LoadedTestDef,
-        sub_execution: TestExecution,
+        sub_execution: ExecutedTest,
     ) -> None:
         """Called when a subtest completes (optional override)."""
 
     @abstractmethod
-    async def on_test_complete(self, execution: TestExecution) -> None:
+    async def on_test_complete(self, execution: ExecutedTest) -> None:
         """Called after each test completes."""
 
     @abstractmethod
@@ -402,7 +402,7 @@ from pathlib import Path
 
 from rue.config import Config
 from rue.reports.base import Reporter
-from rue.testing import Run, LoadedTestDef, TestExecution
+from rue.testing import Run, LoadedTestDef, ExecutedTest
 
 class JsonFileReporter(Reporter):
     """Custom reporter that writes results to JSON file."""
@@ -425,7 +425,7 @@ class JsonFileReporter(Reporter):
         # Optional lifecycle hook for live/in-flight reporting
         pass
 
-    async def on_test_complete(self, execution: TestExecution) -> None:
+    async def on_test_complete(self, execution: ExecutedTest) -> None:
         # Record each test result
         self.results.append({
             "name": execution.definition.spec.full_name,
