@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from rue.testing.execution.types import ExecutionBackend
 from rue.testing.models.case import Case, CaseGroup
 
 
@@ -52,9 +53,18 @@ class GroupsIterateModifier:
     display_name: str = "groups"
 
 
+@dataclass(frozen=True)
+class BackendModifier:
+    """Select the execution backend for the test subtree."""
+
+    backend: ExecutionBackend
+    display_name: str = "backend"
+
+
 Modifier = (
     IterateModifier
     | ParamsIterateModifier
     | CasesIterateModifier
     | GroupsIterateModifier
+    | BackendModifier
 )

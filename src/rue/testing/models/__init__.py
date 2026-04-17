@@ -2,6 +2,7 @@
 
 from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.modifiers import (
+    BackendModifier,
     CasesIterateModifier,
     GroupsIterateModifier,
     IterateModifier,
@@ -33,6 +34,7 @@ __all__ = [
     "TestLocator",
     "TestSpec",
     "TestSpecCollection",
+    "BackendModifier",
     "CasesIterateModifier",
     "IterateModifier",
     "Modifier",

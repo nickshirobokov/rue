@@ -13,6 +13,7 @@ from .resources.sut import (
 from .testing import (
     Case,
     CaseGroup,
+    backend,
     fail,
     resource,
     skip,
@@ -27,11 +28,13 @@ resource.sut = sut
 resource.metric = metric
 test.iterate = iterate
 test.tag = tag
+test.backend = backend
 
 __all__ = [
     # Core testing
     "Case",
     "CaseGroup",
+    "backend",
     "resource",
     "test",
     "iterate",
