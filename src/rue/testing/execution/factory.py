@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
 from typing import Any
 from uuid import UUID
@@ -36,7 +35,6 @@ class DefaultTestFactory:
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
     on_trace_collected: Callable | None = None
-    pool: ProcessPoolExecutor | None = None
 
     def build(
         self,
@@ -51,14 +49,9 @@ class DefaultTestFactory:
         if not modifiers:
             match backend:
                 case ExecutionBackend.SUBPROCESS:
-                    if self.pool is None:
-                        raise RuntimeError(
-                            "subprocess backend requires a ProcessPoolExecutor"
-                        )
                     return RemoteSingleTest(
                         definition=definition,
                         params=params,
-                        pool=self.pool,
                         is_stopped=self.is_stopped,
                         on_complete=self.on_complete,
                     )

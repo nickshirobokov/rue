@@ -6,7 +6,6 @@ import asyncio
 import re
 import time
 import warnings
-from concurrent.futures import ProcessPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -30,9 +29,8 @@ from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.environment import capture_environment
 from rue.testing.execution import DefaultTestFactory
 from rue.testing.execution.interfaces import ExecutableTest
-from rue.testing.execution.types import ExecutionBackend
+from rue.context.process_pool import process_pool_scope
 from rue.testing.models import (
-    BackendModifier,
     Run,
     ExecutedTest,
     LoadedTestDef,
@@ -300,42 +298,27 @@ class Runner:
         run: Run,
     ) -> None:
         """Execute the test run with the given items and resolver."""
-        pool = (
-            ProcessPoolExecutor(max_tasks_per_child=1)
-            if any(self._needs_remote_backend(item) for item in items)
-            else None
-        )
-        self._factory = DefaultTestFactory(
-            config=self.config,
-            run_id=run.run_id,
-            semaphore=self.semaphore,
-            is_stopped=lambda: self.stop_flag,
-            on_complete=self._on_execution_complete,
-            on_trace_collected=self._notify_trace_collected,
-            pool=pool,
-        )
-        self._built_tests: dict[int, ExecutableTest] = {}
-        for item in items:
-            if not item.spec.definition_error:
-                self._built_tests[id(item)] = self._factory.build(item)
-        await self._notify_tests_ready(list(self._built_tests.values()))
-        try:
-            if self._concurrency_limit() == 1:
-                await self._run_sequential(items, resolver, run)
-            else:
-                await self._run_concurrent(items, resolver, run)
-        finally:
-            await resolver.teardown()
-            if pool is not None:
-                pool.shutdown(wait=True)
-
-    @staticmethod
-    def _needs_remote_backend(item: LoadedTestDef) -> bool:
-        return any(
-            isinstance(mod, BackendModifier)
-            and mod.backend == ExecutionBackend.SUBPROCESS
-            for mod in item.spec.modifiers
-        )
+        with process_pool_scope():
+            self._factory = DefaultTestFactory(
+                config=self.config,
+                run_id=run.run_id,
+                semaphore=self.semaphore,
+                is_stopped=lambda: self.stop_flag,
+                on_complete=self._on_execution_complete,
+                on_trace_collected=self._notify_trace_collected,
+            )
+            self._built_tests: dict[int, ExecutableTest] = {}
+            for item in items:
+                if not item.spec.definition_error:
+                    self._built_tests[id(item)] = self._factory.build(item)
+            await self._notify_tests_ready(list(self._built_tests.values()))
+            try:
+                if self._concurrency_limit() == 1:
+                    await self._run_sequential(items, resolver, run)
+                else:
+                    await self._run_concurrent(items, resolver, run)
+            finally:
+                await resolver.teardown()
 
     async def _execute_item(
         self, item: LoadedTestDef, resolver: ResourceResolver

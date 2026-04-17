@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
+from contextlib import contextmanager
 from pathlib import Path
 from textwrap import dedent
 from typing import Any
@@ -16,6 +17,7 @@ from rue.resources import ResourceResolver, registry, resource
 from rue.resources.models import Scope
 from rue.testing.execution.factory import DefaultTestFactory
 from rue.testing.execution.local.single import LocalSingleTest
+from rue.context.process_pool import CURRENT_PROCESS_POOL
 from rue.testing.execution.remote.single import (
     ExecutorPayload,
     RemoteSingleTest,
@@ -40,7 +42,11 @@ def clean_registry():
 
 
 class FakePool:
-    """Stand-in for ProcessPoolExecutor that resolves a canned TestResult."""
+    """Stand-in for ProcessPoolExecutor that resolves a canned TestResult.
+
+    Doubles as the LazyProcessPool holder — ``get()`` returns ``self`` so the
+    same instance can be bound to ``CURRENT_PROCESS_POOL``.
+    """
 
     def __init__(self, result: TestResult) -> None:
         self._result = result
@@ -51,6 +57,18 @@ class FakePool:
         future: Future = Future()
         future.set_result(self._result)
         return future
+
+    def get(self) -> "FakePool":
+        return self
+
+
+@contextmanager
+def bind_pool(pool: FakePool):
+    token = CURRENT_PROCESS_POOL.set(pool)  # type: ignore[arg-type]
+    try:
+        yield pool
+    finally:
+        CURRENT_PROCESS_POOL.reset(token)
 
 
 # ---------------------------------------------------------------------------
@@ -116,34 +134,20 @@ class TestFactoryDispatch:
         assert isinstance(built, LocalSingleTest)
 
     def test_remote_when_backend_modifier_present(self):
-        pool = FakePool(TestResult(status=TestStatus.PASSED, duration_ms=0))
-        factory = DefaultTestFactory(config=Config(), pool=pool)
+        factory = DefaultTestFactory(config=Config())
 
         built = factory.build(
             self._definition(BackendModifier(backend=ExecutionBackend.SUBPROCESS))
         )
 
         assert isinstance(built, RemoteSingleTest)
-        assert built.pool is pool
-
-    def test_remote_backend_requires_pool(self):
-        factory = DefaultTestFactory(config=Config())
-
-        with pytest.raises(
-            RuntimeError,
-            match="subprocess backend requires a ProcessPoolExecutor",
-        ):
-            factory.build(
-                self._definition(BackendModifier(backend=ExecutionBackend.SUBPROCESS))
-            )
 
     def test_invalid_backend_string_rejected(self):
         with pytest.raises(ValueError):
             ExecutionBackend("nope")
 
     def test_backend_propagates_through_iterate(self):
-        pool = FakePool(TestResult(status=TestStatus.PASSED, duration_ms=0))
-        factory = DefaultTestFactory(config=Config(), pool=pool)
+        factory = DefaultTestFactory(config=Config())
 
         built = factory.build(
             self._definition(
@@ -163,7 +167,6 @@ class TestFactoryDispatch:
 
 class TestRemoteSingleTest:
     def test_rejects_modifiers(self):
-        pool = FakePool(TestResult(status=TestStatus.PASSED, duration_ms=0))
         with pytest.raises(
             ValueError, match="RemoteSingleTest should not have modifiers"
         ):
@@ -172,7 +175,6 @@ class TestRemoteSingleTest:
                     modifiers=[IterateModifier(count=2, min_passes=2)]
                 ),
                 params={},
-                pool=pool,
             )
 
     @pytest.mark.asyncio
@@ -192,14 +194,13 @@ class TestRemoteSingleTest:
         )
 
         expected = TestResult(status=TestStatus.PASSED, duration_ms=12.3)
-        pool = FakePool(expected)
         remote = RemoteSingleTest(
             definition=definition,
             params={},
-            pool=pool,
         )
 
-        execution = await remote.execute(ResourceResolver(registry))
+        with bind_pool(FakePool(expected)) as pool:
+            execution = await remote.execute(ResourceResolver(registry))
 
         assert execution.definition is definition
         assert execution.result is expected
@@ -220,31 +221,33 @@ class TestRemoteSingleTest:
 
     @pytest.mark.asyncio
     async def test_skips_when_stopped(self):
-        pool = FakePool(TestResult(status=TestStatus.PASSED, duration_ms=0))
         remote = RemoteSingleTest(
             definition=make_definition("sample"),
             params={},
-            pool=pool,
             is_stopped=lambda: True,
         )
 
-        execution = await remote.execute(ResourceResolver(registry))
+        with bind_pool(
+            FakePool(TestResult(status=TestStatus.PASSED, duration_ms=0))
+        ) as pool:
+            execution = await remote.execute(ResourceResolver(registry))
 
         assert execution.status == TestStatus.SKIPPED
         assert pool.submitted == []
 
     @pytest.mark.asyncio
     async def test_honors_skip_reason(self):
-        pool = FakePool(TestResult(status=TestStatus.PASSED, duration_ms=0))
         definition = make_definition("sample", skip_reason="no thanks")
 
         remote = RemoteSingleTest(
             definition=definition,
             params={},
-            pool=pool,
         )
 
-        execution = await remote.execute(ResourceResolver(registry))
+        with bind_pool(
+            FakePool(TestResult(status=TestStatus.PASSED, duration_ms=0))
+        ) as pool:
+            execution = await remote.execute(ResourceResolver(registry))
 
         assert execution.status == TestStatus.SKIPPED
         assert "no thanks" in str(execution.result.error)
@@ -252,7 +255,6 @@ class TestRemoteSingleTest:
 
     @pytest.mark.asyncio
     async def test_calls_on_complete(self):
-        pool = FakePool(TestResult(status=TestStatus.PASSED, duration_ms=0))
         on_complete = MagicMock()
 
         async def capture(execution):
@@ -261,11 +263,13 @@ class TestRemoteSingleTest:
         remote = RemoteSingleTest(
             definition=make_definition("sample"),
             params={},
-            pool=pool,
             on_complete=capture,
         )
 
-        execution = await remote.execute(ResourceResolver(registry))
+        with bind_pool(
+            FakePool(TestResult(status=TestStatus.PASSED, duration_ms=0))
+        ):
+            execution = await remote.execute(ResourceResolver(registry))
 
         on_complete.assert_called_once_with(execution)
 

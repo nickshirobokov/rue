@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,6 +17,7 @@ from rue.context.runtime import (
 from rue.resources import ResourceResolver
 from rue.resources.models import ResourceBlueprint, Scope
 from rue.testing.execution.interfaces import ExecutableTest
+from rue.context.process_pool import get_process_pool
 from rue.testing.execution.remote.worker import run_remote_test
 from rue.testing.models import ExecutedTest, LoadedTestDef, TestResult, TestStatus
 from rue.testing.models.spec import SetupFileRef, TestSpec
@@ -47,7 +47,6 @@ class RemoteSingleTest(ExecutableTest):
 
     definition: LoadedTestDef
     params: dict[str, Any]
-    pool: ProcessPoolExecutor
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
 
@@ -95,7 +94,7 @@ class RemoteSingleTest(ExecutableTest):
                 blueprint=blueprint,
             )
 
-            future = self.pool.submit(run_remote_test, payload)
+            future = get_process_pool().submit(run_remote_test, payload)
             result = await asyncio.wrap_future(future)
         finally:
             await forked.teardown_scope(Scope.TEST)
