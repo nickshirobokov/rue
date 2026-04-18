@@ -33,7 +33,12 @@ def _make_item(
     module_path: Path | None = None,
 ) -> LoadedTestDef:
     """Create a minimal LoadedTestDef for testing."""
-    return make_definition(name, module_path=module_path or Path("test.py"), suffix=suffix, case_id=case_id)
+    return make_definition(
+        name,
+        module_path=module_path or Path("test.py"),
+        suffix=suffix,
+        case_id=case_id,
+    )
 
 
 def _register_resource_source(

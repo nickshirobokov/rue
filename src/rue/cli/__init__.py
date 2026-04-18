@@ -38,9 +38,7 @@ def init() -> None:
     doc = parse(path.read_text())
     project = doc.get("project")
     if not isinstance(project, _TomlTable):
-        Console().print(
-            "[red]pyproject.toml has no [[project]] table[/red]"
-        )
+        Console().print("[red]pyproject.toml has no [[project]] table[/red]")
         raise SystemExit(1)
     entry_points = project.get("entry-points")
     if entry_points is None:

@@ -141,7 +141,9 @@ class TestBuildSnapshot:
         await resolver.resolve("alias")
 
         snapshot = resolver.build_snapshot(["alias"])
-        identity_map = {identity.name: identity for identity in snapshot.res_specs}
+        identity_map = {
+            identity.name: identity for identity in snapshot.res_specs
+        }
 
         assert (
             snapshot.root_ids[identity_map["shared"].snapshot_key]

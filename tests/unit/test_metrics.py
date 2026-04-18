@@ -38,7 +38,12 @@ def _make_item(
     case_id: UUID | None = None,
 ) -> LoadedTestDef:
     """Create a minimal LoadedTestDef for testing."""
-    return make_definition(name, module_path=module_path or Path("test.py"), suffix=suffix, case_id=case_id)
+    return make_definition(
+        name,
+        module_path=module_path or Path("test.py"),
+        suffix=suffix,
+        case_id=case_id,
+    )
 
 
 def test_metric_computations():
@@ -303,7 +308,9 @@ async def test_metric_decorator_records_metric_dependencies():
         await resolver.resolve("accuracy")
         await resolver.teardown()
 
-    by_name = {result.metadata.identity.name: result for result in metric_results}
+    by_name = {
+        result.metadata.identity.name: result for result in metric_results
+    }
     assert "accuracy" in by_name
     assert by_name["accuracy"].dependencies == [
         by_name["overall_quality"].metadata.identity,

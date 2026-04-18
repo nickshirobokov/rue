@@ -56,9 +56,7 @@ def test_inspect_simple_sut_span(simple_pipeline):
     all_spans = simple_pipeline.all_spans
 
     assert len(root_spans) == 1
-    assert {span.name for span in all_spans} == {
-        "sut.simple_pipeline.__call__"
-    }
+    assert {span.name for span in all_spans} == {"sut.simple_pipeline.__call__"}
 
     span = root_spans[0]
     assert span.name == "sut.simple_pipeline.__call__"
@@ -88,9 +86,7 @@ def test_query_all_spans(multi_step_pipeline):
     result = multi_step_pipeline.instance.run("test query")
 
     root_names = {span.name for span in multi_step_pipeline.root_spans}
-    all_names = {
-        span.name for span in multi_step_pipeline.all_spans
-    }
+    all_names = {span.name for span in multi_step_pipeline.all_spans}
 
     assert "test query" in result
     assert root_names == {
@@ -106,9 +102,7 @@ def test_assert_on_trace_data(multi_step_pipeline):
     """Span relationships and attributes can be asserted directly."""
     multi_step_pipeline.instance.run("assertion test")
 
-    spans = {
-        span.name: span for span in multi_step_pipeline.root_spans
-    }
+    spans = {span.name: span for span in multi_step_pipeline.root_spans}
     run_span = spans["sut.multi_step_pipeline.run"]
     retrieve_span = spans["sut.multi_step_pipeline.retrieve"]
     generate_span = spans["sut.multi_step_pipeline.generate"]

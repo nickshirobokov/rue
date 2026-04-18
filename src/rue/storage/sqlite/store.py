@@ -552,7 +552,9 @@ class SQLiteStore(Store):
         definition = LoadedTestDef(
             spec=TestSpec(
                 locator=TestLocator(
-                    module_path=Path(row["file_path"]) if row["file_path"] else Path(),
+                    module_path=Path(row["file_path"])
+                    if row["file_path"]
+                    else Path(),
                     function_name=row["test_name"],
                     class_name=row["class_name"],
                 ),

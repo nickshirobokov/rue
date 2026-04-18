@@ -269,7 +269,8 @@ class TestMigrationRunner:
 
         conn = sqlite3.connect(sqlite_db_path)
         columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(metrics)").fetchall()
+            row[1]
+            for row in conn.execute("PRAGMA table_info(metrics)").fetchall()
         }
         provider = conn.execute(
             "SELECT provider_name, provider_scope, collected_from_modules_json, "

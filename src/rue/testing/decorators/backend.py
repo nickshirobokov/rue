@@ -15,9 +15,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 def backend(spec: str | ExecutionBackend) -> Callable[[F], F]:
     """Select the execution backend (string or :class:`ExecutionBackend`)."""
 
-    chosen = (
-        spec if type(spec) is ExecutionBackend else ExecutionBackend(spec)
-    )
+    chosen = spec if type(spec) is ExecutionBackend else ExecutionBackend(spec)
     modifier = BackendModifier(backend=chosen)
 
     def decorator(target: F) -> F:

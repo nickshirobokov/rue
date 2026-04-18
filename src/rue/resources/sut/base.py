@@ -93,7 +93,10 @@ class SUT(Generic[InstanceT]):
         self._tracer = SUTTracer(resolved_sut_name)
         self._name = resolved_sut_name
         test_tracer = CURRENT_TEST_TRACER.get()
-        if test_tracer is not None and test_tracer.otel_trace_session is not None:
+        if (
+            test_tracer is not None
+            and test_tracer.otel_trace_session is not None
+        ):
             self._tracer.activate(test_tracer.otel_trace_session)
         self.instance: InstanceT = self._wrap_instance(instance)
 
@@ -193,13 +196,17 @@ class SUT(Generic[InstanceT]):
         self, instance: object, method_name: str
     ) -> _MethodSpec:
         target_callable: Callable[..., object]
-        if method_name == "__call__" and isinstance(instance, _BARE_CALLABLE_TYPES):
+        if method_name == "__call__" and isinstance(
+            instance, _BARE_CALLABLE_TYPES
+        ):
             target_callable = instance
         else:
             missing = object()
             raw_callable = getattr(cast(Any, instance), method_name, missing)
             if raw_callable is missing:
-                raise ValueError(f"Method '{method_name}' not found in instance")
+                raise ValueError(
+                    f"Method '{method_name}' not found in instance"
+                )
             if not callable(raw_callable):
                 raise ValueError(f"Method '{method_name}' is not a callable")
             target_callable = cast(Callable[..., object], raw_callable)

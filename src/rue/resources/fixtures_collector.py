@@ -91,7 +91,9 @@ class RewritePytestFixtureDecoratorsTransformer(ast.NodeTransformer):
                 case ast.ImportFrom(module="pytest", names=names):
                     for alias in names:
                         if alias.name == "fixture":
-                            self._fixture_aliases.add(alias.asname or alias.name)
+                            self._fixture_aliases.add(
+                                alias.asname or alias.name
+                            )
 
     def _rewrite_fixture_decorator(self, decorator: ast.expr) -> ast.expr:
         match decorator:
@@ -105,7 +107,9 @@ class RewritePytestFixtureDecoratorsTransformer(ast.NodeTransformer):
                     ast.Name(id="__rue_fixture_resource__", ctx=ast.Load()),
                     decorator,
                 )
-            case ast.Call(func=func, args=args, keywords=keywords) if self._is_fixture_reference(func) and not args:
+            case ast.Call(func=func, args=args, keywords=keywords) if (
+                self._is_fixture_reference(func) and not args
+            ):
                 return ast.copy_location(
                     ast.Call(
                         func=ast.Name(
@@ -180,4 +184,3 @@ class InjectFixtureResourceDependenciesTransformer(ast.NodeTransformer):
         for stmt in inject_stmts:
             ast.copy_location(stmt, node)
         return node
-

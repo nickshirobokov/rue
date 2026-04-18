@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator, Generator
 from contextvars import ContextVar
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 from rue.context.runtime import (
     CURRENT_RESOURCE_CONSUMER,
@@ -191,9 +191,7 @@ class ResourceResolver:
                             cast(AsyncGenerator[Any, None], generator), None
                         )
                     else:
-                        next(
-                            cast(Generator[Any, None, None], generator), None
-                        )
+                        next(cast(Generator[Any, None, None], generator), None)
                 except Exception as e:
                     teardown_errors.append(
                         RuntimeError(
@@ -288,7 +286,9 @@ class ResourceResolver:
                     for identity, dependencies in closure.items()
                 ]
 
-            case [*specs] if all(isinstance(spec, ResourceSpec) for spec in specs):
+            case [*specs] if all(
+                isinstance(spec, ResourceSpec) for spec in specs
+            ):
                 specs = cast(list[ResourceSpec], resources)
                 identities = [
                     replace(
@@ -307,12 +307,12 @@ class ResourceResolver:
             case _:
                 msg = "resources must be list[str] or list[ResourceSpec]"
                 raise TypeError(msg)
-        
+
         ordered_identities = (
-            self._topological_sort_snapshot_identities(identities) 
-            if topological 
+            self._topological_sort_snapshot_identities(identities)
+            if topological
             else identities
-            )
+        )
         root_map = {
             identity.snapshot_key: self._cache[identity]
             for identity in identities
@@ -360,7 +360,9 @@ class ResourceResolver:
     def snapshot_payload(self, snapshot: ResolverSnapshot) -> dict[str, Any]:
         return {
             "root_ids": dict(snapshot.root_ids),
-            "nodes": {node_id: dict(node) for node_id, node in snapshot.nodes.items()},
+            "nodes": {
+                node_id: dict(node) for node_id, node in snapshot.nodes.items()
+            },
             "ignored_paths": {
                 root_key: list(paths)
                 for root_key, paths in snapshot.ignored_paths.items()
@@ -385,10 +387,13 @@ class ResourceResolver:
         )
         patched_roots = applier.apply_roots(roots)
         self._snapshot_object_ids = applier.object_ids
-        self._snapshot_next_id = max(
-            applier.nodes,
-            default=self._snapshot_next_id - 1,
-        ) + 1
+        self._snapshot_next_id = (
+            max(
+                applier.nodes,
+                default=self._snapshot_next_id - 1,
+            )
+            + 1
+        )
         key_to_identity = {
             identity.snapshot_key: identity for identity in self._cache
         }
@@ -512,9 +517,7 @@ class ResourceResolver:
             return []
 
         in_degree = dict.fromkeys(identity_map, 0)
-        dependents: dict[str, list[str]] = {
-            name: [] for name in identity_map
-        }
+        dependents: dict[str, list[str]] = {name: [] for name in identity_map}
 
         for name, identity in identity_map.items():
             for dependency in identity.dependencies:

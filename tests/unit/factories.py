@@ -55,7 +55,9 @@ def make_definition(
     return LoadedTestDef(
         spec=spec,
         fn=fn or (lambda: None),
-        suite_root=Path(suite_root) if suite_root is not None else module_path.parent,
+        suite_root=Path(suite_root)
+        if suite_root is not None
+        else module_path.parent,
         setup_chain=setup_chain,
         fail_fast=fail_fast,
     )

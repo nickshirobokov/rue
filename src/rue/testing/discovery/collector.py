@@ -163,9 +163,7 @@ class KeywordMatcher:
         self._code = compile(expression, "<keyword>", "eval")
 
     def match(self, text: str) -> bool:
-        return bool(
-            eval(self._code, {"__builtins__": {}}, _KeywordNames(text))
-        )
+        return bool(eval(self._code, {"__builtins__": {}}, _KeywordNames(text)))
 
 
 class TestSpecCollector:
@@ -255,9 +253,7 @@ class TestSpecCollector:
             chain: list[SetupFileRef] = []
             for directory in directories:
                 if (conftest := directory / "conftest.py").is_file():
-                    chain.append(
-                        SetupFileRef(path=conftest, kind="conftest")
-                    )
+                    chain.append(SetupFileRef(path=conftest, kind="conftest"))
                 chain.extend(
                     SetupFileRef(path=setup_path, kind="confrue")
                     for setup_path in sorted(directory.glob("confrue_*.py"))
@@ -277,16 +273,12 @@ class TestSpecCollector:
 
         if self.include_tags:
             filtered = [
-                item
-                for item in filtered
-                if item.tags & self.include_tags
+                item for item in filtered if item.tags & self.include_tags
             ]
 
         if self.exclude_tags:
             filtered = [
-                item
-                for item in filtered
-                if not (item.tags & self.exclude_tags)
+                item for item in filtered if not (item.tags & self.exclude_tags)
             ]
 
         if self._keyword_matcher is not None:

@@ -90,7 +90,9 @@ class EventReporter(Reporter):
     async def on_no_tests_found(self) -> None:
         pass
 
-    async def on_collection_complete(self, _items: list[LoadedTestDef], _run) -> None:
+    async def on_collection_complete(
+        self, _items: list[LoadedTestDef], _run
+    ) -> None:
         self.start_time = time.perf_counter()
 
     async def on_test_start(self, item: LoadedTestDef) -> None:
@@ -102,15 +104,21 @@ class EventReporter(Reporter):
     async def on_execution_complete(self, execution: ExecutedTest) -> None:
         elapsed = time.perf_counter() - self.start_time
         if id(execution.definition) in self._started_ids:
-            self.event_times.append(("complete", execution.definition.spec.name, elapsed))
-            self.event_order.append(("complete", execution.definition.spec.name))
+            self.event_times.append(
+                ("complete", execution.definition.spec.name, elapsed)
+            )
+            self.event_order.append(
+                ("complete", execution.definition.spec.name)
+            )
         else:
             label = execution.definition.spec.suffix or (
                 str(execution.definition.spec.case_id)
                 if execution.definition.spec.case_id
                 else ""
             )
-            self.subtest_event_times.append((execution.definition.spec.name, label, elapsed))
+            self.subtest_event_times.append(
+                (execution.definition.spec.name, label, elapsed)
+            )
 
     async def on_run_complete(self, _rue_run) -> None:
         self.run_complete_elapsed = time.perf_counter() - self.start_time
@@ -514,9 +522,7 @@ class TestOpenTelemetry:
 
             first_agent = SUT(run, name="first_agent")
             await first_agent.instance()
-            captured["first"] = {
-                span.name for span in first_agent.all_spans
-            }
+            captured["first"] = {span.name for span in first_agent.all_spans}
 
         async def second():
             async def run() -> None:
@@ -525,9 +531,7 @@ class TestOpenTelemetry:
 
             second_agent = SUT(run, name="second_agent")
             await second_agent.instance()
-            captured["second"] = {
-                span.name for span in second_agent.all_spans
-            }
+            captured["second"] = {span.name for span in second_agent.all_spans}
 
         items = [
             make_item(first, name="test_first", is_async=True),
@@ -709,7 +713,9 @@ class TestOpenTelemetry:
         assert payload["execution_id"] == str(execution.execution_id)
         assert "otel_trace_id" not in payload
         assert "spans" not in payload
-        assert payload["trace"]["name"] == "test.test_module::test_default_trace"
+        assert (
+            payload["trace"]["name"] == "test.test_module::test_default_trace"
+        )
         assert [child["name"] for child in payload["trace"]["children"]] == [
             "default_step"
         ]
@@ -998,7 +1004,9 @@ class TestConcurrency:
 
         for item in items:
             start_idx = reporter.event_order.index(("start", item.spec.name))
-            complete_idx = reporter.event_order.index(("complete", item.spec.name))
+            complete_idx = reporter.event_order.index(
+                ("complete", item.spec.name)
+            )
             assert start_idx < complete_idx
 
     @pytest.mark.asyncio
@@ -1025,7 +1033,9 @@ class TestConcurrency:
             await asyncio.sleep(0.01)
 
         class CompleteFailureReporter(EventReporter):
-            async def on_execution_complete(self, execution: ExecutedTest) -> None:
+            async def on_execution_complete(
+                self, execution: ExecutedTest
+            ) -> None:
                 raise RuntimeError("complete callback failed")
 
         runner = Runner(
@@ -1066,7 +1076,9 @@ class TestConcurrency:
             for _parent, _suffix, elapsed in reporter.subtest_event_times
         ) <= (parent_complete_elapsed)
         execution = test_run.result.executions[0]
-        assert [sub.definition.spec.suffix for sub in execution.sub_executions] == [
+        assert [
+            sub.definition.spec.suffix for sub in execution.sub_executions
+        ] == [
             "slow",
             "fast",
             "mid",

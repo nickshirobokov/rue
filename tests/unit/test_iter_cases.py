@@ -39,7 +39,9 @@ def test_iterate_cases_empty_is_deferred_to_execution():
     )
 
 
-def test_runner_iterate_cases_preserves_case_identity_and_metadata(null_reporter):
+def test_runner_iterate_cases_preserves_case_identity_and_metadata(
+    null_reporter,
+):
     seen_cases: list[Case[Any, Any]] = []
     cases = [
         Case(inputs={"x": 1}, metadata={"slug": "one"}),
@@ -71,9 +73,9 @@ def test_runner_iterate_cases_preserves_case_identity_and_metadata(null_reporter
     assert [sub.definition.spec.suffix for sub in execution.sub_executions] == [
         repr(case.metadata) for case in cases
     ]
-    assert [sub.definition.spec.case_id for sub in execution.sub_executions] == [
-        case.id for case in cases
-    ]
+    assert [
+        sub.definition.spec.case_id for sub in execution.sub_executions
+    ] == [case.id for case in cases]
     assert [sub.definition.suite_root for sub in execution.sub_executions] == [
         suite_root,
         suite_root,

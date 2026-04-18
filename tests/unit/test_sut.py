@@ -128,7 +128,8 @@ class TestSutObject:
         assert target.stderr.text == "err-1"
         assert target.captured_output.combined.text == "out-1err-1out-2"
         assert [
-            (event.stream, event.text) for event in target.captured_output.events
+            (event.stream, event.text)
+            for event in target.captured_output.events
         ] == [
             ("stdout", "out-1"),
             ("stderr", "err-1"),

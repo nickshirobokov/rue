@@ -196,9 +196,7 @@ async def _invoke(definition: LoadedTestDef, kwargs: dict[str, Any]) -> None:
         instance = cls()
 
     call = (
-        partial(fn, instance, **kwargs)
-        if instance
-        else partial(fn, **kwargs)
+        partial(fn, instance, **kwargs) if instance else partial(fn, **kwargs)
     )
 
     if definition.spec.is_async:

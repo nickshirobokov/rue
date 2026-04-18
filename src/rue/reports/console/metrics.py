@@ -52,7 +52,9 @@ class MetricValue:
     def from_result(cls, metric: MetricResult) -> MetricValue:
         value = metric.value
         value_str = (
-            "N/A" if isinstance(value, float) and math.isnan(value) else str(value)
+            "N/A"
+            if isinstance(value, float) and math.isnan(value)
+            else str(value)
         )
         assertions = metric.assertion_results
         passed = sum(1 for a in assertions if a.passed)
@@ -110,7 +112,8 @@ class MetricGroup:
             case _ if len(set(values)) == 1:
                 return f"{values[0]} ×{len(values)}"
             case _ if all(
-                isinstance(m.value, (int, float)) and not isinstance(m.value, bool)
+                isinstance(m.value, (int, float))
+                and not isinstance(m.value, bool)
                 for m in self.metrics
             ):
                 floats = [float(m.value) for m in self.metrics]  # type: ignore
@@ -162,7 +165,9 @@ class MetricsRenderer:
 
         return renderables
 
-    def _build_groups(self, metric_results: list[MetricResult]) -> list[MetricGroup]:
+    def _build_groups(
+        self, metric_results: list[MetricResult]
+    ) -> list[MetricGroup]:
         grouped: dict[ResourceSpec, MetricGroup] = {}
         for metric in metric_results:
             key = metric.metadata.identity
@@ -184,7 +189,9 @@ class MetricsRenderer:
         for group in groups:
             path_str = group.key.provider_path or group.key.provider_dir
             provider = (
-                safe_relative_path(Path(path_str)).as_posix() if path_str else None
+                safe_relative_path(Path(path_str)).as_posix()
+                if path_str
+                else None
             )
             if name_counts[group.key.name] > 1 and provider:
                 group.display_name = f"{group.key.name} @ {provider}"
@@ -192,7 +199,9 @@ class MetricsRenderer:
                 group.display_name = group.key.name
         return groups
 
-    def _build_graph(self) -> tuple[
+    def _build_graph(
+        self,
+    ) -> tuple[
         dict[ResourceSpec, set[ResourceSpec]],
         dict[ResourceSpec, set[ResourceSpec]],
     ]:
@@ -223,7 +232,11 @@ class MetricsRenderer:
         renderables.append(self._overview_table())
 
     def _add_breakdown(self, renderables: list[RenderableType]) -> None:
-        detail_groups = [g for g in self._groups if g.is_interesting(self._parents, self._children)]
+        detail_groups = [
+            g
+            for g in self._groups
+            if g.is_interesting(self._parents, self._children)
+        ]
         if not detail_groups:
             return
         renderables.append(Text(""))
@@ -265,13 +278,19 @@ class MetricsRenderer:
 
         hierarchy = self._hierarchy_tree(group)
         if hierarchy is not None:
-            self._append_section(renderables, "Hierarchy", hierarchy, inline=True)
+            self._append_section(
+                renderables, "Hierarchy", hierarchy, inline=True
+            )
 
         contributors = self._contributors_grid(group)
         if contributors is not None:
-            self._append_section(renderables, "Contributors", contributors, inline=True)
+            self._append_section(
+                renderables, "Contributors", contributors, inline=True
+            )
 
-        self._append_section(renderables, "Instances", self._instances_table(group))
+        self._append_section(
+            renderables, "Instances", self._instances_table(group)
+        )
 
         assertions = self._assertions_block(group)
         if assertions is not None:
@@ -310,7 +329,9 @@ class MetricsRenderer:
         root_key = self._find_root(group.key)
         root_group = self._group_lookup[root_key]
         tree = Tree(self._tree_label(root_group, current=group.key == root_key))
-        self._populate_tree(tree, root_key, highlight=group.key, seen={root_key})
+        self._populate_tree(
+            tree, root_key, highlight=group.key, seen={root_key}
+        )
         return tree
 
     def _find_root(self, key: ResourceSpec) -> ResourceSpec:
@@ -343,17 +364,38 @@ class MetricsRenderer:
             )
             if child_key not in seen:
                 self._populate_tree(
-                    node, child_key, highlight=highlight, seen={*seen, child_key}
+                    node,
+                    child_key,
+                    highlight=highlight,
+                    seen={*seen, child_key},
                 )
 
     # ── Contributors ──────────────────────────────────────────────────────────
 
     def _contributors_grid(self, group: MetricGroup) -> Table | None:
         rows = [
-            ("Modules", self._format_values(group.contributors("collected_from_modules"), path=True)),
-            ("Tests", self._format_values(group.contributors("collected_from_tests"))),
-            ("Resources", self._format_values(group.contributors("collected_from_resources"))),
-            ("Cases", self._format_values(group.contributors("collected_from_cases"), case=True)),
+            (
+                "Modules",
+                self._format_values(
+                    group.contributors("collected_from_modules"), path=True
+                ),
+            ),
+            (
+                "Tests",
+                self._format_values(group.contributors("collected_from_tests")),
+            ),
+            (
+                "Resources",
+                self._format_values(
+                    group.contributors("collected_from_resources")
+                ),
+            ),
+            (
+                "Cases",
+                self._format_values(
+                    group.contributors("collected_from_cases"), case=True
+                ),
+            ),
         ]
         rows = [(label, value) for label, value in rows if value]
         if not rows:
@@ -380,8 +422,12 @@ class MetricsRenderer:
             mv = MetricValue.from_result(metric)
             table.add_row(
                 self._instance_label(metric),
-                self._format_values(metric.metadata.collected_from_modules, path=True) or "—",
-                self._format_values(metric.metadata.collected_from_tests) or "—",
+                self._format_values(
+                    metric.metadata.collected_from_modules, path=True
+                )
+                or "—",
+                self._format_values(metric.metadata.collected_from_tests)
+                or "—",
                 mv.value_str,
                 self._instance_assertions(metric),
             )
@@ -403,7 +449,9 @@ class MetricsRenderer:
                 )
                 if blocks:
                     blocks.append(Text(""))
-                blocks.append(format_assertion_result(assertion, heading=heading))
+                blocks.append(
+                    format_assertion_result(assertion, heading=heading)
+                )
 
         return Group(*blocks) if blocks else None
 
@@ -465,12 +513,14 @@ class MetricsRenderer:
 
     def _contributor_counts(self, group: MetricGroup) -> Text:
         text = Text()
-        for i, (label, attr) in enumerate([
-            ("M", "collected_from_modules"),
-            ("T", "collected_from_tests"),
-            ("R", "collected_from_resources"),
-            ("C", "collected_from_cases"),
-        ]):
+        for i, (label, attr) in enumerate(
+            [
+                ("M", "collected_from_modules"),
+                ("T", "collected_from_tests"),
+                ("R", "collected_from_resources"),
+                ("C", "collected_from_cases"),
+            ]
+        ):
             if i:
                 text.append(" ")
             text.append(label, style="bold")
@@ -555,7 +605,10 @@ class MetricsRenderer:
             return ""
         items = sorted(values)
         if path:
-            items = [safe_relative_path(Path(v)).as_posix() if v else v for v in items]
+            items = [
+                safe_relative_path(Path(v)).as_posix() if v else v
+                for v in items
+            ]
         if case:
             items = [f"[{v}]" for v in items]
         rendered = ", ".join(items[:limit])

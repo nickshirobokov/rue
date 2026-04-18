@@ -33,7 +33,9 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         suffix="{'slug': 'sample'}",
         case_id=case_id,
     )
-    sub_definition = make_definition("test_sub", module_path="tests/test_sample.py")
+    sub_definition = make_definition(
+        "test_sub", module_path="tests/test_sample.py"
+    )
 
     sub_execution = ExecutedTest(
         definition=sub_definition,
@@ -118,11 +120,16 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     assert loaded.result.failed == 1
     assert loaded.result.total == 1
     assert len(loaded.result.executions) == 1
-    assert loaded.result.executions[0].definition.spec.suffix == "{'slug': 'sample'}"
+    assert (
+        loaded.result.executions[0].definition.spec.suffix
+        == "{'slug': 'sample'}"
+    )
     assert loaded.result.executions[0].definition.spec.case_id == case_id
     assert len(loaded.result.executions[0].sub_executions) == 1
     assert len(loaded.result.metric_results) == 1
-    assert loaded.result.metric_results[0].metadata.identity.name == "latency_ms"
+    assert (
+        loaded.result.metric_results[0].metadata.identity.name == "latency_ms"
+    )
     assert loaded.result.metric_results[0].value == 12.5
     assert loaded.result.metric_results[0].metadata.identity.scope == Scope.TEST
     assert loaded.result.metric_results[0].metadata.collected_from_modules == {

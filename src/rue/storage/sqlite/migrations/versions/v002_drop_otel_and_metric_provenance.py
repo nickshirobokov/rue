@@ -15,7 +15,9 @@ def up(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE test_executions DROP COLUMN otel_trace_id")
     conn.execute("DROP TABLE IF EXISTS otel_spans")
 
-    conn.execute("ALTER TABLE metrics ADD COLUMN collected_from_modules_json TEXT")
+    conn.execute(
+        "ALTER TABLE metrics ADD COLUMN collected_from_modules_json TEXT"
+    )
     conn.execute("ALTER TABLE metrics ADD COLUMN provider_name TEXT")
     conn.execute("ALTER TABLE metrics ADD COLUMN provider_scope TEXT")
     conn.execute("ALTER TABLE metrics ADD COLUMN provider_path TEXT")

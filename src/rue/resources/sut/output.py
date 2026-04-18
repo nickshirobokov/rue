@@ -22,6 +22,7 @@ type _OutputSink = Callable[[OutputStream, str], None]
 # Data models
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class CapturedEvent:
     stream: OutputStream
@@ -61,6 +62,7 @@ class CapturedOutput:
 # ---------------------------------------------------------------------------
 # Global sys.stdout/stderr interception (singleton)
 # ---------------------------------------------------------------------------
+
 
 class _SysStreamDispatcher(io.TextIOBase):
     """Replacement for sys.stdout/stderr that dispatches to active SUT sinks."""
@@ -209,6 +211,7 @@ _sys_capture = _SysCaptureManager()
 # ---------------------------------------------------------------------------
 # Per-SUT output capture
 # ---------------------------------------------------------------------------
+
 
 class SUTOutputCapture:
     def __init__(self) -> None:

@@ -44,7 +44,9 @@ class ConsoleReporter(Reporter):
         (TestStatus.XPASSED, "xpassed"),
     )
 
-    def __init__(self, console: Console | None = None, verbosity: int = 0) -> None:
+    def __init__(
+        self, console: Console | None = None, verbosity: int = 0
+    ) -> None:
         self.console = console or Console(file=sys.__stdout__)
         self.verbosity = verbosity
         self._mode: OutputMode = make_mode(verbosity, self.console)
@@ -75,7 +77,9 @@ class ConsoleReporter(Reporter):
 
     # ── Run header & summary ──────────────────────────────────────────────────
 
-    def _build_run_header(self, environment: RunEnvironment, run_id: object) -> Group:
+    def _build_run_header(
+        self, environment: RunEnvironment, run_id: object
+    ) -> Group:
         parts: list[RenderableType] = [
             Rule("RUE RUN STARTS", characters="="),
             Text(
@@ -117,7 +121,9 @@ class ConsoleReporter(Reporter):
         )
 
     def _build_live_display(self) -> RenderableType:
-        if self.items_by_file and len(self.completed_modules) == len(self.items_by_file):
+        if self.items_by_file and len(self.completed_modules) == len(
+            self.items_by_file
+        ):
             return Text("")
         live = self._mode.render_live(self)
         if not self._mode.show_progress_bar:
@@ -169,7 +175,9 @@ class ConsoleReporter(Reporter):
         self.item_ids = {id(item) for item in items}
         self.items_by_file = {}
         for item in items:
-            self.items_by_file.setdefault(item.spec.module_path, []).append(item)
+            self.items_by_file.setdefault(item.spec.module_path, []).append(
+                item
+            )
         self.total_tests = len(items)
         self.completed_count = 0
         self.tests = {}
@@ -213,15 +221,17 @@ class ConsoleReporter(Reporter):
             if is_top_level:
                 self.completed_count += 1
                 status = execution.result.status
-                self._status_counts[status] = self._status_counts.get(status, 0) + 1
+                self._status_counts[status] = (
+                    self._status_counts.get(status, 0) + 1
+                )
                 if status.is_failure:
                     self.failures.append(execution)
 
             if self._live is not None:
                 module_path = execution.definition.spec.module_path
-                if (
-                    module_path not in self.completed_modules
-                    and all(id(i) in self.executions for i in self.items_by_file.get(module_path, []))
+                if module_path not in self.completed_modules and all(
+                    id(i) in self.executions
+                    for i in self.items_by_file.get(module_path, [])
                 ):
                     self._mode.print_completed_module(
                         module_path, self.items_by_file[module_path], self
@@ -262,7 +272,9 @@ class ConsoleReporter(Reporter):
             self.console.print(renderable)
 
         if self.verbosity >= 2:
-            for renderable in self._captured_renderer.render(self._stderr_capture.lines):
+            for renderable in self._captured_renderer.render(
+                self._stderr_capture.lines
+            ):
                 self.console.print(renderable)
 
         self.console.print()

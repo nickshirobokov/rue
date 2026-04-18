@@ -39,9 +39,7 @@ class FakeReadableSpan:
         self.name = name
         self.context = SimpleNamespace(span_id=span_id)
         self.parent = (
-            None
-            if parent_id is None
-            else SimpleNamespace(span_id=parent_id)
+            None if parent_id is None else SimpleNamespace(span_id=parent_id)
         )
 
 
@@ -162,7 +160,9 @@ def test_skips_tracing_without_active_trace(monkeypatch: pytest.MonkeyPatch):
     assert seen == [()]
 
 
-def test_traces_with_sdk_provider_and_no_session(monkeypatch: pytest.MonkeyPatch):
+def test_traces_with_sdk_provider_and_no_session(
+    monkeypatch: pytest.MonkeyPatch,
+):
     """SUT emits spans to a real SdkTracerProvider even without a Rue session."""
     created, names, start_as_current_span = make_span_factory([501])
     monkeypatch.setattr(

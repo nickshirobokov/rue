@@ -65,12 +65,12 @@ class TestSysOutputCapture:
                 with inner.capturing():
                     sys.stderr.write("nested")
 
-        assert [(event.stream, event.text) for event in outer.output.events] == [
-            ("stderr", "nested")
-        ]
-        assert [(event.stream, event.text) for event in inner.output.events] == [
-            ("stderr", "nested")
-        ]
+        assert [
+            (event.stream, event.text) for event in outer.output.events
+        ] == [("stderr", "nested")]
+        assert [
+            (event.stream, event.text) for event in inner.output.events
+        ] == [("stderr", "nested")]
 
 
 class TestSysOutputCaptureContextManager:

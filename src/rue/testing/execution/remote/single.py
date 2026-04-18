@@ -21,7 +21,12 @@ from rue.testing.execution.interfaces import ExecutableTest
 from rue.testing.execution.remote.models import ExecutorPayload
 from rue.context.process_pool import get_process_pool
 from rue.testing.execution.remote.worker import run_remote_test
-from rue.testing.models import ExecutedTest, LoadedTestDef, TestResult, TestStatus
+from rue.testing.models import (
+    ExecutedTest,
+    LoadedTestDef,
+    TestResult,
+    TestStatus,
+)
 
 
 @dataclass
@@ -67,8 +72,9 @@ class RemoteSingleTest(ExecutableTest):
         try:
             kwargs = await self._resolve_params(forked)
             resource_names = [
-                name for name in self.definition.spec.params if name in kwargs
-                and name not in self.params
+                name
+                for name in self.definition.spec.params
+                if name in kwargs and name not in self.params
             ]
             snapshot = forked.build_snapshot(
                 resource_names,

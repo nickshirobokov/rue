@@ -75,7 +75,9 @@ def test_runner_iterate_params_reports_invalid_definition_as_error(
         module_path="sample.py",
         params=["value"],
         modifiers=getattr(test_invalid, "__rue_modifiers__", []),
-        definition_error=getattr(test_invalid, "__rue_definition_error__", None),
+        definition_error=getattr(
+            test_invalid, "__rue_definition_error__", None
+        ),
     )
 
     run_result = asyncio.run(

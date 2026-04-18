@@ -73,10 +73,7 @@ def metric(
 
     def on_injection_hook(m: Metric) -> Metric:
         consumer_name = CURRENT_RESOURCE_CONSUMER.get()
-        if (
-            consumer_name
-            and CURRENT_RESOURCE_CONSUMER_KIND.get() == "resource"
-        ):
+        if consumer_name and CURRENT_RESOURCE_CONSUMER_KIND.get() == "resource":
             m.metadata.collected_from_resources.add(consumer_name)
         return m
 
@@ -118,9 +115,7 @@ def metric(
                                 ),
                             )
                         dependencies = (
-                            resolver.direct_dependencies_for(
-                                provider.spec
-                            )
+                            resolver.direct_dependencies_for(provider.spec)
                             if provider is not None and resolver is not None
                             else []
                         )
@@ -176,9 +171,7 @@ def metric(
                                 ),
                             )
                         dependencies = (
-                            resolver.direct_dependencies_for(
-                                provider.spec
-                            )
+                            resolver.direct_dependencies_for(provider.spec)
                             if provider is not None and resolver is not None
                             else []
                         )

@@ -15,7 +15,9 @@ def test_iterate_decorator_validation():
         def sample1():
             pass
 
-    with pytest.raises(ValueError, match="iterate\\(\\) min_passes must be >= 1"):
+    with pytest.raises(
+        ValueError, match="iterate\\(\\) min_passes must be >= 1"
+    ):
 
         @t_decorator.iterate(5, min_passes=0)
         def sample2():

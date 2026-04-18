@@ -42,7 +42,9 @@ class Reporter(ABC, metaclass=ReporterMeta):
         """Called when test collection finds no tests."""
 
     @abstractmethod
-    async def on_collection_complete(self, items: list[LoadedTestDef], run: Run) -> None:
+    async def on_collection_complete(
+        self, items: list[LoadedTestDef], run: Run
+    ) -> None:
         """Called after test collection completes."""
 
     async def on_tests_ready(self, tests: list[ExecutableTest]) -> None:

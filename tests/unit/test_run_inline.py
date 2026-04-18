@@ -17,7 +17,9 @@ def test_sync_test_runs_in_worker_thread(null_reporter):
         nonlocal observed_thread
         observed_thread = threading.current_thread()
 
-    item = make_definition("test_check_thread", fn=test_check_thread, module_path="sample.py")
+    item = make_definition(
+        "test_check_thread", fn=test_check_thread, module_path="sample.py"
+    )
 
     asyncio.run(runner.run(items=[item]))
 
@@ -34,7 +36,9 @@ def test_tag_inline_runs_on_main_thread(null_reporter):
         nonlocal observed_thread
         observed_thread = threading.current_thread()
 
-    item = make_definition("test_inline", fn=test_inline, module_path="sample.py", inline=True)
+    item = make_definition(
+        "test_inline", fn=test_inline, module_path="sample.py", inline=True
+    )
 
     asyncio.run(runner.run(items=[item]))
 

@@ -54,7 +54,9 @@ class OutputMode(ABC):
     def render_live(self, state: ConsoleReporter) -> RenderableType: ...
 
     @abstractmethod
-    def print_test(self, execution: ExecutedTest, state: ConsoleReporter) -> None: ...
+    def print_test(
+        self, execution: ExecutedTest, state: ConsoleReporter
+    ) -> None: ...
 
     def print_completed_module(
         self,
@@ -79,7 +81,9 @@ class QuietMode(OutputMode):
         )
         return self._render_spinner_line(text)
 
-    def print_test(self, execution: ExecutedTest, state: ConsoleReporter) -> None:
+    def print_test(
+        self, execution: ExecutedTest, state: ConsoleReporter
+    ) -> None:
         pass
 
 
@@ -100,10 +104,14 @@ class CompactMode(OutputMode):
                     continue
                 style = STATUS_STYLES[execution.result.status]
                 line.append(style.symbol, style=style.color)
-            lines.append(self._render_spinner_line(line) if has_running else line)
+            lines.append(
+                self._render_spinner_line(line) if has_running else line
+            )
         return Group(*lines) if lines else Text("")
 
-    def print_test(self, execution: ExecutedTest, state: ConsoleReporter) -> None:
+    def print_test(
+        self, execution: ExecutedTest, state: ConsoleReporter
+    ) -> None:
         definition = execution.definition
         style = STATUS_STYLES[execution.result.status]
         if state.current_module != definition.spec.module_path:
@@ -198,7 +206,9 @@ class VerboseMode(OutputMode):
                 execution = state.executions.get(id(item))
                 branch = tree.add(self._build_live_item_line(item, execution))
                 if execution is not None and execution.sub_executions:
-                    self._add_live_sub_executions(branch, execution.sub_executions, state)
+                    self._add_live_sub_executions(
+                        branch, execution.sub_executions, state
+                    )
                 elif isinstance(test, LocalCompositeTest) and execution is None:
                     self._add_live_composite_children(branch, test, state)
                 elif execution is None:
@@ -232,11 +242,15 @@ class VerboseMode(OutputMode):
             execution = state.executions.get(id(item))
             branch = tree.add(self._build_live_item_line(item, execution))
             if execution is not None and execution.sub_executions:
-                self._add_live_sub_executions(branch, execution.sub_executions, state)
+                self._add_live_sub_executions(
+                    branch, execution.sub_executions, state
+                )
         self.console.print(tree)
         state.current_module = path
 
-    def print_test(self, execution: ExecutedTest, state: ConsoleReporter) -> None:
+    def print_test(
+        self, execution: ExecutedTest, state: ConsoleReporter
+    ) -> None:
         definition = execution.definition
         if state.current_module != definition.spec.module_path:
             rel = safe_relative_path(definition.spec.module_path)
@@ -249,7 +263,8 @@ class VerboseMode(OutputMode):
             modifier_suffix = self._get_modifier_suffix(execution)
             self.console.print(
                 self._render_test_line(
-                    f"{definition.spec.full_name}{modifier_suffix}", execution.result
+                    f"{definition.spec.full_name}{modifier_suffix}",
+                    execution.result,
                 )
             )
             for renderable in self._iter_sub_executions(
@@ -270,7 +285,9 @@ class VerboseMode(OutputMode):
         execution: ExecutedTest | None,
     ) -> RenderableType:
         if execution is None:
-            text = Text.from_markup(f"{item.spec.full_name} [dim]⋯ running[/dim]")
+            text = Text.from_markup(
+                f"{item.spec.full_name} [dim]⋯ running[/dim]"
+            )
             return self._render_spinner_line(text)
         result = execution.result
         style = STATUS_STYLES[result.status]
@@ -295,11 +312,15 @@ class VerboseMode(OutputMode):
                 modifier_suffix = self._get_modifier_suffix(child_exec)
                 text = Text()
                 text.append(f"{sub_label}{modifier_suffix} ")
-                text.append(f"({child_exec.result.duration_ms:.1f}ms) ", style="dim")
+                text.append(
+                    f"({child_exec.result.duration_ms:.1f}ms) ", style="dim"
+                )
                 text.append(style.label, style=style.color)
                 node = parent.add(text)
                 if child_exec.sub_executions:
-                    self._add_live_sub_executions(node, child_exec.sub_executions, state)
+                    self._add_live_sub_executions(
+                        node, child_exec.sub_executions, state
+                    )
             elif isinstance(child, LocalCompositeTest):
                 pending = f"[{child.definition.spec.suffix or 'case'}]"
                 node = parent.add(

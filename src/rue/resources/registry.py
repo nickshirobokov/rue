@@ -24,7 +24,9 @@ class ResourceRegistry:
         self._definitions: dict[str, LoadedResourceDef] = {}
         self._process_definitions: dict[str, list[LoadedResourceDef]] = {}
         self._builtin_definitions: dict[str, LoadedResourceDef] = {}
-        self._builtin_process_definitions: dict[str, list[LoadedResourceDef]] = {}
+        self._builtin_process_definitions: dict[
+            str, list[LoadedResourceDef]
+        ] = {}
 
     @staticmethod
     def _resource_origin(
@@ -47,9 +49,7 @@ class ResourceRegistry:
     def _register(self, definition: LoadedResourceDef) -> None:
         ident = definition.spec
         if ident.scope == Scope.PROCESS:
-            process_defs = self._process_definitions.setdefault(
-                ident.name, []
-            )
+            process_defs = self._process_definitions.setdefault(ident.name, [])
             process_defs.append(definition)
 
             current = self._definitions.get(ident.name)

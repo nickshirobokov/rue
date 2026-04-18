@@ -10,7 +10,10 @@ from typing import cast
 from uuid import UUID, uuid4
 
 from opentelemetry import trace
-from opentelemetry.sdk.trace import ReadableSpan, TracerProvider as SdkTracerProvider
+from opentelemetry.sdk.trace import (
+    ReadableSpan,
+    TracerProvider as SdkTracerProvider,
+)
 from opentelemetry.trace import Span
 
 from rue.context.runtime import CURRENT_SUT_SPAN_IDS, bind
@@ -46,7 +49,9 @@ class SUTTracer:
     @contextmanager
     def tracing(self) -> Iterator[None]:
         otel_runtime.configure()
-        with otel_runtime.start_as_current_span(f"sut.{self.name}") as root_span:
+        with otel_runtime.start_as_current_span(
+            f"sut.{self.name}"
+        ) as root_span:
             session = otel_runtime.start_otel_trace(
                 root_span,
                 run_id=uuid4(),
@@ -103,7 +108,9 @@ class SUTTracer:
         if not span_ids:
             return []
         return [
-            span for span in session.get_spans() if span.context.span_id in span_ids
+            span
+            for span in session.get_spans()
+            if span.context.span_id in span_ids
         ]
 
     def get_all_spans(self) -> list[ReadableSpan]:
@@ -123,7 +130,10 @@ class SUTTracer:
                 span_id = span.context.span_id
                 if span_id in descendant_ids:
                     continue
-                if span.parent is not None and span.parent.span_id in descendant_ids:
+                if (
+                    span.parent is not None
+                    and span.parent.span_id in descendant_ids
+                ):
                     descendant_ids.add(span_id)
                     changed = True
                     continue
@@ -132,7 +142,9 @@ class SUTTracer:
                     descendant_ids.add(span_id)
                     changed = True
 
-        return [span for span in spans if span.context.span_id in descendant_ids]
+        return [
+            span for span in spans if span.context.span_id in descendant_ids
+        ]
 
     def get_llm_spans(self) -> list[ReadableSpan]:
         return [
@@ -160,7 +172,9 @@ class SUTTracer:
         *args: object,
         **kwargs: object,
     ) -> object:
-        with otel_runtime.start_as_current_span(f"sut.{self.name}.{method_name}") as span:
+        with otel_runtime.start_as_current_span(
+            f"sut.{self.name}.{method_name}"
+        ) as span:
             span_id = self._set_span_attrs(span, method_name)
             span_ids = (*CURRENT_SUT_SPAN_IDS.get(), span_id)
             with bind(CURRENT_SUT_SPAN_IDS, span_ids):
@@ -176,7 +190,9 @@ class SUTTracer:
         *args: object,
         **kwargs: object,
     ) -> object:
-        with otel_runtime.start_as_current_span(f"sut.{self.name}.{method_name}") as span:
+        with otel_runtime.start_as_current_span(
+            f"sut.{self.name}.{method_name}"
+        ) as span:
             span_id = self._set_span_attrs(span, method_name)
             span_ids = (*CURRENT_SUT_SPAN_IDS.get(), span_id)
             with bind(CURRENT_SUT_SPAN_IDS, span_ids):

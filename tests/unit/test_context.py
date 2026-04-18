@@ -26,7 +26,9 @@ def _make_item(
     case_id=None,
 ) -> LoadedTestDef:
     """Create a minimal LoadedTestDef for testing."""
-    return make_definition(name=name, module_path="test.py", suffix=suffix, case_id=case_id)
+    return make_definition(
+        name=name, module_path="test.py", suffix=suffix, case_id=case_id
+    )
 
 
 @pytest.fixture(autouse=True)

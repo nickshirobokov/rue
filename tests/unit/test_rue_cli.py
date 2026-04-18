@@ -20,8 +20,12 @@ def dummy() -> None:
     return None
 
 
-def make_item(name: str, tags: set[str], suffix: str | None = None) -> LoadedTestDef:
-    return make_definition(name, fn=dummy, module_path="module.py", tags=tags, suffix=suffix)
+def make_item(
+    name: str, tags: set[str], suffix: str | None = None
+) -> LoadedTestDef:
+    return make_definition(
+        name, fn=dummy, module_path="module.py", tags=tags, suffix=suffix
+    )
 
 
 class TestResolveReporters:
@@ -87,7 +91,9 @@ def test_run_tests_returns_2_when_run_id_already_exists(
         msg = "Runner.run should not be called when duplicate run_id exists"
         raise AssertionError(msg)
 
-    monkeypatch.setattr("rue.cli.TestSpecCollector.build_spec_collection", _build)
+    monkeypatch.setattr(
+        "rue.cli.TestSpecCollector.build_spec_collection", _build
+    )
     monkeypatch.setattr(
         "rue.cli.TestLoader.load_from_collection",
         lambda self, collection: [make_item("test_ok", set())],

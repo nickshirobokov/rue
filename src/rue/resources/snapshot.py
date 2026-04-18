@@ -27,7 +27,7 @@ _RUNTIME_IGNORE_TYPES = (
     types.AsyncGeneratorType,
     types.GeneratorType,
     types.ModuleType,
-    * _LOCK_TYPES,
+    *_LOCK_TYPES,
 )
 _ATOMIC_VALUE_TYPES = (
     UUID,
@@ -252,7 +252,9 @@ class SnapshotExporter:
 
     @staticmethod
     def _is_primitive(value: Any) -> bool:
-        return value is None or isinstance(value, (bool, int, float, str, bytes))
+        return value is None or isinstance(
+            value, (bool, int, float, str, bytes)
+        )
 
     @staticmethod
     def _is_trackable(value: Any) -> bool:
@@ -390,14 +392,18 @@ class SnapshotApplier:
             result[:] = [
                 self._apply_node(
                     item_id,
-                    current_items[index] if index < len(current_items) else None,
+                    current_items[index]
+                    if index < len(current_items)
+                    else None,
                 )
                 for index, item_id in enumerate(node["items"])
             ]
             return result
 
         if kind == "tuple":
-            result = tuple(self._apply_node(item_id, None) for item_id in node["items"])
+            result = tuple(
+                self._apply_node(item_id, None) for item_id in node["items"]
+            )
             self.built[node_id] = result
             return result
 
@@ -406,7 +412,9 @@ class SnapshotApplier:
             self.built[node_id] = result
             self.object_ids[id(result)] = node_id
             result.clear()
-            result.update(self._apply_node(item_id, None) for item_id in node["items"])
+            result.update(
+                self._apply_node(item_id, None) for item_id in node["items"]
+            )
             return result
 
         if kind == "frozenset":

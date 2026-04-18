@@ -51,7 +51,9 @@ def _resolve_from_import(
         if module_file.name == "__init__.py"
         else module_name.rpartition(".")[0]
     )
-    return importlib.util.resolve_name("." * node.level + (node.module or ""), package)
+    return importlib.util.resolve_name(
+        "." * node.level + (node.module or ""), package
+    )
 
 
 class ImportIndex:
@@ -97,9 +99,13 @@ class ImportIndex:
         for stmt in tree.body:
             match stmt:
                 case ast.Import() | ast.ImportFrom():
-                    for local, mod in self._extract(stmt, module_name, module_file):
+                    for local, mod in self._extract(
+                        stmt, module_name, module_file
+                    ):
                         self._module_level[local] = mod
-                case ast.FunctionDef(name=name) | ast.AsyncFunctionDef(name=name):
+                case (
+                    ast.FunctionDef(name=name) | ast.AsyncFunctionDef(name=name)
+                ):
                     self._local_functions.add(name)
                     func_imports: dict[str, ImportBinding] = {}
                     for node in ast.walk(stmt):
@@ -216,7 +222,10 @@ class ModuleAnalyzer:
                     binding = index.get_module_level(sym_name)
                     if binding:
                         modules.add(binding)
-                    elif sym_name in index.local_functions and sym_name not in visited:
+                    elif (
+                        sym_name in index.local_functions
+                        and sym_name not in visited
+                    ):
                         pending.append(sym_name)
 
         return modules
@@ -304,7 +313,9 @@ class DependencyCollector:
                 if resolved is not None:
                     pending.append((module, self._next_targets(mode, binding)))
                     if mode == DependencyCollectionMode.MODULE:
-                        self._enqueue_parent_packages(module, discovered, pending)
+                        self._enqueue_parent_packages(
+                            module, discovered, pending
+                        )
             if mode == DependencyCollectionMode.SYMBOL and targets is not None:
                 self._enqueue_submodule_fallbacks(
                     module_name=module_name,
@@ -325,7 +336,10 @@ class DependencyCollector:
     ) -> set[str] | None:
         """Choose target symbols to propagate into a dependency."""
 
-        if mode == DependencyCollectionMode.SYMBOL and binding.imported_name is not None:
+        if (
+            mode == DependencyCollectionMode.SYMBOL
+            and binding.imported_name is not None
+        ):
             return {binding.imported_name}
         return None
 
@@ -398,7 +412,9 @@ def collect_dependencies(
     owner_module = inspect.getmodule(fn)
     owner_file_attr = getattr(owner_module, "__file__", None)
     if not (owner_module and owner_file_attr):
-        raise ValueError("Cannot determine module or file for the provided callable")
+        raise ValueError(
+            "Cannot determine module or file for the provided callable"
+        )
 
     owner_file = Path(owner_file_attr).resolve()
     repo_root = next(

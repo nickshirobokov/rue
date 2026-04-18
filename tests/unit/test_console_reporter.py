@@ -71,7 +71,9 @@ def make_item(
     suffix: str | None = None,
     case_id: UUID | None = None,
 ) -> LoadedTestDef:
-    return make_definition(name, module_path=module_path, suffix=suffix, case_id=case_id)
+    return make_definition(
+        name, module_path=module_path, suffix=suffix, case_id=case_id
+    )
 
 
 def make_execution(
@@ -532,6 +534,7 @@ async def test_compact_mode_does_not_show_warnings_section():
 
     await reporter.on_collection_complete([item], Run())
     import sys
+
     sys.stderr.write("some noisy warning\n")
     await reporter.on_execution_complete(execution)
 
@@ -555,6 +558,7 @@ async def test_verbose_mode_does_not_show_warnings_section():
 
     await reporter.on_collection_complete([item], Run())
     import sys
+
     sys.stderr.write("some noisy warning\n")
     await reporter.on_execution_complete(execution)
 

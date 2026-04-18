@@ -45,7 +45,12 @@ class FakeSpanScope:
 def make_definition(
     *, suffix: str | None = None, case_id: UUID | None = None
 ) -> LoadedTestDef:
-    return _make_definition("test_traced", module_path="test_traced.py", suffix=suffix, case_id=case_id)
+    return _make_definition(
+        "test_traced",
+        module_path="test_traced.py",
+        suffix=suffix,
+        case_id=case_id,
+    )
 
 
 @pytest.mark.parametrize(

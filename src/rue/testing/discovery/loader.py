@@ -230,7 +230,11 @@ def _is_test_decorator(node: ast.expr) -> bool:
     if isinstance(node, ast.Name) and node.id == "test":
         return True
     if isinstance(node, ast.Attribute):
-        if node.attr == "test" and isinstance(node.value, ast.Name) and node.value.id == "rue":
+        if (
+            node.attr == "test"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "rue"
+        ):
             return True
         return _is_test_decorator(node.value)
     return False

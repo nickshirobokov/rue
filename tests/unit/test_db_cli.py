@@ -81,7 +81,9 @@ class TestDbMigrate:
         self, migrated_sqlite_db_path: Path, mock_console: MagicMock
     ) -> None:
         """Dry run on current DB should report up to date."""
-        result = _commands(migrated_sqlite_db_path, mock_console).migrate(dry_run=True)
+        result = _commands(migrated_sqlite_db_path, mock_console).migrate(
+            dry_run=True
+        )
 
         assert result == 0
         calls = [str(c) for c in mock_console.print.call_args_list]
@@ -157,7 +159,9 @@ class TestDbReset:
         self, migrated_sqlite_db_path: Path, mock_console: MagicMock
     ) -> None:
         """Reset without --yes should show warning and not delete."""
-        result = _commands(migrated_sqlite_db_path, mock_console).reset(confirmed=False)
+        result = _commands(migrated_sqlite_db_path, mock_console).reset(
+            confirmed=False
+        )
 
         assert result == 1
         assert migrated_sqlite_db_path.exists()
@@ -178,7 +182,9 @@ class TestDbReset:
         conn.commit()
         conn.close()
 
-        result = _commands(migrated_sqlite_db_path, mock_console).reset(confirmed=True)
+        result = _commands(migrated_sqlite_db_path, mock_console).reset(
+            confirmed=True
+        )
 
         assert result == 0
         assert migrated_sqlite_db_path.exists()

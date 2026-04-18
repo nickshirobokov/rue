@@ -39,7 +39,9 @@ class OtelReporter(Reporter):
     async def on_no_tests_found(self) -> None:
         return None
 
-    async def on_collection_complete(self, items: list[LoadedTestDef], run: Run) -> None:
+    async def on_collection_complete(
+        self, items: list[LoadedTestDef], run: Run
+    ) -> None:
         _ = items, run
         self._prepared_run_ids.clear()
         return None
@@ -82,9 +84,7 @@ class OtelReporter(Reporter):
             "trace": self._build_trace_tree(payload["spans"]),
         }
 
-    def _build_trace_tree(
-        self, spans: list[dict[str, Any]]
-    ) -> dict[str, Any]:
+    def _build_trace_tree(self, spans: list[dict[str, Any]]) -> dict[str, Any]:
         nodes_by_span_id = {
             span["context"]["span_id"]: {**span, "children": []}
             for span in spans

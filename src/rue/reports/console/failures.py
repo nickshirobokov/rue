@@ -41,11 +41,18 @@ class ExceptionRenderer:
         relevant = [f for f in failures if self._has_exception(f)]
         if not relevant:
             return []
-        renderables: list[RenderableType] = [Text(""), Rule("ERRORS", characters="=")]
+        renderables: list[RenderableType] = [
+            Text(""),
+            Rule("ERRORS", characters="="),
+        ]
         for index, failure in enumerate(relevant):
             if index:
                 renderables.append(Text(""))
-            renderables.append(self.render_panel(failure, title=failure.definition.spec.full_name))
+            renderables.append(
+                self.render_panel(
+                    failure, title=failure.definition.spec.full_name
+                )
+            )
         renderables.append(Text(""))
         return renderables
 

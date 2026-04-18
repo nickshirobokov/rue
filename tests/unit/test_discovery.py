@@ -138,7 +138,9 @@ def test_selector_plan_ignores_setup_and_legacy_modules(tmp_path):
 
     assert [
         spec.full_name
-        for spec in TestSpecCollector((), (), None).build_spec_collection((tmp_path,)).specs
+        for spec in TestSpecCollector((), (), None)
+        .build_spec_collection((tmp_path,))
+        .specs
     ] == ["test_real::test_real"]
 
 
@@ -165,7 +167,9 @@ def test_selector_skips_unselected_modules_before_import(tmp_path):
         },
     )
 
-    plan = TestSpecCollector([], [], "good").build_spec_collection([str(tmp_path)])
+    plan = TestSpecCollector([], [], "good").build_spec_collection(
+        [str(tmp_path)]
+    )
     items = TestLoader(plan.suite_root).load_from_collection(plan)
 
     assert [item.spec.name for item in items] == ["test_good"]
@@ -191,7 +195,9 @@ def test_load_from_collection_skips_unselected_invalid_tests_in_same_module(
         },
     )
 
-    plan = TestSpecCollector([], [], "good").build_spec_collection([str(tmp_path)])
+    plan = TestSpecCollector([], [], "good").build_spec_collection(
+        [str(tmp_path)]
+    )
     items = TestLoader(plan.suite_root).load_from_collection(plan)
 
     assert [item.spec.name for item in items] == ["test_good"]
@@ -221,7 +227,9 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
         },
     )
 
-    plan = TestSpecCollector((), (), None).build_spec_collection((tmp_path / "test_metadata.py",))
+    plan = TestSpecCollector((), (), None).build_spec_collection(
+        (tmp_path / "test_metadata.py",)
+    )
     planned_specs = {spec.name: spec for spec in plan.specs}
 
     assert planned_specs["test_inline_skip"].params == ()
@@ -282,7 +290,9 @@ async def test_materialize_supports_same_dir_setup_without_pyproject(
         },
     )
 
-    run = await Runner(reporters=[null_reporter]).run(items=materialize(tmp_path))
+    run = await Runner(reporters=[null_reporter]).run(
+        items=materialize(tmp_path)
+    )
 
     assert run.result.passed == 1
     assert run.result.failed == 0
@@ -431,7 +441,9 @@ def test_materialize_uses_single_session_for_selected_modules(
         },
     )
 
-    plan = TestSpecCollector([], [], "good").build_spec_collection([str(tmp_path)])
+    plan = TestSpecCollector([], [], "good").build_spec_collection(
+        [str(tmp_path)]
+    )
     items = TestLoader(plan.suite_root).load_from_collection(plan)
 
     assert [item.spec.name for item in items] == ["test_good", "test_good_two"]
@@ -479,7 +491,9 @@ async def test_materialize_promotes_pytest_fixtures(
 
     write_files(tmp_path, files)
 
-    run = await Runner(reporters=[null_reporter]).run(items=materialize(tmp_path))
+    run = await Runner(reporters=[null_reporter]).run(
+        items=materialize(tmp_path)
+    )
 
     assert run.result.passed == 1
     assert run.result.failed == 0

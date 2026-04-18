@@ -190,7 +190,8 @@ class LocalSingleTest(ExecutableTest):
                     case (_, _, True) if self.definition.spec.xfail_strict:
                         status = TestStatus.FAILED
                         result_error = AssertionError(
-                            self.definition.spec.xfail_reason or "xfail test passed"
+                            self.definition.spec.xfail_reason
+                            or "xfail test passed"
                         )
                     # xfail test passed unexpectedly (non-strict)
                     case (_, _, True):
@@ -209,7 +210,10 @@ class LocalSingleTest(ExecutableTest):
             self.tracer.record_otel_result(result)
             self.tracer.finish_otel_trace()
 
-        if self.tracer.completed_otel_trace_session is not None and self.on_trace_collected:
+        if (
+            self.tracer.completed_otel_trace_session is not None
+            and self.on_trace_collected
+        ):
             await self.on_trace_collected(self.tracer, exec_id)
 
         execution = ExecutedTest(

@@ -109,7 +109,8 @@ class TestBackendDecorator:
         item = make_definition("sample")
         item.spec.get_execution_from_fn(sample)
         assert (
-            BackendModifier(backend=ExecutionBackend.SUBPROCESS) in item.spec.modifiers
+            BackendModifier(backend=ExecutionBackend.SUBPROCESS)
+            in item.spec.modifiers
         )
 
     def test_accepts_execution_backend_enum(self):
@@ -140,7 +141,9 @@ class TestFactoryDispatch:
         factory = DefaultTestFactory(config=Config())
 
         built = factory.build(
-            self._definition(BackendModifier(backend=ExecutionBackend.SUBPROCESS))
+            self._definition(
+                BackendModifier(backend=ExecutionBackend.SUBPROCESS)
+            )
         )
 
         assert isinstance(built, RemoteSingleTest)
@@ -216,15 +219,16 @@ class TestRemoteSingleTest:
         assert len(pool.submitted) == 1
         submitted_fn, args, _ = pool.submitted[0]
         from rue.testing.execution.remote.worker import run_remote_test
+
         assert submitted_fn is run_remote_test
         (payload,) = args
         assert isinstance(payload, ExecutorPayload)
         assert payload.spec is definition.spec
         assert payload.suite_root == tmp_path
         assert payload.setup_chain == ()
-        assert [
-            s.name for s in payload.snapshot.resolution_order
-        ] == ["shared_value"]
+        assert [s.name for s in payload.snapshot.resolution_order] == [
+            "shared_value"
+        ]
 
     @pytest.mark.asyncio
     async def test_skips_when_stopped(self):
@@ -344,6 +348,7 @@ class TestRemoteEndToEnd:
 
         recorded_pid = int(pid_file.read_text())
         import os as _os  # local import so the worker's os import is used above
+
         assert recorded_pid != _os.getpid(), (
             "remote test should not run in the parent process"
         )

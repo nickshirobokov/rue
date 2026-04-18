@@ -64,7 +64,9 @@ class MetricMetadata:
 
     last_item_recorded_at: datetime | None = None
     first_item_recorded_at: datetime | None = None
-    identity: ResourceSpec = field(default=ResourceSpec(name="", scope=Scope.PROCESS))
+    identity: ResourceSpec = field(
+        default=ResourceSpec(name="", scope=Scope.PROCESS)
+    )
     collected_from_tests: set[str] = field(default_factory=set)
     collected_from_resources: set[str] = field(default_factory=set)
     collected_from_cases: set[str] = field(default_factory=set)
@@ -166,7 +168,9 @@ class Metric:
             test_ctx = CURRENT_TEST.get()
             if test_ctx is not None:
                 if test_ctx.item.spec.name:
-                    self.metadata.collected_from_tests.add(test_ctx.item.spec.name)
+                    self.metadata.collected_from_tests.add(
+                        test_ctx.item.spec.name
+                    )
                 if test_ctx.item.spec.module_path:
                     self.metadata.collected_from_modules.add(
                         str(test_ctx.item.spec.module_path)
@@ -176,7 +180,9 @@ class Metric:
                         str(test_ctx.item.spec.case_id)
                     )
                 elif test_ctx.item.spec.suffix:
-                    self.metadata.collected_from_cases.add(test_ctx.item.spec.suffix)
+                    self.metadata.collected_from_cases.add(
+                        test_ctx.item.spec.suffix
+                    )
 
             if self.metadata.first_item_recorded_at is None:
                 self.metadata.first_item_recorded_at = datetime.now(UTC)

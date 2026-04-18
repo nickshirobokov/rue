@@ -45,7 +45,10 @@ class CapturedOutputRenderer:
     def render(self, lines: list[str]) -> list[RenderableType]:
         if not lines:
             return []
-        renderables: list[RenderableType] = [Text(""), Rule("WARNINGS", characters="=")]
+        renderables: list[RenderableType] = [
+            Text(""),
+            Rule("WARNINGS", characters="="),
+        ]
         for line, count in Counter(lines).items():
             label = f"{line} (x{count})" if count > 1 else line
             renderables.append(Text(label, style="yellow dim"))
