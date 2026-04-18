@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator, Generator
 from contextvars import ContextVar
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from rue.context.runtime import (
     CURRENT_RESOURCE_CONSUMER,
@@ -18,8 +18,8 @@ from rue.context.runtime import (
     bind,
 )
 from rue.resources.models import (
-    ResourceBlueprint,
     LoadedResourceDef,
+    ResolverSnapshot,
     ResourceSpec,
     Scope,
 )
@@ -261,28 +261,62 @@ class ResourceResolver:
                 if key.scope == scope:
                     del owner._cache[key]
 
-    def build_blueprint(
+    def build_snapshot(
         self,
-        resource_names: list[str],
+        resources: list[str] | list[ResourceSpec],
+        *,
         request_path: Path | None = None,
-    ) -> ResourceBlueprint:
-        """Build a transfer blueprint for the given resources."""
-        closure = self._collect_blueprint_closure(
-            resource_names, self._cache, self._shared_dependency_graph
-        )
-        identities = [
-            replace(
-                identity,
-                dependencies=tuple(d.name for d in dependencies),
+        topological: bool = False,
+        only_cached_roots: bool = False,
+    ) -> ResolverSnapshot:
+        """Build a transfer snapshot for the given resource names or specs."""
+
+        match resources:
+            case []:
+                identities = []
+
+            case [*names] if all(isinstance(name, str) for name in names):
+                names = cast(list[str], resources)
+                closure = self._collect_snapshot_closure(
+                    names, self._cache, self._shared_dependency_graph
+                )
+                identities = [
+                    replace(
+                        identity,
+                        dependencies=tuple(d.name for d in dependencies),
+                    )
+                    for identity, dependencies in closure.items()
+                ]
+
+            case [*specs] if all(isinstance(spec, ResourceSpec) for spec in specs):
+                specs = cast(list[ResourceSpec], resources)
+                identities = [
+                    replace(
+                        identity,
+                        dependencies=tuple(
+                            dependency.name
+                            for dependency in self._shared_dependency_graph.get(
+                                identity,
+                                (),
+                            )
+                        ),
+                    )
+                    for identity in specs
+                ]
+
+            case _:
+                msg = "resources must be list[str] or list[ResourceSpec]"
+                raise TypeError(msg)
+        
+        ordered_identities = (
+            self._topological_sort_snapshot_identities(identities) 
+            if topological 
+            else identities
             )
-            for identity, dependencies in closure.items()
-        ]
-        resolution_order = self._topological_sort_blueprint_identities(
-            identities
-        )
         root_map = {
             identity.snapshot_key: self._cache[identity]
             for identity in identities
+            if not only_cached_roots or identity in self._cache
         }
         exporter = SnapshotExporter(
             known_ids=self._snapshot_object_ids,
@@ -293,92 +327,53 @@ class ResourceResolver:
         self._snapshot_object_ids = exporter.object_ids
         self._snapshot_path_ids = exporter.path_ids
         self._snapshot_next_id = exporter.next_id
-        return ResourceBlueprint(
+        return ResolverSnapshot(
             res_specs=tuple(identities),
             request_path=(str(request_path) if request_path else None),
             root_ids=root_ids,
             nodes=nodes,
             ignored_paths=ignored_paths,
-            resolution_order=tuple(resolution_order),
+            resolution_order=tuple(ordered_identities),
         )
 
     @classmethod
-    async def build_from_blueprint(
+    async def from_snapshot(
         cls,
-        blueprint: ResourceBlueprint,
+        snapshot: ResolverSnapshot,
         registry: ResourceRegistry,
     ) -> "ResourceResolver":
         resolver = cls(registry, shadow_mode=True)
         request_path = (
-            Path(blueprint.request_path) if blueprint.request_path else None
+            Path(snapshot.request_path) if snapshot.request_path else None
         )
 
-        for identity in blueprint.resolution_order:
+        for identity in snapshot.resolution_order:
             definition = registry.select(identity.name, request_path).definition
             await resolver._resolve_uncached(
                 name=identity.name,
                 definition=definition,
                 cache_key=identity,
             )
-        resolver.apply_snapshot(blueprint)
+        resolver.apply_snapshot_to_state(snapshot)
         return resolver
 
-    def snapshot_blueprint(
-        self,
-        identities: tuple[ResourceSpec, ...],
-        request_path: Path | None = None,
-    ) -> ResourceBlueprint:
-        identities_with_dependencies = tuple(
-            replace(
-                identity,
-                dependencies=tuple(
-                    dependency.name
-                    for dependency in self._shared_dependency_graph.get(
-                        identity,
-                        (),
-                    )
-                ),
-            )
-            for identity in identities
-        )
-        root_map = {
-            identity.snapshot_key: self._cache[identity]
-            for identity in identities
-            if identity in self._cache
-        }
-        exporter = SnapshotExporter(
-            known_ids=self._snapshot_object_ids,
-            known_paths=self._snapshot_path_ids,
-            next_id=self._snapshot_next_id,
-        )
-        root_ids, nodes, ignored_paths = exporter.export_roots(root_map)
-        self._snapshot_object_ids = exporter.object_ids
-        self._snapshot_path_ids = exporter.path_ids
-        self._snapshot_next_id = exporter.next_id
-        return ResourceBlueprint(
-            res_specs=identities_with_dependencies,
-            request_path=(str(request_path) if request_path else None),
-            root_ids=root_ids,
-            nodes=nodes,
-            ignored_paths=ignored_paths,
-            resolution_order=identities_with_dependencies,
-        )
-
-    def snapshot_payload(self, blueprint: ResourceBlueprint) -> dict[str, Any]:
+    def snapshot_payload(self, snapshot: ResolverSnapshot) -> dict[str, Any]:
         return {
-            "root_ids": dict(blueprint.root_ids),
-            "nodes": {node_id: dict(node) for node_id, node in blueprint.nodes.items()},
+            "root_ids": dict(snapshot.root_ids),
+            "nodes": {node_id: dict(node) for node_id, node in snapshot.nodes.items()},
             "ignored_paths": {
                 root_key: list(paths)
-                for root_key, paths in blueprint.ignored_paths.items()
+                for root_key, paths in snapshot.ignored_paths.items()
             },
         }
 
-    def apply_snapshot(self, blueprint: ResourceBlueprint | dict[str, Any]) -> None:
+    def apply_snapshot_to_state(
+        self, snapshot: ResolverSnapshot | dict[str, Any]
+    ) -> None:
         payload = (
-            self.snapshot_payload(blueprint)
-            if isinstance(blueprint, ResourceBlueprint)
-            else blueprint
+            self.snapshot_payload(snapshot)
+            if isinstance(snapshot, ResolverSnapshot)
+            else snapshot
         )
         roots = {
             identity.snapshot_key: self._cache.get(identity)
@@ -474,12 +469,12 @@ class ResourceResolver:
         return value
 
     @staticmethod
-    def _collect_blueprint_closure(
+    def _collect_snapshot_closure(
         resource_names: list[str],
         cache: dict[ResourceSpec, Any],
         dep_graph: dict[ResourceSpec, list[ResourceSpec]],
     ) -> dict[ResourceSpec, list[ResourceSpec]]:
-        """Expand resource names into a full dependency closure."""
+        """Expand resource names into the dependency closure for a transfer snapshot."""
         name_to_identity = {identity.name: identity for identity in cache}
         for name in resource_names:
             if name not in name_to_identity:
@@ -508,10 +503,10 @@ class ResourceResolver:
         return closure
 
     @staticmethod
-    def _topological_sort_blueprint_identities(
+    def _topological_sort_snapshot_identities(
         identities: list[ResourceSpec],
     ) -> list[ResourceSpec]:
-        """Topologically sort blueprint identities for worker resolution."""
+        """Topologically sort identities for worker-side snapshot replay."""
         identity_map = {identity.name: identity for identity in identities}
         if not identity_map:
             return []
@@ -543,7 +538,7 @@ class ResourceResolver:
         if len(order) != len(identity_map):
             resolved = {identity.name for identity in order}
             unresolved = set(identity_map) - resolved
-            msg = f"Circular dependency in blueprint resources: {unresolved}"
+            msg = f"Circular dependency in snapshot resources: {unresolved}"
             raise RuntimeError(msg)
 
         return order

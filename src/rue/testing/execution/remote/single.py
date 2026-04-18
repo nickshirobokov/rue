@@ -29,7 +29,7 @@ class RemoteSingleTest(ExecutableTest):
     """Executes a single test in a separate worker process.
 
     Resolves every resource needed by the test in the parent process, builds a
-    serializable :class:`ResourceBlueprint`, hands the packaged payload to a
+    serializable :class:`ResolverSnapshot`, hands the packaged payload to a
     :class:`ProcessPoolExecutor`, and wraps the returned :class:`TestResult`
     into an :class:`ExecutedTest` using the locally-held ``definition``.
     """
@@ -70,9 +70,10 @@ class RemoteSingleTest(ExecutableTest):
                 name for name in self.definition.spec.params if name in kwargs
                 and name not in self.params
             ]
-            blueprint = forked.build_blueprint(
+            snapshot = forked.build_snapshot(
                 resource_names,
                 request_path=self.definition.spec.module_path,
+                topological=True,
             )
 
             payload = ExecutorPayload(
@@ -80,24 +81,25 @@ class RemoteSingleTest(ExecutableTest):
                 suite_root=self.definition.suite_root,
                 setup_chain=self.definition.setup_chain,
                 params=dict(self.params),
-                blueprint=blueprint,
+                snapshot=snapshot,
             )
 
             future = get_process_pool().submit(run_remote_test, payload)
             remote_result = await asyncio.wrap_future(future)
-            parent_blueprint = forked.snapshot_blueprint(
-                payload.blueprint.res_specs,
+            parent_snapshot = forked.build_snapshot(
+                list(payload.snapshot.res_specs),
                 request_path=self.definition.spec.module_path,
+                only_cached_roots=True,
             )
-            base_payload = forked.snapshot_payload(payload.blueprint)
+            base_payload = forked.snapshot_payload(payload.snapshot)
             parent_diff = DeepDiff(
                 base_payload,
-                forked.snapshot_payload(parent_blueprint),
+                forked.snapshot_payload(parent_snapshot),
                 verbose_level=2,
             )
             merged_payload = base_payload + Delta(parent_diff)
             merged_payload = merged_payload + Delta(remote_result.worker_diff)
-            forked.apply_snapshot(merged_payload)
+            forked.apply_snapshot_to_state(merged_payload)
             result = remote_result.result
         finally:
             await forked.teardown_scope(Scope.TEST)

@@ -10,7 +10,7 @@ import pytest
 from deepdiff import DeepDiff, Delta
 
 from rue.resources import ResourceResolver, Scope, registry, resource
-from rue.resources.models import ResourceBlueprint
+from rue.resources.models import ResolverSnapshot
 from rue.resources.serialization import (
     check_serializable,
     deserialize_value,
@@ -39,9 +39,9 @@ class SlotsState:
 
 def _merge_payloads(
     resolver: ResourceResolver,
-    base: ResourceBlueprint,
-    current: ResourceBlueprint,
-    worker: ResourceBlueprint,
+    base: ResolverSnapshot,
+    current: ResolverSnapshot,
+    worker: ResolverSnapshot,
 ) -> dict[str, object]:
     base_payload = resolver.snapshot_payload(base)
     parent_diff = DeepDiff(
@@ -84,7 +84,7 @@ class TestSerializeRoundTrip:
         assert restored == original
 
 
-class TestBuildBlueprint:
+class TestBuildSnapshot:
     async def test_includes_test_scope_in_snapshot_closure(self):
         @resource(scope=Scope.TEST)
         def per_test():
@@ -98,12 +98,12 @@ class TestBuildBlueprint:
         await resolver.resolve("shared")
         await resolver.resolve("per_test")
 
-        blueprint = resolver.build_blueprint(["shared", "per_test"])
+        snapshot = resolver.build_snapshot(["shared", "per_test"])
 
-        names = {identity.name for identity in blueprint.res_specs}
+        names = {identity.name for identity in snapshot.res_specs}
         assert names == {"shared", "per_test"}
-        assert set(blueprint.root_ids) == {
-            identity.snapshot_key for identity in blueprint.res_specs
+        assert set(snapshot.root_ids) == {
+            identity.snapshot_key for identity in snapshot.res_specs
         }
 
     async def test_records_ignored_runtime_fields(self):
@@ -114,16 +114,16 @@ class TestBuildBlueprint:
         resolver = ResourceResolver(registry)
         await resolver.resolve("state")
 
-        blueprint = resolver.build_blueprint(["state"])
-        identity = blueprint.res_specs[0]
-        root_node = blueprint.nodes[blueprint.root_ids[identity.snapshot_key]]
+        snapshot = resolver.build_snapshot(["state"])
+        identity = snapshot.res_specs[0]
+        root_node = snapshot.nodes[snapshot.root_ids[identity.snapshot_key]]
         attrs = set(root_node["attrs"])
 
         assert "count" in attrs
         assert "_private" in attrs
         assert "_cache" not in attrs
         assert "lock" not in attrs
-        assert blueprint.ignored_paths[identity.snapshot_key] == [
+        assert snapshot.ignored_paths[identity.snapshot_key] == [
             "_cache",
             "lock",
         ]
@@ -140,12 +140,12 @@ class TestBuildBlueprint:
         resolver = ResourceResolver(registry)
         await resolver.resolve("alias")
 
-        blueprint = resolver.build_blueprint(["alias"])
-        identity_map = {identity.name: identity for identity in blueprint.res_specs}
+        snapshot = resolver.build_snapshot(["alias"])
+        identity_map = {identity.name: identity for identity in snapshot.res_specs}
 
         assert (
-            blueprint.root_ids[identity_map["shared"].snapshot_key]
-            == blueprint.root_ids[identity_map["alias"].snapshot_key]
+            snapshot.root_ids[identity_map["shared"].snapshot_key]
+            == snapshot.root_ids[identity_map["alias"].snapshot_key]
         )
 
     async def test_request_path_stored(self):
@@ -156,20 +156,20 @@ class TestBuildBlueprint:
         resolver = ResourceResolver(registry)
         await resolver.resolve("simple")
 
-        blueprint = resolver.build_blueprint(
+        snapshot = resolver.build_snapshot(
             ["simple"],
             request_path=Path("/project/tests/test_foo.py"),
         )
 
-        assert blueprint.request_path == "/project/tests/test_foo.py"
+        assert snapshot.request_path == "/project/tests/test_foo.py"
 
-    def test_build_blueprint_requires_cached_resources(self):
+    def test_build_snapshot_requires_cached_resources(self):
         resolver = ResourceResolver(registry)
         with pytest.raises(ValueError, match="nonexistent"):
-            resolver.build_blueprint(["nonexistent"])
+            resolver.build_snapshot(["nonexistent"])
 
 
-class TestBuildFromBlueprint:
+class TestFromSnapshot:
     async def test_worker_replays_shadow_factories(self):
         resolve_count = 0
 
@@ -183,9 +183,9 @@ class TestBuildFromBlueprint:
         await resolver.resolve("config")
         assert resolve_count == 1
 
-        blueprint = resolver.build_blueprint(["config"])
-        worker = await ResourceResolver.build_from_blueprint(
-            blueprint,
+        snap = resolver.build_snapshot(["config"])
+        worker = await ResourceResolver.from_snapshot(
+            snap,
             registry,
         )
 
@@ -201,9 +201,9 @@ class TestBuildFromBlueprint:
         shared = await resolver.resolve("shared")
         shared["count"] = 4
 
-        blueprint = resolver.build_blueprint(["shared"])
-        worker = await ResourceResolver.build_from_blueprint(
-            blueprint,
+        snap = resolver.build_snapshot(["shared"])
+        worker = await ResourceResolver.from_snapshot(
+            snap,
             registry,
         )
 
@@ -222,22 +222,22 @@ class TestBuildFromBlueprint:
         resolver = ResourceResolver(registry)
         await resolver.resolve("holder")
 
-        blueprint = resolver.build_blueprint(["holder"])
-        worker = await ResourceResolver.build_from_blueprint(
-            blueprint,
+        snap = resolver.build_snapshot(["holder"])
+        worker = await ResourceResolver.from_snapshot(
+            snap,
             registry,
         )
         hydrated = await worker.resolve("holder")
 
         assert hydrated.ctx.get() == 7
 
-    async def test_empty_blueprint_hydration(self):
-        blueprint = ResourceBlueprint(
+    async def test_empty_snapshot_hydration(self):
+        snap = ResolverSnapshot(
             res_specs=(),
             request_path=None,
         )
-        worker = await ResourceResolver.build_from_blueprint(
-            blueprint,
+        worker = await ResourceResolver.from_snapshot(
+            snap,
             registry,
         )
 
@@ -252,24 +252,24 @@ class TestRoundTrip:
 
         resolver = ResourceResolver(registry)
         shared = await resolver.resolve("shared")
-        base = resolver.build_blueprint(["shared"])
+        base = resolver.build_snapshot(["shared"])
 
-        worker = await ResourceResolver.build_from_blueprint(base, registry)
+        worker = await ResourceResolver.from_snapshot(base, registry)
         worker_shared = await worker.resolve("shared")
 
         shared["values"].append("parent")
         worker_shared["values"].append("worker")
 
-        current = resolver.snapshot_blueprint(
-            base.res_specs,
+        current = resolver.build_snapshot(
+            list(base.res_specs),
             request_path=Path("/tmp/test_shared.py"),
         )
-        worker_snapshot = worker.snapshot_blueprint(
-            base.res_specs,
+        worker_snapshot = worker.build_snapshot(
+            list(base.res_specs),
             request_path=Path("/tmp/test_shared.py"),
         )
 
-        resolver.apply_snapshot(
+        resolver.apply_snapshot_to_state(
             _merge_payloads(resolver, base, current, worker_snapshot)
         )
 
@@ -289,21 +289,21 @@ class TestRoundTrip:
         parent = ResourceResolver(registry)
         forked = parent.fork_for_test()
         state = await forked.resolve("case_state")
-        base = forked.build_blueprint(["case_state"])
+        base = forked.build_snapshot(["case_state"])
 
-        worker = await ResourceResolver.build_from_blueprint(base, registry)
+        worker = await ResourceResolver.from_snapshot(base, registry)
         worker_state = await worker.resolve("case_state")
         worker_state["body"].append("worker")
 
-        current = forked.snapshot_blueprint(
-            base.res_specs,
+        current = forked.build_snapshot(
+            list(base.res_specs),
             request_path=Path("/tmp/test_case.py"),
         )
-        worker_snapshot = worker.snapshot_blueprint(
-            base.res_specs,
+        worker_snapshot = worker.build_snapshot(
+            list(base.res_specs),
             request_path=Path("/tmp/test_case.py"),
         )
-        forked.apply_snapshot(
+        forked.apply_snapshot_to_state(
             _merge_payloads(forked, base, current, worker_snapshot)
         )
 
@@ -318,23 +318,23 @@ class TestRoundTrip:
 
         parent = ResourceResolver(registry)
         live = await parent.resolve("state")
-        base = parent.build_blueprint(["state"])
+        base = parent.build_snapshot(["state"])
 
-        worker = await ResourceResolver.build_from_blueprint(base, registry)
+        worker = await ResourceResolver.from_snapshot(base, registry)
         worker_state = await worker.resolve("state")
         worker_state.count = 8
         worker_state._private = "worker"
         worker_state.ctx.set(11)
 
-        current = parent.snapshot_blueprint(
-            base.res_specs,
+        current = parent.build_snapshot(
+            list(base.res_specs),
             request_path=Path("/tmp/test_slots.py"),
         )
-        worker_snapshot = worker.snapshot_blueprint(
-            base.res_specs,
+        worker_snapshot = worker.build_snapshot(
+            list(base.res_specs),
             request_path=Path("/tmp/test_slots.py"),
         )
-        parent.apply_snapshot(
+        parent.apply_snapshot_to_state(
             _merge_payloads(parent, base, current, worker_snapshot)
         )
 

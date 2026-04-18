@@ -8,7 +8,7 @@ test and its resources, invokes the test function, and returns a fresh
 Execution logic intentionally lives separately from
 :class:`LocalSingleTest` — the worker has no tracer, no semaphore, no
 ``on_complete`` / ``on_trace_collected`` callbacks, and constructs its own
-resolver from a blueprint rather than forking a parent one.  Keeping the two
+resolver from a snapshot rather than forking a parent one.  Keeping the two
 sides apart avoids entangling concerns that will continue to diverge as
 remote-specific features (resource hooks, distributed tracing) are added.
 """
@@ -66,11 +66,11 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
         setup_chain=payload.setup_chain,
     )
 
-    resolver = await ResourceResolver.build_from_blueprint(
-        payload.blueprint,
+    resolver = await ResourceResolver.from_snapshot(
+        payload.snapshot,
         default_resource_registry,
     )
-    base_payload = resolver.snapshot_payload(payload.blueprint)
+    base_payload = resolver.snapshot_payload(payload.snapshot)
 
     assertion_results: list[AssertionResult] = []
     error: BaseException | None = None
@@ -100,9 +100,10 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
 
     duration_ms = (time.perf_counter() - start) * 1000
 
-    worker_snapshot = resolver.snapshot_blueprint(
-        payload.blueprint.res_specs,
+    worker_snapshot = resolver.build_snapshot(
+        list(payload.snapshot.res_specs),
         request_path=payload.spec.module_path,
+        only_cached_roots=True,
     )
     worker_diff = DeepDiff(
         base_payload,

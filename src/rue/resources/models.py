@@ -71,7 +71,7 @@ class SelectedResource:
 
 
 @dataclass(frozen=True, slots=True)
-class ResourceBlueprint:
+class ResolverSnapshot:
     """Complete transfer payload for reconstructing resources in a worker."""
 
     res_specs: tuple[ResourceSpec, ...]

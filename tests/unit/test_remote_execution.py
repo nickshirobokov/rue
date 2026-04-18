@@ -223,7 +223,7 @@ class TestRemoteSingleTest:
         assert payload.suite_root == tmp_path
         assert payload.setup_chain == ()
         assert [
-            s.name for s in payload.blueprint.resolution_order
+            s.name for s in payload.snapshot.resolution_order
         ] == ["shared_value"]
 
     @pytest.mark.asyncio

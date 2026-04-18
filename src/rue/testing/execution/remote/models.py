@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from rue.resources.models import ResourceBlueprint
+from rue.resources.models import ResolverSnapshot
 from rue.testing.models import TestResult
 from rue.testing.models.spec import SetupFileRef, TestSpec
 
@@ -20,7 +20,7 @@ class ExecutorPayload:
     suite_root: Path
     setup_chain: tuple[SetupFileRef, ...]
     params: dict[str, Any]
-    blueprint: ResourceBlueprint
+    snapshot: ResolverSnapshot
     run_id: UUID | None = None
 
 
