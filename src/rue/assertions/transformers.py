@@ -1,4 +1,5 @@
 import ast
+from typing import cast
 
 
 class InjectAssertionDependenciesTransformer(ast.NodeTransformer):
@@ -12,7 +13,7 @@ class InjectAssertionDependenciesTransformer(ast.NodeTransformer):
 
     def _inject_dependencies(
         self, node: ast.FunctionDef | ast.AsyncFunctionDef
-    ):
+    ) -> ast.FunctionDef | ast.AsyncFunctionDef:
         inject_stmts: list[ast.stmt] = [
             ast.ImportFrom(
                 module="rue.assertions.base",
@@ -45,11 +46,13 @@ class InjectAssertionDependenciesTransformer(ast.NodeTransformer):
             ast.copy_location(stmt, node)
         return node
 
-    def visit_FunctionDef(self, node: ast.FunctionDef):
-        return self._inject_dependencies(node)
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        return cast("ast.FunctionDef", self._inject_dependencies(node))
 
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
-        return self._inject_dependencies(node)
+    def visit_AsyncFunctionDef(
+        self, node: ast.AsyncFunctionDef
+    ) -> ast.AsyncFunctionDef:
+        return cast("ast.AsyncFunctionDef", self._inject_dependencies(node))
 
 
 class AssertTransformer(ast.NodeTransformer):
@@ -74,7 +77,7 @@ class AssertTransformer(ast.NodeTransformer):
     def __init__(self, source: str | None = None) -> None:
         self.source = source
 
-    def visit_Assert(self, node: ast.Assert):
+    def visit_Assert(self, node: ast.Assert) -> list[ast.stmt]:
         # Get the source segment of the assertion statement
         segment = None
         if self.source is not None:

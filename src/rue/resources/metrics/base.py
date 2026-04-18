@@ -1,12 +1,10 @@
-from __future__ import annotations
-
-
-"""
-Metric abstractions for the Rue testing framework.
+"""Metric abstractions for the Rue testing framework.
 
 This module provides the core classes for recording, computing, and managing
 metrics during test execution.
 """
+
+from __future__ import annotations
 
 import math
 import statistics

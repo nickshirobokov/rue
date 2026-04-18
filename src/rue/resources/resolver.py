@@ -3,7 +3,7 @@
 import asyncio
 import inspect
 from collections import deque
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Generator, Sequence
 from contextvars import ContextVar
 from dataclasses import replace
 from pathlib import Path
@@ -53,7 +53,7 @@ class ResourceResolver:
             ]
         ] = []
         self._parent = parent
-        self._pending: dict[ResourceSpec, asyncio.Task[Any]] = {}
+        self._pending: dict[ResourceSpec, asyncio.Future[Any]] = {}
         self._shared_dependency_graph: dict[
             ResourceSpec, list[ResourceSpec]
         ] = parent._shared_dependency_graph if parent is not None else {}
@@ -117,11 +117,9 @@ class ResourceResolver:
             value = owner._cache.get(identity, missing)
             if value is missing:
                 pending = owner._pending.get(identity)
-                created = pending is None
-                if created:
-                    pending = owner._pending[identity] = (
-                        asyncio.get_running_loop().create_future()
-                    )
+                if pending is None:
+                    pending = asyncio.get_running_loop().create_future()
+                    owner._pending[identity] = pending
                     try:
                         value = await owner._resolve_uncached(
                             name=name,
@@ -135,7 +133,7 @@ class ResourceResolver:
                     else:
                         pending.set_result(value)
                     finally:
-                        del owner._pending[identity]
+                        owner._pending.pop(identity, None)
                 else:
                     try:
                         value = await pending
@@ -188,10 +186,12 @@ class ResourceResolver:
                 try:
                     if definition.is_async_generator:
                         await anext(
-                            cast(AsyncGenerator[Any, None], generator), None
+                            cast("AsyncGenerator[Any, None]", generator), None
                         )
                     else:
-                        next(cast(Generator[Any, None, None], generator), None)
+                        next(
+                            cast("Generator[Any, None, None]", generator), None
+                        )
                 except Exception as e:
                     teardown_errors.append(
                         RuntimeError(
@@ -261,52 +261,46 @@ class ResourceResolver:
 
     def build_snapshot(
         self,
-        resources: list[str] | list[ResourceSpec],
+        resources: Sequence[str] | Sequence[ResourceSpec],
         *,
         request_path: Path | None = None,
         topological: bool = False,
         only_cached_roots: bool = False,
     ) -> ResolverSnapshot:
         """Build a transfer snapshot for the given resource names or specs."""
-
-        match resources:
-            case []:
-                identities = []
-
-            case [*names] if all(isinstance(name, str) for name in names):
-                names = cast(list[str], resources)
-                closure = self._collect_snapshot_closure(
-                    names, self._cache, self._shared_dependency_graph
+        resource_items = list(resources)
+        if not resource_items:
+            identities: list[ResourceSpec] = []
+        elif all(isinstance(name, str) for name in resource_items):
+            names = cast("list[str]", resource_items)
+            closure = self._collect_snapshot_closure(
+                names, self._cache, self._shared_dependency_graph
+            )
+            identities = [
+                replace(
+                    identity,
+                    dependencies=tuple(d.name for d in dependencies),
                 )
-                identities = [
-                    replace(
-                        identity,
-                        dependencies=tuple(d.name for d in dependencies),
-                    )
-                    for identity, dependencies in closure.items()
-                ]
-
-            case [*specs] if all(
-                isinstance(spec, ResourceSpec) for spec in specs
-            ):
-                specs = cast(list[ResourceSpec], resources)
-                identities = [
-                    replace(
-                        identity,
-                        dependencies=tuple(
-                            dependency.name
-                            for dependency in self._shared_dependency_graph.get(
-                                identity,
-                                (),
-                            )
-                        ),
-                    )
-                    for identity in specs
-                ]
-
-            case _:
-                msg = "resources must be list[str] or list[ResourceSpec]"
-                raise TypeError(msg)
+                for identity, dependencies in closure.items()
+            ]
+        elif all(isinstance(spec, ResourceSpec) for spec in resource_items):
+            specs = cast("list[ResourceSpec]", resource_items)
+            identities = [
+                replace(
+                    identity,
+                    dependencies=tuple(
+                        dependency.name
+                        for dependency in self._shared_dependency_graph.get(
+                            identity,
+                            (),
+                        )
+                    ),
+                )
+                for identity in specs
+            ]
+        else:
+            msg = "resources must be list[str] or list[ResourceSpec]"
+            raise TypeError(msg)
 
         ordered_identities = (
             self._topological_sort_snapshot_identities(identities)
@@ -430,17 +424,17 @@ class ResourceResolver:
 
             match definition:
                 case LoadedResourceDef(is_async_generator=True):
-                    generator = cast(
-                        AsyncGenerator[Any, None], definition.fn(**kwargs)
+                    async_generator = cast(
+                        "AsyncGenerator[Any, None]", definition.fn(**kwargs)
                     )
-                    value = await anext(generator)
+                    value = await anext(async_generator)
                     if not self._shadow_mode:
                         self._teardowns.append(
-                            (cache_key, definition, generator)
+                            (cache_key, definition, async_generator)
                         )
                 case LoadedResourceDef(is_generator=True):
                     generator = cast(
-                        Generator[Any, None, None], definition.fn(**kwargs)
+                        "Generator[Any, None, None]", definition.fn(**kwargs)
                     )
                     value = next(generator)
                     if not self._shadow_mode:

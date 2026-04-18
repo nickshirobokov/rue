@@ -27,6 +27,7 @@ from rue.resources.sut.output import (
 from rue.resources.sut.tracer import SUTTracer
 from rue.telemetry.otel.runtime import OtelTraceSession
 
+
 if TYPE_CHECKING:
     from rue.testing.models.case import Case
 
@@ -202,14 +203,14 @@ class SUT(Generic[InstanceT]):
             target_callable = instance
         else:
             missing = object()
-            raw_callable = getattr(cast(Any, instance), method_name, missing)
+            raw_callable = getattr(cast("Any", instance), method_name, missing)
             if raw_callable is missing:
                 raise ValueError(
                     f"Method '{method_name}' not found in instance"
                 )
             if not callable(raw_callable):
                 raise ValueError(f"Method '{method_name}' is not a callable")
-            target_callable = cast(Callable[..., object], raw_callable)
+            target_callable = cast("Callable[..., object]", raw_callable)
 
         args_schema = generate_arguments_schema(
             target_callable,

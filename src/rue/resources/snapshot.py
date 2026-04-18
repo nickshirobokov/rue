@@ -11,13 +11,13 @@ import types
 from contextvars import ContextVar
 from datetime import date, datetime, time, timedelta
 from enum import Enum
-from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
-import cloudpickle
+import cloudpickle  # type: ignore[import-untyped]
 import msgspec
+
 
 _LOCK_TYPES = (type(threading.Lock()), type(threading.RLock()))
 _RUNTIME_IGNORE_TYPES = (
@@ -39,6 +39,8 @@ _ATOMIC_VALUE_TYPES = (
     Enum,
 )
 _CONTEXTVAR_UNSET = msgspec.UNSET
+_ATTR_PLAN_CACHE: dict[type[Any], _AttrPlan] = {}
+_CLASS_REF_CACHE: dict[type[Any], tuple[str, str, bytes | None]] = {}
 _CLASS_CACHE: dict[tuple[str, str], type[Any]] = {}
 _LOCAL_CLASS_CACHE: dict[bytes, type[Any]] = {}
 
@@ -48,8 +50,11 @@ class _AttrPlan(msgspec.Struct, frozen=True):
     dataclass_field_names: tuple[str, ...] = ()
 
 
-@lru_cache(maxsize=None)
 def _attr_plan(cls: type[Any]) -> _AttrPlan:
+    cached = _ATTR_PLAN_CACHE.get(cls)
+    if cached is not None:
+        return cached
+
     seen: set[str] = set()
     slot_names: list[str] = []
     for current in cls.__mro__:
@@ -62,20 +67,27 @@ def _attr_plan(cls: type[Any]) -> _AttrPlan:
             seen.add(slot)
             slot_names.append(slot)
 
-    return _AttrPlan(
+    plan = _AttrPlan(
         slot_names=tuple(slot_names),
         dataclass_field_names=tuple(getattr(cls, "__dataclass_fields__", ())),
     )
+    _ATTR_PLAN_CACHE[cls] = plan
+    return plan
 
 
-@lru_cache(maxsize=None)
 def _class_ref(cls: type[Any]) -> tuple[str, str, bytes | None]:
+    cached = _CLASS_REF_CACHE.get(cls)
+    if cached is not None:
+        return cached
+
     qualname = cls.__qualname__
-    return (
+    ref = (
         cls.__module__,
         qualname,
         cloudpickle.dumps(cls) if "<locals>" in qualname else None,
     )
+    _CLASS_REF_CACHE[cls] = ref
+    return ref
 
 
 class OpaqueSnapshotValue:
@@ -461,7 +473,8 @@ class SnapshotApplier:
             return self._resolve_class(node)(node["value"])
 
         if kind == "enum":
-            return self._resolve_class(node)[node["member"]]
+            enum_cls = cast("type[Enum]", self._resolve_class(node))
+            return getattr(enum_cls, node["member"])
 
         if kind == "opaque":
             if current is not None:
@@ -478,26 +491,31 @@ class SnapshotApplier:
             return result
 
         if kind == "contextvar":
-            current_value = (
-                current.get(None)
+            current_var = (
+                current
                 if isinstance(current, (ContextVar, SnapshotContextVar))
                 else None
             )
-            result = SnapshotContextVar(
+            current_value = (
+                current_var.get(None) if current_var is not None else None
+            )
+            context_var = SnapshotContextVar(
                 node["name"],
                 value=current_value,
             )
-            self.built[node_id] = result
-            self.object_ids[id(result)] = node_id
-            result.set(self._apply_node(node["value"], result.get(None)))
-            return result
+            self.built[node_id] = context_var
+            self.object_ids[id(context_var)] = node_id
+            context_var.set(
+                self._apply_node(node["value"], context_var.get(None))
+            )
+            return context_var
 
         if kind == "list":
-            result = current if isinstance(current, list) else []
-            current_items = list(result)
-            self.built[node_id] = result
-            self.object_ids[id(result)] = node_id
-            result[:] = [
+            list_value = current if isinstance(current, list) else []
+            current_items = list(list_value)
+            self.built[node_id] = list_value
+            self.object_ids[id(list_value)] = node_id
+            list_value[:] = [
                 self._apply_node(
                     item_id,
                     current_items[index]
@@ -506,47 +524,52 @@ class SnapshotApplier:
                 )
                 for index, item_id in enumerate(node["items"])
             ]
-            return result
+            return list_value
 
         if kind == "tuple":
-            result = tuple(
+            tuple_value = tuple(
                 self._apply_node(item_id, None) for item_id in node["items"]
             )
-            self.built[node_id] = result
-            return result
+            self.built[node_id] = tuple_value
+            return tuple_value
 
         if kind == "set":
-            result = current if isinstance(current, set) else set()
-            self.built[node_id] = result
-            self.object_ids[id(result)] = node_id
-            result.clear()
-            result.update(
+            set_value = current if isinstance(current, set) else set()
+            self.built[node_id] = set_value
+            self.object_ids[id(set_value)] = node_id
+            set_value.clear()
+            set_value.update(
                 self._apply_node(item_id, None) for item_id in node["items"]
             )
-            return result
+            return set_value
 
         if kind == "frozenset":
-            result = frozenset(
+            frozen_set_value = frozenset(
                 self._apply_node(item_id, None) for item_id in node["items"]
             )
-            self.built[node_id] = result
-            return result
+            self.built[node_id] = frozen_set_value
+            return frozen_set_value
 
         if kind == "dict":
-            result = current if isinstance(current, dict) else {}
-            current_entries = dict(result)
-            self.built[node_id] = result
-            self.object_ids[id(result)] = node_id
-            result.clear()
+            dict_value = current if isinstance(current, dict) else {}
+            current_entries = dict(dict_value)
+            self.built[node_id] = dict_value
+            self.object_ids[id(dict_value)] = node_id
+            dict_value.clear()
             for key_id, value_id in node["entries"]:
                 key = self._apply_node(key_id, None)
                 value = self._apply_node(value_id, current_entries.get(key))
-                result[key] = value
-            return result
+                dict_value[key] = value
+            return dict_value
 
         cls = self._resolve_class(node)
-        existing = current is not None and isinstance(current, cls)
-        result = current if existing else cls.__new__(cls)
+        existing_object = current if isinstance(current, cls) else None
+        if existing_object is None:
+            new_object = cast("Any", cls.__new__)(cls)
+            result = cast("Any", new_object)
+        else:
+            result = existing_object
+        existing = existing_object is not None
         self.built[node_id] = result
         self.object_ids[id(result)] = node_id
 
@@ -578,7 +601,7 @@ class SnapshotApplier:
             cached = _LOCAL_CLASS_CACHE.get(class_data)
             if cached is not None:
                 return cached
-            resolved = cloudpickle.loads(class_data)
+            resolved = cast("type[Any]", cloudpickle.loads(class_data))
             _LOCAL_CLASS_CACHE[class_data] = resolved
             return resolved
 
@@ -593,5 +616,6 @@ class SnapshotApplier:
             if part == "<locals>":
                 continue
             current = getattr(current, part)
-        _CLASS_CACHE[key] = current
-        return current
+        resolved = cast("type[Any]", current)
+        _CLASS_CACHE[key] = resolved
+        return resolved

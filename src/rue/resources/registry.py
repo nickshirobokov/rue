@@ -12,6 +12,7 @@ from rue.resources.models import (
     SelectedResource,
 )
 
+
 P = ParamSpec("P")
 T = TypeVar("T")
 _RECEIVER_PARAMETER_NAMES = {"self", "cls"}

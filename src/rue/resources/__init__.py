@@ -13,9 +13,9 @@ from rue.resources.resolver import ResourceResolver
 __all__ = [
     "LoadedResourceDef",
     "ResolverSnapshot",
-    "ResourceSpec",
     "ResourceRegistry",
     "ResourceResolver",
+    "ResourceSpec",
     "Scope",
     "registry",
     "resource",

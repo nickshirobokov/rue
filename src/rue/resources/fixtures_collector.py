@@ -1,22 +1,27 @@
 """AST and runtime hooks that map pytest fixtures to Rue resources."""
 
 import ast
-from typing import Any, cast
+from collections.abc import Callable
+from typing import cast
 
 from rue.resources.models import Scope
 from rue.resources.registry import registry as default_registry, resource
 
 
+type ResourceFactory = Callable[..., object]
+type ResourceDecorator = Callable[[ResourceFactory], ResourceFactory]
+
+
 def decorate_pytest_fixture_as_resource(
-    fn=None,
+    fn: ResourceFactory | None = None,
     *,
     scope: Scope | str = "function",
-    params: object = None,
-    **kwargs,
-) -> Any:
+    params: object | None = None,
+    **kwargs: object,
+) -> ResourceFactory | ResourceDecorator:
     _ = kwargs
 
-    def decorator(fn):
+    def decorator(fn: ResourceFactory) -> ResourceFactory:
         if params is not None or default_registry.get(fn.__name__) is not None:
             return fn
         match scope:
@@ -30,7 +35,7 @@ def decorate_pytest_fixture_as_resource(
                 mapped_scope = Scope.PROCESS
             case _:
                 mapped_scope = Scope.TEST
-        return resource(fn, scope=mapped_scope)
+        return cast("ResourceFactory", resource(fn, scope=mapped_scope))
 
     if fn is not None:
         return decorator(fn)
@@ -46,22 +51,24 @@ class RewritePytestFixtureDecoratorsTransformer(ast.NodeTransformer):
         self._class_depth = 0
         self._function_depth = 0
 
-    def visit_Module(self, node: ast.Module):
+    def visit_Module(self, node: ast.Module) -> ast.Module:
         self._collect_aliases(node)
-        return self.generic_visit(node)
+        return cast("ast.Module", self.generic_visit(node))
 
-    def visit_ClassDef(self, node: ast.ClassDef):
+    def visit_ClassDef(self, node: ast.ClassDef) -> ast.ClassDef:
         self._class_depth += 1
         try:
-            return self.generic_visit(node)
+            return cast("ast.ClassDef", self.generic_visit(node))
         finally:
             self._class_depth -= 1
 
-    def visit_FunctionDef(self, node: ast.FunctionDef):
-        return self._visit_function(node)
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        return cast("ast.FunctionDef", self._visit_function(node))
 
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
-        return self._visit_function(node)
+    def visit_AsyncFunctionDef(
+        self, node: ast.AsyncFunctionDef
+    ) -> ast.AsyncFunctionDef:
+        return cast("ast.AsyncFunctionDef", self._visit_function(node))
 
     def _visit_function(
         self, node: ast.FunctionDef | ast.AsyncFunctionDef
@@ -75,7 +82,7 @@ class RewritePytestFixtureDecoratorsTransformer(ast.NodeTransformer):
         self._function_depth += 1
         try:
             return cast(
-                ast.FunctionDef | ast.AsyncFunctionDef,
+                "ast.FunctionDef | ast.AsyncFunctionDef",
                 self.generic_visit(node),
             )
         finally:
@@ -144,7 +151,7 @@ class InjectFixtureResourceDependenciesTransformer(ast.NodeTransformer):
     can resolve without relying on the module loader to bind the name.
     """
 
-    def visit_Module(self, node: ast.Module):
+    def visit_Module(self, node: ast.Module) -> ast.Module:
         uses = False
         for n in ast.walk(node):
             if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):

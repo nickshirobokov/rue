@@ -77,7 +77,7 @@ class SUTTracer:
             async def async_wrapped(*args: object, **kwargs: object) -> object:
                 if not self._should_trace():
                     return await cast(
-                        Awaitable[object],
+                        "Awaitable[object]",
                         original_callable(*args, **kwargs),
                     )
                 return await self._trace_async(
@@ -198,7 +198,7 @@ class SUTTracer:
             with bind(CURRENT_SUT_SPAN_IDS, span_ids):
                 _set_input_attrs(span, args, kwargs)
                 result = await cast(
-                    Awaitable[object],
+                    "Awaitable[object]",
                     original_callable(*args, **kwargs),
                 )
                 _set_output_attrs(span, result)
