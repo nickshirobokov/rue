@@ -9,15 +9,15 @@ import socket
 import threading
 import types
 from contextvars import ContextVar
-from dataclasses import is_dataclass
 from datetime import date, datetime, time, timedelta
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from rue.resources.serialization import deserialize_value, serialize_value
-
+import cloudpickle
+import msgspec
 
 _LOCK_TYPES = (type(threading.Lock()), type(threading.RLock()))
 _RUNTIME_IGNORE_TYPES = (
@@ -38,6 +38,44 @@ _ATOMIC_VALUE_TYPES = (
     timedelta,
     Enum,
 )
+_CONTEXTVAR_UNSET = msgspec.UNSET
+_CLASS_CACHE: dict[tuple[str, str], type[Any]] = {}
+_LOCAL_CLASS_CACHE: dict[bytes, type[Any]] = {}
+
+
+class _AttrPlan(msgspec.Struct, frozen=True):
+    slot_names: tuple[str, ...] = ()
+    dataclass_field_names: tuple[str, ...] = ()
+
+
+@lru_cache(maxsize=None)
+def _attr_plan(cls: type[Any]) -> _AttrPlan:
+    seen: set[str] = set()
+    slot_names: list[str] = []
+    for current in cls.__mro__:
+        slots = current.__dict__.get("__slots__", ())
+        if isinstance(slots, str):
+            slots = (slots,)
+        for slot in slots:
+            if slot in {"__dict__", "__weakref__"} or slot in seen:
+                continue
+            seen.add(slot)
+            slot_names.append(slot)
+
+    return _AttrPlan(
+        slot_names=tuple(slot_names),
+        dataclass_field_names=tuple(getattr(cls, "__dataclass_fields__", ())),
+    )
+
+
+@lru_cache(maxsize=None)
+def _class_ref(cls: type[Any]) -> tuple[str, str, bytes | None]:
+    qualname = cls.__qualname__
+    return (
+        cls.__module__,
+        qualname,
+        cloudpickle.dumps(cls) if "<locals>" in qualname else None,
+    )
 
 
 class OpaqueSnapshotValue:
@@ -66,14 +104,14 @@ class SnapshotContextVar:
         name: str,
         *,
         default: Any = None,
-        value: Any = None,
+        value: Any = _CONTEXTVAR_UNSET,
     ) -> None:
         self.name = name
         self._default = default
         self._value = value
 
     def get(self, default: Any = None) -> Any:
-        if self._value is not None:
+        if self._value is not _CONTEXTVAR_UNSET:
             return self._value
         if default is not None:
             return default
@@ -99,6 +137,8 @@ class SnapshotExporter:
         self.next_id = next_id or (max(self.object_ids.values(), default=0) + 1)
         self.nodes: dict[int, dict[str, Any]] = {}
         self.ignored_paths: dict[str, list[str]] = {}
+        self._live_object_ids: dict[int, int] = {}
+        self._live_path_ids: dict[str, int] = {}
 
     def export_roots(
         self,
@@ -108,18 +148,22 @@ class SnapshotExporter:
             root_key: self._export_value(value, path=root_key)
             for root_key, value in roots.items()
         }
+        self.object_ids = self._live_object_ids
+        self.path_ids = self._live_path_ids
         return root_ids, self.nodes, self.ignored_paths
 
     def _export_value(self, value: Any, *, path: str) -> int:
         if self._is_trackable(value):
-            existing = self.object_ids.get(id(value))
+            object_id = id(value)
+            existing = self.object_ids.get(object_id)
             if existing is not None:
                 if existing in self.nodes:
                     return existing
                 node_id = existing
             else:
                 node_id = self._next_node_id()
-                self.object_ids[id(value)] = node_id
+                self.object_ids[object_id] = node_id
+            self._live_object_ids[object_id] = node_id
         else:
             existing = self.path_ids.get(path)
             if existing is not None and existing not in self.nodes:
@@ -129,6 +173,7 @@ class SnapshotExporter:
             else:
                 node_id = self._next_node_id()
                 self.path_ids[path] = node_id
+            self._live_path_ids[path] = node_id
 
         if isinstance(value, (ContextVar, SnapshotContextVar)):
             self.nodes[node_id] = {
@@ -148,10 +193,7 @@ class SnapshotExporter:
             return node_id
 
         if isinstance(value, _ATOMIC_VALUE_TYPES):
-            self.nodes[node_id] = {
-                "kind": "pickle",
-                "data": serialize_value(value),
-            }
+            self.nodes[node_id] = self._export_atomic(value)
             return node_id
 
         if isinstance(value, dict):
@@ -203,13 +245,7 @@ class SnapshotExporter:
 
         self.nodes[node_id] = {
             "kind": "object",
-            "module": type(value).__module__,
-            "qualname": type(value).__qualname__,
-            "class_data": (
-                serialize_value(type(value))
-                if "<locals>" in type(value).__qualname__
-                else None
-            ),
+            **self._class_ref_fields(type(value)),
             "attrs": {},
         }
 
@@ -240,7 +276,7 @@ class SnapshotExporter:
         try:
             return {
                 "kind": "pickle",
-                "data": serialize_value(value),
+                "data": cloudpickle.dumps(value),
             }
         except Exception:
             return {
@@ -251,6 +287,53 @@ class SnapshotExporter:
             }
 
     @staticmethod
+    def _class_ref_fields(cls: type[Any]) -> dict[str, Any]:
+        module, qualname, class_data = _class_ref(cls)
+        return {
+            "module": module,
+            "qualname": qualname,
+            "class_data": class_data,
+        }
+
+    def _export_atomic(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, Enum):
+            return {
+                "kind": "enum",
+                **self._class_ref_fields(type(value)),
+                "member": value.name,
+            }
+
+        if isinstance(value, Path):
+            return {
+                "kind": "path",
+                **self._class_ref_fields(type(value)),
+                "value": str(value),
+            }
+
+        if isinstance(value, UUID):
+            return {"kind": "uuid", "value": msgspec.to_builtins(value)}
+
+        if isinstance(value, datetime):
+            return {"kind": "datetime", "value": msgspec.to_builtins(value)}
+
+        if isinstance(value, date):
+            return {"kind": "date", "value": msgspec.to_builtins(value)}
+
+        if isinstance(value, time):
+            return {"kind": "time", "value": msgspec.to_builtins(value)}
+
+        if isinstance(value, timedelta):
+            return {
+                "kind": "timedelta",
+                "value": msgspec.to_builtins(value),
+            }
+
+        return {
+            "kind": "pickle",
+            "data": cloudpickle.dumps(value),
+        }
+
+    @staticmethod
     def _is_primitive(value: Any) -> bool:
         return value is None or isinstance(
             value, (bool, int, float, str, bytes)
@@ -258,7 +341,10 @@ class SnapshotExporter:
 
     @staticmethod
     def _is_trackable(value: Any) -> bool:
-        return not SnapshotExporter._is_primitive(value)
+        return not (
+            SnapshotExporter._is_primitive(value)
+            or isinstance(value, _ATOMIC_VALUE_TYPES)
+        )
 
     def _next_node_id(self) -> int:
         value = self.next_id
@@ -279,26 +365,26 @@ class SnapshotExporter:
     @staticmethod
     def _iter_state_attrs(value: Any) -> list[tuple[str, Any]]:
         attrs: dict[str, Any] = {}
+        plan = _attr_plan(type(value))
 
         if hasattr(value, "__dict__"):
             attrs.update(vars(value))
 
-        for cls in type(value).__mro__:
-            slots = cls.__dict__.get("__slots__", ())
-            if isinstance(slots, str):
-                slots = (slots,)
-            for slot in slots:
-                if slot in {"__dict__", "__weakref__"}:
-                    continue
-                if slot in attrs or not hasattr(value, slot):
-                    continue
+        for slot in plan.slot_names:
+            if slot in attrs:
+                continue
+            try:
                 attrs[slot] = object.__getattribute__(value, slot)
+            except AttributeError:
+                continue
 
-        if is_dataclass(value):
-            for field_name in value.__dataclass_fields__:
-                if field_name in attrs or not hasattr(value, field_name):
-                    continue
-                attrs[field_name] = getattr(value, field_name)
+        for field_name in plan.dataclass_field_names:
+            if field_name in attrs:
+                continue
+            try:
+                attrs[field_name] = object.__getattribute__(value, field_name)
+            except AttributeError:
+                continue
 
         return list(attrs.items())
 
@@ -306,8 +392,9 @@ class SnapshotExporter:
     def _normalized_name(name: str) -> str:
         return name.lstrip("_").lower()
 
-    def _should_ignore_attr(self, name: str, value: Any) -> bool:
-        normalized = self._normalized_name(name)
+    @staticmethod
+    def _should_ignore_attr(name: str, value: Any) -> bool:
+        normalized = SnapshotExporter._normalized_name(name)
         if normalized in {"cache", "memo"}:
             return True
         if isinstance(value, _RUNTIME_IGNORE_TYPES):
@@ -353,7 +440,28 @@ class SnapshotApplier:
             return node["value"]
 
         if kind == "pickle":
-            return deserialize_value(node["data"])
+            return cloudpickle.loads(node["data"])
+
+        if kind == "uuid":
+            return msgspec.convert(node["value"], UUID)
+
+        if kind == "date":
+            return msgspec.convert(node["value"], date)
+
+        if kind == "datetime":
+            return msgspec.convert(node["value"], datetime)
+
+        if kind == "time":
+            return msgspec.convert(node["value"], time)
+
+        if kind == "timedelta":
+            return msgspec.convert(node["value"], timedelta)
+
+        if kind == "path":
+            return self._resolve_class(node)(node["value"])
+
+        if kind == "enum":
+            return self._resolve_class(node)[node["member"]]
 
         if kind == "opaque":
             if current is not None:
@@ -446,7 +554,7 @@ class SnapshotApplier:
             {
                 name
                 for name, value in SnapshotExporter._iter_state_attrs(result)
-                if not SnapshotExporter()._should_ignore_attr(name, value)
+                if not SnapshotExporter._should_ignore_attr(name, value)
             }
             if existing
             else set()
@@ -466,7 +574,18 @@ class SnapshotApplier:
     @staticmethod
     def _resolve_class(node: dict[str, Any]) -> type[Any]:
         if node.get("class_data") is not None:
-            return deserialize_value(node["class_data"])
+            class_data = node["class_data"]
+            cached = _LOCAL_CLASS_CACHE.get(class_data)
+            if cached is not None:
+                return cached
+            resolved = cloudpickle.loads(class_data)
+            _LOCAL_CLASS_CACHE[class_data] = resolved
+            return resolved
+
+        key = (node["module"], node["qualname"])
+        cached = _CLASS_CACHE.get(key)
+        if cached is not None:
+            return cached
 
         module = importlib.import_module(node["module"])
         current: Any = module
@@ -474,4 +593,5 @@ class SnapshotApplier:
             if part == "<locals>":
                 continue
             current = getattr(current, part)
+        _CLASS_CACHE[key] = current
         return current

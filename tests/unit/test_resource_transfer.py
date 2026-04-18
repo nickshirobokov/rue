@@ -4,18 +4,17 @@ from __future__ import annotations
 
 import threading
 from contextvars import ContextVar
+from datetime import date, datetime, time, timedelta, timezone
+from enum import Enum
 from pathlib import Path
+from uuid import UUID
 
+import cloudpickle
 import pytest
 from deepdiff import DeepDiff, Delta
 
 from rue.resources import ResourceResolver, Scope, registry, resource
 from rue.resources.models import ResolverSnapshot
-from rue.resources.serialization import (
-    check_serializable,
-    deserialize_value,
-    serialize_value,
-)
 
 
 @pytest.fixture(autouse=True)
@@ -35,6 +34,13 @@ class SlotsState:
         self.lock = threading.Lock()
         self.ctx = ContextVar("slots_state_ctx", default=0)
         self.ctx.set(5)
+
+
+class Box:
+    __slots__ = ("value",)
+
+    def __init__(self, value: int) -> None:
+        self.value = value
 
 
 def _merge_payloads(
@@ -58,29 +64,17 @@ def _merge_payloads(
     return merged + Delta(worker_diff)
 
 
-class TestCheckSerializable:
-    def test_primitive_types_are_serializable(self):
-        assert check_serializable(42)
-        assert check_serializable("hello")
-        assert check_serializable([1, 2, 3])
-        assert check_serializable({"key": "value"})
-
-    def test_non_serializable_objects(self):
-        lock = threading.Lock()
-        assert not check_serializable(lock)
-
-
 class TestSerializeRoundTrip:
     def test_round_trip_primitive(self):
         original = {"a": 1, "b": [2, 3]}
-        data = serialize_value(original)
-        restored = deserialize_value(data)
+        data = cloudpickle.dumps(original)
+        restored = cloudpickle.loads(data)
         assert restored == original
 
     def test_round_trip_nested(self):
         original = {"nested": {"deep": [1, 2, 3]}}
-        data = serialize_value(original)
-        restored = deserialize_value(data)
+        data = cloudpickle.dumps(original)
+        restored = cloudpickle.loads(data)
         assert restored == original
 
 
@@ -164,6 +158,51 @@ class TestBuildSnapshot:
         )
 
         assert snapshot.request_path == "/project/tests/test_foo.py"
+
+    async def test_atomic_values_use_tagged_nodes(self):
+        class Mode(Enum):
+            FAST = "fast"
+
+        @resource(scope=Scope.PROCESS)
+        def state():
+            return {
+                "uuid": UUID("12345678-1234-5678-1234-567812345678"),
+                "path": Path("/tmp/demo"),
+                "date": date(2024, 1, 2),
+                "datetime": datetime(
+                    2024,
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    tzinfo=timezone.utc,
+                ),
+                "time": time(3, 4, 5),
+                "delta": timedelta(seconds=7),
+                "enum": Mode.FAST,
+            }
+
+        resolver = ResourceResolver(registry)
+        await resolver.resolve("state")
+
+        snapshot = resolver.build_snapshot(["state"])
+        identity = snapshot.res_specs[0]
+        root_node = snapshot.nodes[snapshot.root_ids[identity.snapshot_key]]
+        node_kinds = {
+            snapshot.nodes[key_id]["value"]: snapshot.nodes[value_id]["kind"]
+            for key_id, value_id in root_node["entries"]
+        }
+
+        assert node_kinds == {
+            "uuid": "uuid",
+            "path": "path",
+            "date": "date",
+            "datetime": "datetime",
+            "time": "time",
+            "delta": "timedelta",
+            "enum": "enum",
+        }
 
     def test_build_snapshot_requires_cached_resources(self):
         resolver = ResourceResolver(registry)
@@ -344,3 +383,22 @@ class TestRoundTrip:
         assert live._private == "worker"
         assert live.ctx.get() == 11
         assert isinstance(live.lock, type(threading.Lock()))
+
+    async def test_snapshot_id_cache_drops_replaced_objects(self):
+        @resource(scope=Scope.PROCESS)
+        def holder():
+            return {"items": [Box(1), Box(2)]}
+
+        resolver = ResourceResolver(registry)
+        state = await resolver.resolve("holder")
+
+        resolver.build_snapshot(["holder"])
+        assert len(resolver._snapshot_object_ids) == 4
+
+        state["items"] = [Box(3), Box(4)]
+        resolver.build_snapshot(["holder"])
+        assert len(resolver._snapshot_object_ids) == 4
+
+        state["items"] = [Box(5), Box(6)]
+        resolver.build_snapshot(["holder"])
+        assert len(resolver._snapshot_object_ids) == 4
