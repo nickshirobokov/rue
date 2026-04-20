@@ -19,6 +19,14 @@ def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
     return mod_name, mod_path
 
 
+def _artifact_payload(artifact) -> dict[str, object]:
+    return {
+        "run_id": str(artifact.run_id),
+        "execution_id": str(artifact.execution_id),
+        "spans": artifact.spans,
+    }
+
+
 async def _run_module_with_tracing(
     *,
     tmp_path: Path,
@@ -36,7 +44,7 @@ async def _run_module_with_tracing(
             reporters=[trace_reporter],
         )
         run = await runner.run(items=items)
-        return mod_name, run, trace_reporter.sessions
+        return mod_name, run, trace_reporter.artifacts
     finally:
         sys.modules.pop(mod_name, None)
 
@@ -133,7 +141,7 @@ async def test_sut_trace_accessors_work_inside_runner(
     monkeypatch: pytest.MonkeyPatch,
     source: str,
 ):
-    mod_name, run, sessions = await _run_module_with_tracing(
+    mod_name, run, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
         trace_reporter=trace_reporter,
         monkeypatch=monkeypatch,
@@ -141,7 +149,7 @@ async def test_sut_trace_accessors_work_inside_runner(
     )
 
     assert run.result.passed == 1
-    payloads = [session.serialize() for session in sessions]
+    payloads = [_artifact_payload(artifact) for artifact in artifacts]
     assert any(
         span["name"] == f"test.{mod_name}::test_sample"
         for payload in payloads
@@ -159,9 +167,13 @@ async def test_sut_trace_accessors_work_inside_runner(
 
 def test_public_otel_trace_and_otel_span_are_removed():
     rue = import_module("rue")
+    rue_telemetry = import_module("rue.telemetry")
     rue_otel = import_module("rue.telemetry.otel")
 
     assert not hasattr(rue, "OtelTrace")
+    assert not hasattr(rue, "OtelTraceSession")
     assert not hasattr(rue, "otel_span")
+    assert not hasattr(rue_telemetry, "OtelTraceSession")
     assert not hasattr(rue_otel, "OtelTrace")
+    assert not hasattr(rue_otel, "OtelTraceSession")
     assert not hasattr(rue_otel, "otel_span")

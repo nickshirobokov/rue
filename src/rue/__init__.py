@@ -22,7 +22,6 @@ from .testing import (
     iterate,
     tag,
 )
-from .telemetry import OtelTraceSession
 
 resource.sut = sut
 resource.metric = metric
@@ -54,6 +53,4 @@ __all__ = [
     "metrics",
     # Reporters
     "Reporter",
-    # OpenTelemetry
-    "OtelTraceSession",
 ]

@@ -100,9 +100,9 @@ Available read-only span accessors on `SUT`:
 - If you override the reporter list and omit `OtelReporter`, Rue captures traces but does not persist local trace files
 - `OtelReporter` stores compact JSON payloads under `.rue/traces/<run_id>/<execution_id>.json`
 - `OtelReporter` keeps only the 5 most recent run directories under `.rue/traces`
-- Custom OTEL persistence or forwarding belongs in custom reporters via `Reporter.on_trace_collected(tracer, execution_id)`
+- Custom OTEL persistence or forwarding belongs in custom reporters via `Reporter.on_execution_complete(execution)` and `execution.telemetry_artifacts`
 - File format: one compact JSON trace payload per execution with `run_id`, `execution_id`, and a nested `trace` tree rooted at the test span
-- `session.serialize()` stays flat with `run_id`, `execution_id`, and `spans` for internal use and custom reporters
+- `OtelTraceArtifact.spans` stays flat with the canonical OTEL span payload for artifact consumers
 - SQLite does not persist OpenTelemetry trace payloads or trace IDs
 
 When OpenTelemetry is active, Rue records these content-bearing SUT and predicate attributes:

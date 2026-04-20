@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from abc import ABC, ABCMeta, abstractmethod
 from typing import TYPE_CHECKING, ClassVar
-from uuid import UUID
 
 
 if TYPE_CHECKING:
@@ -13,7 +12,6 @@ if TYPE_CHECKING:
     from rue.testing.execution.interfaces import ExecutableTest
     from rue.testing.models.executed import ExecutedTest
     from rue.testing.models.run import Run
-    from rue.testing.tracing import TestTracer
 
 
 class ReporterMeta(ABCMeta):
@@ -68,10 +66,3 @@ class Reporter(ABC, metaclass=ReporterMeta):
     @abstractmethod
     async def on_run_stopped_early(self, failure_count: int) -> None:
         """Called when run stops early due to maxfail limit."""
-
-    async def on_trace_collected(
-        self, tracer: TestTracer, execution_id: UUID
-    ) -> None:
-        """Called when a test finishes collecting trace data."""
-        _ = tracer, execution_id
-        return None

@@ -6,20 +6,21 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from deepdiff import DeepDiff, Delta
 
+from rue.config import Config
 from rue.context.runtime import (
     CURRENT_RESOURCE_CONSUMER,
     CURRENT_RESOURCE_CONSUMER_KIND,
     bind,
 )
+from rue.context.process_pool import get_process_pool
 from rue.resources import ResourceResolver
 from rue.resources.models import Scope
 from rue.testing.execution.interfaces import ExecutableTest
 from rue.testing.execution.remote.models import ExecutorPayload
-from rue.context.process_pool import get_process_pool
 from rue.testing.execution.remote.worker import run_remote_test
 from rue.testing.models import (
     ExecutedTest,
@@ -41,6 +42,8 @@ class RemoteSingleTest(ExecutableTest):
 
     definition: LoadedTestDef
     params: dict[str, Any]
+    config: Config = field(default_factory=Config)
+    run_id: UUID = field(default_factory=uuid4)
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
 
@@ -49,13 +52,15 @@ class RemoteSingleTest(ExecutableTest):
             raise ValueError("RemoteSingleTest should not have modifiers")
 
     async def execute(self, resolver: ResourceResolver) -> ExecutedTest:
+        exec_id = uuid4()
         if self.is_stopped():
             return await self._finalize(
                 TestResult(
                     status=TestStatus.SKIPPED,
                     duration_ms=0,
                     error=Exception("Run stopped early"),
-                )
+                ),
+                execution_id=exec_id,
             )
 
         if self.definition.spec.skip_reason:
@@ -64,7 +69,8 @@ class RemoteSingleTest(ExecutableTest):
                     status=TestStatus.SKIPPED,
                     duration_ms=0,
                     error=Exception(self.definition.spec.skip_reason),
-                )
+                ),
+                execution_id=exec_id,
             )
 
         forked = resolver.fork_for_test()
@@ -88,6 +94,9 @@ class RemoteSingleTest(ExecutableTest):
                 setup_chain=self.definition.setup_chain,
                 params=dict(self.params),
                 snapshot=snapshot,
+                config=self.config,
+                run_id=self.run_id,
+                execution_id=exec_id,
             )
 
             future = get_process_pool().submit(run_remote_test, payload)
@@ -110,7 +119,11 @@ class RemoteSingleTest(ExecutableTest):
         finally:
             await forked.teardown_scope(Scope.TEST)
 
-        return await self._finalize(result)
+        return await self._finalize(
+            result,
+            execution_id=exec_id,
+            telemetry_artifacts=remote_result.telemetry_artifacts,
+        )
 
     async def _resolve_params(
         self, resolver: ResourceResolver
@@ -126,11 +139,18 @@ class RemoteSingleTest(ExecutableTest):
                     kwargs[param] = await resolver.resolve(param)
         return kwargs
 
-    async def _finalize(self, result: TestResult) -> ExecutedTest:
+    async def _finalize(
+        self,
+        result: TestResult,
+        *,
+        execution_id: UUID,
+        telemetry_artifacts: tuple = (),
+    ) -> ExecutedTest:
         execution = ExecutedTest(
             definition=self.definition,
             result=result,
-            execution_id=uuid4(),
+            execution_id=execution_id,
+            telemetry_artifacts=telemetry_artifacts,
         )
         if self.on_complete:
             await self.on_complete(execution)

@@ -1,8 +1,6 @@
-"""OpenTelemetry-backed spans for Rue tests."""
+"""OpenTelemetry internals for Rue telemetry."""
 
-from rue.telemetry.otel.runtime import OtelTraceSession
+from rue.telemetry.otel.backend import OtelTraceArtifact
 
 
-__all__ = [
-    "OtelTraceSession",
-]
+__all__ = ["OtelTraceArtifact"]

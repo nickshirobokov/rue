@@ -10,14 +10,13 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from rue.reports.base import Reporter
+from rue.telemetry import OtelTraceArtifact
 
 if TYPE_CHECKING:
     from rue.config import Config
-    from rue.telemetry.otel.runtime import OtelTraceSession
     from rue.testing import LoadedTestDef
     from rue.testing.models.executed import ExecutedTest
     from rue.testing.models.run import Run
-    from rue.testing.tracing import TestTracer
 
 
 DEFAULT_OTEL_OUTPUT_ROOT = Path(".rue/traces")
@@ -47,7 +46,26 @@ class OtelReporter(Reporter):
         return None
 
     async def on_execution_complete(self, execution: ExecutedTest) -> None:
-        _ = execution
+        artifacts = [
+            artifact
+            for artifact in execution.telemetry_artifacts
+            if isinstance(artifact, OtelTraceArtifact)
+        ]
+        if not artifacts:
+            return None
+        if len(artifacts) != 1:
+            raise ValueError("Expected exactly one OTEL trace artifact")
+
+        artifact = artifacts[0]
+        if artifact.execution_id != execution.execution_id:
+            raise ValueError("OTEL artifact execution_id does not match")
+
+        run_dir = self._prepare_run_directory(artifact.run_id)
+        trace_path = run_dir / f"{execution.execution_id}.json"
+        trace_path.write_text(
+            json.dumps(self._serialize_trace_artifact(artifact), indent=2),
+            encoding="utf-8",
+        )
         return None
 
     async def on_run_complete(self, run: Run) -> None:
@@ -59,29 +77,13 @@ class OtelReporter(Reporter):
         _ = failure_count
         return None
 
-    async def on_trace_collected(
-        self, tracer: TestTracer, execution_id: UUID
-    ) -> None:
-        session = tracer.completed_otel_trace_session
-        if session is None:
-            return None
-
-        run_dir = self._prepare_run_directory(session.run_id)
-        trace_path = run_dir / f"{execution_id}.json"
-        trace_path.write_text(
-            json.dumps(self._serialize_trace_session(session), indent=2),
-            encoding="utf-8",
-        )
-        return None
-
-    def _serialize_trace_session(
-        self, session: OtelTraceSession
+    def _serialize_trace_artifact(
+        self, artifact: OtelTraceArtifact
     ) -> dict[str, Any]:
-        payload = session.serialize()
         return {
-            "run_id": payload["run_id"],
-            "execution_id": payload["execution_id"],
-            "trace": self._build_trace_tree(payload["spans"]),
+            "run_id": str(artifact.run_id),
+            "execution_id": str(artifact.execution_id),
+            "trace": self._build_trace_tree(artifact.spans),
         }
 
     def _build_trace_tree(self, spans: list[dict[str, Any]]) -> dict[str, Any]:

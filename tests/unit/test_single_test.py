@@ -1,11 +1,12 @@
-from pathlib import Path
+from uuid import UUID
 
 import pytest
 
+from rue.config import Config
 from rue.resources import ResourceResolver, registry
 from rue.testing.execution.local.single import LocalSingleTest
 from rue.testing.models import IterateModifier, LoadedTestDef, TestStatus
-from rue.testing.tracing import TestTracer
+from rue.testing.tracing import TestTracer, build_test_tracer
 from tests.unit.factories import make_definition
 
 
@@ -19,7 +20,10 @@ def make_item(fn=None, *, modifiers=None) -> LoadedTestDef:
 
 
 def make_tracer() -> TestTracer:
-    return TestTracer(otel_enabled=False)
+    return build_test_tracer(
+        config=Config.model_construct(otel=False),
+        run_id=UUID(int=1),
+    )
 
 
 @pytest.mark.asyncio

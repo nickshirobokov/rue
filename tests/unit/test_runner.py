@@ -19,7 +19,8 @@ from rue.reports.base import Reporter
 from rue.reports.otel import DEFAULT_OTEL_OUTPUT_ROOT, MAX_STORED_OTEL_RUNS
 from rue.resources import ResourceRegistry, registry, resource
 from rue.resources.sut import sut
-from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
+from rue.telemetry import OtelTraceArtifact
+from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.environment import _filter_env_vars
 from rue.testing.models import (
     ParameterSet,
@@ -80,7 +81,7 @@ class EventReporter(Reporter):
         self.event_times: list[tuple[str, str, float]] = []
         self.event_order: list[tuple[str, str]] = []
         self.subtest_event_times: list[tuple[str, str, float]] = []
-        self.trace_events: list[tuple[UUID, OtelTraceSession]] = []
+        self.trace_events: list[tuple[UUID, OtelTraceArtifact]] = []
         self.run_complete_elapsed = 0.0
         self._started_ids: set[int] = set()
 
@@ -119,18 +120,17 @@ class EventReporter(Reporter):
             self.subtest_event_times.append(
                 (execution.definition.spec.name, label, elapsed)
             )
+        self.trace_events.extend(
+            (execution.execution_id, artifact)
+            for artifact in execution.telemetry_artifacts
+            if isinstance(artifact, OtelTraceArtifact)
+        )
 
     async def on_run_complete(self, _rue_run) -> None:
         self.run_complete_elapsed = time.perf_counter() - self.start_time
 
     async def on_run_stopped_early(self, failure_count: int) -> None:
         pass
-
-    async def on_trace_collected(self, tracer, execution_id: UUID) -> None:
-        if tracer.completed_otel_trace_session is not None:
-            self.trace_events.append(
-                (execution_id, tracer.completed_otel_trace_session)
-            )
 
 
 class TestRunResult:
@@ -557,26 +557,25 @@ class TestOpenTelemetry:
         }
 
         trace_ids = {
-            session.root_span.get_span_context().trace_id
-            for _, session in reporter.trace_events
+            artifact.trace_id for _, artifact in reporter.trace_events
         }
         assert len(trace_ids) == 2
 
         payloads_by_execution = {
-            execution_id: session.serialize()
-            for execution_id, session in reporter.trace_events
+            execution_id: artifact.spans
+            for execution_id, artifact in reporter.trace_events
         }
         assert set(payloads_by_execution) == {
             execution.execution_id for execution in result.result.executions
         }
         for execution in result.result.executions:
-            payload = payloads_by_execution[execution.execution_id]
+            spans = payloads_by_execution[execution.execution_id]
             expected_child = (
                 "first_step"
                 if execution.definition.spec.name == "test_first"
                 else "second_step"
             )
-            assert {span["name"] for span in payload["spans"]} == {
+            assert {span["name"] for span in spans} == {
                 f"test.{execution.definition.spec.full_name}",
                 (
                     "sut.first_agent.__call__"
@@ -608,10 +607,10 @@ class TestOpenTelemetry:
         assert len(reporter.trace_events) == 1
 
         execution = result.result.executions[0]
-        execution_id, session = reporter.trace_events[0]
+        execution_id, artifact = reporter.trace_events[0]
         assert execution_id == execution.execution_id
-        assert session.run_id == result.run_id
-        assert session.execution_id == execution.execution_id
+        assert artifact.run_id == result.run_id
+        assert artifact.execution_id == execution.execution_id
         assert not (tmp_path / DEFAULT_OTEL_OUTPUT_ROOT).exists()
 
     @pytest.mark.asyncio
@@ -681,8 +680,8 @@ class TestOpenTelemetry:
             execution_id for execution_id, _ in reporter.trace_events
         } == child_execution_ids
         assert all(
-            execution_id == session.execution_id
-            for execution_id, session in reporter.trace_events
+            execution_id == artifact.execution_id
+            for execution_id, artifact in reporter.trace_events
         )
 
     @pytest.mark.asyncio
@@ -760,7 +759,7 @@ class TestOpenTelemetry:
         assert trace["children"][0]["children"][1]["children"] == []
 
     @pytest.mark.asyncio
-    async def test_otel_session_serialize_stays_flat_for_custom_reporters(
+    async def test_otel_trace_artifact_stays_flat_for_custom_reporters(
         self,
     ):
         reporter = EventReporter()
@@ -775,13 +774,11 @@ class TestOpenTelemetry:
         ).run(items=[make_item(traced, name="test_flat_trace", is_async=True)])
 
         execution = result.result.executions[0]
-        session = reporter.trace_events[0][1]
-        payload = session.serialize()
+        artifact = reporter.trace_events[0][1]
 
-        assert payload["run_id"] == str(result.run_id)
-        assert payload["execution_id"] == str(execution.execution_id)
-        assert "trace" not in payload
-        assert {span["name"] for span in payload["spans"]} == {
+        assert artifact.run_id == result.run_id
+        assert artifact.execution_id == execution.execution_id
+        assert {span["name"] for span in artifact.spans} == {
             "flat_step",
             "test.test_module::test_flat_trace",
         }

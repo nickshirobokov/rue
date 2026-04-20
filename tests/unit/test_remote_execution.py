@@ -8,6 +8,7 @@ from pathlib import Path
 from textwrap import dedent
 from typing import Any
 from unittest.mock import MagicMock
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -15,6 +16,7 @@ import rue
 from rue.config import Config
 from rue.resources import ResourceResolver, registry, resource
 from rue.resources.models import Scope
+from rue.telemetry import OtelTraceArtifact
 from rue.testing.execution.factory import DefaultTestFactory
 from rue.testing.execution.local.single import LocalSingleTest
 from rue.context.process_pool import CURRENT_PROCESS_POOL
@@ -33,7 +35,7 @@ from rue.testing.models import (
     TestStatus,
 )
 from rue.testing.runner import Runner
-from tests.unit.conftest import NullReporter
+from tests.unit.conftest import NullReporter, TraceCollectorReporter
 from tests.unit.factories import make_definition, materialize_tests
 
 
@@ -133,12 +135,12 @@ class TestFactoryDispatch:
         return make_definition("sample", modifiers=list(modifiers))
 
     def test_local_by_default(self):
-        factory = DefaultTestFactory(config=Config())
+        factory = DefaultTestFactory(config=Config(), run_id=uuid4())
         built = factory.build(self._definition())
         assert isinstance(built, LocalSingleTest)
 
     def test_remote_when_backend_modifier_present(self):
-        factory = DefaultTestFactory(config=Config())
+        factory = DefaultTestFactory(config=Config(), run_id=uuid4())
 
         built = factory.build(
             self._definition(
@@ -153,7 +155,7 @@ class TestFactoryDispatch:
             ExecutionBackend("nope")
 
     def test_backend_propagates_through_iterate(self):
-        factory = DefaultTestFactory(config=Config())
+        factory = DefaultTestFactory(config=Config(), run_id=uuid4())
 
         built = factory.build(
             self._definition(
@@ -201,12 +203,15 @@ class TestRemoteSingleTest:
 
         expected = RemoteExecutionResult(
             result=TestResult(status=TestStatus.PASSED, duration_ms=12.3),
+            telemetry_artifacts=(),
             worker_diff={},
             ignored_paths={},
         )
         remote = RemoteSingleTest(
             definition=definition,
             params={},
+            config=Config.model_construct(otel=False),
+            run_id=UUID(int=1),
         )
 
         with bind_pool(FakePool(expected)) as pool:
@@ -226,9 +231,66 @@ class TestRemoteSingleTest:
         assert payload.spec is definition.spec
         assert payload.suite_root == tmp_path
         assert payload.setup_chain == ()
+        assert payload.config.otel is False
+        assert payload.run_id == UUID(int=1)
+        assert payload.execution_id == execution.execution_id
         assert [s.name for s in payload.snapshot.resolution_order] == [
             "shared_value"
         ]
+
+    @pytest.mark.asyncio
+    async def test_preserves_worker_telemetry_artifacts(self, tmp_path: Path):
+        definition = make_definition(
+            "sample",
+            fn=lambda: None,
+            suite_root=tmp_path,
+        )
+
+        class ArtifactPool(FakePool):
+            def submit(self, fn, *args, **kwargs) -> Future:
+                self.submitted.append((fn, args, kwargs))
+                future: Future = Future()
+                (payload,) = args
+                future.set_result(
+                    RemoteExecutionResult(
+                        result=TestResult(
+                            status=TestStatus.PASSED, duration_ms=12.3
+                        ),
+                        telemetry_artifacts=(
+                            OtelTraceArtifact(
+                                run_id=payload.run_id,
+                                execution_id=payload.execution_id,
+                                trace_id="abc",
+                                spans=[],
+                            ),
+                        ),
+                        worker_diff={},
+                        ignored_paths={},
+                    )
+                )
+                return future
+
+        remote = RemoteSingleTest(
+            definition=definition,
+            params={},
+            config=Config.model_construct(otel=True),
+            run_id=UUID(int=1),
+        )
+
+        with bind_pool(ArtifactPool(RemoteExecutionResult(
+            result=TestResult(status=TestStatus.PASSED, duration_ms=0),
+            telemetry_artifacts=(),
+            worker_diff={},
+            ignored_paths={},
+        ))) as pool:
+            execution = await remote.execute(ResourceResolver(registry))
+
+        assert len(pool.submitted) == 1
+        assert len(execution.telemetry_artifacts) == 1
+        artifact = execution.telemetry_artifacts[0]
+        assert isinstance(artifact, OtelTraceArtifact)
+        assert artifact.run_id == UUID(int=1)
+        assert artifact.execution_id == execution.execution_id
 
     @pytest.mark.asyncio
     async def test_skips_when_stopped(self):
@@ -242,6 +304,7 @@ class TestRemoteSingleTest:
             FakePool(
                 RemoteExecutionResult(
                     result=TestResult(status=TestStatus.PASSED, duration_ms=0),
+                    telemetry_artifacts=(),
                     worker_diff={},
                     ignored_paths={},
                 )
@@ -265,6 +328,7 @@ class TestRemoteSingleTest:
             FakePool(
                 RemoteExecutionResult(
                     result=TestResult(status=TestStatus.PASSED, duration_ms=0),
+                    telemetry_artifacts=(),
                     worker_diff={},
                     ignored_paths={},
                 )
@@ -293,6 +357,7 @@ class TestRemoteSingleTest:
             FakePool(
                 RemoteExecutionResult(
                     result=TestResult(status=TestStatus.PASSED, duration_ms=0),
+                    telemetry_artifacts=(),
                     worker_diff={},
                     ignored_paths={},
                 )
@@ -352,6 +417,67 @@ class TestRemoteEndToEnd:
         assert recorded_pid != _os.getpid(), (
             "remote test should not run in the parent process"
         )
+
+    @pytest.mark.asyncio
+    async def test_remote_worker_returns_trace_artifacts(
+        self,
+        tmp_path: Path,
+        trace_reporter: TraceCollectorReporter,
+    ):
+        module_path = tmp_path / "test_remote_trace.py"
+        module_path.write_text(
+            dedent(
+                """
+                import rue
+                from rue.predicates import predicate
+                from rue.telemetry.otel.runtime import otel_runtime
+
+                @predicate
+                def is_ok(actual: str, reference: str) -> bool:
+                    return actual == reference
+
+                @rue.resource.sut(scope="process")
+                def remote_pipeline():
+                    def run() -> str:
+                        with otel_runtime.start_as_current_span("worker_step"):
+                            pass
+                        with otel_runtime.start_as_current_span("openai.responses.create"):
+                            pass
+                        assert is_ok("ok", "ok")
+                        return "ok"
+
+                    return rue.SUT(run)
+
+                @rue.test.backend("subprocess")
+                def test_remote(remote_pipeline):
+                    assert remote_pipeline.instance() == "ok"
+                    assert {span.name for span in remote_pipeline.all_spans} == {
+                        "sut.remote_pipeline.__call__",
+                        "worker_step",
+                        "openai.responses.create",
+                        "predicate.is_ok",
+                    }
+                """
+            )
+        )
+
+        items = materialize_tests(module_path)
+        run = await Runner(reporters=[trace_reporter]).run(items=items)
+
+        execution = run.result.executions[0]
+        assert run.result.passed == 1
+        assert len(execution.telemetry_artifacts) == 1
+        artifact = execution.telemetry_artifacts[0]
+        assert isinstance(artifact, OtelTraceArtifact)
+        assert artifact.execution_id == execution.execution_id
+        assert {span["name"] for span in artifact.spans} == {
+            f"test.{execution.definition.spec.full_name}",
+            "sut.remote_pipeline.__call__",
+            "worker_step",
+            "openai.responses.create",
+            "predicate.is_ok",
+        }
+        assert trace_reporter.artifacts == [artifact]
 
     @pytest.mark.asyncio
     async def test_remote_test_with_mixed_resource_states(

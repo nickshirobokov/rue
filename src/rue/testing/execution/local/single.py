@@ -48,7 +48,6 @@ class LocalSingleTest(ExecutableTest):
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
-    on_trace_collected: Callable | None = None
 
     def __post_init__(self) -> None:
         """Validate that this test has no modifiers."""
@@ -91,10 +90,10 @@ class LocalSingleTest(ExecutableTest):
 
         assertion_results: list[AssertionResult] = []
         error: BaseException | None = None
+        telemetry_artifacts = ()
 
         with bind(CURRENT_TEST_TRACER, self.tracer):
-            self.tracer.start_otel_root_span(self.definition)
-            self.tracer.start_otel_trace(execution_id=exec_id)
+            self.tracer.start(self.definition, execution_id=exec_id)
 
             ctx = TestContext(
                 item=self.definition,
@@ -207,19 +206,14 @@ class LocalSingleTest(ExecutableTest):
                     assertion_results=assertion_results.copy(),
                 )
 
-            self.tracer.record_otel_result(result)
-            self.tracer.finish_otel_trace()
-
-        if (
-            self.tracer.completed_otel_trace_session is not None
-            and self.on_trace_collected
-        ):
-            await self.on_trace_collected(self.tracer, exec_id)
+            self.tracer.record_result(result)
+            telemetry_artifacts = self.tracer.finish()
 
         execution = ExecutedTest(
             definition=self.definition,
             result=result,
             execution_id=exec_id,
+            telemetry_artifacts=telemetry_artifacts,
         )
         if self.on_complete:
             await self.on_complete(execution)

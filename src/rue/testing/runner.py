@@ -37,8 +37,6 @@ from rue.testing.models import (
     TestResult,
     TestStatus,
 )
-from rue.testing.tracing import TestTracer
-
 UUID_STRING_PATTERN = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
@@ -148,16 +146,6 @@ class Runner:
     async def _notify_run_stopped_early(self, failure_count: int) -> None:
         await asyncio.gather(
             *[r.on_run_stopped_early(failure_count) for r in self.reporters]
-        )
-
-    async def _notify_trace_collected(
-        self, tracer: TestTracer, execution_id: UUID
-    ) -> None:
-        await asyncio.gather(
-            *[
-                r.on_trace_collected(tracer, execution_id)
-                for r in self.reporters
-            ]
         )
 
     def _ensure_db_ready(self) -> None:
@@ -305,7 +293,6 @@ class Runner:
                 semaphore=self.semaphore,
                 is_stopped=lambda: self.stop_flag,
                 on_complete=self._on_execution_complete,
-                on_trace_collected=self._notify_trace_collected,
             )
             self._built_tests: dict[int, ExecutableTest] = {}
             for item in items:

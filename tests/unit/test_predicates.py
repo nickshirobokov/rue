@@ -56,6 +56,14 @@ def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
     return mod_name, mod_path
 
 
+def _artifact_payload(artifact) -> dict[str, object]:
+    return {
+        "run_id": str(artifact.run_id),
+        "execution_id": str(artifact.execution_id),
+        "spans": artifact.spans,
+    }
+
+
 async def _run_module_with_tracing(
     *,
     tmp_path: Path,
@@ -79,7 +87,7 @@ async def _run_module_with_tracing(
             reporters=[trace_reporter],
         )
         run = await runner.run(items=items)
-        return mod_name, run, trace_reporter.sessions
+        return mod_name, run, trace_reporter.artifacts
     finally:
         sys.modules.pop(mod_name, None)
 
@@ -190,7 +198,7 @@ async def test_predicate_writes_trace_attributes(
     span_name: str,
     expected_attrs: dict[str, object],
 ):
-    mod_name, run, sessions = await _run_module_with_tracing(
+    mod_name, run, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
         trace_reporter=trace_reporter,
         monkeypatch=monkeypatch,
@@ -198,7 +206,7 @@ async def test_predicate_writes_trace_attributes(
     )
 
     assert run.result.passed == 1
-    payloads = [session.serialize() for session in sessions]
+    payloads = [_artifact_payload(artifact) for artifact in artifacts]
     attrs = next(
         span["attributes"]
         for payload in payloads
@@ -242,7 +250,7 @@ async def test_runner_collects_predicate_results_and_trace_data_into_db(
     monkeypatch: pytest.MonkeyPatch,
 ):
     db_path = tmp_path / "rue.db"
-    mod_name, run, sessions = await _run_module_with_tracing(
+    mod_name, run, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
         trace_reporter=trace_reporter,
         monkeypatch=monkeypatch,
@@ -312,7 +320,7 @@ def test_sample():
 
     span_names = {
         span["name"]
-        for payload in [session.serialize() for session in sessions]
+        for payload in [_artifact_payload(artifact) for artifact in artifacts]
         for span in payload["spans"]
     }
     assert "predicate.equals" in span_names
@@ -325,7 +333,7 @@ async def test_predicate_does_not_trace_outside_runner_even_after_runtime_config
     trace_reporter,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    _, _, sessions = await _run_module_with_tracing(
+    _, _, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
         trace_reporter=trace_reporter,
         monkeypatch=monkeypatch,
@@ -338,9 +346,9 @@ def test_sample():
 """,
     )
 
-    before = [session.serialize() for session in sessions]
+    before = [_artifact_payload(artifact) for artifact in artifacts]
     assert equals("abc", "ABC", strict=False) is True
-    after = [session.serialize() for session in sessions]
+    after = [_artifact_payload(artifact) for artifact in artifacts]
 
     assert before == after
 
@@ -351,7 +359,7 @@ async def test_predicate_trace_always_records_content_attributes(
     trace_reporter,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    _, run, sessions = await _run_module_with_tracing(
+    _, run, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
         trace_reporter=trace_reporter,
         monkeypatch=monkeypatch,
@@ -380,8 +388,8 @@ def test_sample():
     assert run.result.passed == 1
     attrs = next(
         span["attributes"]
-        for session in sessions
-        for span in session.serialize()["spans"]
+        for artifact in artifacts
+        for span in artifact.spans
         if span["name"] == "predicate.equals"
     )
 

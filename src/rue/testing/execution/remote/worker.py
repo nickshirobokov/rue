@@ -1,17 +1,4 @@
-"""Worker-side entrypoint for remote test execution.
-
-Runs inside a :class:`ProcessPoolExecutor` worker.  Receives an
-:class:`ExecutorPayload` built by :class:`RemoteSingleTest`, reconstructs the
-test and its resources, invokes the test function, and returns a fresh
-:class:`TestResult`.
-
-Execution logic intentionally lives separately from
-:class:`LocalSingleTest` — the worker has no tracer, no semaphore, no
-``on_complete`` / ``on_trace_collected`` callbacks, and constructs its own
-resolver from a snapshot rather than forking a parent one.  Keeping the two
-sides apart avoids entangling concerns that will continue to diverge as
-remote-specific features (resource hooks, distributed tracing) are added.
-"""
+"""Worker-side entrypoint for remote test execution."""
 
 from __future__ import annotations
 
@@ -29,6 +16,7 @@ from rue.context.runtime import (
     CURRENT_RESOURCE_CONSUMER,
     CURRENT_RESOURCE_CONSUMER_KIND,
     CURRENT_TEST,
+    CURRENT_TEST_TRACER,
     TestContext,
     bind,
 )
@@ -42,6 +30,7 @@ from rue.testing.execution.remote.models import (
 )
 from rue.testing.models import TestResult, TestStatus
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
+from rue.testing.tracing import build_test_tracer
 
 
 if TYPE_CHECKING:
@@ -75,30 +64,101 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
     assertion_results: list[AssertionResult] = []
     error: BaseException | None = None
     imperative_outcome: TestStatus | None = None
+    telemetry_artifacts = ()
+    tracer = build_test_tracer(
+        config=payload.config,
+        run_id=payload.run_id,
+    )
 
-    ctx = TestContext(item=definition, execution_id=None)
+    ctx = TestContext(item=definition, execution_id=payload.execution_id)
 
-    with (
-        bind(CURRENT_TEST, ctx),
-        bind(CURRENT_ASSERTION_RESULTS, assertion_results),
-    ):
-        try:
-            start = time.perf_counter()
-            kwargs = await _resolve_params(resolver, definition, payload.params)
-            await _invoke(definition, kwargs)
-        except SkipTest as e:
-            imperative_outcome = TestStatus.SKIPPED
-            error = e
-        except FailTest as e:
-            imperative_outcome = TestStatus.FAILED
-            error = e
-        except XFailTest as e:
-            imperative_outcome = TestStatus.XFAILED
-            error = e
-        except Exception as e:  # noqa: BLE001
-            error = e
+    with bind(CURRENT_TEST_TRACER, tracer):
+        tracer.start(definition, execution_id=payload.execution_id)
+        with (
+            bind(CURRENT_TEST, ctx),
+            bind(CURRENT_ASSERTION_RESULTS, assertion_results),
+        ):
+            try:
+                start = time.perf_counter()
+                kwargs = await _resolve_params(
+                    resolver, definition, payload.params
+                )
+                await _invoke(definition, kwargs)
+            except SkipTest as e:
+                imperative_outcome = TestStatus.SKIPPED
+                error = e
+            except FailTest as e:
+                imperative_outcome = TestStatus.FAILED
+                error = e
+            except XFailTest as e:
+                imperative_outcome = TestStatus.XFAILED
+                error = e
+            except Exception as e:  # noqa: BLE001
+                error = e
 
-    duration_ms = (time.perf_counter() - start) * 1000
+        duration_ms = (time.perf_counter() - start) * 1000
+
+        if imperative_outcome is not None:
+            result = TestResult(
+                status=imperative_outcome,
+                duration_ms=duration_ms,
+                error=error,
+                assertion_results=assertion_results,
+            )
+        else:
+            expect_failure = definition.spec.xfail_reason is not None
+            failed_assertions = [ar for ar in assertion_results if not ar.passed]
+            has_error = error is not None and not isinstance(
+                error, AssertionError
+            )
+            has_assertion_fail = bool(failed_assertions) or isinstance(
+                error, AssertionError
+            )
+
+            match (has_error, has_assertion_fail, expect_failure):
+                case (True, _, True):
+                    status, result_error = TestStatus.XFAILED, error
+                case (True, _, False):
+                    status, result_error = TestStatus.ERROR, error
+                case (_, True, xfail):
+                    status = TestStatus.XFAILED if xfail else TestStatus.FAILED
+                    if error is None and failed_assertions:
+                        msg = (
+                            failed_assertions[0].error_message
+                            or failed_assertions[0].expression_repr.expr
+                        )
+                        result_error = AssertionError(msg)
+                    else:
+                        result_error = error
+                case (_, _, True) if definition.spec.xfail_strict:
+                    status = TestStatus.FAILED
+                    result_error = AssertionError(
+                        definition.spec.xfail_reason or "xfail test passed"
+                    )
+                case (_, _, True):
+                    status, result_error = TestStatus.XPASSED, None
+                case _:
+                    status, result_error = TestStatus.PASSED, None
+
+            result = TestResult(
+                status=status,
+                duration_ms=duration_ms,
+                error=result_error,
+                assertion_results=assertion_results.copy(),
+            )
+
+        with bind(CURRENT_TEST, ctx):
+            try:
+                await resolver.teardown_scope(Scope.TEST)
+            except Exception as teardown_err:
+                logger.warning(
+                    f"Error during resource teardown: {teardown_err}"
+                )
+                if result.error is None:
+                    result.error = teardown_err
+
+        tracer.record_result(result)
+        telemetry_artifacts = tracer.finish()
 
     worker_snapshot = resolver.build_snapshot(
         list(payload.snapshot.res_specs),
@@ -111,57 +171,9 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
         verbose_level=2,
     )
 
-    if imperative_outcome is not None:
-        return RemoteExecutionResult(
-            result=TestResult(
-                status=imperative_outcome,
-                duration_ms=duration_ms,
-                error=error,
-                assertion_results=assertion_results,
-            ),
-            worker_diff=worker_diff,
-            ignored_paths=worker_snapshot.ignored_paths,
-        )
-
-    expect_failure = definition.spec.xfail_reason is not None
-    failed_assertions = [ar for ar in assertion_results if not ar.passed]
-    has_error = error is not None and not isinstance(error, AssertionError)
-    has_assertion_fail = bool(failed_assertions) or isinstance(
-        error, AssertionError
-    )
-
-    match (has_error, has_assertion_fail, expect_failure):
-        case (True, _, True):
-            status, result_error = TestStatus.XFAILED, error
-        case (True, _, False):
-            status, result_error = TestStatus.ERROR, error
-        case (_, True, xfail):
-            status = TestStatus.XFAILED if xfail else TestStatus.FAILED
-            if error is None and failed_assertions:
-                msg = (
-                    failed_assertions[0].error_message
-                    or failed_assertions[0].expression_repr.expr
-                )
-                result_error = AssertionError(msg)
-            else:
-                result_error = error
-        case (_, _, True) if definition.spec.xfail_strict:
-            status = TestStatus.FAILED
-            result_error = AssertionError(
-                definition.spec.xfail_reason or "xfail test passed"
-            )
-        case (_, _, True):
-            status, result_error = TestStatus.XPASSED, None
-        case _:
-            status, result_error = TestStatus.PASSED, None
-
     return RemoteExecutionResult(
-        result=TestResult(
-            status=status,
-            duration_ms=duration_ms,
-            error=result_error,
-            assertion_results=assertion_results.copy(),
-        ),
+        result=result,
+        telemetry_artifacts=telemetry_artifacts,
         worker_diff=worker_diff,
         ignored_paths=worker_snapshot.ignored_paths,
     )

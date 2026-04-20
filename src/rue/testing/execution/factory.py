@@ -22,7 +22,7 @@ from rue.testing.models import (
     ParamsIterateModifier,
     LoadedTestDef,
 )
-from rue.testing.tracing import TestTracer
+from rue.testing.tracing import build_test_tracer
 
 
 @dataclass
@@ -30,11 +30,10 @@ class DefaultTestFactory:
     """Creates test instances with shared collaborators."""
 
     config: Config
-    run_id: UUID | None = None
+    run_id: UUID
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
-    on_trace_collected: Callable | None = None
 
     def build(
         self,
@@ -52,6 +51,8 @@ class DefaultTestFactory:
                     return RemoteSingleTest(
                         definition=definition,
                         params=params,
+                        config=self.config,
+                        run_id=self.run_id,
                         is_stopped=self.is_stopped,
                         on_complete=self.on_complete,
                     )
@@ -59,14 +60,13 @@ class DefaultTestFactory:
                     return LocalSingleTest(
                         definition=definition,
                         params=params,
-                        tracer=TestTracer(
-                            otel_enabled=self.config.otel,
+                        tracer=build_test_tracer(
+                            config=self.config,
                             run_id=self.run_id,
                         ),
                         semaphore=self.semaphore,
                         is_stopped=self.is_stopped,
                         on_complete=self.on_complete,
-                        on_trace_collected=self.on_trace_collected,
                     )
                 case _:
                     raise NotImplementedError(f"Unknown backend: {backend}")

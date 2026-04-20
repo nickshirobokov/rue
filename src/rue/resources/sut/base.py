@@ -25,6 +25,7 @@ from rue.resources.sut.output import (
     SUTOutputCapture,
 )
 from rue.resources.sut.tracer import SUTTracer
+from rue.telemetry.otel.backend import OtelTelemetryBackend
 from rue.telemetry.otel.runtime import OtelTraceSession
 
 
@@ -94,11 +95,13 @@ class SUT(Generic[InstanceT]):
         self._tracer = SUTTracer(resolved_sut_name)
         self._name = resolved_sut_name
         test_tracer = CURRENT_TEST_TRACER.get()
-        if (
-            test_tracer is not None
-            and test_tracer.otel_trace_session is not None
-        ):
-            self._tracer.activate(test_tracer.otel_trace_session)
+        backend = (
+            None
+            if test_tracer is None
+            else test_tracer.get_backend(OtelTelemetryBackend)
+        )
+        if backend is not None and backend.active_session is not None:
+            self._tracer.activate(backend.active_session)
         self.instance: InstanceT = self._wrap_instance(instance)
 
     @property

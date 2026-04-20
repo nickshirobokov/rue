@@ -648,7 +648,7 @@ result = await runner.run(
 )
 ```
 
-OpenTelemetry persistence is configured through reporters. In a normal fresh process, the default reporter set includes `OtelReporter`; if you supply your own reporters, keep it attached for local `.rue/traces` storage or implement `Reporter.on_trace_collected()` in a custom reporter.
+OpenTelemetry persistence is configured through reporters. In a normal fresh process, the default reporter set includes `OtelReporter`; if you supply your own reporters, keep it attached for local `.rue/traces` storage or handle `execution.telemetry_artifacts` in `Reporter.on_execution_complete()`.
 
 ---
 
