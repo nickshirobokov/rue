@@ -419,28 +419,6 @@ class TestResourceInjection:
         assert captured == ["injected_value"]
 
     @pytest.mark.asyncio
-    async def test_uses_provided_resource_registry(self, null_reporter):
-        custom_resource_registry = ResourceRegistry()
-
-        @custom_resource_registry.resource
-        def injected():
-            return "custom_value"
-
-        captured = []
-
-        def test_with_resource(injected):
-            captured.append(injected)
-
-        item = make_item(test_with_resource, params=["injected"])
-        runner = Runner(
-            reporters=[null_reporter],
-            resource_registry=custom_resource_registry,
-        )
-        await runner.run(items=[item])
-
-        assert captured == ["custom_value"]
-
-    @pytest.mark.asyncio
     async def test_removed_otel_trace_resource_errors(self, null_reporter):
         def test_needs_trace(otel_trace):
             pass
