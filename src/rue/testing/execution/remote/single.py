@@ -14,6 +14,8 @@ from rue.config import Config
 from rue.context.runtime import (
     CURRENT_RESOURCE_CONSUMER,
     CURRENT_RESOURCE_CONSUMER_KIND,
+    CURRENT_TEST,
+    TestContext,
     bind,
 )
 from rue.context.process_pool import get_process_pool
@@ -117,7 +119,9 @@ class RemoteSingleTest(ExecutableTest):
             forked.apply_snapshot_to_state(merged_payload)
             result = remote_result.result
         finally:
-            await forked.teardown_scope(Scope.TEST)
+            ctx = TestContext(item=self.definition, execution_id=exec_id)
+            with bind(CURRENT_TEST, ctx):
+                await forked.teardown_scope(Scope.TEST)
 
         return await self._finalize(
             result,

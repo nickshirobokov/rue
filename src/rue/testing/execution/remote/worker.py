@@ -147,15 +147,14 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
                 assertion_results=assertion_results.copy(),
             )
 
-        with bind(CURRENT_TEST, ctx):
-            try:
-                await resolver.teardown_scope(Scope.TEST)
-            except Exception as teardown_err:
-                logger.warning(
-                    f"Error during resource teardown: {teardown_err}"
-                )
-                if result.error is None:
-                    result.error = teardown_err
+        try: # no ctx required: resolver in shadow mode, and teardown happens in the local one 
+            await resolver.teardown_scope(Scope.TEST)
+        except Exception as teardown_err:
+            logger.warning(
+                f"Error during resource teardown: {teardown_err}"
+            )
+            if result.error is None:
+                result.error = teardown_err
 
         tracer.record_result(result)
         telemetry_artifacts = tracer.finish()
