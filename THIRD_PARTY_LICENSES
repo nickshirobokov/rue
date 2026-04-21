@@ -3,13 +3,9 @@ developed by Merit AI, Inc.
 
 The following files contain code derived from that project:
 
-- examples/rue_example_captured_output.py
-- examples/rue_example_concurrency.py
 - examples/rue_example_outcomes.py
 - examples/rue_example_parametrize_and_tags.py
 - examples/rue_example_run_inline.py
-- examples/rue_example_trace_context.py
-- examples/rue_example_tracing.py
 - src/rue/reports/__init__.py
 - src/rue/reports/base.py
 - src/rue/storage/__init__.py
@@ -23,29 +19,13 @@ The following files contain code derived from that project:
 - src/rue/storage/sqlite/schema.py
 - src/rue/storage/sqlite/store.py
 - src/rue/testing/__init__.py
-- src/rue/testing/discovery/__init__.py
-- src/rue/testing/discovery/collector.py
 - src/rue/testing/environment.py
 - src/rue/testing/models/__init__.py
-- src/rue/testing/models/loaded.py
 - src/rue/testing/models/modifiers.py
 - src/rue/testing/models/result.py
 - src/rue/testing/models/run.py
 - src/rue/testing/outcomes.py
 - src/rue/testing/runner.py
-- tests/unit/conftest.py
-- tests/unit/storage/sqlite/migrations/__init__.py
-- tests/unit/storage/sqlite/migrations/test_cli.py
-- tests/unit/storage/sqlite/migrations/test_runner.py
-- tests/unit/storage/sqlite/test_sqlite_store.py
-- tests/unit/test_config.py
-- tests/unit/test_context.py
-- tests/unit/test_outcomes.py
-- tests/unit/test_parametrize.py
-- tests/unit/test_reporter_registry.py
-- tests/unit/test_resources.py
-- tests/unit/test_run_inline.py
-- tests/unit/test_runner.py
 
 Those portions are subject to the following license:
 
