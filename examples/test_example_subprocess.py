@@ -19,4 +19,3 @@ def test_remote(event, shared_events):
 @rue.test
 def test_after(shared_events):
     assert shared_events == ["one", "two"]
-

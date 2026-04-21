@@ -1,4 +1,12 @@
-"""Example showing mixed local and subprocess execution with shared resources.
+"""Exercise Rue against an LLM-style document workflow with mixed execution.
+
+This example models a small RAG-style pipeline: retrieve context for a user query,
+then compose an answer. You run the same suite with some tests in-process (async)
+and others in a subprocess worker, while a process-scoped SUT keeps one
+`DocumentProcessingPipeline` instance per worker. After all tests in that process
+finish, the teardown sees every query that touched that instance—so you can
+assert the workflow ran end-to-end even when cases are split across local and
+subprocess backends.
 
 Run with concurrent local and subprocess workers:
     uv run rue test examples/test_example_mixed_backends.py --concurrency 4
@@ -14,39 +22,46 @@ import rue
 from rue import Metric, SUT, metrics
 
 
-LOCAL_CASES = (
-    ("main-alpha", 0.05),
-    ("main-beta", 0.01),
+# Same worker: two queries handled by the async (in-process) tests.
+LOCAL_QUERIES = (
+    ("Summarize the Q1 earnings section", 0.05),
+    ("What does the policy say about retention?", 0.01),
 )
-SUBPROCESS_CASES = (
-    ("remote-alpha", 0.05),
-    ("remote-beta", 0.15),
+# Other worker process: subprocess tests; they still share that process's pipeline instance.
+SUBPROCESS_QUERIES = (
+    ("Extract all tables from the appendix", 0.05),
+    ("Redact PII from the draft before export", 0.15),
 )
-ALL_PROMPTS = tuple(prompt for prompt, _ in (*LOCAL_CASES, *SUBPROCESS_CASES))
+ALL_QUERIES = tuple(q for q, _ in (*LOCAL_QUERIES, *SUBPROCESS_QUERIES))
 
 
-class SharedPipeline:
+class DocumentProcessingPipeline:
+    """Minimal doc-QA workflow: fetch context, then compose a string answer."""
+
     def __init__(self) -> None:
-        self.calls: list[str] = []
+        self.seen_queries: list[str] = []
 
-    def run(self, prompt: str) -> str:
-        docs = self.retrieve(prompt)
-        return self.render(prompt, docs)
+    def run(self, query: str) -> str:
+        chunks = self.fetch_context(query)
+        return self.compose_answer(query, chunks)
 
-    def retrieve(self, prompt: str) -> list[str]:
-        self.calls.append(prompt)
-        return [prompt.upper(), f"evidence:{prompt}"]
+    def fetch_context(self, query: str) -> list[str]:
+        self.seen_queries.append(query)
+        return [query.upper(), f"evidence:{query}"]
 
-    def render(self, prompt: str, docs: list[str]) -> str:
-        return f"{prompt} -> {' | '.join(docs)}"
+    def compose_answer(self, query: str, chunks: list[str]) -> str:
+        return f"{query} -> {' | '.join(chunks)}"
 
 
 @rue.resource.sut(scope="process")
-def shared_pipeline():
-    sut = SUT(SharedPipeline(), methods=["run", "retrieve", "render"])
+def document_pipeline():
+    sut = SUT(
+        DocumentProcessingPipeline(),
+        methods=["run", "fetch_context", "compose_answer"],
+    )
     yield sut
 
-    assert sorted(sut.instance.calls) == sorted(ALL_PROMPTS)
+    assert sorted(sut.instance.seen_queries) == sorted(ALL_QUERIES)
 
 
 @rue.resource.metric(scope="process")
@@ -81,52 +96,52 @@ def trace_checks(overall_quality: Metric):
     yield metric.mean
 
 
-@rue.test.iterate.params("prompt,pause", LOCAL_CASES)
+@rue.test.iterate.params("query,pause", LOCAL_QUERIES)
 async def test_local_async_iterations(
-    prompt: str,
+    query: str,
     pause: float,
-    shared_pipeline: SUT[SharedPipeline],
+    document_pipeline: SUT[DocumentProcessingPipeline],
     content_checks: Metric,
     trace_checks: Metric,
 ):
     await asyncio.sleep(pause)
 
-    result = shared_pipeline.instance.run(prompt)
+    result = document_pipeline.instance.run(query)
 
     with metrics(content_checks):
-        assert prompt in result
-        assert prompt.upper() in result
+        assert query in result
+        assert query.upper() in result
 
     with metrics(trace_checks):
-        assert {span.name for span in shared_pipeline.all_spans} == {
-            "sut.shared_pipeline.run",
-            "sut.shared_pipeline.retrieve",
-            "sut.shared_pipeline.render",
+        assert {span.name for span in document_pipeline.all_spans} == {
+            "sut.document_pipeline.run",
+            "sut.document_pipeline.fetch_context",
+            "sut.document_pipeline.compose_answer",
         }
-        assert len(shared_pipeline.root_spans) == 3
+        assert len(document_pipeline.root_spans) == 3
 
 
 @rue.test.backend("subprocess")
-@rue.test.iterate.params("prompt,pause", SUBPROCESS_CASES)
+@rue.test.iterate.params("query,pause", SUBPROCESS_QUERIES)
 def test_subprocess_iterations(
-    prompt: str,
+    query: str,
     pause: float,
-    shared_pipeline: SUT[SharedPipeline],
+    document_pipeline: SUT[DocumentProcessingPipeline],
     content_checks: Metric,
     trace_checks: Metric,
 ):
     time.sleep(pause)
 
-    result = shared_pipeline.instance.run(prompt)
+    result = document_pipeline.instance.run(query)
 
     with metrics(content_checks):
-        assert prompt in result
-        assert f"evidence:{prompt}" in result
+        assert query in result
+        assert f"evidence:{query}" in result
 
     with metrics(trace_checks):
-        assert {span.name for span in shared_pipeline.all_spans} == {
-            "sut.shared_pipeline.run",
-            "sut.shared_pipeline.retrieve",
-            "sut.shared_pipeline.render",
+        assert {span.name for span in document_pipeline.all_spans} == {
+            "sut.document_pipeline.run",
+            "sut.document_pipeline.fetch_context",
+            "sut.document_pipeline.compose_answer",
         }
-        assert len(shared_pipeline.root_spans) == 3
+        assert len(document_pipeline.root_spans) == 3
