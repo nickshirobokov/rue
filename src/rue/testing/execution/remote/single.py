@@ -77,7 +77,10 @@ class RemoteSingleTest(ExecutableTest):
         forked = resolver.fork_for_test()
 
         try:
-            kwargs = await self._resolve_params(forked)
+            kwargs = await self._resolve_params(
+                forked,
+                apply_injection_hook=False,
+            )
             resource_names = [
                 name
                 for name in self.definition.spec.params
@@ -116,7 +119,10 @@ class RemoteSingleTest(ExecutableTest):
         )
 
     async def _resolve_params(
-        self, resolver: ResourceResolver
+        self,
+        resolver: ResourceResolver,
+        *,
+        apply_injection_hook: bool = True,
     ) -> dict[str, Any]:
         """Resolve test parameters from resources."""
         kwargs = dict(self.params)
@@ -126,7 +132,10 @@ class RemoteSingleTest(ExecutableTest):
         ):
             for param in self.definition.spec.params:
                 if param not in kwargs:
-                    kwargs[param] = await resolver.resolve(param)
+                    kwargs[param] = await resolver.resolve(
+                        param,
+                        apply_injection_hook=apply_injection_hook,
+                    )
         return kwargs
 
     async def _finalize(

@@ -23,7 +23,10 @@ from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
 class SUTTracer:
     def __init__(self, name: str) -> None:
         self.name = name
-        self._session: OtelTraceSession | None = None
+        self._session: ContextVar[OtelTraceSession | None] = ContextVar(
+            f"sut_{id(self)}_otel_session",
+            default=None,
+        )
         self._execution_id: ContextVar[UUID | None] = ContextVar(
             f"sut_{id(self)}_otel_execution_id",
             default=None,
@@ -34,17 +37,17 @@ class SUTTracer:
         )
 
     def activate(self, session: OtelTraceSession) -> None:
-        self._session = session
+        self._session.set(session)
 
     def deactivate(self) -> None:
-        self._session = None
+        self._session.set(None)
 
     def reset(self, execution_id: UUID | None) -> None:
         if self._execution_id.get() == execution_id:
             return
         self._execution_id.set(execution_id)
         self._span_ids.set(())
-        self._session = None
+        self._session.set(None)
 
     @contextmanager
     def tracing(self) -> Iterator[None]:
@@ -154,14 +157,15 @@ class SUTTracer:
         ]
 
     def _require_session(self) -> OtelTraceSession:
-        if self._session is None:
+        session = self._session.get()
+        if session is None:
             raise RuntimeError(
                 "OpenTelemetry is not enabled or this SUT has not been traced yet."
             )
-        return self._session
+        return session
 
     def _should_trace(self) -> bool:
-        if self._session is not None:
+        if self._session.get() is not None:
             return True
         return isinstance(trace.get_tracer_provider(), SdkTracerProvider)
 

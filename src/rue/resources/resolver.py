@@ -25,7 +25,12 @@ from rue.resources.models import (
     Scope,
 )
 from rue.resources.registry import ResourceRegistry
-from rue.resources.snapshot import SnapshotApplier, SyncGraph, build_path_ids
+from rue.resources.snapshot import (
+    SnapshotApplier,
+    SnapshotDeltaApplier,
+    SyncGraph,
+    build_path_ids,
+)
 
 
 _RESOLUTION_PATH: ContextVar[tuple[ResourceSpec, ...]] = ContextVar(
@@ -74,7 +79,12 @@ class ResourceResolver:
     ) -> list[ResourceSpec]:
         return list(self._shared_dependency_graph.get(identity, []))
 
-    async def resolve(self, name: str) -> Any:
+    async def resolve(
+        self,
+        name: str,
+        *,
+        apply_injection_hook: bool = True,
+    ) -> Any:
         test_ctx = CURRENT_TEST.get()
         request_path = (
             None
@@ -140,6 +150,9 @@ class ResourceResolver:
 
             if owner is not self:
                 self._cache[identity] = value
+
+            if not apply_injection_hook:
+                return value
 
             with (
                 bind(CURRENT_RESOURCE_PROVIDER, definition),
@@ -335,7 +348,7 @@ class ResourceResolver:
         snapshot: ResolverSyncSnapshot,
         sync_update: bytes,
     ) -> None:
-        """Merge a worker CRDT update and materialize it onto live objects."""
+        """Merge a worker CRDT update and patch changed state onto live objects."""
         identities = list(snapshot.res_specs)
         if not identities:
             return
@@ -354,11 +367,13 @@ class ResourceResolver:
             transport.object_ids = dict(self._sync_graph.object_ids)
             transport.path_ids = dict(self._sync_graph.path_ids)
             transport.next_local_id = self._sync_graph.next_local_id
+            baseline_payload = transport.payload(root_keys)
             transport.sync_live_roots(self._live_root_map(merge_order))
             transport.apply_update(sync_update)
-            payload = transport.payload(root_keys)
-            self._materialize_payload(payload)
-            self._sync_graph.sync_payload(payload)
+            after_payload = transport.payload(root_keys)
+            self._apply_payload_delta(baseline_payload, after_payload)
+            self._sync_graph.sync_payload(after_payload)
+            self._refresh_sync_counter()
 
     def _owner_resolver_for_scope(self, scope: Scope) -> "ResourceResolver":
         if scope is not Scope.TEST and self._parent is not None:
@@ -380,6 +395,32 @@ class ResourceResolver:
         self._sync_graph.path_ids = build_path_ids(payload)
         self._sync_graph.set_baseline(payload)
         self._refresh_sync_counter()
+        key_to_identity = {
+            identity.snapshot_key: identity for identity in self._cache
+        }
+        for root_key, value in patched_roots.items():
+            identity = key_to_identity.get(root_key)
+            if identity is not None:
+                self._cache[identity] = value
+
+    def _apply_payload_delta(
+        self,
+        before_payload: dict[str, Any],
+        after_payload: dict[str, Any],
+    ) -> None:
+        roots = {
+            identity.snapshot_key: self._cache.get(identity)
+            for identity in self._cache
+            if identity.snapshot_key in after_payload["root_ids"]
+        }
+        applier = SnapshotDeltaApplier(
+            before_payload,
+            after_payload,
+            object_ids=self._sync_graph.object_ids,
+        )
+        patched_roots = applier.apply_roots(roots)
+        self._sync_graph.object_ids = applier.object_ids
+        self._sync_graph.path_ids = build_path_ids(after_payload)
         key_to_identity = {
             identity.snapshot_key: identity for identity in self._cache
         }

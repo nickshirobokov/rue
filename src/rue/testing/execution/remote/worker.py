@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -19,7 +18,6 @@ from rue.context.runtime import (
     bind,
 )
 from rue.resources import ResourceResolver
-from rue.resources.models import Scope
 from rue.resources.registry import registry as default_resource_registry
 from rue.testing.discovery.loader import TestLoader
 from rue.testing.execution.remote.models import (
@@ -33,9 +31,6 @@ from rue.testing.tracing import build_test_tracer
 
 if TYPE_CHECKING:
     from rue.testing.models import LoadedTestDef
-
-
-logger = logging.getLogger(__name__)
 
 
 def run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
@@ -143,15 +138,6 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
                 error=result_error,
                 assertion_results=assertion_results.copy(),
             )
-
-        try: # no ctx required: resolver in shadow mode, and teardown happens in the local one 
-            await resolver.teardown_scope(Scope.TEST)
-        except Exception as teardown_err:
-            logger.warning(
-                f"Error during resource teardown: {teardown_err}"
-            )
-            if result.error is None:
-                result.error = teardown_err
 
         tracer.record_result(result)
         telemetry_artifacts = tracer.finish()

@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from rue.resources.models import LoadedResourceDef
     from rue.resources.resolver import ResourceResolver
     from rue.testing.models import LoadedTestDef
-    from rue.testing.runner import Runner
     from rue.testing.tracing import TestTracer
 
 
@@ -35,9 +34,6 @@ CURRENT_TEST_TRACER: ContextVar[TestTracer | None] = ContextVar(
 )
 CURRENT_SUT_SPAN_IDS: ContextVar[tuple[int, ...]] = ContextVar(
     "current_sut_span_ids", default=()
-)
-CURRENT_RUNNER: ContextVar[Runner | None] = ContextVar(
-    "current_runner", default=None
 )
 CURRENT_RESOURCE_CONSUMER: ContextVar[str | None] = ContextVar(
     "current_resource_consumer", default=None

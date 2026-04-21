@@ -53,6 +53,16 @@ class AttrState:
         self.right = "base-right"
 
 
+class BranchHolder:
+    def __init__(self) -> None:
+        self.branch = AttrState()
+
+
+class NestedHolder:
+    def __init__(self) -> None:
+        self.payload = {"items": [Box(1), Box(2)]}
+
+
 def _snapshot_payload(snapshot: ResolverSyncSnapshot) -> dict[str, object]:
     graph = SyncGraph.from_update(snapshot.graph_update, actor_id=0)
     return graph.payload(
@@ -300,6 +310,27 @@ class TestHydrateFromSyncSnapshot:
 
 
 class TestSyncRoundTrip:
+    async def test_test_scope_updates_sync_before_parent_teardown(self):
+        @resource(scope=Scope.TEST)
+        def case_state():
+            return {"events": []}
+
+        parent = ResourceResolver(registry)
+        forked = parent.fork_for_test()
+        state = await forked.resolve("case_state")
+        snapshot = forked.export_sync_snapshot(["case_state"], sync_actor_id=1)
+
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
+            registry,
+        )
+        worker_state = await worker.resolve("case_state")
+        worker_state["events"].append("worker")
+
+        forked.apply_sync_update(snapshot, _sync_update(worker, snapshot))
+
+        assert state["events"] == ["worker"]
+
     async def test_concurrent_list_appends_are_preserved(self):
         @resource(scope=Scope.PROCESS)
         def shared():
@@ -364,6 +395,30 @@ class TestSyncRoundTrip:
 
         assert shared_state.left == "parent-left"
         assert shared_state.right == "worker-right"
+
+    async def test_replaced_object_attr_preserves_untouched_parent_state(self):
+        @resource(scope=Scope.PROCESS)
+        def shared():
+            return BranchHolder()
+
+        parent = ResourceResolver(registry)
+        shared_state = await parent.resolve("shared")
+        snapshot = parent.export_sync_snapshot(["shared"], sync_actor_id=1)
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
+            registry,
+        )
+        worker_shared = await worker.resolve("shared")
+
+        replacement = BranchHolder().branch
+        replacement.right = "worker-right"
+        worker_shared.branch = replacement
+        shared_state.branch.left = "parent-left"
+
+        _apply_worker_update(parent, worker, snapshot)
+
+        assert shared_state.branch.left == "parent-left"
+        assert shared_state.branch.right == "worker-right"
 
     async def test_aliased_roots_stay_aliased_after_mergeback(self):
         @resource(scope=Scope.PROCESS)
@@ -466,3 +521,27 @@ class TestSyncRoundTrip:
 
         assert state["items"] is items_before
         assert [box.value for box in state["items"]] == [1, 2, 3]
+
+    async def test_nested_remote_merge_keeps_parent_identities(self):
+        @resource(scope=Scope.PROCESS)
+        def holder():
+            return NestedHolder()
+
+        parent = ResourceResolver(registry)
+        state = await parent.resolve("holder")
+        payload_before = state.payload
+        items_before = state.payload["items"]
+        snapshot = parent.export_sync_snapshot(["holder"], sync_actor_id=1)
+
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
+            registry,
+        )
+        worker_state = await worker.resolve("holder")
+        worker_state.payload["items"].append(Box(3))
+
+        _apply_worker_update(parent, worker, snapshot)
+
+        assert state.payload is payload_before
+        assert state.payload["items"] is items_before
+        assert [box.value for box in state.payload["items"]] == [1, 2, 3]

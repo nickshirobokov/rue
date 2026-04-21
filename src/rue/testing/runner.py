@@ -12,13 +12,9 @@ from uuid import UUID, uuid4
 
 from rue.config import Config, load_config
 from rue.context.collectors import CURRENT_METRIC_RESULTS
-from rue.context.runtime import (
-    CURRENT_RUNNER,
-    bind,
-)
+from rue.context.runtime import bind
 from rue.reports.base import Reporter
 from rue.resources import (
-    ResourceRegistry,
     ResourceResolver,
     registry as default_resource_registry,
 )
@@ -228,7 +224,6 @@ class Runner:
         start = time.perf_counter()
 
         with (
-            bind(CURRENT_RUNNER, self),
             SUTOutputCapture.sys_capture(swallow=self.capture_output),
             bind(CURRENT_METRIC_RESULTS, metric_results),
         ):
