@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import threading
 from contextvars import ContextVar
 from datetime import UTC, date, datetime, time, timedelta
@@ -10,6 +11,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from pydantic import BaseModel
 
 from rue.resources import (
     ResolverSyncSnapshot,
@@ -38,6 +40,45 @@ class SlotsState:
         self.lock = threading.Lock()
         self.ctx = ContextVar("slots_state_ctx", default=0)
         self.ctx.set(5)
+
+
+class FrameworkLike:
+    __slots__ = ("__runtime__", "_cache", "count", "name")
+    __signature__ = inspect.Signature(
+        parameters=[
+            inspect.Parameter(
+                "name",
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            ),
+            inspect.Parameter(
+                "count",
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            ),
+        ],
+    )
+
+    def __init__(self, name: str, count: int) -> None:
+        self.name = name
+        self.count = count
+        self._cache = {"skip": True}
+        self.__runtime__ = "skip"
+
+
+class BaseHousekeeping:
+    __slots__ = ("__helper__", "_cache")
+
+    def __init__(self) -> None:
+        self.__helper__ = "selected"
+        self._cache = {"skip": True}
+
+
+class InheritedHousekeepingState(BaseHousekeeping):
+    __slots__ = ("count",)
+    __match_args__ = ("count", "__helper__")
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.count = 1
 
 
 class Box:
@@ -137,6 +178,74 @@ class TestExportSyncSnapshot:
             "_cache",
             "lock",
         ]
+
+    async def test_framework_like_state_uses_declared_surface(self):
+        @resource(scope=Scope.PROCESS)
+        def state():
+            return FrameworkLike("demo", 3)
+
+        resolver = ResourceResolver(registry)
+        await resolver.resolve("state")
+
+        snapshot = resolver.export_sync_snapshot(["state"], sync_actor_id=1)
+        identity = snapshot.res_specs[0]
+        payload = _snapshot_payload(snapshot)
+        root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
+
+        assert set(root_node["attrs"]) == {"name", "count"}
+        assert set(payload["ignored_paths"][identity.snapshot_key]) == {
+            "__runtime__",
+            "_cache",
+        }
+
+    async def test_parent_slots_need_semantic_surface_to_escape_ignores(self):
+        @resource(scope=Scope.PROCESS)
+        def state():
+            return InheritedHousekeepingState()
+
+        resolver = ResourceResolver(registry)
+        await resolver.resolve("state")
+
+        snapshot = resolver.export_sync_snapshot(["state"], sync_actor_id=1)
+        identity = snapshot.res_specs[0]
+        payload = _snapshot_payload(snapshot)
+        root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
+
+        assert set(root_node["attrs"]) == {"count", "__helper__"}
+        assert payload["ignored_paths"][identity.snapshot_key] == ["_cache"]
+
+    async def test_pydantic_model_syncs_fields_without_package_branches(self):
+        class Model(BaseModel):
+            name: str
+            count: int
+
+        @resource(scope=Scope.PROCESS)
+        def state():
+            return Model(name="demo", count=3)
+
+        resolver = ResourceResolver(registry)
+        live = await resolver.resolve("state")
+
+        snapshot = resolver.export_sync_snapshot(["state"], sync_actor_id=1)
+        identity = snapshot.res_specs[0]
+        payload = _snapshot_payload(snapshot)
+        root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
+            registry,
+        )
+        worker_state = await worker.resolve("state")
+        worker_state.count = 8
+
+        _apply_worker_update(resolver, worker, snapshot)
+
+        assert set(root_node["attrs"]) == {"name", "count"}
+        assert {
+            "__pydantic_extra__",
+            "__pydantic_fields_set__",
+            "__pydantic_private__",
+        } <= set(payload["ignored_paths"][identity.snapshot_key])
+        assert live.count == 8
 
     async def test_preserves_shared_reference_nodes(self):
         @resource(scope=Scope.PROCESS)

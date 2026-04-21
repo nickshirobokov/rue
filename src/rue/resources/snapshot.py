@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import inspect
 import io
+import logging
+import queue
+import re
 import socket
 import threading
 import types
+import weakref
 from collections.abc import Iterable
+from concurrent.futures import Executor, Future as ConcurrentFuture
 from contextvars import ContextVar
 from datetime import date, datetime, time, timedelta
 from enum import Enum
@@ -25,12 +31,25 @@ type NodeId = str
 
 _LOCK_TYPES = (type(threading.Lock()), type(threading.RLock()))
 _RUNTIME_IGNORE_TYPES = (
+    asyncio.AbstractEventLoop,
+    asyncio.BaseTransport,
     asyncio.Future,
+    asyncio.Task,
+    ConcurrentFuture,
     io.IOBase,
+    logging.Handler,
+    logging.Logger,
+    queue.Queue,
+    queue.SimpleQueue,
     socket.socket,
+    threading.Thread,
     types.AsyncGeneratorType,
     types.GeneratorType,
     types.ModuleType,
+    weakref.CallableProxyType,
+    weakref.ProxyType,
+    weakref.ReferenceType,
+    Executor,
     *_LOCK_TYPES,
 )
 _ATOMIC_VALUE_TYPES = (
@@ -41,6 +60,20 @@ _ATOMIC_VALUE_TYPES = (
     time,
     timedelta,
     Enum,
+)
+_PLAIN_DATA_TYPES = (
+    *_ATOMIC_VALUE_TYPES,
+    bool,
+    bytearray,
+    bytes,
+    dict,
+    float,
+    frozenset,
+    int,
+    list,
+    set,
+    str,
+    tuple,
 )
 _PATH_TRACKED_KINDS = {
     "value",
@@ -56,7 +89,27 @@ _PATH_TRACKED_KINDS = {
 _CONTEXTVAR_UNSET = msgspec.UNSET
 _PYCRDT_INT_MIN = -(2**63)
 _PYCRDT_INT_MAX = 2**63 - 1
-_ATTR_PLAN_CACHE: dict[type[Any], _AttrPlan] = {}
+_STRONG_TRANSIENT_TOKENS = {
+    "cache",
+    "client",
+    "connection",
+    "ctx",
+    "executor",
+    "fd",
+    "handle",
+    "lock",
+    "logger",
+    "loop",
+    "memo",
+    "pool",
+    "queue",
+    "registry",
+    "session",
+    "socket",
+    "transport",
+}
+_SOFT_TRANSIENT_TOKENS = {"state"}
+_ATTR_SURFACE_CACHE: dict[type[Any], _AttrSurface] = {}
 _CLASS_REF_CACHE: dict[type[Any], tuple[str, str, bytes | None]] = {}
 _CLASS_CACHE: dict[tuple[str, str], type[Any]] = {}
 _LOCAL_CLASS_CACHE: dict[bytes, type[Any]] = {}
@@ -68,16 +121,14 @@ def _primitive(value: object) -> object:
     return value
 
 
-class _AttrPlan(msgspec.Struct, frozen=True):
+class _AttrSurface(msgspec.Struct, frozen=True):
     slot_names: tuple[str, ...] = ()
-    dataclass_field_names: tuple[str, ...] = ()
+    explicit_semantic_surface: frozenset[str] = frozenset()
+    semantic_surface: frozenset[str] = frozenset()
+    housekeeping_surface: frozenset[str] = frozenset()
 
 
-def _attr_plan(cls: type[Any]) -> _AttrPlan:
-    cached = _ATTR_PLAN_CACHE.get(cls)
-    if cached is not None:
-        return cached
-
+def _slot_names(cls: type[Any]) -> tuple[str, ...]:
     seen: set[str] = set()
     slot_names: list[str] = []
     for current in cls.__mro__:
@@ -89,13 +140,116 @@ def _attr_plan(cls: type[Any]) -> _AttrPlan:
                 continue
             seen.add(slot)
             slot_names.append(slot)
+    return tuple(slot_names)
 
-    plan = _AttrPlan(
-        slot_names=tuple(slot_names),
-        dataclass_field_names=tuple(getattr(cls, "__dataclass_fields__", ())),
+
+def _annotations(cls: type[Any]) -> frozenset[str]:
+    return frozenset(
+        name
+        for current in cls.__mro__
+        for name in current.__dict__.get("__annotations__", {})
     )
-    _ATTR_PLAN_CACHE[cls] = plan
-    return plan
+
+
+def _callable_params(target: object) -> tuple[str, ...]:
+    try:
+        signature = inspect.signature(target)
+    except (TypeError, ValueError):
+        return ()
+    return tuple(
+        name
+        for name, parameter in signature.parameters.items()
+        if name not in {"self", "cls"}
+        and parameter.kind
+        not in {
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        }
+    )
+
+
+def _signature_surface(cls: type[Any]) -> tuple[str, ...]:
+    direct = _callable_params(cls)
+    if direct:
+        return direct
+    for target in (
+        getattr(cls, "__init__", None),
+        getattr(cls, "__new__", None),
+    ):
+        if target is None:
+            continue
+        params = _callable_params(target)
+        if params:
+            return params
+    return ()
+
+
+def _match_args(cls: type[Any]) -> frozenset[str]:
+    return frozenset(
+        name
+        for current in cls.__mro__
+        for name in current.__dict__.get("__match_args__", ())
+        if isinstance(name, str)
+    )
+
+
+def _is_dunder_name(name: str) -> bool:
+    return name.startswith("__") and name.endswith("__")
+
+
+def _name_tokens(name: str) -> tuple[str, ...]:
+    stripped = name.strip("_")
+    if not stripped:
+        return ()
+    snake = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", stripped)
+    return tuple(
+        token.lower()
+        for token in re.split(r"[^a-zA-Z0-9]+", snake)
+        if token
+    )
+
+
+def _transient_token_weight(name: str) -> int:
+    score = 0
+    for token in _name_tokens(name):
+        if token in _STRONG_TRANSIENT_TOKENS:
+            score += 2
+        elif token in _SOFT_TRANSIENT_TOKENS:
+            score += 1
+    return score
+
+
+def _attr_surface(cls: type[Any]) -> _AttrSurface:
+    cached = _ATTR_SURFACE_CACHE.get(cls)
+    if cached is not None:
+        return cached
+
+    slot_names = _slot_names(cls)
+    explicit_semantic_surface = frozenset(
+        {
+            *_signature_surface(cls),
+            *_match_args(cls),
+            *_annotations(cls),
+        }
+    )
+    semantic_surface = frozenset(
+        {
+            *slot_names,
+            *explicit_semantic_surface,
+        }
+    )
+    surface = _AttrSurface(
+        slot_names=slot_names,
+        explicit_semantic_surface=explicit_semantic_surface,
+        semantic_surface=semantic_surface,
+        housekeeping_surface=frozenset(
+            name
+            for name in semantic_surface
+            if _is_dunder_name(name) or _transient_token_weight(name) > 0
+        ),
+    )
+    _ATTR_SURFACE_CACHE[cls] = surface
+    return surface
 
 
 def _class_ref(cls: type[Any]) -> tuple[str, str, bytes | None]:
@@ -132,44 +286,54 @@ def _required_bytes(value: object) -> bytes:
     return data
 
 
-def _normalized_name(name: str) -> str:
-    return name.lstrip("_").lower()
+def _looks_plain_data(value: object) -> bool:
+    return value is None or isinstance(value, _PLAIN_DATA_TYPES)
 
 
-def _should_ignore_attr(name: str, value: object) -> bool:
-    normalized = _normalized_name(name)
-    if normalized in {"cache", "memo", "session"}:
-        return True
-    if name.startswith("_") and (
-        isinstance(value, ContextVar)
-        or type(value).__name__ == "SnapshotContextVar"
-    ):
-        return True
-    if isinstance(value, _RUNTIME_IGNORE_TYPES):
-        return True
-    return bool(callable(value))
+def _should_ignore_attr(owner: object, name: str, value: object) -> bool:
+    ignore = False
+    if isinstance(value, (ContextVar, SnapshotContextVar)):
+        ignore = name.startswith("_")
+    else:
+        surface = _attr_surface(type(owner))
+        if (
+            (
+                _is_dunder_name(name)
+                and name not in surface.explicit_semantic_surface
+            )
+            or isinstance(value, _RUNTIME_IGNORE_TYPES)
+            or callable(value)
+        ):
+            ignore = True
+        else:
+            semantic = 2 if name in surface.semantic_surface else 0
+            if _looks_plain_data(value):
+                semantic += 2
+
+            transient = 1 if name.startswith("_") else 0
+            transient += _transient_token_weight(name)
+            if name in surface.housekeeping_surface:
+                transient += 1
+
+            if transient == semantic:
+                ignore = name.startswith("_")
+            else:
+                ignore = transient > semantic
+    return ignore
 
 
 def _iter_state_attrs(value: object) -> list[tuple[str, object]]:
     attrs: dict[str, object] = {}
-    plan = _attr_plan(type(value))
+    surface = _attr_surface(type(value))
 
     if hasattr(value, "__dict__"):
         attrs.update(vars(value))
 
-    for slot in plan.slot_names:
+    for slot in surface.slot_names:
         if slot in attrs:
             continue
         try:
             attrs[slot] = object.__getattribute__(value, slot)
-        except AttributeError:
-            continue
-
-    for field_name in plan.dataclass_field_names:
-        if field_name in attrs:
-            continue
-        try:
-            attrs[field_name] = object.__getattribute__(value, field_name)
         except AttributeError:
             continue
 
@@ -419,7 +583,7 @@ class SnapshotExporter:
 
         attrs: dict[str, NodeId] = {}
         for name, attr_value in _iter_state_attrs(value):
-            if _should_ignore_attr(name, attr_value):
+            if _should_ignore_attr(value, name, attr_value):
                 self.ignored_paths.setdefault(path, []).append(name)
                 continue
             attrs[name] = self._export_value(attr_value, path=f"{path}.{name}")
@@ -706,7 +870,7 @@ class SnapshotApplier:
             {
                 name
                 for name, value in _iter_state_attrs(result)
-                if not _should_ignore_attr(name, value)
+                if not _should_ignore_attr(result, name, value)
             }
             if existing
             else set()
