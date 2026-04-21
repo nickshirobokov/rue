@@ -452,20 +452,6 @@ class TestResourceResolver:
         with pytest.raises(ValueError, match="Unknown resource: unknown"):
             await resolver.resolve("unknown")
 
-    @pytest.mark.asyncio
-    async def test_resolve_many(self):
-        @resource
-        def res_a():
-            return "a"
-
-        @resource
-        def res_b():
-            return "b"
-
-        resolver = ResourceResolver(registry)
-        values = await resolver.resolve_many(["res_a", "res_b"])
-        assert values == {"res_a": "a", "res_b": "b"}
-
 
 class TestResourceTeardown:
     """Tests for resource teardown."""

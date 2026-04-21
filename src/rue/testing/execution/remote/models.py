@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from rue.config import Config
-from rue.resources.models import ResolverSnapshot
+from rue.resources.models import ResolverSyncSnapshot
 from rue.telemetry.base import TelemetryArtifact
 from rue.testing.models import TestResult
 from rue.testing.models.spec import SetupFileRef, TestSpec
@@ -22,7 +22,7 @@ class ExecutorPayload:
     suite_root: Path
     setup_chain: tuple[SetupFileRef, ...]
     params: dict[str, Any]
-    snapshot: ResolverSnapshot
+    snapshot: ResolverSyncSnapshot
     config: Config
     run_id: UUID
     execution_id: UUID
@@ -34,5 +34,4 @@ class RemoteExecutionResult:
 
     result: TestResult
     telemetry_artifacts: tuple[TelemetryArtifact, ...]
-    worker_diff: dict[str, Any]
-    ignored_paths: dict[str, list[str]]
+    sync_update: bytes

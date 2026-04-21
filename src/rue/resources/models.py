@@ -71,14 +71,12 @@ class SelectedResource:
 
 
 @dataclass(frozen=True, slots=True)
-class ResolverSnapshot:
-    """Complete transfer payload for reconstructing resources in a worker."""
+class ResolverSyncSnapshot:
+    """CRDT-backed transfer payload for reconstructing resources in a worker."""
 
     res_specs: tuple[ResourceSpec, ...]
     request_path: str | None
-    root_ids: dict[str, int] = field(default_factory=dict)
-    nodes: dict[int, dict[str, Any]] = field(default_factory=dict)
-    ignored_paths: dict[str, list[str]] = field(default_factory=dict)
-    resolution_order: tuple[ResourceSpec, ...] = field(
-        default_factory=tuple,
-    )
+    graph_update: bytes
+    base_state: bytes
+    resolution_order: tuple[ResourceSpec, ...] = field(default_factory=tuple)
+    sync_actor_id: int = 0

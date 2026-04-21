@@ -204,8 +204,7 @@ class TestRemoteSingleTest:
         expected = RemoteExecutionResult(
             result=TestResult(status=TestStatus.PASSED, duration_ms=12.3),
             telemetry_artifacts=(),
-            worker_diff={},
-            ignored_paths={},
+            sync_update=b"",
         )
         remote = RemoteSingleTest(
             definition=definition,
@@ -264,8 +263,7 @@ class TestRemoteSingleTest:
                                 spans=[],
                             ),
                         ),
-                        worker_diff={},
-                        ignored_paths={},
+                        sync_update=b"",
                     )
                 )
                 return future
@@ -280,8 +278,7 @@ class TestRemoteSingleTest:
         with bind_pool(ArtifactPool(RemoteExecutionResult(
             result=TestResult(status=TestStatus.PASSED, duration_ms=0),
             telemetry_artifacts=(),
-            worker_diff={},
-            ignored_paths={},
+            sync_update=b"",
         ))) as pool:
             execution = await remote.execute(ResourceResolver(registry))
 
@@ -305,8 +302,7 @@ class TestRemoteSingleTest:
                 RemoteExecutionResult(
                     result=TestResult(status=TestStatus.PASSED, duration_ms=0),
                     telemetry_artifacts=(),
-                    worker_diff={},
-                    ignored_paths={},
+                    sync_update=b"",
                 )
             )
         ) as pool:
@@ -329,8 +325,7 @@ class TestRemoteSingleTest:
                 RemoteExecutionResult(
                     result=TestResult(status=TestStatus.PASSED, duration_ms=0),
                     telemetry_artifacts=(),
-                    worker_diff={},
-                    ignored_paths={},
+                    sync_update=b"",
                 )
             )
         ) as pool:
@@ -358,8 +353,7 @@ class TestRemoteSingleTest:
                 RemoteExecutionResult(
                     result=TestResult(status=TestStatus.PASSED, duration_ms=0),
                     telemetry_artifacts=(),
-                    worker_diff={},
-                    ignored_paths={},
+                    sync_update=b"",
                 )
             )
         ):

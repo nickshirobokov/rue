@@ -136,6 +136,14 @@ class LocalSingleTest(ExecutableTest):
 
             duration_ms = (time.perf_counter() - start) * 1000
 
+            forked_resolver.flush_live_changes(
+                [
+                    identity
+                    for identity in forked_resolver.cached_identities
+                    if identity.scope is not Scope.TEST
+                ]
+            )
+
             with bind(CURRENT_TEST, ctx):
                 try:
                     await forked_resolver.teardown_scope(Scope.TEST)

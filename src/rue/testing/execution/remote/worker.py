@@ -8,8 +8,6 @@ import time
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
-from deepdiff import DeepDiff
-
 from rue.assertions.base import AssertionResult
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
@@ -55,11 +53,10 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
         setup_chain=payload.setup_chain,
     )
 
-    resolver = await ResourceResolver.from_snapshot(
+    resolver = await ResourceResolver.hydrate_from_sync_snapshot(
         payload.snapshot,
         default_resource_registry,
     )
-    base_payload = resolver.snapshot_payload(payload.snapshot)
 
     assertion_results: list[AssertionResult] = []
     error: BaseException | None = None
@@ -159,22 +156,15 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
         tracer.record_result(result)
         telemetry_artifacts = tracer.finish()
 
-    worker_snapshot = resolver.build_snapshot(
+    sync_update = resolver.sync_update_since(
+        payload.snapshot.base_state,
         list(payload.snapshot.res_specs),
-        request_path=payload.spec.module_path,
-        only_cached_roots=True,
-    )
-    worker_diff = DeepDiff(
-        base_payload,
-        resolver.snapshot_payload(worker_snapshot),
-        verbose_level=2,
     )
 
     return RemoteExecutionResult(
         result=result,
         telemetry_artifacts=telemetry_artifacts,
-        worker_diff=worker_diff,
-        ignored_paths=worker_snapshot.ignored_paths,
+        sync_update=sync_update,
     )
 
 

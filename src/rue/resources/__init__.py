@@ -2,7 +2,7 @@
 
 from rue.resources.models import (
     LoadedResourceDef,
-    ResolverSnapshot,
+    ResolverSyncSnapshot,
     ResourceSpec,
     Scope,
 )
@@ -12,7 +12,7 @@ from rue.resources.resolver import ResourceResolver
 
 __all__ = [
     "LoadedResourceDef",
-    "ResolverSnapshot",
+    "ResolverSyncSnapshot",
     "ResourceRegistry",
     "ResourceResolver",
     "ResourceSpec",

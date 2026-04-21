@@ -34,6 +34,7 @@ class DefaultTestFactory:
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
+    _next_sync_actor_id: int = field(default=1, init=False, repr=False)
 
     def build(
         self,
@@ -48,11 +49,14 @@ class DefaultTestFactory:
         if not modifiers:
             match backend:
                 case ExecutionBackend.SUBPROCESS:
+                    sync_actor_id = self._next_sync_actor_id
+                    self._next_sync_actor_id += 1
                     return RemoteSingleTest(
                         definition=definition,
                         params=params,
                         config=self.config,
                         run_id=self.run_id,
+                        sync_actor_id=sync_actor_id,
                         is_stopped=self.is_stopped,
                         on_complete=self.on_complete,
                     )

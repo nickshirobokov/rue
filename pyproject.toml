@@ -25,6 +25,7 @@ dependencies = [
     "cloudpickle>=3.1.2",
     "msgspec>=0.21.1",
     "deepdiff>=9.0.0",
+    "pycrdt>=0.12.50",
 ]
 
 classifiers = [

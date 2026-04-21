@@ -1,20 +1,24 @@
-"""Tests for snapshot-based resource transfer helpers."""
+"""Tests for CRDT-backed resource sync helpers."""
 
 from __future__ import annotations
 
 import threading
 from contextvars import ContextVar
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from enum import Enum
 from pathlib import Path
 from uuid import UUID
 
-import cloudpickle
 import pytest
-from deepdiff import DeepDiff, Delta
 
-from rue.resources import ResourceResolver, Scope, registry, resource
-from rue.resources.models import ResolverSnapshot
+from rue.resources import (
+    ResolverSyncSnapshot,
+    ResourceResolver,
+    Scope,
+    registry,
+    resource,
+)
+from rue.resources.snapshot import SyncGraph
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +29,7 @@ def clean_registry():
 
 
 class SlotsState:
-    __slots__ = ("count", "_private", "_cache", "lock", "ctx")
+    __slots__ = ("_cache", "_private", "count", "ctx", "lock")
 
     def __init__(self) -> None:
         self.count = 1
@@ -43,42 +47,38 @@ class Box:
         self.value = value
 
 
-def _merge_payloads(
+class AttrState:
+    def __init__(self) -> None:
+        self.left = "base-left"
+        self.right = "base-right"
+
+
+def _snapshot_payload(snapshot: ResolverSyncSnapshot) -> dict[str, object]:
+    graph = SyncGraph.from_update(snapshot.graph_update, actor_id=0)
+    return graph.payload(
+        identity.snapshot_key for identity in snapshot.res_specs
+    )
+
+
+def _sync_update(
     resolver: ResourceResolver,
-    base: ResolverSnapshot,
-    current: ResolverSnapshot,
-    worker: ResolverSnapshot,
-) -> dict[str, object]:
-    base_payload = resolver.snapshot_payload(base)
-    parent_diff = DeepDiff(
-        base_payload,
-        resolver.snapshot_payload(current),
-        verbose_level=2,
+    snapshot: ResolverSyncSnapshot,
+) -> bytes:
+    return resolver.sync_update_since(
+        snapshot.base_state,
+        list(snapshot.res_specs),
     )
-    worker_diff = DeepDiff(
-        base_payload,
-        resolver.snapshot_payload(worker),
-        verbose_level=2,
-    )
-    merged = base_payload + Delta(parent_diff)
-    return merged + Delta(worker_diff)
 
 
-class TestSerializeRoundTrip:
-    def test_round_trip_primitive(self):
-        original = {"a": 1, "b": [2, 3]}
-        data = cloudpickle.dumps(original)
-        restored = cloudpickle.loads(data)
-        assert restored == original
-
-    def test_round_trip_nested(self):
-        original = {"nested": {"deep": [1, 2, 3]}}
-        data = cloudpickle.dumps(original)
-        restored = cloudpickle.loads(data)
-        assert restored == original
+def _apply_worker_update(
+    parent: ResourceResolver,
+    worker: ResourceResolver,
+    snapshot: ResolverSyncSnapshot,
+) -> None:
+    parent.apply_sync_update(snapshot, _sync_update(worker, snapshot))
 
 
-class TestBuildSnapshot:
+class TestExportSyncSnapshot:
     async def test_includes_test_scope_in_snapshot_closure(self):
         @resource(scope=Scope.TEST)
         def per_test():
@@ -92,11 +92,16 @@ class TestBuildSnapshot:
         await resolver.resolve("shared")
         await resolver.resolve("per_test")
 
-        snapshot = resolver.build_snapshot(["shared", "per_test"])
+        snapshot = resolver.export_sync_snapshot(
+            ["shared", "per_test"],
+            sync_actor_id=1,
+        )
 
         names = {identity.name for identity in snapshot.res_specs}
+        payload = _snapshot_payload(snapshot)
+
         assert names == {"shared", "per_test"}
-        assert set(snapshot.root_ids) == {
+        assert set(payload["root_ids"]) == {
             identity.snapshot_key for identity in snapshot.res_specs
         }
 
@@ -108,16 +113,17 @@ class TestBuildSnapshot:
         resolver = ResourceResolver(registry)
         await resolver.resolve("state")
 
-        snapshot = resolver.build_snapshot(["state"])
+        snapshot = resolver.export_sync_snapshot(["state"], sync_actor_id=1)
         identity = snapshot.res_specs[0]
-        root_node = snapshot.nodes[snapshot.root_ids[identity.snapshot_key]]
+        payload = _snapshot_payload(snapshot)
+        root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
         attrs = set(root_node["attrs"])
 
         assert "count" in attrs
         assert "_private" in attrs
         assert "_cache" not in attrs
         assert "lock" not in attrs
-        assert snapshot.ignored_paths[identity.snapshot_key] == [
+        assert payload["ignored_paths"][identity.snapshot_key] == [
             "_cache",
             "lock",
         ]
@@ -134,17 +140,18 @@ class TestBuildSnapshot:
         resolver = ResourceResolver(registry)
         await resolver.resolve("alias")
 
-        snapshot = resolver.build_snapshot(["alias"])
+        snapshot = resolver.export_sync_snapshot(["alias"], sync_actor_id=1)
+        payload = _snapshot_payload(snapshot)
         identity_map = {
             identity.name: identity for identity in snapshot.res_specs
         }
 
         assert (
-            snapshot.root_ids[identity_map["shared"].snapshot_key]
-            == snapshot.root_ids[identity_map["alias"].snapshot_key]
+            payload["root_ids"][identity_map["shared"].snapshot_key]
+            == payload["root_ids"][identity_map["alias"].snapshot_key]
         )
 
-    async def test_request_path_stored(self):
+    async def test_request_path_and_actor_are_stored(self):
         @resource(scope=Scope.PROCESS)
         def simple():
             return 1
@@ -152,12 +159,14 @@ class TestBuildSnapshot:
         resolver = ResourceResolver(registry)
         await resolver.resolve("simple")
 
-        snapshot = resolver.build_snapshot(
+        snapshot = resolver.export_sync_snapshot(
             ["simple"],
             request_path=Path("/project/tests/test_foo.py"),
+            sync_actor_id=7,
         )
 
         assert snapshot.request_path == "/project/tests/test_foo.py"
+        assert snapshot.sync_actor_id == 7
 
     async def test_atomic_values_use_tagged_nodes(self):
         class Mode(Enum):
@@ -176,7 +185,7 @@ class TestBuildSnapshot:
                     3,
                     4,
                     5,
-                    tzinfo=timezone.utc,
+                    tzinfo=UTC,
                 ),
                 "time": time(3, 4, 5),
                 "delta": timedelta(seconds=7),
@@ -186,31 +195,32 @@ class TestBuildSnapshot:
         resolver = ResourceResolver(registry)
         await resolver.resolve("state")
 
-        snapshot = resolver.build_snapshot(["state"])
+        snapshot = resolver.export_sync_snapshot(["state"], sync_actor_id=1)
         identity = snapshot.res_specs[0]
-        root_node = snapshot.nodes[snapshot.root_ids[identity.snapshot_key]]
+        payload = _snapshot_payload(snapshot)
+        root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
         node_kinds = {
-            snapshot.nodes[key_id]["value"]: snapshot.nodes[value_id]["kind"]
+            payload["nodes"][value_id]["kind"]
             for key_id, value_id in root_node["entries"]
         }
 
         assert node_kinds == {
-            "uuid": "uuid",
-            "path": "path",
-            "date": "date",
-            "datetime": "datetime",
-            "time": "time",
-            "delta": "timedelta",
-            "enum": "enum",
+            "uuid",
+            "path",
+            "date",
+            "datetime",
+            "time",
+            "timedelta",
+            "enum",
         }
 
-    def test_build_snapshot_requires_cached_resources(self):
+    def test_export_requires_cached_resources(self):
         resolver = ResourceResolver(registry)
         with pytest.raises(ValueError, match="nonexistent"):
-            resolver.build_snapshot(["nonexistent"])
+            resolver.export_sync_snapshot(["nonexistent"], sync_actor_id=1)
 
 
-class TestFromSnapshot:
+class TestHydrateFromSyncSnapshot:
     async def test_worker_replays_shadow_factories(self):
         resolve_count = 0
 
@@ -224,9 +234,9 @@ class TestFromSnapshot:
         await resolver.resolve("config")
         assert resolve_count == 1
 
-        snap = resolver.build_snapshot(["config"])
-        worker = await ResourceResolver.from_snapshot(
-            snap,
+        snapshot = resolver.export_sync_snapshot(["config"], sync_actor_id=1)
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
             registry,
         )
 
@@ -239,12 +249,12 @@ class TestFromSnapshot:
             return {"count": 0}
 
         resolver = ResourceResolver(registry)
-        shared = await resolver.resolve("shared")
-        shared["count"] = 4
+        shared_state = await resolver.resolve("shared")
+        shared_state["count"] = 4
 
-        snap = resolver.build_snapshot(["shared"])
-        worker = await ResourceResolver.from_snapshot(
-            snap,
+        snapshot = resolver.export_sync_snapshot(["shared"], sync_actor_id=1)
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
             registry,
         )
 
@@ -263,9 +273,9 @@ class TestFromSnapshot:
         resolver = ResourceResolver(registry)
         await resolver.resolve("holder")
 
-        snap = resolver.build_snapshot(["holder"])
-        worker = await ResourceResolver.from_snapshot(
-            snap,
+        snapshot = resolver.export_sync_snapshot(["holder"], sync_actor_id=1)
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
             registry,
         )
         hydrated = await worker.resolve("holder")
@@ -273,48 +283,113 @@ class TestFromSnapshot:
         assert hydrated.ctx.get() == 7
 
     async def test_empty_snapshot_hydration(self):
-        snap = ResolverSnapshot(
+        graph = SyncGraph(actor_id=1)
+        snapshot = ResolverSyncSnapshot(
             res_specs=(),
             request_path=None,
+            graph_update=graph.doc.get_update(None),
+            base_state=graph.doc.get_state(),
+            sync_actor_id=1,
         )
-        worker = await ResourceResolver.from_snapshot(
-            snap,
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
             registry,
         )
 
         assert len(worker.cached_identities) == 0
 
 
-class TestRoundTrip:
-    async def test_parent_and_worker_diffs_use_worker_last_on_conflict(self):
+class TestSyncRoundTrip:
+    async def test_concurrent_list_appends_are_preserved(self):
         @resource(scope=Scope.PROCESS)
         def shared():
             return {"values": ["base"]}
 
-        resolver = ResourceResolver(registry)
-        shared = await resolver.resolve("shared")
-        base = resolver.build_snapshot(["shared"])
+        parent = ResourceResolver(registry)
+        shared_state = await parent.resolve("shared")
+        snapshot = parent.export_sync_snapshot(["shared"], sync_actor_id=1)
 
-        worker = await ResourceResolver.from_snapshot(base, registry)
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
+            registry,
+        )
         worker_shared = await worker.resolve("shared")
 
-        shared["values"].append("parent")
+        shared_state["values"].append("parent")
         worker_shared["values"].append("worker")
 
-        current = resolver.build_snapshot(
-            list(base.res_specs),
-            request_path=Path("/tmp/test_shared.py"),
+        _apply_worker_update(parent, worker, snapshot)
+
+        assert shared_state["values"] == ["base", "parent", "worker"]
+
+    async def test_concurrent_dict_key_updates_merge(self):
+        @resource(scope=Scope.PROCESS)
+        def shared():
+            return {"base": True}
+
+        parent = ResourceResolver(registry)
+        shared_state = await parent.resolve("shared")
+        snapshot = parent.export_sync_snapshot(["shared"], sync_actor_id=1)
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
+            registry,
         )
-        worker_snapshot = worker.build_snapshot(
-            list(base.res_specs),
-            request_path=Path("/tmp/test_shared.py"),
+        worker_shared = await worker.resolve("shared")
+
+        shared_state["left"] = 1
+        worker_shared["right"] = 2
+
+        _apply_worker_update(parent, worker, snapshot)
+
+        assert shared_state == {"base": True, "left": 1, "right": 2}
+
+    async def test_concurrent_object_attr_updates_merge(self):
+        @resource(scope=Scope.PROCESS)
+        def shared():
+            return AttrState()
+
+        parent = ResourceResolver(registry)
+        shared_state = await parent.resolve("shared")
+        snapshot = parent.export_sync_snapshot(["shared"], sync_actor_id=1)
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
+            registry,
+        )
+        worker_shared = await worker.resolve("shared")
+
+        shared_state.left = "parent-left"
+        worker_shared.right = "worker-right"
+
+        _apply_worker_update(parent, worker, snapshot)
+
+        assert shared_state.left == "parent-left"
+        assert shared_state.right == "worker-right"
+
+    async def test_aliased_roots_stay_aliased_after_mergeback(self):
+        @resource(scope=Scope.PROCESS)
+        def shared():
+            return {"events": []}
+
+        @resource(scope=Scope.PROCESS)
+        def alias(shared):
+            return shared
+
+        parent = ResourceResolver(registry)
+        live_shared = await parent.resolve("shared")
+        live_alias = await parent.resolve("alias")
+        snapshot = parent.export_sync_snapshot(["alias"], sync_actor_id=1)
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
+            registry,
         )
 
-        resolver.apply_snapshot_to_state(
-            _merge_payloads(resolver, base, current, worker_snapshot)
-        )
+        worker_alias = await worker.resolve("alias")
+        worker_alias["events"].append("worker")
 
-        assert shared["values"] == ["base", "worker"]
+        _apply_worker_update(parent, worker, snapshot)
+
+        assert live_shared is live_alias
+        assert live_shared["events"] == ["worker"]
 
     async def test_test_generator_teardown_mutates_parent_after_merge(self):
         @resource(scope=Scope.PROCESS)
@@ -330,23 +405,16 @@ class TestRoundTrip:
         parent = ResourceResolver(registry)
         forked = parent.fork_for_test()
         state = await forked.resolve("case_state")
-        base = forked.build_snapshot(["case_state"])
+        snapshot = forked.export_sync_snapshot(["case_state"], sync_actor_id=1)
 
-        worker = await ResourceResolver.from_snapshot(base, registry)
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
+            registry,
+        )
         worker_state = await worker.resolve("case_state")
         worker_state["body"].append("worker")
 
-        current = forked.build_snapshot(
-            list(base.res_specs),
-            request_path=Path("/tmp/test_case.py"),
-        )
-        worker_snapshot = worker.build_snapshot(
-            list(base.res_specs),
-            request_path=Path("/tmp/test_case.py"),
-        )
-        forked.apply_snapshot_to_state(
-            _merge_payloads(forked, base, current, worker_snapshot)
-        )
+        _apply_worker_update(forked, worker, snapshot)
 
         assert state["body"] == ["worker"]
         await forked.teardown_scope(Scope.TEST)
@@ -359,46 +427,42 @@ class TestRoundTrip:
 
         parent = ResourceResolver(registry)
         live = await parent.resolve("state")
-        base = parent.build_snapshot(["state"])
+        snapshot = parent.export_sync_snapshot(["state"], sync_actor_id=1)
 
-        worker = await ResourceResolver.from_snapshot(base, registry)
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
+            registry,
+        )
         worker_state = await worker.resolve("state")
         worker_state.count = 8
         worker_state._private = "worker"
         worker_state.ctx.set(11)
 
-        current = parent.build_snapshot(
-            list(base.res_specs),
-            request_path=Path("/tmp/test_slots.py"),
-        )
-        worker_snapshot = worker.build_snapshot(
-            list(base.res_specs),
-            request_path=Path("/tmp/test_slots.py"),
-        )
-        parent.apply_snapshot_to_state(
-            _merge_payloads(parent, base, current, worker_snapshot)
-        )
+        _apply_worker_update(parent, worker, snapshot)
 
         assert live.count == 8
         assert live._private == "worker"
         assert live.ctx.get() == 11
         assert isinstance(live.lock, type(threading.Lock()))
 
-    async def test_snapshot_id_cache_drops_replaced_objects(self):
+    async def test_remote_merge_keeps_live_identity(self):
         @resource(scope=Scope.PROCESS)
         def holder():
             return {"items": [Box(1), Box(2)]}
 
-        resolver = ResourceResolver(registry)
-        state = await resolver.resolve("holder")
+        parent = ResourceResolver(registry)
+        state = await parent.resolve("holder")
+        items_before = state["items"]
+        snapshot = parent.export_sync_snapshot(["holder"], sync_actor_id=1)
 
-        resolver.build_snapshot(["holder"])
-        assert len(resolver._snapshot_object_ids) == 4
+        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+            snapshot,
+            registry,
+        )
+        worker_state = await worker.resolve("holder")
+        worker_state["items"].append(Box(3))
 
-        state["items"] = [Box(3), Box(4)]
-        resolver.build_snapshot(["holder"])
-        assert len(resolver._snapshot_object_ids) == 4
+        _apply_worker_update(parent, worker, snapshot)
 
-        state["items"] = [Box(5), Box(6)]
-        resolver.build_snapshot(["holder"])
-        assert len(resolver._snapshot_object_ids) == 4
+        assert state["items"] is items_before
+        assert [box.value for box in state["items"]] == [1, 2, 3]

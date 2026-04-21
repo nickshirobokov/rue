@@ -134,7 +134,6 @@ Its public methods are:
 Its public methods are:
 
 * `resolve(name)`
-* `resolve_many(names)`
 * `fork_for_test()`
 * `teardown()`
 * `teardown_scope(scope)`
@@ -373,12 +372,6 @@ It MAY transform the returned value.
 * shares `MODULE` and `PROCESS` cache entries from its parent
 * keeps `TEST` scope isolated
 * delegates `MODULE` and `PROCESS` teardown registration to the correct owner
-
-### 8.7 `resolve_many(names)`
-
-`resolve_many(names)` returns a `dict[str, Any]` keyed by requested resource name.
-
-Resolution order follows the input list order.
 
 ---
 
