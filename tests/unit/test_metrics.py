@@ -16,16 +16,17 @@ from rue.context.runtime import (
     TestContext as Ctx,
     bind,
 )
-from rue.resources import ResourceIdentity, ResourceResolver, Scope, registry
+from rue.resources import ResourceSpec, ResourceResolver, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
 from rue.resources.metrics.decorator import metric
-from rue.testing.models import TestDefinition
+from rue.testing.models import LoadedTestDef
+from tests.unit.factories import make_definition
 
 
 def _metric(name: str = "") -> Metric:
     return Metric(
         metadata=MetricMetadata(
-            identity=ResourceIdentity(name=name, scope=Scope.SESSION)
+            identity=ResourceSpec(name=name, scope=Scope.PROCESS)
         )
     )
 
@@ -35,13 +36,11 @@ def _make_item(
     module_path: Path | None = None,
     suffix: str | None = None,
     case_id: UUID | None = None,
-) -> TestDefinition:
-    """Create a minimal TestDefinition for testing."""
-    return TestDefinition(
-        name=name,
-        fn=lambda: None,
+) -> LoadedTestDef:
+    """Create a minimal LoadedTestDef for testing."""
+    return make_definition(
+        name,
         module_path=module_path or Path("test.py"),
-        is_async=False,
         suffix=suffix,
         case_id=case_id,
     )
@@ -115,7 +114,7 @@ def test_metric_result_is_collected_when_collector_is_active():
     with bind(CURRENT_METRIC_RESULTS, results):
         MetricResult(
             metadata=MetricMetadata(
-                identity=ResourceIdentity(name="x", scope=Scope.SESSION)
+                identity=ResourceSpec(name="x", scope=Scope.PROCESS)
             ),
             assertion_results=[],
             value=1,
@@ -161,7 +160,7 @@ async def test_metric_on_injection_hook_with_context():
     """Rue/case attribution happens in add_record; resource attribution happens on injection."""
     registry.reset()
 
-    @metric(scope=Scope.CASE)
+    @metric(scope=Scope.TEST)
     def test_ctx_metric():
         yield _metric("ctx")
         return 0
@@ -181,14 +180,14 @@ async def test_metric_on_injection_hook_with_context():
             m.add_record(1)
 
     assert "my_merit" in m.metadata.collected_from_tests
-    assert m.metadata.identity.scope == Scope.CASE
+    assert m.metadata.identity.scope == Scope.TEST
 
 
 @pytest.mark.asyncio
 async def test_metric_decorator_emits_metric_result_on_teardown_with_assertions_and_return_value():
     registry.reset()
 
-    @metric(scope=Scope.CASE)
+    @metric(scope=Scope.TEST)
     def scored_metric():
         AssertionResult(
             expression_repr=AssertionRepr(
@@ -227,7 +226,7 @@ async def test_metric_decorator_emits_metric_result_on_teardown_with_assertions_
         "before",
         "after",
     ]
-    assert r.metadata.identity.scope == Scope.CASE
+    assert r.metadata.identity.scope == Scope.TEST
     assert r.metadata is not m.metadata
 
 
@@ -235,7 +234,7 @@ async def test_metric_decorator_emits_metric_result_on_teardown_with_assertions_
 async def test_metric_test_injection_does_not_count_as_resource():
     registry.reset()
 
-    @metric(scope=Scope.CASE)
+    @metric(scope=Scope.TEST)
     def sampled_metric():
         yield _metric("sampled")
 
@@ -255,7 +254,7 @@ async def test_metric_test_injection_does_not_count_as_resource():
 async def test_metric_records_module_and_provider_identity():
     registry.reset()
 
-    @metric(scope=Scope.CASE)
+    @metric(scope=Scope.TEST)
     def module_metric():
         metric_instance = _metric("ignored")
         yield metric_instance
@@ -273,7 +272,7 @@ async def test_metric_records_module_and_provider_identity():
         with bind(CURRENT_TEST, ctx):
             m = await resolver.resolve("module_metric")
             m.add_record(1)
-            await resolver.teardown_scope(Scope.CASE)
+            await resolver.teardown_scope(Scope.TEST)
 
     [result] = metric_results
     assert result.metadata.collected_from_modules == {
@@ -282,7 +281,7 @@ async def test_metric_records_module_and_provider_identity():
     assert result.metadata.identity.provider_path is not None
     assert result.metadata.identity.provider_dir is not None
     assert result.metadata.identity.name == "module_metric"
-    assert result.metadata.identity.scope == Scope.CASE
+    assert result.metadata.identity.scope == Scope.TEST
 
 
 @pytest.mark.asyncio
@@ -309,9 +308,11 @@ async def test_metric_decorator_records_metric_dependencies():
         await resolver.resolve("accuracy")
         await resolver.teardown()
 
-    by_name = {result.metadata.identity.name: result for result in metric_results}
+    by_name = {
+        result.metadata.identity.name: result for result in metric_results
+    }
     assert "accuracy" in by_name
     assert by_name["accuracy"].dependencies == [
         by_name["overall_quality"].metadata.identity,
-        registry.select("clock", None).definition.identity,
+        registry.select("clock", None).definition.spec,
     ]

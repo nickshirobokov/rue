@@ -3,7 +3,8 @@ from pathlib import Path
 
 from rue.resources import registry, resource
 from rue.testing import Runner, test as t_decorator
-from rue.testing.models import ParameterSet, ParamsIterateModifier, TestDefinition
+from rue.testing.models import ParameterSet, ParamsIterateModifier
+from tests.unit.factories import make_definition
 
 
 def test_iterate_params_invalid_inputs_are_deferred_to_execution():
@@ -36,11 +37,10 @@ def test_runner_iterate_params_applies_values_and_runs_all_sets(null_reporter):
         min_passes=3,
     )
 
-    item = TestDefinition(
-        name="test_sample",
+    item = make_definition(
+        "test_sample",
         fn=test_sample,
-        module_path=Path("sample.py"),
-        is_async=False,
+        module_path="sample.py",
         params=["param_a", "resource_b"],
         modifiers=[modifier],
     )
@@ -69,11 +69,10 @@ def test_runner_iterate_params_reports_invalid_definition_as_error(
     def test_invalid(value):
         return value
 
-    item = TestDefinition(
-        name="test_invalid",
+    item = make_definition(
+        "test_invalid",
         fn=test_invalid,
-        module_path=Path("sample.py"),
-        is_async=False,
+        module_path="sample.py",
         params=["value"],
         modifiers=getattr(test_invalid, "__rue_modifiers__", []),
         definition_error=getattr(
@@ -99,11 +98,10 @@ def test_runner_iterate_params_uses_min_passes_threshold(null_reporter):
         if value == "three":
             raise AssertionError("boom")
 
-    item = TestDefinition(
-        name="test_sample",
+    item = make_definition(
+        "test_sample",
         fn=test_sample,
-        module_path=Path("sample.py"),
-        is_async=False,
+        module_path="sample.py",
         params=["value"],
         modifiers=[
             ParamsIterateModifier(

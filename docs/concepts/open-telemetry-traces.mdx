@@ -50,7 +50,7 @@ uv run rue test --reporter ConsoleReporter --reporter OtelReporter
 If you override reporters and omit `OtelReporter`, Rue still captures trace data for the run, but it does not persist local `.rue/traces/...` files.
 
 <Note>
-During test execution, Rue exposes OpenTelemetry data only through `SUT` instances. The full trace stays internal until reporters receive the finished `OtelTraceSession`.
+During test execution, Rue exposes OpenTelemetry data only through `SUT` instances. When execution completes, reporters receive finished telemetry artifacts on `ExecutedTest.telemetry_artifacts`.
 </Note>
 
 ## Basic Usage

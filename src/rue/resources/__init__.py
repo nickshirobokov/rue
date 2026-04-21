@@ -1,21 +1,21 @@
 """Resource injection system."""
 
-from rue.resources.registry import (
-    ResourceDef,
-    ResourceIdentity,
+from rue.resources.models import (
+    LoadedResourceDef,
+    ResolverSyncSnapshot,
+    ResourceSpec,
     Scope,
-    ResourceRegistry,
-    registry,
-    resource,
 )
+from rue.resources.registry import ResourceRegistry, registry, resource
 from rue.resources.resolver import ResourceResolver
 
 
 __all__ = [
-    "ResourceDef",
-    "ResourceIdentity",
+    "LoadedResourceDef",
+    "ResolverSyncSnapshot",
     "ResourceRegistry",
     "ResourceResolver",
+    "ResourceSpec",
     "Scope",
     "registry",
     "resource",

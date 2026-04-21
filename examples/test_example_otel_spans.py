@@ -53,9 +53,7 @@ def pipeline_sut():
         def generate(self, docs: list[str], query: str) -> str:
             return f"Answer based on {len(docs)} docs for: {query}"
 
-    return rue.SUT(
-        PipelineSUT(), methods=["run", "retrieve", "generate"]
-    )
+    return rue.SUT(PipelineSUT(), methods=["run", "retrieve", "generate"])
 
 
 @rue.resource.sut

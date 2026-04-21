@@ -331,22 +331,19 @@ class Reporter(ABC):
         """Called when test collection finds no tests."""
 
     @abstractmethod
-    async def on_collection_complete(self, items: list[TestDefinition]) -> None:
+    async def on_collection_complete(
+        self,
+        items: list[LoadedTestDef],
+        run: Run,
+    ) -> None:
         """Called after test collection completes."""
 
-    async def on_test_start(self, item: TestDefinition) -> None:
+    async def on_test_start(self, item: LoadedTestDef) -> None:
         """Called before a test starts executing (optional override)."""
 
-    async def on_subtest_complete(
-        self,
-        parent: TestDefinition,
-        sub_execution: TestExecution,
-    ) -> None:
-        """Called when a subtest completes (optional override)."""
-
     @abstractmethod
-    async def on_test_complete(self, execution: TestExecution) -> None:
-        """Called after each test completes."""
+    async def on_execution_complete(self, execution: ExecutedTest) -> None:
+        """Called when any test node (leaf or composite) completes."""
 
     @abstractmethod
     async def on_run_complete(self, run: Run) -> None:
@@ -355,9 +352,6 @@ class Reporter(ABC):
     @abstractmethod
     async def on_run_stopped_early(self, failure_count: int) -> None:
         """Called when run stops early due to maxfail limit."""
-
-    async def on_trace_collected(self, tracer, execution_id) -> None:
-        """Called when a test finishes with collected trace data."""
 ```
 
 ### Reporter Precedence
@@ -394,7 +388,7 @@ reporter = OtelReporter()
 ### Creating Custom Reporters
 
 Create custom reporters by subclassing `Reporter` and implementing all abstract methods.
-Override `on_test_start` if you need live in-flight state:
+Override `on_test_start` if you need live in-flight state. Finished telemetry arrives on `execution.telemetry_artifacts` inside `on_execution_complete`:
 
 ```python
 import json
@@ -402,7 +396,8 @@ from pathlib import Path
 
 from rue.config import Config
 from rue.reports.base import Reporter
-from rue.testing import Run, TestDefinition, TestExecution
+from rue.telemetry import OtelTraceArtifact
+from rue.testing import Run, LoadedTestDef, ExecutedTest
 
 class JsonFileReporter(Reporter):
     """Custom reporter that writes results to JSON file."""
@@ -418,21 +413,32 @@ class JsonFileReporter(Reporter):
     async def on_no_tests_found(self) -> None:
         print("No tests found")
 
-    async def on_collection_complete(self, items: list[TestDefinition]) -> None:
+    async def on_collection_complete(
+        self,
+        items: list[LoadedTestDef],
+        run: Run,
+    ) -> None:
+        _ = run
         print(f"Collected {len(items)} tests")
 
-    async def on_test_start(self, item: TestDefinition) -> None:
+    async def on_test_start(self, item: LoadedTestDef) -> None:
         # Optional lifecycle hook for live/in-flight reporting
         pass
 
-    async def on_test_complete(self, execution: TestExecution) -> None:
+    async def on_execution_complete(self, execution: ExecutedTest) -> None:
         # Record each test result
         self.results.append({
-            "name": execution.item.full_name,
+            "name": execution.definition.spec.full_name,
             "status": execution.status.value,
             "duration_ms": execution.result.duration_ms,
             "passed": execution.status.value == "passed"
         })
+        for artifact in execution.telemetry_artifacts:
+            if isinstance(artifact, OtelTraceArtifact):
+                print(
+                    "Collected OpenTelemetry trace for execution "
+                    f"{execution.execution_id}: {artifact.execution_id}"
+                )
 
     async def on_run_complete(self, run: Run) -> None:
         # Write all results to JSON file
@@ -450,14 +456,6 @@ class JsonFileReporter(Reporter):
 
     async def on_run_stopped_early(self, failure_count: int) -> None:
         print(f"Run stopped after {failure_count} failures")
-
-    async def on_trace_collected(self, tracer, execution_id) -> None:
-        session = tracer.completed_otel_trace_session
-        if session is not None:
-            print(
-                f"Collected OpenTelemetry trace for execution {execution_id}: "
-                f"{session.execution_id}"
-            )
 ```
 
 ### Using Multiple Reporters

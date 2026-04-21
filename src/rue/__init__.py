@@ -13,6 +13,7 @@ from .resources.sut import (
 from .testing import (
     Case,
     CaseGroup,
+    backend,
     fail,
     resource,
     skip,
@@ -21,17 +22,18 @@ from .testing import (
     iterate,
     tag,
 )
-from .telemetry import OtelTraceSession
 
 resource.sut = sut
 resource.metric = metric
 test.iterate = iterate
 test.tag = tag
+test.backend = backend
 
 __all__ = [
     # Core testing
     "Case",
     "CaseGroup",
+    "backend",
     "resource",
     "test",
     "iterate",
@@ -51,6 +53,4 @@ __all__ = [
     "metrics",
     # Reporters
     "Reporter",
-    # OpenTelemetry
-    "OtelTraceSession",
 ]

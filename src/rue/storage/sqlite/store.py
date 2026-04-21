@@ -11,7 +11,7 @@ from uuid import UUID
 
 from rue.assertions.base import AssertionResult
 from rue.predicates.models import PredicateResult
-from rue.resources import ResourceIdentity, Scope
+from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.base import (
     CalculatedValue,
     MetricMetadata,
@@ -19,9 +19,11 @@ from rue.resources.metrics.base import (
 )
 from rue.storage.base import Store
 from rue.storage.sqlite.migrations import MigrationError, MigrationRunner
-from rue.testing.models.definition import TestDefinition
-from rue.testing.models.result import TestExecution, TestResult, TestStatus
+from rue.testing.models.loaded import LoadedTestDef
+from rue.testing.models.executed import ExecutedTest
+from rue.testing.models.result import TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
+from rue.testing.models.spec import TestLocator, TestSpec
 
 
 DEFAULT_DB_NAME = ".rue/rue.db"
@@ -194,24 +196,25 @@ class SQLiteStore(Store):
             )
 
             execution_rows: list[tuple[object, ...]] = []
-            stack: list[tuple[TestExecution, str | None]] = [
+            stack: list[tuple[ExecutedTest, str | None]] = [
                 (execution, None) for execution in run.result.executions
             ]
             while stack:
                 execution, parent_id = stack.pop()
                 defn = execution.definition
+                spec = defn.spec
                 error = execution.result.error
                 error_msg = str(error) if error else None
                 error_tb = self._format_traceback(error) if error else None
-                test_name = getattr(defn, "name", str(defn))
-                module_path = getattr(defn, "module_path", None)
+                test_name = spec.name
+                module_path = spec.module_path
                 file_path = str(module_path) if module_path else None
-                class_name = getattr(defn, "class_name", None)
-                suffix = getattr(defn, "suffix", None)
-                tags: set[str] = getattr(defn, "tags", set())
-                skip_reason = getattr(defn, "skip_reason", None)
-                xfail_reason = getattr(defn, "xfail_reason", None)
-                case_id = getattr(defn, "case_id", None)
+                class_name = spec.class_name
+                suffix = spec.suffix
+                tags: set[str] = set(spec.tags)
+                skip_reason = spec.skip_reason
+                xfail_reason = spec.xfail_reason
+                case_id = spec.case_id
                 execution_id = str(execution.execution_id)
 
                 execution_rows.append(
@@ -312,7 +315,7 @@ class SQLiteStore(Store):
         self,
         conn: sqlite3.Connection,
         run_id: UUID,
-        execution: TestExecution,
+        execution: ExecutedTest,
     ) -> None:
         for assertion in execution.result.assertion_results:
             assertion_id = self._save_assertion(
@@ -401,7 +404,7 @@ class SQLiteStore(Store):
         return json.dumps(list(items)) if items else None
 
     def _to_json_resource_identities(
-        self, items: list[ResourceIdentity]
+        self, items: list[ResourceSpec]
     ) -> str | None:
         if not items:
             return None
@@ -499,13 +502,13 @@ class SQLiteStore(Store):
             (row["run_id"],),
         ).fetchall()
 
-        executions_by_id: dict[str, TestExecution] = {}
+        executions_by_id: dict[str, ExecutedTest] = {}
         for exec_row in exec_rows:
             executions_by_id[exec_row["execution_id"]] = self._row_to_execution(
                 exec_row
             )
 
-        executions: list[TestExecution] = []
+        executions: list[ExecutedTest] = []
         for exec_row in exec_rows:
             execution = executions_by_id[exec_row["execution_id"]]
             parent_id = exec_row["parent_id"]
@@ -539,24 +542,35 @@ class SQLiteStore(Store):
             result=result,
         )
 
-    def _row_to_execution(self, row: sqlite3.Row) -> TestExecution:
+    def _row_to_execution(self, row: sqlite3.Row) -> ExecutedTest:
         error = (
             Exception(row["error_message"]) if row["error_message"] else None
         )
         tags_json = row["tags_json"]
         tags = set(json.loads(tags_json)) if tags_json else set()
 
-        definition = TestDefinition(
-            name=row["test_name"],
+        definition = LoadedTestDef(
+            spec=TestSpec(
+                locator=TestLocator(
+                    module_path=Path(row["file_path"])
+                    if row["file_path"]
+                    else Path(),
+                    function_name=row["test_name"],
+                    class_name=row["class_name"],
+                ),
+                is_async=False,
+                params=(),
+                modifiers=(),
+                tags=frozenset(tags),
+                skip_reason=row["skip_reason"],
+                xfail_reason=row["xfail_reason"],
+                suffix=row["suffix"],
+                case_id=UUID(row["case_id"]) if row["case_id"] else None,
+            ),
             fn=lambda: None,
-            module_path=Path(row["file_path"]) if row["file_path"] else Path(),
-            is_async=False,
-            class_name=row["class_name"],
-            tags=tags,
-            skip_reason=row["skip_reason"],
-            xfail_reason=row["xfail_reason"],
-            suffix=row["suffix"],
-            case_id=UUID(row["case_id"]) if row["case_id"] else None,
+            suite_root=(
+                Path(row["file_path"]).parent if row["file_path"] else Path()
+            ),
         )
 
         result = TestResult(
@@ -565,7 +579,7 @@ class SQLiteStore(Store):
             error=error,
         )
 
-        return TestExecution(
+        return ExecutedTest(
             definition=definition,
             result=result,
             execution_id=UUID(row["execution_id"]),
@@ -585,12 +599,12 @@ class SQLiteStore(Store):
         scope = (
             Scope(scope_str)
             if scope_str in {s.value for s in Scope}
-            else Scope.SESSION
+            else Scope.PROCESS
         )
 
         first_at = row["first_recorded_at"]
         last_at = row["last_recorded_at"]
-        identity = ResourceIdentity(
+        identity = ResourceSpec(
             name=row["name"],
             scope=scope,
             provider_path=row["provider_path"]
@@ -642,11 +656,11 @@ class SQLiteStore(Store):
 
     def _from_json_resource_identities(
         self, json_str: str | None
-    ) -> list[ResourceIdentity]:
+    ) -> list[ResourceSpec]:
         if not json_str:
             return []
         return [
-            ResourceIdentity(
+            ResourceSpec(
                 name=item["name"],
                 scope=Scope(item["scope"]),
                 provider_path=item.get("provider_path"),

@@ -1,398 +1,144 @@
-"""Test discovery for explicit Rue tests in test_* modules."""
+"""Static test spec collection and filtering."""
+
+from __future__ import annotations
 
 import ast
-import inspect
 import os
-from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from types import ModuleType
-from typing import Any, Protocol, TypeVar
 
-from rue.resources.registry import Scope, registry
-from rue.testing.decorators.tag import TagData, get_tag_data, merge_tag_data
-from rue.testing.discovery.loader import RueImportSession
-from rue.testing.models import Modifier, TestDefinition
-
-
-@dataclass(frozen=True)
-class StaticTestReference:
-    """A test reference discovered from source without importing the module."""
-
-    name: str
-    module_path: Path
-    class_name: str | None = None
-    tags: frozenset[str] = frozenset()
-
-    @property
-    def full_name(self) -> str:
-        """Full qualified name for matching and filtering."""
-        if self.class_name:
-            return f"{self.module_path.stem}::{self.class_name}::{self.name}"
-        return f"{self.module_path.stem}::{self.name}"
+from rue.testing.models.spec import (
+    SetupFileRef,
+    TestLocator,
+    TestSpec,
+    TestSpecCollection,
+)
 
 
-def _resolve_path(path: Path | str | None) -> Path:
-    if path is None:
-        return Path.cwd().resolve()
-    if isinstance(path, str):
-        return Path(path).resolve()
-    return path.resolve()
+class _StaticSpecVisitor(ast.NodeVisitor):
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._class_name: str | None = None
+        self._class_tags: frozenset[str] = frozenset()
+        self._class_is_rue = False
+        self.specs: list[TestSpec] = []
 
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_test_function(node)
 
-def _iter_test_files(path: Path) -> list[Path]:
-    if path.is_file():
-        if path.name.startswith("test_") and path.suffix == ".py":
-            return [path]
-        return []
-    if path.is_dir():
-        return sorted(path.rglob("test_*.py"))
-    return []
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_test_function(node)
 
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        if self._class_name is not None:
+            return
 
-def _iter_setup_files(path: Path) -> list[Path]:
-    if not path.is_dir():
-        return []
-    setup_files: list[Path] = []
-    conftest_path = path / "conftest.py"
-    if conftest_path.is_file():
-        setup_files.append(conftest_path)
-    setup_files.extend(sorted(path.glob("confrue_*.py")))
-    return setup_files
-
-
-def _is_test_root(expr: ast.expr) -> bool:
-    if isinstance(expr, ast.Name):
-        return expr.id == "test"
-    if isinstance(expr, ast.Attribute):
-        return (
-            isinstance(expr.value, ast.Name)
-            and expr.value.id == "rue"
-            and expr.attr == "test"
+        self._class_name = node.name
+        self._class_tags = frozenset(
+            self._extract_static_tags(node.decorator_list)
         )
-    return False
+        self._class_is_rue = any(
+            self._is_rue_test_decorator(decorator)
+            for decorator in node.decorator_list
+        )
+        for child in node.body:
+            self.visit(child)
+        self._class_name = None
+        self._class_tags = frozenset()
+        self._class_is_rue = False
 
-
-def _is_rue_test_decorator(expr: ast.expr) -> bool:
-    """Return True if the decorator AST node roots at `test` or `rue.test`."""
-    if isinstance(expr, ast.Call):
-        return _is_rue_test_decorator(expr.func)
-    if _is_test_root(expr):
-        return True
-    if isinstance(expr, ast.Attribute):
-        return _is_rue_test_decorator(expr.value)
-    return False
-
-
-def _is_tag_root(expr: ast.expr) -> bool:
-    return (
-        isinstance(expr, ast.Attribute)
-        and expr.attr == "tag"
-        and _is_test_root(expr.value)
-    )
-
-
-def _is_tag_method(expr: ast.expr, method_name: str) -> bool:
-    return (
-        isinstance(expr, ast.Attribute)
-        and expr.attr == method_name
-        and _is_tag_root(expr.value)
-    )
-
-
-def _extract_static_tags(decorators: list[ast.expr]) -> set[str]:
-    tags: set[str] = set()
-    for decorator in decorators:
-        if isinstance(decorator, ast.Call):
-            if _is_tag_root(decorator.func):
-                for arg in decorator.args:
-                    if (
-                        isinstance(arg, ast.Constant)
-                        and isinstance(arg.value, str)
-                    ):
-                        tags.add(arg.value)
-                continue
-            if _is_tag_method(decorator.func, "skip"):
-                tags.add("skip")
-                continue
-            if _is_tag_method(decorator.func, "xfail"):
-                tags.add("xfail")
-            continue
-        if _is_tag_method(decorator, "inline"):
-            tags.add("inline")
-    return tags
-
-
-def _collect_static_from_module(path: Path) -> list[StaticTestReference]:
-    module = ast.parse(path.read_text(), filename=str(path))
-    refs: list[StaticTestReference] = []
-
-    for node in module.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if any(_is_rue_test_decorator(d) for d in node.decorator_list):
-                refs.append(
-                    StaticTestReference(
-                        name=node.name,
-                        module_path=path,
-                        tags=frozenset(
-                            _extract_static_tags(node.decorator_list)
-                        ),
-                    )
-                )
-            continue
-
-        if isinstance(node, ast.ClassDef):
-            class_tags = _extract_static_tags(node.decorator_list)
-            class_is_rue = any(
-                _is_rue_test_decorator(d) for d in node.decorator_list
-            )
-            for class_node in node.body:
-                if isinstance(
-                    class_node, (ast.FunctionDef, ast.AsyncFunctionDef)
-                ):
-                    if (
-                        class_is_rue
-                        and class_node.name.startswith("test_")
-                    ) or any(
-                        _is_rue_test_decorator(d)
-                        for d in class_node.decorator_list
-                    ):
-                        tags = class_tags | _extract_static_tags(
-                            class_node.decorator_list
-                        )
-                        refs.append(
-                            StaticTestReference(
-                                name=class_node.name,
-                                module_path=path,
-                                class_name=node.name,
-                                tags=frozenset(tags),
-                            )
-                        )
-
-    return refs
-
-
-def collect_static(path: Path | str | None = None) -> list[StaticTestReference]:
-    """Discover test names and tags without importing modules."""
-    resolved_path = _resolve_path(path)
-    refs: list[StaticTestReference] = []
-
-    for file_path in _iter_test_files(resolved_path):
-        refs.extend(_collect_static_from_module(file_path))
-
-    return refs
-
-
-def _resolve_suite_root(explicit_root: Path) -> Path:
-    for candidate in [explicit_root, *explicit_root.parents]:
-        if (candidate / "pyproject.toml").exists():
-            return candidate
-    return explicit_root
-
-
-def _resolve_collect_root(paths: list[Path]) -> Path:
-    bases = [path.parent for path in paths]
-    if len(bases) == 1:
-        return bases[0]
-    return Path(os.path.commonpath([str(base) for base in bases]))
-
-
-def _iter_ancestor_dirs(root: Path, directory: Path) -> list[Path]:
-    relative = directory.relative_to(root)
-    current = root
-    directories = [root]
-    for part in relative.parts:
-        current /= part
-        directories.append(current)
-    return directories
-
-
-def _config_chain_for(path: Path, suite_root: Path) -> list[Path]:
-    configs: list[Path] = []
-    for directory in _iter_ancestor_dirs(suite_root, path.parent):
-        configs.extend(_iter_setup_files(directory))
-    return configs
-
-
-_PYTEST_SCOPE_MAP: dict[str, Scope] = {
-    "function": Scope.CASE,
-    "class": Scope.SUITE,
-    "module": Scope.SUITE,
-    "package": Scope.SESSION,
-    "session": Scope.SESSION,
-}
-
-
-def _register_fixtures_from_module(module: ModuleType) -> None:
-    """Register pytest fixtures found in a module as Rue resources."""
-    for _name, obj in inspect.getmembers(module):
-        match (
-            getattr(obj, "_fixture_function_marker", None),
-            getattr(obj, "_pytestfixturefunction", None),
+    def _visit_test_function(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> None:
+        has_rue_test = any(
+            self._is_rue_test_decorator(decorator)
+            for decorator in node.decorator_list
+        )
+        if self._class_name is None and not has_rue_test:
+            return
+        if self._class_name is not None and not (
+            (self._class_is_rue and node.name.startswith("test_"))
+            or has_rue_test
         ):
-            case (marker, _) if marker is not None:
-                fn = getattr(obj, "_fixture_function", obj)
-            case (_, marker) if marker is not None:
-                fn = obj
+            return
+
+        tags = self._extract_static_tags(node.decorator_list)
+        if self._class_name is not None:
+            tags = set(self._class_tags | tags)
+
+        self.specs.append(
+            TestSpec(
+                locator=TestLocator(
+                    module_path=self._path,
+                    function_name=node.name,
+                    class_name=self._class_name,
+                ),
+                is_async=isinstance(node, ast.AsyncFunctionDef),
+                params=(),
+                modifiers=(),
+                tags=frozenset(tags),
+            )
+        )
+
+    def _is_test_root(self, expr: ast.expr) -> bool:
+        match expr:
+            case ast.Name(id="test"):
+                return True
+            case ast.Attribute(value=ast.Name(id="rue"), attr="test"):
+                return True
             case _:
-                continue
-        if marker.params is not None or registry.get(fn.__name__) is not None:
-            continue
-        registry.resource(fn, scope=_PYTEST_SCOPE_MAP.get(marker.scope or "function", Scope.CASE))
+                return False
 
+    def _is_rue_test_decorator(self, expr: ast.expr) -> bool:
+        match expr:
+            case ast.Call(func=func):
+                return self._is_rue_test_decorator(func)
+            case ast.Name() | ast.Attribute():
+                if self._is_test_root(expr):
+                    return True
+                if isinstance(expr, ast.Attribute):
+                    return self._is_rue_test_decorator(expr.value)
+            case _:
+                return False
+        return False
 
-def _collect_paths(
-    paths: list[Path], *, explicit_root: Path | None
-) -> list[TestDefinition]:
-    if not paths:
-        return []
+    def _is_tag_root(self, expr: ast.expr) -> bool:
+        match expr:
+            case ast.Attribute(value=value, attr="tag"):
+                return self._is_test_root(value)
+            case _:
+                return False
 
-    resolved_paths = sorted({path.resolve() for path in paths})
-    collect_root = (
-        explicit_root.resolve()
-        if explicit_root is not None
-        else _resolve_collect_root(resolved_paths)
-    )
-    suite_root = _resolve_suite_root(collect_root)
-    session = RueImportSession(suite_root)
+    def _is_tag_method(self, expr: ast.expr, method_name: str) -> bool:
+        match expr:
+            case ast.Attribute(value=value, attr=attr):
+                return attr == method_name and self._is_tag_root(value)
+            case _:
+                return False
 
-    config_chains: dict[Path, list[Path]] = {}
-    for file_path in resolved_paths:
-        session.register_path(file_path)
-        config_paths = _config_chain_for(file_path, suite_root)
-        config_chains[file_path] = config_paths
-        for config_path in config_paths:
-            session.register_path(config_path)
-
-    items: list[TestDefinition] = []
-    for file_path in resolved_paths:
-        for config_path in config_chains[file_path]:
-            config_module = session.load_module(config_path)
-            _register_fixtures_from_module(config_module)
-        module = session.load_module(file_path)
-        _register_fixtures_from_module(module)
-        items.extend(_collect_from_module(module, file_path))
-
-    return items
-
-
-def _extract_test_params(fn: Callable[..., Any]) -> list[str]:
-    """Extract parameter names from function signature (excluding 'self')."""
-    sig = inspect.signature(fn)
-    return [p for p in sig.parameters if p != "self"]
-
-
-def _get_modifiers(fn: Callable[..., Any]) -> list[Modifier]:
-    """Extract modifiers from function's __rue_modifiers__ attribute."""
-    return getattr(fn, "__rue_modifiers__", [])
-
-
-def _collect_from_module(
-    module: ModuleType, module_path: Path
-) -> list[TestDefinition]:
-    """Collect all matching tests from a module."""
-    items: list[TestDefinition] = []
-
-    for name, obj in inspect.getmembers(module):
-        if inspect.isfunction(obj) and getattr(obj, "__rue_test__", False):
-            items.append(_build_item_for_callable(obj, name, module_path))
-
-        elif inspect.isclass(obj):
-            class_is_rue = getattr(obj, "__rue_test__", False)
-            class_tags = get_tag_data(obj)
-            for method_name, method in inspect.getmembers(
-                obj, predicate=inspect.isfunction
-            ):
-                if getattr(method, "__rue_test__", False) or (
-                    class_is_rue and method_name.startswith("test_")
-                ):
-                    items.append(
-                        _build_item_for_callable(
-                            method,
-                            method_name,
-                            module_path,
-                            class_name=name,
-                            parent_tags=class_tags,
-                        )
+    def _extract_static_tags(self, decorators: list[ast.expr]) -> set[str]:
+        tags: set[str] = set()
+        for decorator in decorators:
+            match decorator:
+                case ast.Call(func=func, args=args) if self._is_tag_root(func):
+                    tags.update(
+                        arg.value
+                        for arg in args
+                        if isinstance(arg, ast.Constant)
+                        and isinstance(arg.value, str)
                     )
-
-    return items
-
-
-def _build_item_for_callable(
-    fn: Callable[..., Any],
-    name: str,
-    module_path: Path,
-    class_name: str | None = None,
-    parent_tags: TagData | None = None,
-) -> TestDefinition:
-    """Create a single TestDefinition for a callable with modifiers attached."""
-    combined_tags = merge_tag_data(parent_tags, get_tag_data(fn))
-    modifiers = reversed(_get_modifiers(fn))
-    definition_error: str | None = getattr(fn, "__rue_definition_error__", None)
-
-    return TestDefinition(
-        name=name,
-        fn=fn,
-        module_path=module_path,
-        is_async=inspect.iscoroutinefunction(fn),
-        params=_extract_test_params(fn),
-        class_name=class_name,
-        modifiers=list(modifiers),
-        tags=set(combined_tags.tags),
-        skip_reason=combined_tags.skip_reason,
-        xfail_reason=combined_tags.xfail_reason,
-        xfail_strict=combined_tags.xfail_strict,
-        definition_error=definition_error,
-        inline=combined_tags.inline,
-    )
-
-
-def collect(path: Path | str | None = None) -> list[TestDefinition]:
-    """Discover all matching tests from path.
-
-    Args:
-        path: File or directory to search. Defaults to current directory.
-
-    Returns:
-        List of discovered TestDefinition objects.
-
-    Example:
-        items = collect()  # Current directory
-        items = collect("test_agents.py")  # Specific file
-        items = collect("./tests/")  # Directory
-    """
-    path = _resolve_path(path)
-    file_paths = _iter_test_files(path)
-    explicit_root = path if path.is_dir() else path.parent
-    return _collect_paths(file_paths, explicit_root=explicit_root)
-
-
-def collect_paths(paths: Sequence[Path | str]) -> list[TestDefinition]:
-    """Collect tests from multiple explicit module paths in one session."""
-    resolved = [
-        Path(path).resolve() if isinstance(path, str) else path.resolve()
-        for path in paths
-    ]
-    return _collect_paths(resolved, explicit_root=None)
-
-
-class Filterable(Protocol):
-    """Minimal interface needed by filtering logic."""
-
-    @property
-    def tags(self) -> set[str] | frozenset[str]: ...
-
-    @property
-    def full_name(self) -> str: ...
-
-
-FilterableT = TypeVar("FilterableT", bound=Filterable)
+                case ast.Call(func=func) if self._is_tag_method(func, "skip"):
+                    tags.add("skip")
+                case ast.Call(func=func) if self._is_tag_method(func, "xfail"):
+                    tags.add("xfail")
+                case ast.Attribute() if self._is_tag_method(
+                    decorator, "inline"
+                ):
+                    tags.add("inline")
+        return tags
 
 
 class _KeywordNames(Mapping[str, bool]):
-    """Namespace for eval: each identifier is true iff it appears as a substring."""
-
     __slots__ = ("_text",)
 
     def __init__(self, text: str) -> None:
@@ -409,7 +155,7 @@ class _KeywordNames(Mapping[str, bool]):
 
 
 class KeywordMatcher:
-    """Evaluate pytest-style -k expressions (Python ``and`` / ``or`` / ``not``)."""
+    """Evaluate pytest-style -k expressions."""
 
     __slots__ = ("_code",)
 
@@ -417,13 +163,11 @@ class KeywordMatcher:
         self._code = compile(expression, "<keyword>", "eval")
 
     def match(self, text: str) -> bool:
-        return bool(
-            eval(self._code, {"__builtins__": {}}, _KeywordNames(text))
-        )
+        return bool(eval(self._code, {"__builtins__": {}}, _KeywordNames(text)))
 
 
-class TestCollector:
-    """Discovers and filters test items for a given set of paths and criteria."""
+class TestSpecCollector:
+    """Build filtered spec collections using static AST discovery only."""
 
     def __init__(
         self,
@@ -431,38 +175,117 @@ class TestCollector:
         exclude_tags: Sequence[str],
         keyword: str | None,
     ) -> None:
-        self.include_tags = include_tags
-        self.exclude_tags = exclude_tags
+        self.include_tags = frozenset(include_tags)
+        self.exclude_tags = frozenset(exclude_tags)
         self.keyword = keyword
+        self._keyword_matcher = KeywordMatcher(keyword) if keyword else None
 
-    def collect(self, paths: Sequence[str]) -> list[TestDefinition]:
-        static_refs: list[StaticTestReference] = []
-        for path in paths:
-            static_refs.extend(collect_static(path))
+    def build_spec_collection(
+        self,
+        paths: Sequence[Path | str],
+        *,
+        explicit_root: Path | None = None,
+    ) -> TestSpecCollection:
+        explicit_root = explicit_root.resolve() if explicit_root else None
+        inputs = tuple(Path(path).resolve() for path in paths)
+        module_paths = sorted(
+            {
+                module_path
+                for path in inputs
+                for module_path in (
+                    [path]
+                    if path.is_file()
+                    and path.suffix == ".py"
+                    and path.name.startswith("test_")
+                    else path.rglob("test_*.py")
+                    if path.is_dir()
+                    else ()
+                )
+            }
+        )
 
-        selected_refs = self.filter(static_refs)
-        if not selected_refs:
-            return []
+        if not module_paths:
+            if explicit_root is not None:
+                return TestSpecCollection(suite_root=explicit_root)
+            if len(inputs) == 1:
+                [root] = inputs
+                return TestSpecCollection(
+                    suite_root=root if root.is_dir() else root.parent
+                )
+            return TestSpecCollection(suite_root=Path.cwd().resolve())
 
-        selected_paths = sorted({ref.module_path for ref in selected_refs})
-        items = collect_paths(selected_paths)
-        return self.filter(items)
+        collect_root = explicit_root or Path(
+            os.path.commonpath(
+                [module_path.parent for module_path in module_paths]
+            )
+        )
+        suite_root = next(
+            (
+                candidate
+                for candidate in (collect_root, *collect_root.parents)
+                if (candidate / "pyproject.toml").exists()
+            ),
+            collect_root,
+        )
 
-    def filter(self, items: Sequence[FilterableT]) -> list[FilterableT]:
+        setup_chains: dict[Path, tuple[SetupFileRef, ...]] = {}
+        specs: list[TestSpec] = []
+        for module_path in module_paths:
+            visitor = _StaticSpecVisitor(module_path)
+            visitor.visit(
+                ast.parse(
+                    module_path.read_text(),
+                    filename=str(module_path),
+                )
+            )
+            if not (module_specs := self.filter_specs(visitor.specs)):
+                continue
+
+            parts = module_path.parent.relative_to(suite_root).parts
+            directories = [
+                suite_root,
+                *(
+                    suite_root.joinpath(*parts[:depth])
+                    for depth in range(1, len(parts) + 1)
+                ),
+            ]
+
+            chain: list[SetupFileRef] = []
+            for directory in directories:
+                if (conftest := directory / "conftest.py").is_file():
+                    chain.append(SetupFileRef(path=conftest, kind="conftest"))
+                chain.extend(
+                    SetupFileRef(path=setup_path, kind="confrue")
+                    for setup_path in sorted(directory.glob("confrue_*.py"))
+                )
+
+            setup_chains[module_path] = tuple(chain)
+            specs.extend(module_specs)
+
+        return TestSpecCollection(
+            suite_root=suite_root,
+            setup_chains=setup_chains,
+            specs=tuple(specs),
+        )
+
+    def filter_specs(self, items: Sequence[TestSpec]) -> list[TestSpec]:
         filtered = list(items)
 
         if self.include_tags:
-            include = set(self.include_tags)
-            filtered = [item for item in filtered if item.tags & include]
+            filtered = [
+                item for item in filtered if item.tags & self.include_tags
+            ]
 
         if self.exclude_tags:
-            exclude = set(self.exclude_tags)
-            filtered = [item for item in filtered if not (item.tags & exclude)]
-
-        if self.keyword:
-            matcher = KeywordMatcher(self.keyword)
             filtered = [
-                item for item in filtered if matcher.match(item.full_name)
+                item for item in filtered if not (item.tags & self.exclude_tags)
+            ]
+
+        if self._keyword_matcher is not None:
+            filtered = [
+                item
+                for item in filtered
+                if self._keyword_matcher.match(item.full_name)
             ]
 
         return filtered

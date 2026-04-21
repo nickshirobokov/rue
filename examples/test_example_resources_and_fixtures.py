@@ -1,6 +1,7 @@
 import rue
 import pytest
 
+
 @rue.resource
 def some_rue_resource():
     return "some_rue_resource"

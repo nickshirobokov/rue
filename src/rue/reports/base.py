@@ -4,16 +4,14 @@ from __future__ import annotations
 
 from abc import ABC, ABCMeta, abstractmethod
 from typing import TYPE_CHECKING, ClassVar
-from uuid import UUID
 
 
 if TYPE_CHECKING:
     from rue.config import Config
-    from rue.testing import TestDefinition
-    from rue.testing.execution.interfaces import Test
-    from rue.testing.models.result import TestExecution
+    from rue.testing import LoadedTestDef
+    from rue.testing.execution.interfaces import ExecutableTest
+    from rue.testing.models.executed import ExecutedTest
     from rue.testing.models.run import Run
-    from rue.testing.tracing import TestTracer
 
 
 class ReporterMeta(ABCMeta):
@@ -42,21 +40,23 @@ class Reporter(ABC, metaclass=ReporterMeta):
         """Called when test collection finds no tests."""
 
     @abstractmethod
-    async def on_collection_complete(self, items: list[TestDefinition], run: Run) -> None:
+    async def on_collection_complete(
+        self, items: list[LoadedTestDef], run: Run
+    ) -> None:
         """Called after test collection completes."""
 
-    async def on_tests_ready(self, tests: list[Test]) -> None:
-        """Called after all Test trees are built, before execution starts."""
+    async def on_tests_ready(self, tests: list[ExecutableTest]) -> None:
+        """Called after all executable test trees are built, before execution starts."""
         _ = tests
         return None
 
-    async def on_test_start(self, item: TestDefinition) -> None:
+    async def on_test_start(self, item: LoadedTestDef) -> None:
         """Called before a test starts executing."""
         _ = item
         return None
 
     @abstractmethod
-    async def on_execution_complete(self, execution: TestExecution) -> None:
+    async def on_execution_complete(self, execution: ExecutedTest) -> None:
         """Called when any test node (leaf or composite) completes."""
 
     @abstractmethod
@@ -66,10 +66,3 @@ class Reporter(ABC, metaclass=ReporterMeta):
     @abstractmethod
     async def on_run_stopped_early(self, failure_count: int) -> None:
         """Called when run stops early due to maxfail limit."""
-
-    async def on_trace_collected(
-        self, tracer: TestTracer, execution_id: UUID
-    ) -> None:
-        """Called when a test finishes collecting trace data."""
-        _ = tracer, execution_id
-        return None

@@ -1,97 +1,59 @@
-"""Per-execution tracing state."""
+"""Per-execution telemetry orchestration."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
+from typing import TypeVar
 from uuid import UUID
 
-from opentelemetry.trace import Span, StatusCode
+from rue.config import Config
+from rue.telemetry.base import TelemetryArtifact
+from rue.telemetry.backends.base import TelemetryBackend
+from rue.telemetry.otel.backend import OtelTelemetryBackend
+from rue.testing.models import LoadedTestDef, TestResult
 
-from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
-from rue.testing.models import TestDefinition, TestResult
+T = TypeVar("T", bound=TelemetryBackend)
 
 
 @dataclass(slots=True)
 class TestTracer:
-    """Stores tracing state for a single test execution."""
+    """Coordinates telemetry backends for one concrete execution."""
 
     __test__ = False
 
-    otel_enabled: bool
-    run_id: UUID | None = None
-    otel_root_span: Span | None = None
-    otel_trace_session: OtelTraceSession | None = None
-    completed_otel_trace_session: OtelTraceSession | None = None
-    _otel_root_span_scope: Any = field(default=None, init=False, repr=False)
+    run_id: UUID
+    backends: tuple[TelemetryBackend, ...] = ()
 
-    @property
-    def has_otel_trace(self) -> bool:
-        return self.otel_trace_session is not None
-
-    @property
-    def otel_trace_id(self) -> str | None:
-        span = self.completed_otel_trace_session
-        if span is not None:
-            return format(span.root_span.get_span_context().trace_id, "032x")
-        if self.otel_root_span is None:
-            return None
-        return format(self.otel_root_span.get_span_context().trace_id, "032x")
-
-    def start_otel_root_span(self, definition: TestDefinition) -> Span | None:
-        if not self.otel_enabled:
-            return None
-
-        scope = otel_runtime.start_as_current_span(
-            f"test.{definition.full_name}"
-        )
-        span = scope.__enter__()
-        self._otel_root_span_scope = scope
-        self.otel_root_span = span
-        span.set_attribute("test.name", definition.name)
-        span.set_attribute("test.module", str(definition.module_path))
-        if definition.tags:
-            span.set_attribute("test.tags", list(definition.tags))
-        if definition.suffix:
-            span.set_attribute("test.suffix", definition.suffix)
-        if definition.case_id:
-            span.set_attribute("test.case_id", str(definition.case_id))
-        return span
-
-    def start_otel_trace(
-        self, *, execution_id: UUID
-    ) -> OtelTraceSession | None:
-        if self.otel_root_span is None or self.run_id is None:
-            return None
-
-        self.otel_trace_session = otel_runtime.start_otel_trace(
-            self.otel_root_span,
-            run_id=self.run_id,
-            execution_id=execution_id,
-        )
-        return self.otel_trace_session
-
-    def record_otel_result(self, result: TestResult) -> None:
-        if self.otel_root_span is None:
-            return
-
-        self.otel_root_span.set_attribute("test.status", result.status.value)
-        self.otel_root_span.set_attribute(
-            "test.duration_ms", result.duration_ms
-        )
-        if result.error:
-            self.otel_root_span.set_status(StatusCode.ERROR, str(result.error))
-            self.otel_root_span.record_exception(result.error)
-
-    def finish_otel_trace(self) -> OtelTraceSession | None:
-        if self._otel_root_span_scope is not None:
-            self._otel_root_span_scope.__exit__(None, None, None)
-            self._otel_root_span_scope = None
-
-        if self.otel_trace_session is not None:
-            self.completed_otel_trace_session = otel_runtime.finish_otel_trace(
-                self.otel_trace_session
+    def start(self, definition: LoadedTestDef, execution_id: UUID) -> None:
+        for backend in self.backends:
+            backend.start(
+                definition,
+                run_id=self.run_id,
+                execution_id=execution_id,
             )
-            self.otel_trace_session = None
 
-        return self.completed_otel_trace_session
+    def record_result(self, result: TestResult) -> None:
+        for backend in self.backends:
+            backend.record_result(result)
+
+    def finish(self) -> tuple[TelemetryArtifact, ...]:
+        artifacts: list[TelemetryArtifact] = []
+        for backend in self.backends:
+            artifacts.extend(backend.finish())
+        return tuple(artifacts)
+
+    def get_backend(self, backend_type: type[T]) -> T | None:
+        for backend in self.backends:
+            if isinstance(backend, backend_type):
+                return backend
+        return None
+
+
+def build_test_tracer(
+    *, config: Config, run_id: UUID
+) -> TestTracer:
+    """Build a tracer by resolving telemetry backends from config flags."""
+    backends: list[TelemetryBackend] = []
+    if config.otel:
+        backends.append(OtelTelemetryBackend())
+    return TestTracer(run_id=run_id, backends=tuple(backends))

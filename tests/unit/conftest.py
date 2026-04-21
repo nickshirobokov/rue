@@ -10,6 +10,7 @@ from rue.reports.otel import OtelReporter
 from rue.reports.base import Reporter
 from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.migrations import MigrationRunner
+from rue.telemetry import OtelTraceArtifact
 
 
 def _reset_reporters() -> None:
@@ -51,15 +52,17 @@ class NullReporter(Reporter):
 
 
 class TraceCollectorReporter(NullReporter):
-    """Reporter that keeps collected OpenTelemetry sessions."""
+    """Reporter that keeps collected OpenTelemetry artifacts."""
 
     def __init__(self) -> None:
-        self.sessions = []
+        self.artifacts: list[OtelTraceArtifact] = []
 
-    async def on_trace_collected(self, tracer, execution_id) -> None:
-        _ = execution_id
-        if tracer.completed_otel_trace_session is not None:
-            self.sessions.append(tracer.completed_otel_trace_session)
+    async def on_execution_complete(self, execution) -> None:
+        self.artifacts.extend(
+            artifact
+            for artifact in execution.telemetry_artifacts
+            if isinstance(artifact, OtelTraceArtifact)
+        )
 
 
 @pytest.fixture
@@ -70,7 +73,7 @@ def null_reporter() -> NullReporter:
 
 @pytest.fixture
 def trace_reporter() -> TraceCollectorReporter:
-    """Provide a reporter that collects completed OTEL sessions."""
+    """Provide a reporter that collects completed OTEL trace artifacts."""
     return TraceCollectorReporter()
 
 

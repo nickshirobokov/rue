@@ -10,7 +10,7 @@ from rich.console import Console
 from rue.assertions.base import AssertionRepr, AssertionResult
 from rue.reports.console import ConsoleReporter
 from rue.reports.console.metrics import MetricGroup
-from rue.resources import ResourceIdentity, Scope
+from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.base import (
     MetricMetadata,
     MetricResult,
@@ -18,11 +18,12 @@ from rue.resources.metrics.base import (
 from rue.resources.sut.output import SUTOutputCapture
 from rue.testing.models import (
     Run,
-    TestDefinition,
-    TestExecution,
+    LoadedTestDef,
+    ExecutedTest,
     TestResult,
     TestStatus,
 )
+from tests.unit.factories import make_definition
 
 
 class FakeLive:
@@ -69,31 +70,22 @@ def make_item(
     *,
     suffix: str | None = None,
     case_id: UUID | None = None,
-) -> TestDefinition:
-    return TestDefinition(
-        name=name,
-        fn=lambda: None,
-        module_path=Path(module_path),
-        is_async=False,
-        params=[],
-        class_name=None,
-        modifiers=[],
-        tags=set(),
-        suffix=suffix,
-        case_id=case_id,
+) -> LoadedTestDef:
+    return make_definition(
+        name, module_path=module_path, suffix=suffix, case_id=case_id
     )
 
 
 def make_execution(
-    item: TestDefinition,
+    item: LoadedTestDef,
     status: TestStatus,
     duration_ms: float,
     *,
     error: Exception | None = None,
     assertion_results: list[AssertionResult] | None = None,
-    sub_executions: list[TestExecution] | None = None,
-) -> TestExecution:
-    return TestExecution(
+    sub_executions: list[ExecutedTest] | None = None,
+) -> ExecutedTest:
+    return ExecutedTest(
         definition=item,
         result=TestResult(
             status=status,
@@ -117,7 +109,7 @@ def render_to_text(renderable) -> str:
 def make_metric_result(
     name: str,
     *,
-    scope: Scope = Scope.SESSION,
+    scope: Scope = Scope.PROCESS,
     value=1.0,
     assertion_results: list[AssertionResult] | None = None,
     tests: set[str] | None = None,
@@ -126,11 +118,11 @@ def make_metric_result(
     modules: set[str] | None = None,
     provider_path: str | None = None,
     provider_dir: str | None = None,
-    depends_on: list[ResourceIdentity] | None = None,
+    depends_on: list[ResourceSpec] | None = None,
     execution_id: UUID | None = None,
 ) -> MetricResult:
     metadata = MetricMetadata(
-        identity=ResourceIdentity(
+        identity=ResourceSpec(
             name=name,
             scope=scope,
             provider_path=provider_path,
@@ -542,6 +534,7 @@ async def test_compact_mode_does_not_show_warnings_section():
 
     await reporter.on_collection_complete([item], Run())
     import sys
+
     sys.stderr.write("some noisy warning\n")
     await reporter.on_execution_complete(execution)
 
@@ -565,6 +558,7 @@ async def test_verbose_mode_does_not_show_warnings_section():
 
     await reporter.on_collection_complete([item], Run())
     import sys
+
     sys.stderr.write("some noisy warning\n")
     await reporter.on_execution_complete(execution)
 
@@ -705,7 +699,7 @@ async def test_metrics_verbose_mode_groups_case_metrics_into_instances_panel():
     run.result.metric_results = [
         make_metric_result(
             "case_accuracy",
-            scope=Scope.CASE,
+            scope=Scope.TEST,
             value=1.0,
             assertion_results=[passing],
             tests={"test_shared"},
@@ -717,7 +711,7 @@ async def test_metrics_verbose_mode_groups_case_metrics_into_instances_panel():
         ),
         make_metric_result(
             "case_accuracy",
-            scope=Scope.CASE,
+            scope=Scope.TEST,
             value=0.0,
             assertion_results=[failing],
             tests={"test_shared"},
@@ -735,7 +729,7 @@ async def test_metrics_verbose_mode_groups_case_metrics_into_instances_panel():
     assert "OVERVIEW" in text
     assert "BREAKDOWN" in text
     assert "case_accuracy" in text
-    assert "case ×2" in text
+    assert "test ×2" in text
     assert "Instances" in text
     assert "[case-a]" in text
     assert "[case-b]" in text
@@ -869,7 +863,7 @@ def test_metrics_overview_assertion_summary_substitutes_resolved_value_with_dim_
         passed=True,
     )
     group = MetricGroup(
-        key=ResourceIdentity(name="accuracy", scope=Scope.SESSION),
+        key=ResourceSpec(name="accuracy", scope=Scope.PROCESS),
         metrics=[],
     )
     group.metrics = [

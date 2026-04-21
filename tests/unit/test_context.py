@@ -14,24 +14,20 @@ from rue.context.runtime import (
     TestContext as Ctx,
     bind,
 )
-from rue.resources import ResourceIdentity, Scope, registry
+from rue.resources import ResourceSpec, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata
-from rue.testing.models import TestDefinition
+from rue.testing.models import LoadedTestDef
+from tests.unit.factories import make_definition
 
 
 def _make_item(
     name: str = "test_fn",
     suffix: str | None = None,
     case_id=None,
-) -> TestDefinition:
-    """Create a minimal TestDefinition for testing."""
-    return TestDefinition(
-        name=name,
-        fn=lambda: None,
-        module_path=Path("test.py"),
-        is_async=False,
-        suffix=suffix,
-        case_id=case_id,
+) -> LoadedTestDef:
+    """Create a minimal LoadedTestDef for testing."""
+    return make_definition(
+        name=name, module_path="test.py", suffix=suffix, case_id=case_id
     )
 
 
@@ -78,12 +74,12 @@ def test_metrics_records_assertion_passed_and_reads_test_context_for_metadata():
 
     m1 = Metric(
         metadata=MetricMetadata(
-            identity=ResourceIdentity(name="m1", scope=Scope.SESSION)
+            identity=ResourceSpec(name="m1", scope=Scope.PROCESS)
         )
     )
     m2 = Metric(
         metadata=MetricMetadata(
-            identity=ResourceIdentity(name="m2", scope=Scope.SESSION)
+            identity=ResourceSpec(name="m2", scope=Scope.PROCESS)
         )
     )
 

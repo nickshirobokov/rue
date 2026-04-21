@@ -10,7 +10,10 @@ from typing import cast
 from uuid import UUID, uuid4
 
 from opentelemetry import trace
-from opentelemetry.sdk.trace import ReadableSpan, TracerProvider as SdkTracerProvider
+from opentelemetry.sdk.trace import (
+    ReadableSpan,
+    TracerProvider as SdkTracerProvider,
+)
 from opentelemetry.trace import Span
 
 from rue.context.runtime import CURRENT_SUT_SPAN_IDS, bind
@@ -20,7 +23,10 @@ from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
 class SUTTracer:
     def __init__(self, name: str) -> None:
         self.name = name
-        self._session: OtelTraceSession | None = None
+        self._session: ContextVar[OtelTraceSession | None] = ContextVar(
+            f"sut_{id(self)}_otel_session",
+            default=None,
+        )
         self._execution_id: ContextVar[UUID | None] = ContextVar(
             f"sut_{id(self)}_otel_execution_id",
             default=None,
@@ -31,22 +37,24 @@ class SUTTracer:
         )
 
     def activate(self, session: OtelTraceSession) -> None:
-        self._session = session
+        self._session.set(session)
 
     def deactivate(self) -> None:
-        self._session = None
+        self._session.set(None)
 
     def reset(self, execution_id: UUID | None) -> None:
         if self._execution_id.get() == execution_id:
             return
         self._execution_id.set(execution_id)
         self._span_ids.set(())
-        self._session = None
+        self._session.set(None)
 
     @contextmanager
     def tracing(self) -> Iterator[None]:
         otel_runtime.configure()
-        with otel_runtime.start_as_current_span(f"sut.{self.name}") as root_span:
+        with otel_runtime.start_as_current_span(
+            f"sut.{self.name}"
+        ) as root_span:
             session = otel_runtime.start_otel_trace(
                 root_span,
                 run_id=uuid4(),
@@ -72,7 +80,7 @@ class SUTTracer:
             async def async_wrapped(*args: object, **kwargs: object) -> object:
                 if not self._should_trace():
                     return await cast(
-                        Awaitable[object],
+                        "Awaitable[object]",
                         original_callable(*args, **kwargs),
                     )
                 return await self._trace_async(
@@ -103,7 +111,9 @@ class SUTTracer:
         if not span_ids:
             return []
         return [
-            span for span in session.get_spans() if span.context.span_id in span_ids
+            span
+            for span in session.get_spans()
+            if span.context.span_id in span_ids
         ]
 
     def get_all_spans(self) -> list[ReadableSpan]:
@@ -123,7 +133,10 @@ class SUTTracer:
                 span_id = span.context.span_id
                 if span_id in descendant_ids:
                     continue
-                if span.parent is not None and span.parent.span_id in descendant_ids:
+                if (
+                    span.parent is not None
+                    and span.parent.span_id in descendant_ids
+                ):
                     descendant_ids.add(span_id)
                     changed = True
                     continue
@@ -132,7 +145,9 @@ class SUTTracer:
                     descendant_ids.add(span_id)
                     changed = True
 
-        return [span for span in spans if span.context.span_id in descendant_ids]
+        return [
+            span for span in spans if span.context.span_id in descendant_ids
+        ]
 
     def get_llm_spans(self) -> list[ReadableSpan]:
         return [
@@ -142,14 +157,15 @@ class SUTTracer:
         ]
 
     def _require_session(self) -> OtelTraceSession:
-        if self._session is None:
+        session = self._session.get()
+        if session is None:
             raise RuntimeError(
                 "OpenTelemetry is not enabled or this SUT has not been traced yet."
             )
-        return self._session
+        return session
 
     def _should_trace(self) -> bool:
-        if self._session is not None:
+        if self._session.get() is not None:
             return True
         return isinstance(trace.get_tracer_provider(), SdkTracerProvider)
 
@@ -160,7 +176,9 @@ class SUTTracer:
         *args: object,
         **kwargs: object,
     ) -> object:
-        with otel_runtime.start_as_current_span(f"sut.{self.name}.{method_name}") as span:
+        with otel_runtime.start_as_current_span(
+            f"sut.{self.name}.{method_name}"
+        ) as span:
             span_id = self._set_span_attrs(span, method_name)
             span_ids = (*CURRENT_SUT_SPAN_IDS.get(), span_id)
             with bind(CURRENT_SUT_SPAN_IDS, span_ids):
@@ -176,13 +194,15 @@ class SUTTracer:
         *args: object,
         **kwargs: object,
     ) -> object:
-        with otel_runtime.start_as_current_span(f"sut.{self.name}.{method_name}") as span:
+        with otel_runtime.start_as_current_span(
+            f"sut.{self.name}.{method_name}"
+        ) as span:
             span_id = self._set_span_attrs(span, method_name)
             span_ids = (*CURRENT_SUT_SPAN_IDS.get(), span_id)
             with bind(CURRENT_SUT_SPAN_IDS, span_ids):
                 _set_input_attrs(span, args, kwargs)
                 result = await cast(
-                    Awaitable[object],
+                    "Awaitable[object]",
                     original_callable(*args, **kwargs),
                 )
                 _set_output_attrs(span, result)

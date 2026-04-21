@@ -1,12 +1,17 @@
 import builtins
+from pathlib import Path
 from textwrap import dedent
 
 import pytest
 
-from rue.testing.discovery import TestCollector
-from rue.config import Config
-from rue.resources import registry
-from rue.testing.discovery import collect
+from rue.resources import Scope, registry
+from rue.testing.discovery import KeywordMatcher, TestLoader, TestSpecCollector
+from rue.testing.models import (
+    ParameterSet,
+    ParamsIterateModifier,
+    TestLocator,
+    TestSpec,
+)
 from rue.testing.runner import Runner
 
 
@@ -17,816 +22,453 @@ def clean_registry():
     registry.reset()
 
 
-def test_collect_supports_same_dir_confrue_imports_without_pyproject(
-    tmp_path,
-):
-    (tmp_path / "confrue_shared.py").write_text("VALUE = 123\n")
-    (tmp_path / "test_sample.py").write_text(
-        dedent(
-            """
-            import rue
+def write_files(root, files):
+    for relative_path, source in files.items():
+        path = root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(dedent(source))
 
-            from .confrue_shared import VALUE
 
-            @rue.test
-            def test_value():
-                assert VALUE == 123
-            """
-        )
+def materialize(path):
+    plan = TestSpecCollector((), (), None).build_spec_collection((path,))
+    return TestLoader(plan.suite_root).load_from_collection(plan)
+
+
+def test_selector_filters_by_tags_and_keyword():
+    items = [
+        TestSpec(
+            locator=TestLocator(Path("test_sample.py"), "test_fast"),
+            is_async=False,
+            params=(),
+            modifiers=(),
+            tags=frozenset({"fast", "smoke"}),
+        ),
+        TestSpec(
+            locator=TestLocator(Path("test_sample.py"), "test_slow"),
+            is_async=False,
+            params=(),
+            modifiers=(),
+            tags=frozenset({"slow"}),
+        ),
+    ]
+
+    assert KeywordMatcher("fast and not slow").match("test_fast")
+    assert not KeywordMatcher("fast and not slow").match("test_slow")
+
+    selected = TestSpecCollector(["smoke"], ["slow"], "fast").filter_specs(
+        items
     )
 
-    [item] = collect(tmp_path)
-
-    item.fn()
-
-
-@pytest.mark.asyncio
-async def test_collect_supports_same_dir_conftest_imports_and_resources_without_pyproject(
-    tmp_path,
-    null_reporter,
-):
-    (tmp_path / "conftest.py").write_text(
-        dedent(
-            """
-            import rue
-
-            VALUE = 123
-
-            @rue.resource
-            def shared_value():
-                return VALUE
-            """
-        )
-    )
-    (tmp_path / "test_sample.py").write_text(
-        dedent(
-            """
-            import rue
-
-            from .conftest import VALUE
-
-            @rue.test
-            def test_value(shared_value):
-                assert VALUE == 123
-                assert shared_value == VALUE
-            """
-        )
-    )
-
-    items = collect(tmp_path)
-    run = await Runner(reporters=[null_reporter]).run(items=items)
-
-    assert run.result.failed == 0
-    assert run.result.errors == 0
-    assert run.result.passed == 1
-
-
-@pytest.mark.asyncio
-async def test_collect_autoloads_confrue_chain_in_order(
-    tmp_path,
-    monkeypatch,
-    null_reporter,
-):
-    monkeypatch.setattr(builtins, "confrue_log", [], raising=False)
-    (tmp_path / "pyproject.toml").write_text(
-        "[project]\nname = 'tmp'\nversion = '0.0.0'\n"
-    )
-    nested = tmp_path / "nested"
-    nested.mkdir()
-
-    (tmp_path / "confrue_a.py").write_text(
-        dedent(
-            """
-            import builtins
-            import rue
-
-            builtins.confrue_log.append("root-a")
-
-            @rue.resource
-            def shared_value():
-                return 7
-            """
-        )
-    )
-    (tmp_path / "confrue_b.py").write_text(
-        dedent(
-            """
-            import builtins
-
-            from .confrue_a import shared_value
-
-            builtins.confrue_log.append("root-b")
-            """
-        )
-    )
-    (nested / "confrue_child.py").write_text(
-        dedent(
-            """
-            import builtins
-
-            from ..confrue_a import shared_value
-
-            builtins.confrue_log.append("child")
-            """
-        )
-    )
-    (nested / "test_sample.py").write_text(
-        dedent(
-            """
-            import builtins
-            import rue
-
-            from ..confrue_a import shared_value
-
-            @rue.test
-            def test_value(shared_value):
-                assert shared_value == 7
-                assert builtins.confrue_log == [
-                    "root-a",
-                    "root-b",
-                    "child",
-                ]
-            """
-        )
-    )
-
-    items = collect(nested)
-    run = await Runner(reporters=[null_reporter]).run(items=items)
-
-    assert run.result.failed == 0
-    assert run.result.errors == 0
-    assert run.result.passed == 1
-
-
-def test_collect_autoloads_conftest_and_confrue_chain_in_order(
-    tmp_path,
-    monkeypatch,
-):
-    monkeypatch.setattr(builtins, "setup_log", [], raising=False)
-    (tmp_path / "pyproject.toml").write_text(
-        "[project]\nname = 'tmp'\nversion = '0.0.0'\n"
-    )
-    nested = tmp_path / "nested"
-    nested.mkdir()
-
-    (tmp_path / "conftest.py").write_text(
-        dedent(
-            """
-            import builtins
-
-            ROOT_VALUE = 3
-            builtins.setup_log.append("root-conftest")
-            """
-        )
-    )
-    (tmp_path / "confrue_a.py").write_text(
-        dedent(
-            """
-            import builtins
-
-            from .conftest import ROOT_VALUE
-
-            builtins.setup_log.append(f"root-confrue:{ROOT_VALUE}")
-            """
-        )
-    )
-    (nested / "conftest.py").write_text(
-        dedent(
-            """
-            import builtins
-
-            from ..conftest import ROOT_VALUE
-
-            CHILD_VALUE = ROOT_VALUE + 1
-            builtins.setup_log.append(f"child-conftest:{CHILD_VALUE}")
-            """
-        )
-    )
-    (nested / "confrue_child.py").write_text(
-        dedent(
-            """
-            import builtins
-
-            from .conftest import CHILD_VALUE
-
-            builtins.setup_log.append(f"child-confrue:{CHILD_VALUE}")
-            """
-        )
-    )
-    (nested / "test_sample.py").write_text(
-        dedent(
-            """
-            import builtins
-            import rue
-
-            from .conftest import CHILD_VALUE
-
-            builtins.setup_log.append("test-module")
-
-            @rue.test
-            def test_value():
-                assert CHILD_VALUE == 4
-                assert builtins.setup_log == [
-                    "root-conftest",
-                    "root-confrue:3",
-                    "child-conftest:4",
-                    "child-confrue:4",
-                    "test-module",
-                ]
-            """
-        )
-    )
-
-    [item] = collect(nested)
-
-    item.fn()
-
-
-@pytest.mark.asyncio
-async def test_confrue_session_resources_resolve_hierarchically(
-    tmp_path,
-    null_reporter,
-):
-    (tmp_path / "pyproject.toml").write_text(
-        "[project]\nname = 'tmp'\nversion = '0.0.0'\n"
-    )
-    child = tmp_path / "child"
-    sibling = tmp_path / "sibling"
-    child.mkdir()
-    sibling.mkdir()
-
-    (tmp_path / "confrue_root.py").write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.resource(scope="session")
-            def shared_value():
-                return "root"
-            """
-        )
-    )
-    (child / "confrue_child.py").write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.resource(scope="session")
-            def shared_value():
-                return "child"
-            """
-        )
-    )
-    (tmp_path / "test_root.py").write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.test
-            def test_root(shared_value):
-                assert shared_value == "root"
-            """
-        )
-    )
-    (child / "test_child.py").write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.test
-            def test_child(shared_value):
-                assert shared_value == "child"
-            """
-        )
-    )
-    (sibling / "test_sibling.py").write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.test
-            def test_sibling(shared_value):
-                assert shared_value == "root"
-            """
-        )
-    )
-
-    items = collect(tmp_path)
-    run = await Runner(
-        config=Config.model_construct(db_enabled=False),
-        reporters=[null_reporter],
-    ).run(items=items)
-
-    assert run.result.failed == 0
-    assert run.result.errors == 0
-    assert run.result.passed == 3
-
-
-@pytest.mark.asyncio
-async def test_conftest_session_resources_resolve_hierarchically(
-    tmp_path,
-    null_reporter,
-):
-    (tmp_path / "pyproject.toml").write_text(
-        "[project]\nname = 'tmp'\nversion = '0.0.0'\n"
-    )
-    child = tmp_path / "child"
-    sibling = tmp_path / "sibling"
-    child.mkdir()
-    sibling.mkdir()
-
-    (tmp_path / "conftest.py").write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.resource(scope="session")
-            def shared_value():
-                return "root"
-            """
-        )
-    )
-    (child / "conftest.py").write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.resource(scope="session")
-            def shared_value():
-                return "child"
-            """
-        )
-    )
-    (tmp_path / "test_root.py").write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.test
-            def test_root(shared_value):
-                assert shared_value == "root"
-            """
-        )
-    )
-    (child / "test_child.py").write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.test
-            def test_child(shared_value):
-                assert shared_value == "child"
-            """
-        )
-    )
-    (sibling / "test_sibling.py").write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.test
-            def test_sibling(shared_value):
-                assert shared_value == "root"
-            """
-        )
-    )
-
-    items = collect(tmp_path)
-    run = await Runner(
-        config=Config.model_construct(db_enabled=False),
-        reporters=[null_reporter],
-    ).run(items=items)
-
-    assert run.result.failed == 0
-    assert run.result.errors == 0
-    assert run.result.passed == 3
-
-
-@pytest.mark.asyncio
-async def test_same_named_confrue_metrics_preserve_provider_identity_and_modules(
-    tmp_path,
-    null_reporter,
-):
-    (tmp_path / "pyproject.toml").write_text(
-        "[project]\nname = 'tmp'\nversion = '0.0.0'\n"
-    )
-    child = tmp_path / "child"
-    child.mkdir()
-
-    (tmp_path / "confrue_root.py").write_text(
-        dedent(
-            """
-            import rue
-            from rue import Metric, metrics
-
-            @rue.resource.metric(scope="session")
-            def quality():
-                metric = Metric()
-                yield metric
-                yield metric.mean
-
-            def root_check(quality: Metric):
-                with metrics(quality):
-                    assert True
-            """
-        )
-    )
-    (child / "confrue_child.py").write_text(
-        dedent(
-            """
-            import rue
-            from rue import Metric, metrics
-
-            @rue.resource.metric(scope="session")
-            def quality():
-                metric = Metric()
-                yield metric
-                yield metric.mean
-
-            def child_check(quality: Metric):
-                with metrics(quality):
-                    assert True
-            """
-        )
-    )
-    (tmp_path / "test_root.py").write_text(
-        dedent(
-            """
-            import rue
-            from rue import metrics
-
-            @rue.test
-            def test_shared(quality):
-                with metrics(quality):
-                    assert True
-            """
-        )
-    )
-    (child / "test_child.py").write_text(
-        dedent(
-            """
-            import rue
-            from rue import metrics
-
-            @rue.test
-            def test_shared(quality):
-                with metrics(quality):
-                    assert True
-            """
-        )
-    )
-
-    items = collect(tmp_path)
-    run = await Runner(
-        config=Config.model_construct(db_enabled=False),
-        reporters=[null_reporter],
-    ).run(items=items)
-
-    metrics = sorted(
-        run.result.metric_results,
-        key=lambda result: result.metadata.identity.provider_path or "",
-    )
-    assert len(metrics) == 2
-    assert {metric.metadata.identity.name for metric in metrics} == {"quality"}
-    assert all(
-        metric.metadata.collected_from_tests == {"test_shared"}
-        for metric in metrics
-    )
-    assert metrics[0].metadata.identity != metrics[1].metadata.identity
-    module_sets = [metric.metadata.collected_from_modules for metric in metrics]
-    assert any(
-        any(module.endswith("test_root.py") for module in modules)
-        for modules in module_sets
-    )
-    assert any(
-        any(module.endswith("child/test_child.py") for module in modules)
-        for modules in module_sets
-    )
-
-
-@pytest.mark.asyncio
-async def test_same_named_conftest_modules_preserve_identity_and_state(
-    tmp_path,
-    monkeypatch,
-    null_reporter,
-):
-    monkeypatch.setattr(
-        builtins,
-        "conftest_module_names",
-        [],
-        raising=False,
-    )
-    (tmp_path / "pyproject.toml").write_text(
-        "[project]\nname = 'tmp'\nversion = '0.0.0'\n"
-    )
-    child = tmp_path / "child"
-    child.mkdir()
-
-    (tmp_path / "conftest.py").write_text(
-        dedent(
-            """
-            import rue
-            from rue import Metric
-
-            MODULE_NAME = __name__
-
-            @rue.resource(scope="session")
-            def provider_module():
-                return MODULE_NAME
-
-            @rue.resource.metric(scope="session")
-            def quality():
-                metric = Metric()
-                yield metric
-                yield metric.mean
-            """
-        )
-    )
-    (child / "conftest.py").write_text(
-        dedent(
-            """
-            import rue
-            from rue import Metric
-
-            MODULE_NAME = __name__
-
-            @rue.resource(scope="session")
-            def provider_module():
-                return MODULE_NAME
-
-            @rue.resource.metric(scope="session")
-            def quality():
-                metric = Metric()
-                yield metric
-                yield metric.mean
-            """
-        )
-    )
-    (tmp_path / "test_root.py").write_text(
-        dedent(
-            """
-            import builtins
-            import rue
-            from rue import metrics
-
-            @rue.test
-            def test_shared(provider_module, quality):
-                builtins.conftest_module_names.append(provider_module)
-                with metrics(quality):
-                    assert provider_module.endswith(".conftest")
-            """
-        )
-    )
-    (child / "test_child.py").write_text(
-        dedent(
-            """
-            import builtins
-            import rue
-            from rue import metrics
-
-            @rue.test
-            def test_shared(provider_module, quality):
-                builtins.conftest_module_names.append(provider_module)
-                with metrics(quality):
-                    assert provider_module.endswith(".conftest")
-            """
-        )
-    )
-
-    items = collect(tmp_path)
-    run = await Runner(
-        config=Config.model_construct(db_enabled=False),
-        reporters=[null_reporter],
-    ).run(items=items)
-
-    assert run.result.failed == 0
-    assert run.result.errors == 0
-    assert run.result.passed == 2
-    assert len(set(builtins.conftest_module_names)) == 2
-
-    metrics = sorted(
-        run.result.metric_results,
-        key=lambda result: result.metadata.identity.provider_path or "",
-    )
-    assert len(metrics) == 2
-    assert all(
-        (metric.metadata.identity.provider_path or "").endswith(
-            "conftest.py"
-        )
-        for metric in metrics
-    )
-    assert metrics[0].metadata.identity != metrics[1].metadata.identity
-    module_sets = [metric.metadata.collected_from_modules for metric in metrics]
-    assert any(
-        any(module.endswith("test_root.py") for module in modules)
-        for modules in module_sets
-    )
-    assert any(
-        any(module.endswith("child/test_child.py") for module in modules)
-        for modules in module_sets
-    )
-
-
-@pytest.mark.asyncio
-async def test_collect_runs_class_based_tests_with_resource_injection(
-    tmp_path,
-    null_reporter,
-):
-    (tmp_path / "confrue_shared.py").write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.resource
-            def shared_value():
-                return 7
-            """
-        )
-    )
-    module_path = tmp_path / "test_class_sample.py"
-    module_path.write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.test
-            class MathChecks:
-                def test_value(self, shared_value):
-                    assert shared_value == 7
+    assert [item.name for item in selected] == ["test_fast"]
+
+
+def test_selector_plan_discovers_rue_tests_and_static_tags(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "test_sample.py": """
+                import rue
+                from rue import test
+
+                def test_pytest_only():
+                    pass
 
                 @rue.test
-                def helper(self, shared_value):
-                    assert shared_value == 7
+                def helper():
+                    pass
+
+                @test.tag("smoke")
+                @test.tag.inline
+                def test_top():
+                    pass
+
+                @rue.test.tag("suite")
+                @rue.test.tag.skip(reason="skip suite")
+                class Flows:
+                    @test.tag("fast")
+                    @test.tag.xfail(reason="known")
+                    def test_nested(self):
+                        pass
+
+                    @rue.test
+                    def helper_nested(self):
+                        pass
             """
-        )
+        },
     )
 
-    items = collect(module_path)
-    run = await Runner(reporters=[null_reporter]).run(items=items)
+    plan = TestSpecCollector((), (), None).build_spec_collection(
+        (tmp_path,), explicit_root=tmp_path
+    )
+    specs_by_name = {spec.full_name: spec.tags for spec in plan.specs}
 
-    assert [item.full_name for item in items] == [
-        "test_class_sample::MathChecks::helper",
-        "test_class_sample::MathChecks::test_value",
-    ]
-    assert run.result.passed == 2
-    assert all(
-        execution.item.class_name == "MathChecks"
-        for execution in run.result.executions
+    assert plan.suite_root == tmp_path
+    assert specs_by_name == {
+        "test_sample::helper": frozenset(),
+        "test_sample::test_top": frozenset({"smoke", "inline"}),
+        "test_sample::Flows::test_nested": frozenset(
+            {"suite", "skip", "fast", "xfail"}
+        ),
+        "test_sample::Flows::helper_nested": frozenset({"suite", "skip"}),
+    }
+
+
+def test_selector_plan_ignores_setup_and_legacy_modules(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "conftest.py": "VALUE = 1\n",
+            "confrue_only.py": "VALUE = 2\n",
+            "rue_legacy.py": """
+                import rue
+
+                @rue.test
+                def test_old():
+                    pass
+            """,
+            "test_real.py": """
+                import rue
+
+                @rue.test
+                def test_real():
+                    pass
+            """,
+        },
     )
 
+    assert [
+        spec.full_name
+        for spec in TestSpecCollector((), (), None)
+        .build_spec_collection((tmp_path,))
+        .specs
+    ] == ["test_real::test_real"]
 
-def test_collect_supports_individually_decorated_methods_in_plain_classes(
+
+def test_selector_skips_unselected_modules_before_import(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "test_good.py": """
+                import rue
+
+                @rue.test
+                def test_good():
+                    assert True
+            """,
+            "test_bad.py": """
+                import rue
+
+                raise RuntimeError("must not import")
+
+                @rue.test
+                def test_bad():
+                    pass
+            """,
+        },
+    )
+
+    plan = TestSpecCollector([], [], "good").build_spec_collection(
+        [str(tmp_path)]
+    )
+    items = TestLoader(plan.suite_root).load_from_collection(plan)
+
+    assert [item.spec.name for item in items] == ["test_good"]
+
+
+def test_load_from_collection_skips_unselected_invalid_tests_in_same_module(
     tmp_path,
 ):
-    module_path = tmp_path / "test_method_marker.py"
-    module_path.write_text(
-        dedent(
-            """
-            import rue
+    write_files(
+        tmp_path,
+        {
+            "test_mixed.py": """
+                from rue import test
 
-            class HelperSuite:
-                def test_pytest_only(self):
+                @test
+                def test_good():
+                    assert True
+
+                @test.iterate.cases()
+                def test_bad(case):
+                    assert case
+            """
+        },
+    )
+
+    plan = TestSpecCollector([], [], "good").build_spec_collection(
+        [str(tmp_path)]
+    )
+    items = TestLoader(plan.suite_root).load_from_collection(plan)
+
+    assert [item.spec.name for item in items] == ["test_good"]
+
+
+def test_load_from_collection_enriches_runtime_metadata(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "test_metadata.py": """
+                from rue import test
+
+                @test.tag.inline
+                @test.tag.skip(reason="skip me")
+                @test.iterate.params("value", [1], ids=["one"])
+                def test_inline_skip(value):
+                    assert value == 1
+
+                @test.tag.xfail(reason="known", strict=True)
+                def test_expected_failure():
                     assert False
 
-                @rue.test
-                def helper(self):
-                    assert True
+                @test.iterate.params("value", [])
+                def test_bad(value):
+                    assert value
             """
-        )
+        },
     )
 
-    items = collect(module_path)
+    plan = TestSpecCollector((), (), None).build_spec_collection(
+        (tmp_path / "test_metadata.py",)
+    )
+    planned_specs = {spec.name: spec for spec in plan.specs}
 
-    assert [item.full_name for item in items] == [
-        "test_method_marker::HelperSuite::helper"
+    assert planned_specs["test_inline_skip"].params == ()
+    assert planned_specs["test_inline_skip"].skip_reason is None
+    assert planned_specs["test_inline_skip"].inline is False
+    assert planned_specs["test_expected_failure"].xfail_reason is None
+    assert planned_specs["test_bad"].definition_error is None
+
+    items = TestLoader(plan.suite_root).load_from_collection(plan)
+    items_by_name = {item.spec.name: item for item in items}
+    [modifier] = items_by_name["test_inline_skip"].spec.modifiers
+
+    assert items_by_name["test_inline_skip"].spec.params == ("value",)
+    assert items_by_name["test_inline_skip"].spec.skip_reason == "skip me"
+    assert items_by_name["test_inline_skip"].spec.inline is True
+    assert isinstance(modifier, ParamsIterateModifier)
+    assert modifier.parameter_sets == (
+        ParameterSet(values={"value": 1}, suffix="one"),
+    )
+    assert items_by_name["test_expected_failure"].spec.xfail_reason == "known"
+    assert items_by_name["test_expected_failure"].spec.xfail_strict is True
+    assert (
+        items_by_name["test_bad"].spec.definition_error
+        == "iterate.params() requires at least one value set"
+    )
+
+
+@pytest.mark.asyncio
+async def test_materialize_supports_same_dir_setup_without_pyproject(
+    tmp_path,
+    null_reporter,
+):
+    write_files(
+        tmp_path,
+        {
+            "conftest.py": """
+                import rue
+
+                VALUE = 123
+
+                @rue.resource
+                def shared_value():
+                    return VALUE
+            """,
+            "confrue_shared.py": "FLAG = 456\n",
+            "test_sample.py": """
+                import rue
+
+                from .confrue_shared import FLAG
+                from .conftest import VALUE
+
+                @rue.test
+                def test_value(shared_value):
+                    assert VALUE == 123
+                    assert FLAG == 456
+                    assert shared_value == VALUE
+            """,
+        },
+    )
+
+    run = await Runner(reporters=[null_reporter]).run(
+        items=materialize(tmp_path)
+    )
+
+    assert run.result.passed == 1
+    assert run.result.failed == 0
+    assert run.result.errors == 0
+
+
+def test_materialize_imports_nested_setup_chain_in_order(tmp_path, monkeypatch):
+    monkeypatch.setattr(builtins, "setup_log", [], raising=False)
+    write_files(
+        tmp_path,
+        {
+            "pyproject.toml": "[project]\nname = 'tmp'\nversion = '0.0.0'\n",
+            "conftest.py": """
+                import builtins
+
+                ROOT_VALUE = 3
+                builtins.setup_log.append("root-conftest")
+            """,
+            "confrue_root.py": """
+                import builtins
+
+                from .conftest import ROOT_VALUE
+
+                builtins.setup_log.append(f"root-confrue:{ROOT_VALUE}")
+            """,
+            "nested/conftest.py": """
+                import builtins
+
+                from ..conftest import ROOT_VALUE
+
+                CHILD_VALUE = ROOT_VALUE + 1
+                builtins.setup_log.append(f"child-conftest:{CHILD_VALUE}")
+            """,
+            "nested/confrue_child.py": """
+                import builtins
+
+                from .conftest import CHILD_VALUE
+
+                builtins.setup_log.append(f"child-confrue:{CHILD_VALUE}")
+            """,
+            "nested/test_sample.py": """
+                import builtins
+                import rue
+
+                from .conftest import CHILD_VALUE
+
+                builtins.setup_log.append("test-module")
+
+                @rue.test
+                def test_value():
+                    assert CHILD_VALUE == 4
+                    assert builtins.setup_log == [
+                        "root-conftest",
+                        "root-confrue:3",
+                        "child-conftest:4",
+                        "child-confrue:4",
+                        "test-module",
+                    ]
+            """,
+        },
+    )
+
+    plan = TestSpecCollector((), (), None).build_spec_collection(
+        (tmp_path / "nested",)
+    )
+    [item] = TestLoader(plan.suite_root).load_from_collection(plan)
+
+    assert item.suite_root == plan.suite_root
+    assert item.setup_chain == plan.setup_chain_for(item.spec.module_path)
+
+    item.fn()
+
+
+def test_materialize_collects_class_based_and_method_marked_tests(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "test_class_sample.py": """
+                import rue
+
+                @rue.test
+                class MathChecks:
+                    def test_value(self):
+                        assert True
+
+                    @rue.test
+                    def helper(self):
+                        assert True
+
+                class HelperSuite:
+                    def test_pytest_only(self):
+                        assert False
+
+                    @rue.test
+                    def extra(self):
+                        assert True
+            """
+        },
+    )
+
+    assert [item.spec.full_name for item in materialize(tmp_path)] == [
+        "test_class_sample::MathChecks::test_value",
+        "test_class_sample::MathChecks::helper",
+        "test_class_sample::HelperSuite::extra",
     ]
 
 
-def test_collect_ignores_plain_pytest_tests_in_mixed_files(tmp_path):
-    module_path = tmp_path / "test_mixed.py"
-    module_path.write_text(
-        dedent(
-            """
-            import rue
-
-            def test_pytest_only():
-                assert False
-
-            @rue.test
-            def test_rue_only():
-                assert True
-            """
-        )
-    )
-
-    items = collect(module_path)
-
-    assert [item.name for item in items] == ["test_rue_only"]
-
-
-def test_collect_ignores_rue_prefixed_files(tmp_path):
-    (tmp_path / "rue_legacy.py").write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.test
-            def test_old():
-                assert True
-            """
-        )
-    )
-
-    assert collect(tmp_path) == []
-
-
-def test_collect_items_share_confrue_session_across_selected_modules(
+def test_materialize_uses_single_session_for_selected_modules(
     tmp_path,
     monkeypatch,
 ):
     monkeypatch.setattr(builtins, "confrue_counter", 0, raising=False)
-    (tmp_path / "pyproject.toml").write_text(
-        "[project]\nname = 'tmp'\nversion = '0.0.0'\n"
-    )
-    (tmp_path / "confrue_root.py").write_text(
-        dedent(
-            """
-            import builtins
+    write_files(
+        tmp_path,
+        {
+            "pyproject.toml": "[project]\nname = 'tmp'\nversion = '0.0.0'\n",
+            "confrue_root.py": """
+                import builtins
 
-            builtins.confrue_counter += 1
-            """
-        )
-    )
-    (tmp_path / "test_good.py").write_text(
-        "from rue import test\n\n@test\ndef test_good():\n    assert True\n"
-    )
-    (tmp_path / "test_good_two.py").write_text(
-        "from rue import test\n\n@test\ndef test_good_two():\n    assert True\n"
+                builtins.confrue_counter += 1
+            """,
+            "test_good.py": """
+                from rue import test
+
+                @test
+                def test_good():
+                    assert True
+            """,
+            "test_good_two.py": """
+                from rue import test
+
+                @test
+                def test_good_two():
+                    assert True
+            """,
+            "bad/confrue_bad.py": 'raise RuntimeError("must not import")\n',
+            "bad/test_bad.py": """
+                from rue import test
+
+                raise RuntimeError("must not import")
+
+                @test
+                def test_bad():
+                    assert True
+            """,
+        },
     )
 
-    bad_dir = tmp_path / "bad"
-    bad_dir.mkdir()
-    (bad_dir / "confrue_bad.py").write_text(
-        'raise RuntimeError("must not import")\n'
+    plan = TestSpecCollector([], [], "good").build_spec_collection(
+        [str(tmp_path)]
     )
-    (bad_dir / "test_bad.py").write_text(
-        'from rue import test\n\nraise RuntimeError("must not import")\n\n@test\ndef test_bad():\n    assert True\n'
-    )
+    items = TestLoader(plan.suite_root).load_from_collection(plan)
 
-    items = TestCollector([], [], "good").collect([str(tmp_path)])
-
-    assert [item.name for item in items] == ["test_good", "test_good_two"]
+    assert [item.spec.name for item in items] == ["test_good", "test_good_two"]
     assert builtins.confrue_counter == 1
 
 
-def test_collect_does_not_discover_setup_modules(tmp_path):
-    (tmp_path / "conftest.py").write_text("VALUE = 1\n")
-    (tmp_path / "confrue_only.py").write_text("VALUE = 1\n")
-
-    assert collect(tmp_path) == []
-
-
-def test_collect_uses_fresh_import_session_after_file_changes(
-    tmp_path,
-    monkeypatch,
-):
-    monkeypatch.setattr(builtins, "collected_values", [], raising=False)
-    (tmp_path / "confrue_shared.py").write_text("VALUE = 1\n")
-    module_path = tmp_path / "test_sample.py"
-    module_path.write_text(
-        dedent(
-            """
-            import builtins
-            import rue
-            from .confrue_shared import VALUE
-
-            @rue.test
-            def test_value():
-                builtins.collected_values.append(VALUE)
-            """
-        )
-    )
-
-    [first_item] = collect(tmp_path)
-    first_item.fn()
-    assert builtins.collected_values == [1]
-
-    builtins.collected_values.clear()
-    (tmp_path / "confrue_shared.py").write_text("VALUE = 2\n")
-
-    [second_item] = collect(tmp_path)
-    second_item.fn()
-    assert builtins.collected_values == [2]
-
-
 @pytest.mark.asyncio
-async def test_pytest_fixture_in_test_file_injected_into_rue_test(
+@pytest.mark.parametrize("fixture_location", ["module", "conftest"])
+async def test_materialize_promotes_pytest_fixtures(
     tmp_path,
     null_reporter,
+    fixture_location,
 ):
-    (tmp_path / "test_sample.py").write_text(
-        dedent(
-            """
+    files = {
+        "test_sample.py": """
+            import rue
+
+            @rue.test
+            def test_uses_fixture(greeting):
+                assert greeting == "hello"
+        """
+    }
+
+    if fixture_location == "module":
+        files["test_sample.py"] = """
             import pytest
             import rue
 
@@ -837,151 +479,69 @@ async def test_pytest_fixture_in_test_file_injected_into_rue_test(
             @rue.test
             def test_uses_fixture(greeting):
                 assert greeting == "hello"
-            """
-        )
-    )
+        """
+    else:
+        files["conftest.py"] = """
+            import pytest
 
-    items = collect(tmp_path)
-    run = await Runner(reporters=[null_reporter]).run(items=items)
+            @pytest.fixture
+            def greeting():
+                return "hello"
+        """
+
+    write_files(tmp_path, files)
+
+    run = await Runner(reporters=[null_reporter]).run(
+        items=materialize(tmp_path)
+    )
 
     assert run.result.passed == 1
     assert run.result.failed == 0
     assert run.result.errors == 0
 
 
-@pytest.mark.asyncio
-async def test_pytest_fixture_and_rue_resource_both_injected(
-    tmp_path,
-    null_reporter,
-):
-    (tmp_path / "test_sample.py").write_text(
-        dedent(
+def test_materialize_uses_deterministic_module_names(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "test_sample.py": """
+                import rue
+
+                @rue.test
+                def test_value():
+                    pass
             """
-            import pytest
-            import rue
-
-            @pytest.fixture
-            def multiplier():
-                return 3
-
-            @rue.resource
-            def base_value():
-                return 7
-
-            @rue.test
-            def test_mixed_di(multiplier, base_value):
-                assert multiplier * base_value == 21
-            """
-        )
+        },
     )
 
-    items = collect(tmp_path)
-    run = await Runner(reporters=[null_reporter]).run(items=items)
+    [first_item] = materialize(tmp_path)
+    [second_item] = materialize(tmp_path)
 
-    assert run.result.passed == 1
-    assert run.result.failed == 0
-    assert run.result.errors == 0
+    assert first_item.fn.__module__ == second_item.fn.__module__
+    assert "rue_discovery" in first_item.fn.__module__
 
 
-@pytest.mark.asyncio
-async def test_pytest_yield_fixture_teardown_runs(
-    tmp_path,
-    null_reporter,
-    monkeypatch,
-):
-    monkeypatch.setattr(builtins, "teardown_log", [], raising=False)
-    (tmp_path / "test_sample.py").write_text(
-        dedent(
+def test_materialize_rewrites_pytest_fixture_aliases_to_resources(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "test_sample.py": """
+                import pytest as pt
+                import rue
+
+                @pt.fixture(scope="module")
+                def greeting():
+                    return "hello"
+
+                @rue.test
+                def test_uses_fixture(greeting):
+                    assert greeting == "hello"
             """
-            import builtins
-            import pytest
-            import rue
-
-            @pytest.fixture
-            def tracked_resource():
-                builtins.teardown_log.append("setup")
-                yield "value"
-                builtins.teardown_log.append("teardown")
-
-            @rue.test
-            def test_uses_yield_fixture(tracked_resource):
-                assert tracked_resource == "value"
-            """
-        )
+        },
     )
 
-    items = collect(tmp_path)
-    run = await Runner(reporters=[null_reporter]).run(items=items)
+    [item] = materialize(tmp_path)
 
-    assert run.result.passed == 1
-    assert builtins.teardown_log == ["setup", "teardown"]
-
-
-@pytest.mark.asyncio
-async def test_pytest_fixture_in_conftest_injected_into_rue_test(
-    tmp_path,
-    null_reporter,
-):
-    (tmp_path / "conftest.py").write_text(
-        dedent(
-            """
-            import pytest
-
-            @pytest.fixture
-            def config_value():
-                return 42
-            """
-        )
-    )
-    (tmp_path / "test_sample.py").write_text(
-        dedent(
-            """
-            import rue
-
-            @rue.test
-            def test_uses_conftest_fixture(config_value):
-                assert config_value == 42
-            """
-        )
-    )
-
-    items = collect(tmp_path)
-    run = await Runner(reporters=[null_reporter]).run(items=items)
-
-    assert run.result.passed == 1
-    assert run.result.failed == 0
-    assert run.result.errors == 0
-
-
-@pytest.mark.asyncio
-async def test_rue_resource_takes_precedence_over_same_named_fixture(
-    tmp_path,
-    null_reporter,
-):
-    (tmp_path / "test_sample.py").write_text(
-        dedent(
-            """
-            import pytest
-            import rue
-
-            @pytest.fixture
-            def value():
-                return "from_fixture"
-
-            @rue.resource
-            def value():
-                return "from_resource"
-
-            @rue.test
-            def test_resource_wins(value):
-                assert value == "from_resource"
-            """
-        )
-    )
-
-    items = collect(tmp_path)
-    run = await Runner(reporters=[null_reporter]).run(items=items)
-
-    assert run.result.passed == 1
-    assert run.result.failed == 0
-    assert run.result.errors == 0
+    assert item.spec.name == "test_uses_fixture"
+    assert registry.get("greeting") is not None
+    assert registry.get("greeting").spec.scope == Scope.MODULE

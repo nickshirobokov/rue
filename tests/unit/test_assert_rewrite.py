@@ -10,9 +10,9 @@ from rue.context.collectors import (
     CURRENT_METRIC_RESULTS,
 )
 from rue.context.runtime import CURRENT_TEST, TestContext, bind
-from rue.resources import ResourceIdentity, ResourceResolver, Scope, registry
+from rue.resources import ResourceSpec, ResourceResolver, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
-from rue.testing.discovery import collect
+from tests.unit.factories import materialize_tests
 
 
 def test_rewritten_assert_collects_predicate_results(tmp_path):
@@ -21,7 +21,7 @@ def test_rewritten_assert_collects_predicate_results(tmp_path):
     mod_path.write_text(
         """
 from rue import test
-from rue.resources import ResourceIdentity, Scope
+from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.base import Metric, MetricMetadata
 from rue.predicates import predicate
 
@@ -31,14 +31,14 @@ def equals(actual, reference):
 
 @test
 def test_sample():
-    m = Metric(metadata=MetricMetadata(identity=ResourceIdentity(name="m", scope=Scope.SESSION)))
+    m = Metric(metadata=MetricMetadata(identity=ResourceSpec(name="m", scope=Scope.PROCESS)))
     m.add_record([1, 2, 3])
     assert equals(1, 1) and (m.len == 3)
 """.lstrip()
     )
 
     try:
-        [item] = collect(mod_path)
+        [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         ctx = TestContext(item=item)
         with (
@@ -78,7 +78,7 @@ def test_fail():
     )
 
     try:
-        [item] = collect(mod_path)
+        [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         ctx = TestContext(item=item)
         with (
@@ -116,13 +116,13 @@ def test_metric_capture_multi():
     )
 
     try:
-        [item] = collect(mod_path)
+        [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         ctx = TestContext(item=item)
         m = Metric(
             metadata=MetricMetadata(
-                identity=ResourceIdentity(
-                    name="assert_outcomes", scope=Scope.SESSION
+                identity=ResourceSpec(
+                    name="assert_outcomes", scope=Scope.PROCESS
                 )
             )
         )
@@ -152,12 +152,12 @@ async def test_rewritten_asserts_inside_metric_functions_are_collected(
     mod_path.write_text(
         """
 import rue
-from rue.resources import ResourceIdentity, Scope
+from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.base import Metric, MetricMetadata
 
 @rue.resource.metric
 def my_metric():
-    m = Metric(metadata=MetricMetadata(identity=ResourceIdentity(name="m", scope=Scope.SESSION)))
+    m = Metric(metadata=MetricMetadata(identity=ResourceSpec(name="m", scope=Scope.PROCESS)))
     yield m
     assert False, "nope"
 
@@ -168,7 +168,7 @@ def test_dummy():
     )
 
     try:
-        [item] = collect(mod_path)
+        [item] = materialize_tests(mod_path)
         resolver = ResourceResolver(registry)
         metric_results: list[MetricResult] = []
         with bind(CURRENT_METRIC_RESULTS, metric_results):
@@ -218,7 +218,7 @@ def test_repr_cases():
     )
 
     try:
-        [item] = collect(mod_path)
+        [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
             item.fn()
@@ -265,7 +265,7 @@ def test_multiline_assert():
     )
 
     try:
-        [item] = collect(mod_path)
+        [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
             item.fn()

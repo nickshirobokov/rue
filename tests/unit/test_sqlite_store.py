@@ -5,16 +5,18 @@ from uuid import uuid4
 
 from rue.assertions.base import AssertionRepr, AssertionResult
 from rue.predicates.models import PredicateResult
-from rue.resources import ResourceIdentity, Scope
+from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.base import (
     MetricMetadata,
     MetricResult,
 )
 from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.store import MAX_STORED_RUNS
-from rue.testing.models.definition import TestDefinition
-from rue.testing.models.result import TestExecution, TestResult, TestStatus
+from rue.testing.models.loaded import LoadedTestDef
+from rue.testing.models.executed import ExecutedTest
+from rue.testing.models.result import TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
+from tests.unit.factories import make_definition
 
 
 def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
@@ -24,28 +26,23 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     start_time = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     end_time = datetime(2024, 1, 1, 12, 5, tzinfo=UTC)
 
-    definition = TestDefinition(
-        name="test_one",
-        fn=lambda: None,
-        module_path=Path("tests/test_sample.py"),
-        is_async=False,
+    definition = make_definition(
+        "test_one",
+        module_path="tests/test_sample.py",
         tags={"smoke"},
         suffix="{'slug': 'sample'}",
         case_id=case_id,
     )
-    sub_definition = TestDefinition(
-        name="test_sub",
-        fn=lambda: None,
-        module_path=Path("tests/test_sample.py"),
-        is_async=False,
+    sub_definition = make_definition(
+        "test_sub", module_path="tests/test_sample.py"
     )
 
-    sub_execution = TestExecution(
+    sub_execution = ExecutedTest(
         definition=sub_definition,
         result=TestResult(status=TestStatus.PASSED, duration_ms=10.0),
         execution_id=sub_execution_id,
     )
-    execution = TestExecution(
+    execution = ExecutedTest(
         definition=definition,
         result=TestResult(
             status=TestStatus.FAILED,
@@ -59,9 +56,9 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     metric_metadata = MetricMetadata(
         first_item_recorded_at=start_time,
         last_item_recorded_at=end_time,
-        identity=ResourceIdentity(
+        identity=ResourceSpec(
             name="latency_ms",
-            scope=Scope.CASE,
+            scope=Scope.TEST,
             provider_path="/tmp/project/confrue_root.py",
             provider_dir="/tmp/project",
         ),
@@ -75,9 +72,9 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         assertion_results=[],
         value=12.5,
         dependencies=[
-            ResourceIdentity(
+            ResourceSpec(
                 name="overall_latency",
-                scope=Scope.SESSION,
+                scope=Scope.PROCESS,
                 provider_path="/tmp/project/confrue_root.py",
                 provider_dir="/tmp/project",
             )
@@ -123,13 +120,18 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     assert loaded.result.failed == 1
     assert loaded.result.total == 1
     assert len(loaded.result.executions) == 1
-    assert loaded.result.executions[0].definition.suffix == "{'slug': 'sample'}"
-    assert loaded.result.executions[0].definition.case_id == case_id
+    assert (
+        loaded.result.executions[0].definition.spec.suffix
+        == "{'slug': 'sample'}"
+    )
+    assert loaded.result.executions[0].definition.spec.case_id == case_id
     assert len(loaded.result.executions[0].sub_executions) == 1
     assert len(loaded.result.metric_results) == 1
-    assert loaded.result.metric_results[0].metadata.identity.name == "latency_ms"
+    assert (
+        loaded.result.metric_results[0].metadata.identity.name == "latency_ms"
+    )
     assert loaded.result.metric_results[0].value == 12.5
-    assert loaded.result.metric_results[0].metadata.identity.scope == Scope.CASE
+    assert loaded.result.metric_results[0].metadata.identity.scope == Scope.TEST
     assert loaded.result.metric_results[0].metadata.collected_from_modules == {
         "tests/test_sample.py"
     }
@@ -140,9 +142,9 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         "/tmp/project"
     )
     assert loaded.result.metric_results[0].dependencies == [
-        ResourceIdentity(
+        ResourceSpec(
             name="overall_latency",
-            scope=Scope.SESSION,
+            scope=Scope.PROCESS,
             provider_path="/tmp/project/confrue_root.py",
             provider_dir="/tmp/project",
         )
@@ -199,13 +201,8 @@ def test_sqlite_store_assertions_and_predicates(
         predicate_results=[predicate_result],
     )
 
-    definition = TestDefinition(
-        name="test_one",
-        fn=lambda: None,
-        module_path=Path("tests/test_sample.py"),
-        is_async=False,
-    )
-    execution = TestExecution(
+    definition = make_definition("test_one", module_path="tests/test_sample.py")
+    execution = ExecutedTest(
         definition=definition,
         result=TestResult(
             status=TestStatus.FAILED,
@@ -217,7 +214,7 @@ def test_sqlite_store_assertions_and_predicates(
     )
 
     metric_metadata = MetricMetadata(
-        identity=ResourceIdentity(name="count", scope=Scope.SESSION)
+        identity=ResourceSpec(name="count", scope=Scope.PROCESS)
     )
     metric_assertion = AssertionResult(
         expression_repr=AssertionRepr(

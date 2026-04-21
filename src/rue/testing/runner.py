@@ -12,13 +12,9 @@ from uuid import UUID, uuid4
 
 from rue.config import Config, load_config
 from rue.context.collectors import CURRENT_METRIC_RESULTS
-from rue.context.runtime import (
-    CURRENT_RUNNER,
-    bind,
-)
+from rue.context.runtime import bind
 from rue.reports.base import Reporter
 from rue.resources import (
-    ResourceRegistry,
     ResourceResolver,
     registry as default_resource_registry,
 )
@@ -26,19 +22,17 @@ from rue.resources.metrics.base import MetricResult
 from rue.resources.sut.output import SUTOutputCapture
 from rue.storage import SQLiteStore
 from rue.telemetry.otel.runtime import otel_runtime
-from rue.testing.discovery import collect
 from rue.testing.environment import capture_environment
 from rue.testing.execution import DefaultTestFactory
-from rue.testing.execution.interfaces import Test
+from rue.testing.execution.interfaces import ExecutableTest
+from rue.context.process_pool import process_pool_scope
 from rue.testing.models import (
     Run,
-    TestExecution,
-    TestDefinition,
+    ExecutedTest,
+    LoadedTestDef,
     TestResult,
     TestStatus,
 )
-from rue.testing.tracing import TestTracer
-
 UUID_STRING_PATTERN = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
@@ -52,13 +46,17 @@ class Runner:
         reporters: Optional reporters. Defaults to all registered reporters.
 
     Examples:
-        # Sequential execution (default reporters)
-        runner = Runner()
-        result = await runner.run(path="tests/")
+        # Build items with TestSpecCollector + TestLoader, then run.
+        # runner = Runner()
+        # collection = TestSpecCollector(
+        #     include_tags, exclude_tags, keyword
+        # ).build_spec_collection(resolved_paths)
+        # items = TestLoader(collection.suite_root).load_from_collection(collection)
+        # result = await runner.run(items)
 
-        # Concurrent execution with 5 workers
-        runner = Runner(config=Config(concurrency=5))
-        result = await runner.run(path="tests/")
+        # Concurrent execution with 5 workers (same item preparation as above)
+        # runner = Runner(config=Config(concurrency=5))
+        # result = await runner.run(items)
     """
 
     DEFAULT_MAX_CONCURRENCY = 10
@@ -71,13 +69,11 @@ class Runner:
         fail_fast: bool = False,
         capture_output: bool = True,
         run_id: UUID | str | None = None,
-        resource_registry: ResourceRegistry | None = None,
     ) -> None:
         self.config = config or load_config()
         self.fail_fast = fail_fast
         self.capture_output = capture_output
         self._default_run_id = self._normalize_run_id(run_id)
-        self.resource_registry = resource_registry or default_resource_registry
         self.reporters = self._resolve_reporters(reporters)
         for reporter in self.reporters:
             reporter.configure(self.config)
@@ -121,16 +117,16 @@ class Runner:
         await asyncio.gather(*[r.on_no_tests_found() for r in self.reporters])
 
     async def _notify_collection_complete(
-        self, items: list[TestDefinition], run: Run
+        self, items: list[LoadedTestDef], run: Run
     ) -> None:
         await asyncio.gather(
             *[r.on_collection_complete(items, run) for r in self.reporters]
         )
 
-    async def _notify_test_start(self, item: TestDefinition) -> None:
+    async def _notify_test_start(self, item: LoadedTestDef) -> None:
         await asyncio.gather(*[r.on_test_start(item) for r in self.reporters])
 
-    async def _on_execution_complete(self, execution: TestExecution) -> None:
+    async def _on_execution_complete(self, execution: ExecutedTest) -> None:
         await asyncio.gather(
             *[r.on_execution_complete(execution) for r in self.reporters]
         )
@@ -144,16 +140,6 @@ class Runner:
     async def _notify_run_stopped_early(self, failure_count: int) -> None:
         await asyncio.gather(
             *[r.on_run_stopped_early(failure_count) for r in self.reporters]
-        )
-
-    async def _notify_trace_collected(
-        self, tracer: TestTracer, execution_id: UUID
-    ) -> None:
-        await asyncio.gather(
-            *[
-                r.on_trace_collected(tracer, execution_id)
-                for r in self.reporters
-            ]
         )
 
     def _ensure_db_ready(self) -> None:
@@ -192,15 +178,15 @@ class Runner:
 
     async def run(
         self,
-        items: list[TestDefinition] | None = None,
-        path: str | None = None,
+        items: list[LoadedTestDef],
+        *,
         run_id: UUID | str | None = None,
     ) -> Run:
         """Run tests and return results.
 
         Args:
-            items: Pre-collected test items, or None to discover.
-            path: Path to discover tests from if items not provided.
+            items: Test definitions to execute (discover via TestSpecCollector and
+                TestLoader before calling).
             run_id: Optional UUID for this run. Overrides constructor-level run_id.
 
         Returns:
@@ -225,9 +211,6 @@ class Runner:
         if self.config.otel:
             otel_runtime.configure()
 
-        if items is None:
-            items = collect(path)
-
         if not items:
             await self._notify_no_tests_found()
             self.current_run.end_time = datetime.now(UTC)
@@ -241,13 +224,12 @@ class Runner:
         start = time.perf_counter()
 
         with (
-            bind(CURRENT_RUNNER, self),
             SUTOutputCapture.sys_capture(swallow=self.capture_output),
             bind(CURRENT_METRIC_RESULTS, metric_results),
         ):
             await self._notify_collection_complete(items, self.current_run)
 
-            resolver = ResourceResolver(self.resource_registry)
+            resolver = ResourceResolver(default_resource_registry)
 
             self.semaphore = asyncio.Semaphore(self._concurrency_limit())
             self.stop_flag = False
@@ -292,43 +274,43 @@ class Runner:
     async def _execute_run(
         self,
         *,
-        items: list[TestDefinition],
+        items: list[LoadedTestDef],
         resolver: ResourceResolver,
         run: Run,
     ) -> None:
         """Execute the test run with the given items and resolver."""
-        self._factory = DefaultTestFactory(
-            config=self.config,
-            run_id=run.run_id,
-            semaphore=self.semaphore,
-            is_stopped=lambda: self.stop_flag,
-            on_complete=self._on_execution_complete,
-            on_trace_collected=self._notify_trace_collected,
-        )
-        self._built_tests: dict[int, Test] = {}
-        for item in items:
-            if not item.definition_error:
-                self._built_tests[id(item)] = self._factory.build(item)
-        await self._notify_tests_ready(list(self._built_tests.values()))
-        try:
-            if self._concurrency_limit() == 1:
-                await self._run_sequential(items, resolver, run)
-            else:
-                await self._run_concurrent(items, resolver, run)
-        finally:
-            await resolver.teardown()
+        with process_pool_scope():
+            self._factory = DefaultTestFactory(
+                config=self.config,
+                run_id=run.run_id,
+                semaphore=self.semaphore,
+                is_stopped=lambda: self.stop_flag,
+                on_complete=self._on_execution_complete,
+            )
+            self._built_tests: dict[int, ExecutableTest] = {}
+            for item in items:
+                if not item.spec.definition_error:
+                    self._built_tests[id(item)] = self._factory.build(item)
+            await self._notify_tests_ready(list(self._built_tests.values()))
+            try:
+                if self._concurrency_limit() == 1:
+                    await self._run_sequential(items, resolver, run)
+                else:
+                    await self._run_concurrent(items, resolver, run)
+            finally:
+                await resolver.teardown()
 
     async def _execute_item(
-        self, item: TestDefinition, resolver: ResourceResolver
-    ) -> TestExecution:
+        self, item: LoadedTestDef, resolver: ResourceResolver
+    ) -> ExecutedTest:
         """Execute a single test with error handling."""
-        if item.definition_error:
-            execution = TestExecution(
+        if item.spec.definition_error:
+            execution = ExecutedTest(
                 definition=item,
                 result=TestResult(
                     status=TestStatus.ERROR,
                     duration_ms=0,
-                    error=ValueError(item.definition_error),
+                    error=ValueError(item.spec.definition_error),
                 ),
                 execution_id=uuid4(),
             )
@@ -342,7 +324,7 @@ class Runner:
             execution = await test.execute(resolver)
         except Exception as e:
             duration = (time.perf_counter() - t_start) * 1000
-            execution = TestExecution(
+            execution = ExecutedTest(
                 definition=item,
                 result=TestResult(
                     status=TestStatus.ERROR, duration_ms=duration, error=e
@@ -355,7 +337,7 @@ class Runner:
         return execution
 
     async def _run_sequential(
-        self, items: list[TestDefinition], resolver: ResourceResolver, run: Run
+        self, items: list[LoadedTestDef], resolver: ResourceResolver, run: Run
     ) -> None:
         """Run tests sequentially."""
         failures = 0
@@ -376,14 +358,14 @@ class Runner:
                     break
 
     async def _run_concurrent(
-        self, items: list[TestDefinition], resolver: ResourceResolver, run: Run
+        self, items: list[LoadedTestDef], resolver: ResourceResolver, run: Run
     ) -> None:
         """Run tests concurrently."""
         state_lock = asyncio.Lock()
         failures = 0
-        results: list[TestExecution | None] = [None] * len(items)
+        results: list[ExecutedTest | None] = [None] * len(items)
 
-        async def run_one(idx: int, item: TestDefinition) -> None:
+        async def run_one(idx: int, item: LoadedTestDef) -> None:
             nonlocal failures
 
             async with state_lock:

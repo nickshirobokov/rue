@@ -73,7 +73,7 @@ This makes mixed pytest/Rue files possible: pytest can still collect plain `test
 
 ### Shared Setup With `conftest.py` and `confrue_*`
 
-Use `conftest.py` or `confrue_*.py` for reusable setup that should apply to a directory tree, especially shared helpers and `SESSION` resources.
+Use `conftest.py` or `confrue_*.py` for reusable setup that should apply to a directory tree, especially shared helpers and `PROCESS` resources.
 
 ```text
 project/
@@ -235,7 +235,7 @@ Resources are the Rue equivalent of pytest fixtures: named, injectable dependenc
   **Related docs**: [Resource (Concept)](/concepts/resource), [Metric (Concept)](/concepts/metric), [SUT (Concept)](/concepts/sut), [OpenTelemetry Traces (API)](/apis/open-telemetry-traces)
 </Info>
 
-**`@rue.resource(scope="case")`** - Define injectable dependencies with lifecycle management
+**`@rue.resource(scope="test")`** - Define injectable dependencies with lifecycle management
 
 ```python
 @rue.resource
@@ -244,7 +244,7 @@ def database():
     yield conn  # Injected into tests
     conn.close()  # Automatic cleanup
 
-@rue.resource(scope="session")
+@rue.resource(scope="process")
 def ml_model():
     return load_model()  # Shared across the run for the active provider
 
@@ -256,13 +256,13 @@ def test_query(database, ml_model):
     assert prediction
 ```
 
-Scopes: `"case"` (default), `"suite"`, `"session"`.
+Scopes: `"test"` (default), `"module"`, `"process"`.
 
-`SESSION` resources are hierarchical: same-name providers can coexist, and Rue selects the nearest ancestor provider relative to the requesting test module. Without an active test context, resolution falls back to the flat/latest registered definition.
+`PROCESS` resources are hierarchical: same-name providers can coexist, and Rue selects the nearest ancestor provider relative to the requesting test module. Without an active test context, resolution falls back to the flat/latest registered definition.
 
-In practice, put shared `SESSION` resources in `conftest.py` or `confrue_*.py` files so directory structure controls which override is active.
+In practice, put shared `PROCESS` resources in `conftest.py` or `confrue_*.py` files so directory structure controls which override is active.
 
-**`@rue.resource.metric(scope="session")`** - Define a metric as a scoped, injectable measurement object
+**`@rue.resource.metric(scope="process")`** - Define a metric as a scoped, injectable measurement object
 
 Metrics behave like resources, but they’re intended to accumulate measurements across many cases and then assert on aggregates at the end of their scope.
 
@@ -286,7 +286,7 @@ def test_classifier(input, expected, classifier, accuracy: Metric):
         assert result == expected
 ```
 
-Scopes: `"session"` (default), `"suite"`, `"case"`.
+Scopes: `"process"` (default), `"module"`, `"test"`.
 
 **`@rue.resource.sut`** - Register a System Under Test (SUT) factory as an injectable, traceable resource
 

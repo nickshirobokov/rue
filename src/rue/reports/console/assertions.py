@@ -12,29 +12,40 @@ from rich.text import Text
 from .shared import STATUS_STYLES, format_assertion_result
 
 if TYPE_CHECKING:
-    from rue.testing.models.result import TestExecution
+    from rue.testing.models.executed import ExecutedTest
+
 
 class AssertionRenderer:
     @staticmethod
-    def _has_failed_assertions(execution: TestExecution) -> bool:
+    def _has_failed_assertions(execution: ExecutedTest) -> bool:
         if any(not a.passed for a in execution.result.assertion_results):
             return True
-        return any(AssertionRenderer._has_failed_assertions(s) for s in execution.sub_executions)
+        return any(
+            AssertionRenderer._has_failed_assertions(s)
+            for s in execution.sub_executions
+        )
 
-    def render(self, failures: list[TestExecution]) -> list[RenderableType]:
+    def render(self, failures: list[ExecutedTest]) -> list[RenderableType]:
         relevant = [f for f in failures if self._has_failed_assertions(f)]
         if not relevant:
             return []
-        renderables: list[RenderableType] = [Text(""), Rule("ASSERTIONS", characters="=", style="bold red")]
+        renderables: list[RenderableType] = [
+            Text(""),
+            Rule("ASSERTIONS", characters="=", style="bold red"),
+        ]
         for index, failure in enumerate(relevant):
             if index:
                 renderables.append(Text(""))
-            renderables.append(self.render_panel(failure, title=failure.item.full_name))
+            renderables.append(
+                self.render_panel(
+                    failure, title=failure.definition.spec.full_name
+                )
+            )
         renderables.append(Text(""))
         return renderables
 
     def render_panel(
-        self, execution: TestExecution, *, title: str | None = None
+        self, execution: ExecutedTest, *, title: str | None = None
     ) -> Panel:
         result = execution.result
         style = STATUS_STYLES[result.status]

@@ -19,19 +19,20 @@ from rue.reports.base import Reporter
 from rue.reports.otel import DEFAULT_OTEL_OUTPUT_ROOT, MAX_STORED_OTEL_RUNS
 from rue.resources import ResourceRegistry, registry, resource
 from rue.resources.sut import sut
-from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
-from rue.testing.discovery import collect
+from rue.telemetry import OtelTraceArtifact
+from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.environment import _filter_env_vars
 from rue.testing.models import (
     ParameterSet,
     ParamsIterateModifier,
     RunResult,
-    TestExecution,
-    TestDefinition,
+    ExecutedTest,
+    LoadedTestDef,
     TestResult,
     TestStatus,
 )
 from rue.testing.runner import Runner
+from tests.unit.factories import make_definition, materialize_tests
 
 
 @pytest.fixture(autouse=True)
@@ -52,17 +53,13 @@ def make_item(
     xfail_strict: bool = False,
     suffix: str | None = None,
     case_id: UUID | None = None,
-) -> TestDefinition:
-    """Helper to create TestDefinition for testing."""
-    return TestDefinition(
+) -> LoadedTestDef:
+    """Helper to create LoadedTestDef for testing."""
+    return make_definition(
+        name or fn.__name__,
         fn=fn,
-        name=name or fn.__name__,
-        module_path=Path("test_module.py"),
         is_async=is_async,
         params=params or [],
-        class_name=None,
-        modifiers=[],
-        tags=set(),
         skip_reason=skip_reason,
         xfail_reason=xfail_reason,
         xfail_strict=xfail_strict,
@@ -84,7 +81,7 @@ class EventReporter(Reporter):
         self.event_times: list[tuple[str, str, float]] = []
         self.event_order: list[tuple[str, str]] = []
         self.subtest_event_times: list[tuple[str, str, float]] = []
-        self.trace_events: list[tuple[UUID, OtelTraceSession]] = []
+        self.trace_events: list[tuple[UUID, OtelTraceArtifact]] = []
         self.run_complete_elapsed = 0.0
         self._started_ids: set[int] = set()
 
@@ -94,39 +91,46 @@ class EventReporter(Reporter):
     async def on_no_tests_found(self) -> None:
         pass
 
-    async def on_collection_complete(self, _items: list[TestDefinition], _run) -> None:
+    async def on_collection_complete(
+        self, _items: list[LoadedTestDef], _run
+    ) -> None:
         self.start_time = time.perf_counter()
 
-    async def on_test_start(self, item: TestDefinition) -> None:
+    async def on_test_start(self, item: LoadedTestDef) -> None:
         self._started_ids.add(id(item))
         elapsed = time.perf_counter() - self.start_time
-        self.event_times.append(("start", item.name, elapsed))
-        self.event_order.append(("start", item.name))
+        self.event_times.append(("start", item.spec.name, elapsed))
+        self.event_order.append(("start", item.spec.name))
 
-    async def on_execution_complete(self, execution: TestExecution) -> None:
+    async def on_execution_complete(self, execution: ExecutedTest) -> None:
         elapsed = time.perf_counter() - self.start_time
-        if id(execution.item) in self._started_ids:
-            self.event_times.append(("complete", execution.item.name, elapsed))
-            self.event_order.append(("complete", execution.item.name))
+        if id(execution.definition) in self._started_ids:
+            self.event_times.append(
+                ("complete", execution.definition.spec.name, elapsed)
+            )
+            self.event_order.append(
+                ("complete", execution.definition.spec.name)
+            )
         else:
-            label = execution.item.suffix or (
-                str(execution.item.case_id)
-                if execution.item.case_id
+            label = execution.definition.spec.suffix or (
+                str(execution.definition.spec.case_id)
+                if execution.definition.spec.case_id
                 else ""
             )
-            self.subtest_event_times.append((execution.item.name, label, elapsed))
+            self.subtest_event_times.append(
+                (execution.definition.spec.name, label, elapsed)
+            )
+        self.trace_events.extend(
+            (execution.execution_id, artifact)
+            for artifact in execution.telemetry_artifacts
+            if isinstance(artifact, OtelTraceArtifact)
+        )
 
     async def on_run_complete(self, _rue_run) -> None:
         self.run_complete_elapsed = time.perf_counter() - self.start_time
 
     async def on_run_stopped_early(self, failure_count: int) -> None:
         pass
-
-    async def on_trace_collected(self, tracer, execution_id: UUID) -> None:
-        if tracer.completed_otel_trace_session is not None:
-            self.trace_events.append(
-                (execution_id, tracer.completed_otel_trace_session)
-            )
 
 
 class TestRunResult:
@@ -136,27 +140,27 @@ class TestRunResult:
         result = RunResult()
         items = [make_item(lambda: None) for _ in range(6)]
         result.executions = [
-            TestExecution(
+            ExecutedTest(
                 definition=items[0],
                 result=TestResult(status=TestStatus.PASSED, duration_ms=1),
             ),
-            TestExecution(
+            ExecutedTest(
                 definition=items[1],
                 result=TestResult(status=TestStatus.FAILED, duration_ms=1),
             ),
-            TestExecution(
+            ExecutedTest(
                 definition=items[2],
                 result=TestResult(status=TestStatus.ERROR, duration_ms=1),
             ),
-            TestExecution(
+            ExecutedTest(
                 definition=items[3],
                 result=TestResult(status=TestStatus.SKIPPED, duration_ms=1),
             ),
-            TestExecution(
+            ExecutedTest(
                 definition=items[4],
                 result=TestResult(status=TestStatus.XFAILED, duration_ms=1),
             ),
-            TestExecution(
+            ExecutedTest(
                 definition=items[5],
                 result=TestResult(status=TestStatus.XPASSED, duration_ms=1),
             ),
@@ -280,7 +284,7 @@ class TestRunner:
         result = await Runner(
             reporters=[null_reporter],
             fail_fast=True,
-        ).run(items=collect(module_path))
+        ).run(items=materialize_tests(module_path))
 
         execution = result.result.executions[0]
         assert result.result.failed == 1
@@ -415,28 +419,6 @@ class TestResourceInjection:
         assert captured == ["injected_value"]
 
     @pytest.mark.asyncio
-    async def test_uses_provided_resource_registry(self, null_reporter):
-        custom_resource_registry = ResourceRegistry()
-
-        @custom_resource_registry.resource
-        def injected():
-            return "custom_value"
-
-        captured = []
-
-        def test_with_resource(injected):
-            captured.append(injected)
-
-        item = make_item(test_with_resource, params=["injected"])
-        runner = Runner(
-            reporters=[null_reporter],
-            resource_registry=custom_resource_registry,
-        )
-        await runner.run(items=[item])
-
-        assert captured == ["custom_value"]
-
-    @pytest.mark.asyncio
     async def test_removed_otel_trace_resource_errors(self, null_reporter):
         def test_needs_trace(otel_trace):
             pass
@@ -518,9 +500,7 @@ class TestOpenTelemetry:
 
             first_agent = SUT(run, name="first_agent")
             await first_agent.instance()
-            captured["first"] = {
-                span.name for span in first_agent.all_spans
-            }
+            captured["first"] = {span.name for span in first_agent.all_spans}
 
         async def second():
             async def run() -> None:
@@ -529,9 +509,7 @@ class TestOpenTelemetry:
 
             second_agent = SUT(run, name="second_agent")
             await second_agent.instance()
-            captured["second"] = {
-                span.name for span in second_agent.all_spans
-            }
+            captured["second"] = {span.name for span in second_agent.all_spans}
 
         items = [
             make_item(first, name="test_first", is_async=True),
@@ -557,30 +535,29 @@ class TestOpenTelemetry:
         }
 
         trace_ids = {
-            session.root_span.get_span_context().trace_id
-            for _, session in reporter.trace_events
+            artifact.trace_id for _, artifact in reporter.trace_events
         }
         assert len(trace_ids) == 2
 
         payloads_by_execution = {
-            execution_id: session.serialize()
-            for execution_id, session in reporter.trace_events
+            execution_id: artifact.spans
+            for execution_id, artifact in reporter.trace_events
         }
         assert set(payloads_by_execution) == {
             execution.execution_id for execution in result.result.executions
         }
         for execution in result.result.executions:
-            payload = payloads_by_execution[execution.execution_id]
+            spans = payloads_by_execution[execution.execution_id]
             expected_child = (
                 "first_step"
-                if execution.item.name == "test_first"
+                if execution.definition.spec.name == "test_first"
                 else "second_step"
             )
-            assert {span["name"] for span in payload["spans"]} == {
-                f"test.{execution.item.full_name}",
+            assert {span["name"] for span in spans} == {
+                f"test.{execution.definition.spec.full_name}",
                 (
                     "sut.first_agent.__call__"
-                    if execution.item.name == "test_first"
+                    if execution.definition.spec.name == "test_first"
                     else "sut.second_agent.__call__"
                 ),
                 expected_child,
@@ -608,10 +585,10 @@ class TestOpenTelemetry:
         assert len(reporter.trace_events) == 1
 
         execution = result.result.executions[0]
-        execution_id, session = reporter.trace_events[0]
+        execution_id, artifact = reporter.trace_events[0]
         assert execution_id == execution.execution_id
-        assert session.run_id == result.run_id
-        assert session.execution_id == execution.execution_id
+        assert artifact.run_id == result.run_id
+        assert artifact.execution_id == execution.execution_id
         assert not (tmp_path / DEFAULT_OTEL_OUTPUT_ROOT).exists()
 
     @pytest.mark.asyncio
@@ -648,13 +625,11 @@ class TestOpenTelemetry:
             _ = value
             await asyncio.sleep(0)
 
-        item = TestDefinition(
+        item = make_definition(
+            "test_params_trace",
             fn=test_case,
-            name="test_params_trace",
-            module_path=Path("test_module.py"),
             is_async=True,
             params=["value"],
-            class_name=None,
             modifiers=[
                 ParamsIterateModifier(
                     parameter_sets=(
@@ -664,7 +639,6 @@ class TestOpenTelemetry:
                     min_passes=2,
                 )
             ],
-            tags=set(),
         )
 
         reporter = EventReporter()
@@ -684,8 +658,8 @@ class TestOpenTelemetry:
             execution_id for execution_id, _ in reporter.trace_events
         } == child_execution_ids
         assert all(
-            execution_id == session.execution_id
-            for execution_id, session in reporter.trace_events
+            execution_id == artifact.execution_id
+            for execution_id, artifact in reporter.trace_events
         )
 
     @pytest.mark.asyncio
@@ -716,7 +690,9 @@ class TestOpenTelemetry:
         assert payload["execution_id"] == str(execution.execution_id)
         assert "otel_trace_id" not in payload
         assert "spans" not in payload
-        assert payload["trace"]["name"] == "test.test_module::test_default_trace"
+        assert (
+            payload["trace"]["name"] == "test.test_module::test_default_trace"
+        )
         assert [child["name"] for child in payload["trace"]["children"]] == [
             "default_step"
         ]
@@ -761,7 +737,7 @@ class TestOpenTelemetry:
         assert trace["children"][0]["children"][1]["children"] == []
 
     @pytest.mark.asyncio
-    async def test_otel_session_serialize_stays_flat_for_custom_reporters(
+    async def test_otel_trace_artifact_stays_flat_for_custom_reporters(
         self,
     ):
         reporter = EventReporter()
@@ -776,13 +752,11 @@ class TestOpenTelemetry:
         ).run(items=[make_item(traced, name="test_flat_trace", is_async=True)])
 
         execution = result.result.executions[0]
-        session = reporter.trace_events[0][1]
-        payload = session.serialize()
+        artifact = reporter.trace_events[0][1]
 
-        assert payload["run_id"] == str(result.run_id)
-        assert payload["execution_id"] == str(execution.execution_id)
-        assert "trace" not in payload
-        assert {span["name"] for span in payload["spans"]} == {
+        assert artifact.run_id == result.run_id
+        assert artifact.execution_id == execution.execution_id
+        assert {span["name"] for span in artifact.spans} == {
             "flat_step",
             "test.test_module::test_flat_trace",
         }
@@ -911,24 +885,21 @@ class TestConcurrency:
         *,
         name: str,
         parameter_sets: tuple[ParameterSet, ...],
-    ) -> TestDefinition:
+    ) -> LoadedTestDef:
         async def params_case(delay: float) -> None:
             await asyncio.sleep(delay)
 
-        return TestDefinition(
+        return make_definition(
+            name,
             fn=params_case,
-            name=name,
-            module_path=Path("test_module.py"),
             is_async=True,
             params=["delay"],
-            class_name=None,
             modifiers=[
                 ParamsIterateModifier(
                     parameter_sets=parameter_sets,
                     min_passes=len(parameter_sets),
                 )
             ],
-            tags=set(),
         )
 
     @pytest.mark.asyncio
@@ -1004,11 +975,13 @@ class TestConcurrency:
         completed = {
             name for kind, name in reporter.event_order if kind == "complete"
         }
-        assert started == completed == {item.name for item in items}
+        assert started == completed == {item.spec.name for item in items}
 
         for item in items:
-            start_idx = reporter.event_order.index(("start", item.name))
-            complete_idx = reporter.event_order.index(("complete", item.name))
+            start_idx = reporter.event_order.index(("start", item.spec.name))
+            complete_idx = reporter.event_order.index(
+                ("complete", item.spec.name)
+            )
             assert start_idx < complete_idx
 
     @pytest.mark.asyncio
@@ -1017,7 +990,7 @@ class TestConcurrency:
             await asyncio.sleep(0.01)
 
         class StartFailureReporter(EventReporter):
-            async def on_test_start(self, item: TestDefinition) -> None:
+            async def on_test_start(self, item: LoadedTestDef) -> None:
                 raise RuntimeError("start callback failed")
 
         runner = Runner(
@@ -1035,7 +1008,9 @@ class TestConcurrency:
             await asyncio.sleep(0.01)
 
         class CompleteFailureReporter(EventReporter):
-            async def on_execution_complete(self, execution: TestExecution) -> None:
+            async def on_execution_complete(
+                self, execution: ExecutedTest
+            ) -> None:
                 raise RuntimeError("complete callback failed")
 
         runner = Runner(
@@ -1069,14 +1044,16 @@ class TestConcurrency:
         parent_complete_elapsed = next(
             elapsed
             for kind, name, elapsed in reporter.event_times
-            if kind == "complete" and name == item.name
+            if kind == "complete" and name == item.spec.name
         )
         assert max(
             elapsed
             for _parent, _suffix, elapsed in reporter.subtest_event_times
         ) <= (parent_complete_elapsed)
         execution = test_run.result.executions[0]
-        assert [sub.item.suffix for sub in execution.sub_executions] == [
+        assert [
+            sub.definition.spec.suffix for sub in execution.sub_executions
+        ] == [
             "slow",
             "fast",
             "mid",
@@ -1209,7 +1186,7 @@ class TestResultOrdering:
         result = await runner.run(items=items)
 
         # Results should be in discovery order, not completion order
-        names = [r.item.name for r in result.result.executions]
+        names = [r.definition.spec.name for r in result.result.executions]
         assert names == ["test_0", "test_1", "test_2"]
 
 
@@ -1220,7 +1197,7 @@ class TestResourceTeardown:
     async def test_case_resources_torn_down_between_tests(self, null_reporter):
         teardown_count = 0
 
-        @resource(scope="case")
+        @resource(scope="test")
         def case_res():
             yield "value"
             nonlocal teardown_count
@@ -1244,7 +1221,7 @@ class TestResourceTeardown:
     async def test_suite_resources_shared(self, null_reporter):
         create_count = 0
 
-        @resource(scope="suite")
+        @resource(scope="module")
         def suite_res():
             nonlocal create_count
             create_count += 1
@@ -1273,7 +1250,7 @@ class TestResourceTeardown:
         create_count = 0
         teardown_count = 0
 
-        @resource(scope="session")
+        @resource(scope="process")
         async def session_res():
             nonlocal create_count, teardown_count
             create_count += 1
@@ -1425,7 +1402,7 @@ class TestResourceResolutionErrors:
     ):
         """Test that errors in suite-scope resources affect all subsequent tests."""
 
-        @resource(scope="suite")
+        @resource(scope="module")
         def suite_resource():
             raise RuntimeError("Suite resource failed")
 

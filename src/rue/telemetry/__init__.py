@@ -1,8 +1,7 @@
-"""Telemetry backends and public telemetry APIs."""
+"""Telemetry artifacts and public telemetry APIs."""
 
-from rue.telemetry.otel import OtelTraceSession
+from rue.telemetry.base import TelemetryArtifact
+from rue.telemetry.otel.backend import OtelTraceArtifact
 
 
-__all__ = [
-    "OtelTraceSession",
-]
+__all__ = ["OtelTraceArtifact", "TelemetryArtifact"]

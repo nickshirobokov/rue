@@ -1,25 +1,29 @@
-from pathlib import Path
+from uuid import UUID
 
 import pytest
 
+from rue.config import Config
 from rue.resources import ResourceResolver, registry
-from rue.testing.execution.single import SingleTest
-from rue.testing.models import IterateModifier, TestDefinition, TestStatus
-from rue.testing.tracing import TestTracer
+from rue.testing.execution.local.single import LocalSingleTest
+from rue.testing.models import IterateModifier, LoadedTestDef, TestStatus
+from rue.testing.tracing import TestTracer, build_test_tracer
+from tests.unit.factories import make_definition
 
 
-def make_item(fn=None, *, modifiers=None) -> TestDefinition:
-    return TestDefinition(
-        name="test_sample",
+def make_item(fn=None, *, modifiers=None) -> LoadedTestDef:
+    return make_definition(
+        "test_sample",
         fn=fn or (lambda: None),
-        module_path=Path("test_sample.py"),
-        is_async=False,
+        module_path="test_sample.py",
         modifiers=modifiers or [],
     )
 
 
 def make_tracer() -> TestTracer:
-    return TestTracer(otel_enabled=False)
+    return build_test_tracer(
+        config=Config.model_construct(otel=False),
+        run_id=UUID(int=1),
+    )
 
 
 @pytest.mark.asyncio
@@ -29,7 +33,7 @@ async def test_single_test_executes_without_runner():
     def test_body():
         called.append("called")
 
-    test = SingleTest(
+    test = LocalSingleTest(
         definition=make_item(test_body),
         params={},
         tracer=make_tracer(),
@@ -43,9 +47,9 @@ async def test_single_test_executes_without_runner():
 
 def test_single_test_rejects_modifiers():
     with pytest.raises(
-        ValueError, match="SingleTest should not have modifiers"
+        ValueError, match="LocalSingleTest should not have modifiers"
     ):
-        SingleTest(
+        LocalSingleTest(
             definition=make_item(
                 modifiers=[IterateModifier(count=2, min_passes=2)]
             ),

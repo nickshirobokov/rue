@@ -81,13 +81,15 @@ class IterateDecorator:
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         match argnames:
             case str():
-                names = tuple(n.strip() for n in argnames.split(",") if n.strip())
+                names = tuple(
+                    n.strip() for n in argnames.split(",") if n.strip()
+                )
             case _:
                 names = tuple(str(n) for n in argnames)
 
         values_list: list[tuple[Any, ...]] = []
         parse_error: str | None = None
-        for raw in (argvalues if names else ()):
+        for raw in argvalues if names else ():
             match raw:
                 case tuple() | list() if len(raw) == len(names):
                     values_list.append(tuple(raw))
@@ -97,7 +99,9 @@ class IterateDecorator:
                 case _ if len(names) == 1:
                     values_list.append((raw,))
                 case _:
-                    parse_error = "iterate.params() values must be tuples or lists"
+                    parse_error = (
+                        "iterate.params() values must be tuples or lists"
+                    )
                     break
 
         ids_tuple = tuple(str(i) for i in ids) if ids is not None else None
@@ -106,13 +110,19 @@ class IterateDecorator:
         modifier: ParamsIterateModifier | None = None
         match (names, values_list, parse_error, ids_tuple):
             case ((), _, _, _):
-                definition_error = "iterate.params() requires at least one argument name"
+                definition_error = (
+                    "iterate.params() requires at least one argument name"
+                )
             case (_, _, str() as err, _):
                 definition_error = err
             case (_, [], _, _):
-                definition_error = "iterate.params() requires at least one value set"
+                definition_error = (
+                    "iterate.params() requires at least one value set"
+                )
             case (_, _, _, tuple() as it) if len(it) != len(values_list):
-                definition_error = "iterate.params() ids must match number of value sets"
+                definition_error = (
+                    "iterate.params() ids must match number of value sets"
+                )
             case _:
                 parameter_sets: list[ParameterSet] = []
                 for i, vals in enumerate(values_list):
@@ -120,11 +130,24 @@ class IterateDecorator:
                         case tuple():
                             suffix = ids_tuple[i]
                         case _:
-                            suffix = "{" + ", ".join(f"{n}={repr(v)[:30]}" for n, v in zip(names, vals)) + "}"
-                    parameter_sets.append(ParameterSet(values=dict(zip(names, vals)), suffix=suffix))
+                            suffix = (
+                                "{"
+                                + ", ".join(
+                                    f"{n}={repr(v)[:30]}"
+                                    for n, v in zip(names, vals)
+                                )
+                                + "}"
+                            )
+                    parameter_sets.append(
+                        ParameterSet(
+                            values=dict(zip(names, vals)), suffix=suffix
+                        )
+                    )
                 modifier = ParamsIterateModifier(
                     parameter_sets=tuple(parameter_sets),
-                    min_passes=self._resolve_min_passes("iterate.params()", len(values_list), min_passes),
+                    min_passes=self._resolve_min_passes(
+                        "iterate.params()", len(values_list), min_passes
+                    ),
                 )
 
         def decorator(target: Callable[..., Any]) -> Callable[..., Any]:

@@ -9,7 +9,9 @@ from rich.pretty import Node
 from rich.traceback import Frame, Stack, Trace, Traceback
 
 
-def rich_traceback_from_json(data: str, *, show_locals: bool = False) -> Traceback:
+def rich_traceback_from_json(
+    data: str, *, show_locals: bool = False
+) -> Traceback:
     """Reconstruct a Rich Traceback from stored JSON data.
 
     Rich's Traceback normally requires live exception objects. This function
@@ -21,7 +23,9 @@ def rich_traceback_from_json(data: str, *, show_locals: bool = False) -> Traceba
     for f in parsed["frames"]:
         locals_nodes: dict[str, Node] | None = None
         if show_locals and f.get("locals"):
-            locals_nodes = {k: Node(value_repr=v) for k, v in f["locals"].items()}
+            locals_nodes = {
+                k: Node(value_repr=v) for k, v in f["locals"].items()
+            }
         frames.append(
             Frame(
                 filename=f["filename"],

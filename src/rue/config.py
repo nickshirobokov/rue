@@ -138,7 +138,9 @@ class Config(BaseSettings):
 
     def with_overrides(self, **kwargs: Any) -> Config:
         """Return a copy with non-None kwargs applied on top of current values."""
-        return self.model_copy(update={k: v for k, v in kwargs.items() if v is not None})
+        return self.model_copy(
+            update={k: v for k, v in kwargs.items() if v is not None}
+        )
 
     @property
     def resolved_db_path(self) -> Path:

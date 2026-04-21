@@ -1,47 +1,35 @@
 """Import/session machinery for discovered Rue test modules."""
 
+from __future__ import annotations
+
 import ast
 import hashlib
 import importlib
 import importlib.abc
 import importlib.machinery
 import importlib.util
+import pkgutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import ModuleType
+from types import FunctionType, MethodType, ModuleType
 from typing import TypeVar
-from uuid import uuid4
 
 from rue.assertions.transformers import (
     AssertTransformer,
     InjectAssertionDependenciesTransformer,
 )
+from rue.resources.fixtures_collector import (
+    InjectFixtureResourceDependenciesTransformer,
+    RewritePytestFixtureDecoratorsTransformer,
+)
+from rue.testing.decorators.tag import get_tag_data, merge_tag_data
+from rue.testing.models.loaded import LoadedTestDef
+from rue.testing.models.spec import SetupFileRef, TestSpec, TestSpecCollection
 
 
 TFunction = TypeVar("TFunction", ast.FunctionDef, ast.AsyncFunctionDef)
 RUE_DISCOVERY_PACKAGE = "rue_discovery"
-
-
-def _short_hash(value: str) -> str:
-    return hashlib.blake2s(value.encode(), digest_size=4).hexdigest()
-
-
-def _ensure_discovery_package() -> None:
-    if RUE_DISCOVERY_PACKAGE in sys.modules:
-        return
-
-    module = ModuleType(RUE_DISCOVERY_PACKAGE)
-    spec = importlib.machinery.ModuleSpec(
-        RUE_DISCOVERY_PACKAGE,
-        loader=None,
-        is_package=True,
-    )
-    spec.submodule_search_locations = []
-    module.__package__ = RUE_DISCOVERY_PACKAGE
-    module.__path__ = []
-    module.__spec__ = spec
-    sys.modules[RUE_DISCOVERY_PACKAGE] = module
 
 
 class RuePackageLoader(importlib.abc.Loader):
@@ -60,7 +48,18 @@ class RuePackageLoader(importlib.abc.Loader):
 
 @dataclass(slots=True)
 class RueImportSession:
-    """Import state for a single discovery pass."""
+    """Import state for a single discovery pass.
+
+    The ``root_package`` name is derived deterministically from ``root`` so
+    that parent and worker processes importing from the same suite root
+    produce identical synthetic module names — a prerequisite for correct
+    pickling of function objects and consistent ``__module__`` attributes
+    across processes.
+
+    Within a single process, ``sys.modules`` caches modules across multiple
+    materialization calls on the same suite root. Restarting the process
+    is required to pick up on-disk changes to already-imported files.
+    """
 
     root: Path
     root_package: str = field(init=False)
@@ -70,9 +69,27 @@ class RueImportSession:
 
     def __post_init__(self) -> None:
         self.root = self.root.resolve()
-        self.root_package = f"{RUE_DISCOVERY_PACKAGE}.session_{uuid4().hex}"
-        _ensure_discovery_package()
-        _install_discovery_finder()
+        # Deterministic: same root → same package name in every process.
+        self.root_package = (
+            f"{RUE_DISCOVERY_PACKAGE}"
+            f".suite_{hashlib.blake2s(str(self.root).encode(), digest_size=8).hexdigest()}"
+        )
+        if RUE_DISCOVERY_PACKAGE not in sys.modules:
+            module = ModuleType(RUE_DISCOVERY_PACKAGE)
+            spec = importlib.machinery.ModuleSpec(
+                RUE_DISCOVERY_PACKAGE,
+                loader=None,
+                is_package=True,
+            )
+            spec.submodule_search_locations = []
+            module.__package__ = RUE_DISCOVERY_PACKAGE
+            module.__path__ = []
+            module.__spec__ = spec
+            sys.modules[RUE_DISCOVERY_PACKAGE] = module
+
+        if _RUE_DISCOVERY_FINDER not in sys.meta_path:
+            sys.meta_path.insert(0, _RUE_DISCOVERY_FINDER)
+
         _RUE_DISCOVERY_FINDER.register(self)
 
     def package_name_for_dir(self, directory: Path) -> str:
@@ -86,7 +103,9 @@ class RueImportSession:
         current = Path()
         for depth, part in enumerate(relative.parts):
             current /= part
-            parts.append(f"pkg_{depth}_{_short_hash(current.as_posix())}")
+            parts.append(
+                f"pkg_{depth}_{hashlib.blake2s(current.as_posix().encode(), digest_size=4).hexdigest()}"
+            )
         return ".".join(parts)
 
     def register_path(self, path: Path) -> str:
@@ -175,11 +194,6 @@ class RueDiscoveryFinder(importlib.abc.MetaPathFinder):
 _RUE_DISCOVERY_FINDER = RueDiscoveryFinder()
 
 
-def _install_discovery_finder() -> None:
-    if _RUE_DISCOVERY_FINDER not in sys.meta_path:
-        sys.meta_path.insert(0, _RUE_DISCOVERY_FINDER)
-
-
 class RueFunctionTransformer(ast.NodeTransformer):
     """Finds all test functions in the module and transforms them."""
 
@@ -210,39 +224,24 @@ class RueFunctionTransformer(ast.NodeTransformer):
 
 
 def _is_test_decorator(node: ast.expr) -> bool:
-    """Return True if the AST node is any supported @test / @rue.test decorator form.
-
-    Matches:
-      @test
-      @rue.test
-      @test(...)
-      @test.tag(...)
-      @test.iterate(...)
-      @rue.test.tag.skip()
-      etc.
-    """
+    """Return True if the AST node is any supported @test / @rue.test decorator form."""
     if isinstance(node, ast.Call):
         return _is_test_decorator(node.func)
     if isinstance(node, ast.Name) and node.id == "test":
         return True
     if isinstance(node, ast.Attribute):
-        if node.attr == "test" and isinstance(node.value, ast.Name) and node.value.id == "rue":
+        if (
+            node.attr == "test"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "rue"
+        ):
             return True
         return _is_test_decorator(node.value)
     return False
 
 
 def _is_metric_decorator(node: ast.expr) -> bool:
-    """Return True if the AST node is any supported @metric decorator form.
-
-    Matches:
-      @metric
-      @rue.metric
-      @rue.resource.metric
-      @metric(...)
-      @rue.metric(...)
-      @rue.resource.metric(...)
-    """
+    """Return True if the AST node is any supported @metric decorator form."""
     target = node.func if isinstance(node, ast.Call) else node
     if isinstance(target, ast.Name):
         return target.id == "metric"
@@ -261,13 +260,12 @@ def _is_metric_decorator(node: ast.expr) -> bool:
 
 
 class RueMetricTransformer(ast.NodeTransformer):
-    """Find metric functions (decorated with `@rue.resource.metric` / `@metric`) and transform them."""
+    """Find metric functions and transform them."""
 
     def __init__(self, transformers: list[ast.NodeTransformer]) -> None:
         self.transformers = transformers
 
     def apply_transformers(self, node: TFunction) -> TFunction:
-        """Apply configured transformer pipeline to a single function node."""
         for transformer in self.transformers:
             node = transformer.visit(node)
         return ast.fix_missing_locations(node)
@@ -284,20 +282,9 @@ class RueMetricTransformer(ast.NodeTransformer):
 
 
 class RueModuleLoader(importlib.abc.SourceLoader):
-    """Custom loader for Rue test modules with AST transformations.
-
-    This loader participates in Python's import protocol and handles
-    AST transformation and injection of Rue-specific globals during
-    module execution.
-    """
+    """Custom loader for Rue test modules with AST transformations."""
 
     def __init__(self, fullname: str, path: Path) -> None:
-        """Initialize the loader.
-
-        Args:
-            fullname: The fully qualified module name.
-            path: Path to the module file.
-        """
         self.fullname = fullname
         self.path = path
 
@@ -314,7 +301,10 @@ class RueModuleLoader(importlib.abc.SourceLoader):
             msg = f"Cannot get source for module {module.__name__}"
             raise ImportError(msg)
 
-        module_transformers = [
+        tree = ast.parse(source, filename=filename)
+        for transformer in [
+            RewritePytestFixtureDecoratorsTransformer(),
+            InjectFixtureResourceDependenciesTransformer(),
             RueMetricTransformer(
                 transformers=[
                     InjectAssertionDependenciesTransformer(),
@@ -327,11 +317,117 @@ class RueModuleLoader(importlib.abc.SourceLoader):
                     AssertTransformer(source),
                 ]
             ),
-        ]
-        tree = ast.parse(source, filename=filename)
-        for transformer in module_transformers:
+        ]:
             tree = transformer.visit(tree)
         validated_tree = ast.fix_missing_locations(tree)
 
         code = compile(validated_tree, filename=filename, mode="exec")
         exec(code, module.__dict__)
+
+
+class TestLoader:
+    """Materializes :class:`TestSpec` objects into live :class:`LoadedTestDef` instances.
+
+    Safe to construct in any process.  Given the same :class:`TestSpecCollection`
+    (suite root + setup file chain), two ``TestLoader`` instances
+    in two different processes will import modules under identical synthetic
+    names — a prerequisite for pickle-safe function objects and consistent
+    ``__module__`` attributes across processes.
+
+    Registry population is a side-effect of :meth:`prepare_setup`: importing
+    the setup files causes resource decorators to fire, and supported
+    pytest fixtures are rewritten into equivalent resource decorators
+    during import.
+    """
+
+    def __init__(self, suite_root: Path) -> None:
+        self._suite_root = suite_root.resolve()
+        self._session = RueImportSession(self._suite_root)
+        self._prepared_paths: set[Path] = set()
+
+    def prepare_setup(self, path: Path) -> None:
+        """Import one setup file and register any fixtures/resources it defines.
+
+        Idempotent: calling this more than once for the same path is safe.
+        """
+        path = path.resolve()
+        if path in self._prepared_paths:
+            return
+        self._prepared_paths.add(path)
+        self._session.load_module(path)
+
+    def load_from_collection(
+        self, collection: TestSpecCollection
+    ) -> list[LoadedTestDef]:
+        """Resolve every spec in a collection to a live LoadedTestDef."""
+        if not collection.specs:
+            return []
+
+        by_module: dict[Path, list[TestSpec]] = {}
+        for spec in collection.specs:
+            by_module.setdefault(spec.module_path, []).append(spec)
+
+        items: list[LoadedTestDef] = []
+        for module_path, requested_specs in by_module.items():
+            setup_chain = collection.setup_chain_for(module_path)
+            for setup_ref in setup_chain:
+                self.prepare_setup(setup_ref.path)
+
+            module = self._session.load_module(module_path.resolve())
+            for spec in requested_specs:
+                items.append(
+                    self.load_definition(
+                        spec,
+                        module=module,
+                        setup_chain=setup_chain,
+                    )
+                )
+
+        return items
+
+    def load_definition(
+        self,
+        spec: TestSpec,
+        module: ModuleType | None = None,
+        *,
+        setup_chain: tuple[SetupFileRef, ...] = (),
+    ) -> LoadedTestDef:
+        """Resolve a spec to a live LoadedTestDef by importing its module.
+
+        When ``module`` is omitted, the module is imported through the session
+        (with AST transformations applied).  The callable is looked up by name
+        inside the module or class namespace.
+        """
+        if module is None:
+            module = self._session.load_module(spec.module_path.resolve())
+
+        match spec.locator.class_name:
+            case str() as class_name:
+                cls = pkgutil.resolve_name(f"{module.__name__}:{class_name}")
+                fn = pkgutil.resolve_name(
+                    f"{module.__name__}:{class_name}.{spec.locator.function_name}"
+                )
+                if not isinstance(fn, (FunctionType, MethodType)):
+                    raise TypeError(
+                        f"not a function or method: {module.__name__}:{class_name}.{spec.locator.function_name}"
+                    )
+                parent_tags = get_tag_data(cls)
+            case None:
+                fn = pkgutil.resolve_name(
+                    f"{module.__name__}:{spec.locator.function_name}"
+                )
+                if not isinstance(fn, (FunctionType, MethodType)):
+                    raise TypeError(
+                        f"not a function or method: {module.__name__}:{spec.locator.function_name}"
+                    )
+                parent_tags = None
+
+        combined_tags = merge_tag_data(parent_tags, get_tag_data(fn))
+        spec.update_tags(combined_tags)
+        spec.get_execution_from_fn(fn)
+        return LoadedTestDef(
+            spec=spec,
+            fn=fn,
+            suite_root=self._suite_root,
+            setup_chain=setup_chain,
+        )

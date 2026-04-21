@@ -6,23 +6,24 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
-from rue.testing.execution.interfaces import Test
-from rue.testing.models.definition import TestDefinition
-from rue.testing.models.result import TestExecution, TestResult, TestStatus
+from rue.testing.execution.interfaces import ExecutableTest
+from rue.testing.models.loaded import LoadedTestDef
+from rue.testing.models.executed import ExecutedTest
+from rue.testing.models.result import TestResult, TestStatus
 from rue.resources.resolver import ResourceResolver
 
 
 @dataclass
-class CompositeTest(Test):
+class LocalCompositeTest(ExecutableTest):
     """Executes pre-built child tests concurrently and aggregates results."""
 
-    definition: TestDefinition
+    definition: LoadedTestDef
     min_passes: int
-    children: list[Test] = field(default_factory=list)
+    children: list[ExecutableTest] = field(default_factory=list)
     on_complete: Callable | None = None
 
-    async def execute(self, resolver: ResourceResolver) -> TestExecution:
-        async def run_child(index: int) -> tuple[int, TestExecution]:
+    async def execute(self, resolver: ResourceResolver) -> ExecutedTest:
+        async def run_child(index: int) -> tuple[int, ExecutedTest]:
             execution = await self.children[index].execute(resolver)
             return index, execution
 
@@ -36,7 +37,7 @@ class CompositeTest(Test):
             else TestStatus.FAILED
         )
         duration = sum(e.result.duration_ms for e in sub_executions)
-        execution = TestExecution(
+        execution = ExecutedTest(
             definition=self.definition,
             result=TestResult(status=status, duration_ms=duration),
             execution_id=uuid4(),
@@ -49,14 +50,14 @@ class CompositeTest(Test):
     async def _run_children(
         self,
         run_child: Callable[
-            [int], Coroutine[Any, Any, tuple[int, TestExecution]]
+            [int], Coroutine[Any, Any, tuple[int, ExecutedTest]]
         ],
-    ) -> list[TestExecution]:
+    ) -> list[ExecutedTest]:
         tasks = [
             asyncio.create_task(run_child(index))
             for index in range(len(self.children))
         ]
-        sub_executions: list[TestExecution | None] = [None] * len(self.children)
+        sub_executions: list[ExecutedTest | None] = [None] * len(self.children)
         try:
             for completed_task in asyncio.as_completed(tasks):
                 index, sub_execution = await completed_task

@@ -10,8 +10,9 @@ from rue.testing.models import (
     CaseGroup,
     CasesIterateModifier,
     GroupsIterateModifier,
-    TestDefinition,
+    SetupFileRef,
 )
+from tests.unit.factories import make_definition
 
 
 def test_iterate_cases_decorator_rejects_invalid_threshold():
@@ -38,23 +39,28 @@ def test_iterate_cases_empty_is_deferred_to_execution():
     )
 
 
-def test_runner_iterate_cases_preserves_case_identity_and_metadata(null_reporter):
+def test_runner_iterate_cases_preserves_case_identity_and_metadata(
+    null_reporter,
+):
     seen_cases: list[Case[Any, Any]] = []
     cases = [
         Case(inputs={"x": 1}, metadata={"slug": "one"}),
         Case(inputs={"x": 2}, metadata={"slug": "two"}),
     ]
+    suite_root = Path("suite")
+    setup_chain = (SetupFileRef(path=Path("conftest.py"), kind="conftest"),)
 
     def test_collect_case(case):
         seen_cases.append(case)
 
-    item = TestDefinition(
-        name="test_collect_case",
+    item = make_definition(
+        "test_collect_case",
         fn=test_collect_case,
-        module_path=Path("sample.py"),
-        is_async=False,
+        module_path="sample.py",
         params=["case"],
         modifiers=[CasesIterateModifier(cases=tuple(cases), min_passes=2)],
+        suite_root=suite_root,
+        setup_chain=setup_chain,
     )
 
     run_result = asyncio.run(
@@ -64,11 +70,19 @@ def test_runner_iterate_cases_preserves_case_identity_and_metadata(null_reporter
 
     assert run_result.result.passed == 1
     assert seen_cases == cases
-    assert [sub.definition.suffix for sub in execution.sub_executions] == [
+    assert [sub.definition.spec.suffix for sub in execution.sub_executions] == [
         repr(case.metadata) for case in cases
     ]
-    assert [sub.definition.case_id for sub in execution.sub_executions] == [
-        case.id for case in cases
+    assert [
+        sub.definition.spec.case_id for sub in execution.sub_executions
+    ] == [case.id for case in cases]
+    assert [sub.definition.suite_root for sub in execution.sub_executions] == [
+        suite_root,
+        suite_root,
+    ]
+    assert [sub.definition.setup_chain for sub in execution.sub_executions] == [
+        setup_chain,
+        setup_chain,
     ]
 
 
@@ -79,11 +93,10 @@ def test_runner_iterate_cases_passes_when_threshold_is_met(null_reporter):
         if case.inputs["x"] >= 4:
             raise AssertionError("fail")
 
-    item = TestDefinition(
-        name="test_partial_pass",
+    item = make_definition(
+        "test_partial_pass",
         fn=test_partial_pass,
-        module_path=Path("sample.py"),
-        is_async=False,
+        module_path="sample.py",
         params=["case"],
         modifiers=[CasesIterateModifier(cases=tuple(cases), min_passes=3)],
     )
@@ -111,11 +124,10 @@ def test_runner_iterate_cases_fails_when_threshold_is_not_met(null_reporter):
         if case.inputs["x"] > 2:
             raise AssertionError("fail")
 
-    item = TestDefinition(
-        name="test_mostly_fail",
+    item = make_definition(
+        "test_mostly_fail",
         fn=test_mostly_fail,
-        module_path=Path("sample.py"),
-        is_async=False,
+        module_path="sample.py",
         params=["case"],
         modifiers=[CasesIterateModifier(cases=tuple(cases), min_passes=3)],
     )
@@ -161,11 +173,10 @@ def test_runner_iterate_groups_injects_group_and_case_and_nests(
     def test_collect_group_case(group, case):
         seen_pairs.append((group.name, case.id))
 
-    item = TestDefinition(
-        name="test_collect_group_case",
+    item = make_definition(
+        "test_collect_group_case",
         fn=test_collect_group_case,
-        module_path=Path("sample.py"),
-        is_async=False,
+        module_path="sample.py",
         params=["group", "case"],
         modifiers=[GroupsIterateModifier(groups=tuple(groups), min_passes=2)],
     )
@@ -177,7 +188,7 @@ def test_runner_iterate_groups_injects_group_and_case_and_nests(
 
     assert run_result.result.passed == 1
     assert len(seen_pairs) == 3
-    assert [sub.definition.suffix for sub in execution.sub_executions] == [
+    assert [sub.definition.spec.suffix for sub in execution.sub_executions] == [
         "alpha",
         "beta",
     ]
@@ -211,11 +222,10 @@ def test_runner_iterate_groups_uses_group_and_outer_min_passes(
         if group.name == "beta" and case.inputs["x"] == 2:
             raise AssertionError("beta fail")
 
-    item = TestDefinition(
-        name="test_group_threshold",
+    item = make_definition(
+        "test_group_threshold",
         fn=test_group_threshold,
-        module_path=Path("sample.py"),
-        is_async=False,
+        module_path="sample.py",
         params=["group", "case"],
         modifiers=[GroupsIterateModifier(groups=tuple(groups), min_passes=1)],
     )

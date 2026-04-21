@@ -15,7 +15,7 @@ It defines:
 * decorator-based registration through `resource(...)`
 * runtime resolution through `ResourceResolver`
 * lifecycle scopes through `Scope`
-* hierarchical `SESSION` lookup anchored to the requesting test module path
+* hierarchical `PROCESS` lookup anchored to the requesting test module path
 
 This RFC is normative for the `rue.resources` package itself.
 
@@ -30,7 +30,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** ar
 Unless otherwise stated:
 
 * "resource name" means the registered function name
-* "request path" means the current test module path used to anchor hierarchical `SESSION` lookup
+* "request path" means the current test module path used to anchor hierarchical `PROCESS` lookup
 * "provider" means the selected `ResourceDef` chosen for one resolution request
 
 This RFC specifies public behavior. It does not freeze private attribute names or internal data structures.
@@ -45,7 +45,7 @@ The goals of the resources API are:
 * support sync, async, generator, and async-generator resources
 * provide explicit registry ownership
 * provide deterministic scope-aware caching and teardown
-* support conftest-style hierarchical `SESSION` resources
+* support conftest-style hierarchical `PROCESS` resources
 * keep decorator ergonomics for normal test authoring
 
 ---
@@ -56,7 +56,7 @@ This RFC does not define:
 
 * arbitrary service-locator behavior
 * type-based dependency lookup
-* named scopes beyond `CASE`, `SUITE`, and `SESSION`
+* named scopes beyond `TEST`, `MODULE`, and `PROCESS`
 * automatic registry isolation across threads or processes
 * post-`teardown()` resolver reuse semantics
 * any API for unregistering one resource by name
@@ -82,11 +82,11 @@ from rue.resources import (
 
 `Scope` is an enum with exactly three values:
 
-* `Scope.CASE`
-* `Scope.SUITE`
-* `Scope.SESSION`
+* `Scope.TEST`
+* `Scope.MODULE`
+* `Scope.PROCESS`
 
-Their string values are `"case"`, `"suite"`, and `"session"` respectively.
+Their string values are `"test"`, `"module"`, and `"process"` respectively.
 
 ### 4.2 `ResourceDef`
 
@@ -134,8 +134,7 @@ Its public methods are:
 Its public methods are:
 
 * `resolve(name)`
-* `resolve_many(names)`
-* `fork_for_case()`
+* `fork_for_test()`
 * `teardown()`
 * `teardown_scope(scope)`
 
@@ -222,18 +221,18 @@ It does not perform hierarchical lookup.
 The registry maintains both:
 
 * a flat definition map
-* a session-only hierarchical index
+* a process-only hierarchical index
 
 Registration rules are:
 
-* non-`SESSION` resources replace the flat definition for their name
-* `SESSION` resources are appended to the session index for their name
-* a `SESSION` resource replaces the flat definition only when the current flat definition is absent or also `SESSION`
+* non-`PROCESS` resources replace the flat definition for their name
+* `PROCESS` resources are appended to the process index for their name
+* a `PROCESS` resource replaces the flat definition only when the current flat definition is absent or also `PROCESS`
 
 As a result:
 
-* `CASE` and `SUITE` resources win over same-name `SESSION` resources for direct DI selection
-* multiple `SESSION` resources with the same name can coexist in the hierarchical index
+* `TEST` and `MODULE` resources win over same-name `PROCESS` resources for direct DI selection
+* multiple `PROCESS` resources with the same name can coexist in the hierarchical index
 
 ### 6.3 `select(name, request_path)`
 
@@ -246,31 +245,31 @@ It returns a selected provider object containing:
 
 Selection rules are:
 
-* if a flat non-`SESSION` definition exists, it MUST be selected immediately
-* otherwise, `SESSION` selection MUST use hierarchical lookup
-* if no name exists in either flat or session indexes, `ValueError("Unknown resource: <name>")` MUST be raised
+* if a flat non-`PROCESS` definition exists, it MUST be selected immediately
+* otherwise, `PROCESS` selection MUST use hierarchical lookup
+* if no name exists in either flat or process indexes, `ValueError("Unknown resource: <name>")` MUST be raised
 
-### 6.4 Hierarchical `SESSION` lookup
+### 6.4 Hierarchical `PROCESS` lookup
 
-Hierarchical `SESSION` lookup is anchored to `request_path.parent`.
+Hierarchical `PROCESS` lookup is anchored to `request_path.parent`.
 
-A `SESSION` definition is eligible if:
+A `PROCESS` definition is eligible if:
 
 * it has `origin_dir`
 * `request_path.parent` is inside that `origin_dir`
 
 Among eligible candidates, the registry MUST pick the deepest ancestor.
 
-If multiple eligible `SESSION` definitions exist at the same depth, the latest registered definition wins.
+If multiple eligible `PROCESS` definitions exist at the same depth, the latest registered definition wins.
 
 If no eligible hierarchical match exists, the registry MUST fall back to the flat definition for that name.
 
 Consequences:
 
-* child tests see the nearest ancestor `SESSION` resource
+* child tests see the nearest ancestor `PROCESS` resource
 * sibling branches do not see unrelated child overrides
-* mixed-scope clashes still prefer non-`SESSION` resources
-* without a request path, `SESSION` lookup falls back to flat latest-registration behavior
+* mixed-scope clashes still prefer non-`PROCESS` resources
+* without a request path, `PROCESS` lookup falls back to flat latest-registration behavior
 
 ### 6.5 Builtin preservation
 
@@ -280,7 +279,7 @@ Consequences:
 
 * clear all non-builtin definitions
 * restore builtin flat definitions
-* restore builtin `SESSION` indexes
+* restore builtin `PROCESS` indexes
 
 The default singleton registry uses this mechanism for framework-provided resources.
 
@@ -294,19 +293,19 @@ Scope controls sharing and teardown ownership inside a resolver tree.
 
 The API itself defines resolver-relative semantics. Rue's runner builds on top of those semantics to deliver run-level behavior.
 
-### 7.2 `CASE`
+### 7.2 `TEST`
 
-`CASE` resources are owned by the current resolver instance.
+`TEST` resources are owned by the current resolver instance.
 
 They are:
 
 * cached per resolver
 * not shared upward to parent resolvers
-* torn down by `teardown_scope(Scope.CASE)` or `teardown()`
+* torn down by `teardown_scope(Scope.TEST)` or `teardown()`
 
-### 7.3 `SUITE`
+### 7.3 `MODULE`
 
-`SUITE` resources are flat by name.
+`MODULE` resources are flat by name.
 
 Within a resolver family:
 
@@ -314,9 +313,9 @@ Within a resolver family:
 * child resolvers reuse the parent's cached value
 * teardown is delegated to the owner resolver
 
-### 7.4 `SESSION`
+### 7.4 `PROCESS`
 
-`SESSION` resources are selected hierarchically, then cached by provider identity.
+`PROCESS` resources are selected hierarchically, then cached by provider identity.
 
 The cache identity includes:
 
@@ -324,7 +323,7 @@ The cache identity includes:
 * resource name
 * selected provider directory
 
-This means two same-name `SESSION` resources from different directories MUST produce distinct cached instances.
+This means two same-name `PROCESS` resources from different directories MUST produce distinct cached instances.
 
 ---
 
@@ -344,7 +343,7 @@ This means two same-name `SESSION` resources from different directories MUST pro
 
 When used inside Rue execution, the resolver derives `request_path` from the current test context.
 
-If no current test context exists, the resolver passes `None`, which causes `SESSION` selection to use flat fallback behavior.
+If no current test context exists, the resolver passes `None`, which causes `PROCESS` selection to use flat fallback behavior.
 
 ### 8.3 Dependency resolution
 
@@ -366,19 +365,13 @@ It therefore runs once per created instance, not once per injection.
 
 It MAY transform the returned value.
 
-### 8.6 `fork_for_case()`
+### 8.6 `fork_for_test()`
 
-`fork_for_case()` creates a child resolver that:
+`fork_for_test()` creates a child resolver that:
 
-* shares `SUITE` and `SESSION` cache entries from its parent
-* keeps `CASE` scope isolated
-* delegates `SUITE` and `SESSION` teardown registration to the correct owner
-
-### 8.7 `resolve_many(names)`
-
-`resolve_many(names)` returns a `dict[str, Any]` keyed by requested resource name.
-
-Resolution order follows the input list order.
+* shares `MODULE` and `PROCESS` cache entries from its parent
+* keeps `TEST` scope isolated
+* delegates `MODULE` and `PROCESS` teardown registration to the correct owner
 
 ---
 
@@ -432,7 +425,7 @@ Resolving an unknown resource MUST raise:
 
 If dependency resolution revisits the same cache key in the active resolution path, the resolver MUST raise a `RuntimeError` describing the cycle.
 
-For hierarchical `SESSION` resources, the cycle label includes the selected provider directory.
+For hierarchical `PROCESS` resources, the cycle label includes the selected provider directory.
 
 ### 10.3 Resource body failures
 
@@ -471,7 +464,7 @@ Most user code SHOULD use the default decorator:
 ```python
 from rue.resources import resource
 
-@resource(scope="session")
+@resource(scope="process")
 def db():
     return connect()
 ```
@@ -485,11 +478,11 @@ resource_registry = ResourceRegistry()
 resolver = ResourceResolver(resource_registry)
 ```
 
-### 12.3 Hierarchical `SESSION` resources
+### 12.3 Hierarchical `PROCESS` resources
 
-Directory-scoped `SESSION` overrides SHOULD be defined in files whose source path reflects the intended hierarchy, such as Rue `confrue_*` modules.
+Directory-scoped `PROCESS` overrides SHOULD be defined in files whose source path reflects the intended hierarchy, such as Rue `confrue_*` modules.
 
-The request path used during resolution determines which ancestor `SESSION` provider is active.
+The request path used during resolution determines which ancestor `PROCESS` provider is active.
 
 ---
 
@@ -500,9 +493,9 @@ The following invariants are required:
 * resource names come from function names
 * dependency names come from parameters except `self` and `cls`
 * resolver construction is explicit and requires a registry
-* non-`SESSION` resources win over same-name `SESSION` resources
-* `SESSION` selection is nearest-ancestor by request path
-* same-name `SESSION` resources from different provider directories do not share cache entries
+* non-`PROCESS` resources win over same-name `PROCESS` resources
+* `PROCESS` selection is nearest-ancestor by request path
+* same-name `PROCESS` resources from different provider directories do not share cache entries
 * `on_resolve` runs once per created instance
 * `on_injection` runs on every injection, including cached values
 * `on_teardown` runs after generator finalization

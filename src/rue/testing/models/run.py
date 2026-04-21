@@ -13,7 +13,8 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from rue.resources.metrics.base import MetricResult
-from rue.testing.models.result import TestExecution, TestStatus
+from rue.testing.models.executed import ExecutedTest
+from rue.testing.models.result import TestStatus
 
 
 def _get_python_version() -> str:
@@ -74,7 +75,7 @@ class RunEnvironment:
 class RunResult:
     """Result of a complete test run."""
 
-    executions: list[TestExecution] = field(default_factory=list)
+    executions: list[ExecutedTest] = field(default_factory=list)
     metric_results: list[MetricResult] = field(default_factory=list)
     total_duration_ms: float = 0
     stopped_early: bool = False

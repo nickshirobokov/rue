@@ -16,7 +16,7 @@ from typer import Argument, Option, Typer
 
 from rue.cli.db import DatabaseCommands, db_app
 from rue.config import load_config
-from rue.testing.discovery import KeywordMatcher, TestCollector
+from rue.testing.discovery import KeywordMatcher, TestLoader, TestSpecCollector
 from rue.testing.runner import Runner
 
 
@@ -38,9 +38,7 @@ def init() -> None:
     doc = parse(path.read_text())
     project = doc.get("project")
     if not isinstance(project, _TomlTable):
-        Console().print(
-            "[red]pyproject.toml has no [[project]] table[/red]"
-        )
+        Console().print("[red]pyproject.toml has no [[project]] table[/red]")
         raise SystemExit(1)
     entry_points = project.get("entry-points")
     if entry_points is None:
@@ -170,11 +168,9 @@ def test(
         exclude_tags=exclude_tags,
     )
 
-    collector = TestCollector(
+    collector = TestSpecCollector(
         include_tags, exclude_tags, keyword or runner_config.keyword
     )
-
-    items = collector.collect(resolved_paths)
 
     runner = Runner(
         config=runner_config,
@@ -182,11 +178,14 @@ def test(
         capture_output=not show_output,
     )
 
+    collection = collector.build_spec_collection(resolved_paths)
+    items = TestLoader(collection.suite_root).load_from_collection(collection)
+
     if runner_config.db_enabled and run_id and runner.run_id_exists(run_id):
         Console().print(f"[red]run_id '{run_id}' already exists[/red]")
         raise SystemExit(2)
 
-    run = asyncio.run(runner.run(items=items, run_id=run_id))
+    run = asyncio.run(runner.run(items, run_id=run_id))
 
     raise SystemExit(
         0 if run.result.failed == 0 and run.result.errors == 0 else 1
@@ -200,4 +199,4 @@ def main() -> None:
     app(argv, standalone_mode=False)
 
 
-__all__ = ["DatabaseCommands", "KeywordMatcher", "TestCollector", "main"]
+__all__ = ["DatabaseCommands", "KeywordMatcher", "TestSpecCollector", "main"]

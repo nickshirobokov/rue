@@ -22,6 +22,7 @@ type _OutputSink = Callable[[OutputStream, str], None]
 # Data models
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class CapturedEvent:
     stream: OutputStream
@@ -62,6 +63,7 @@ class CapturedOutput:
 # Global sys.stdout/stderr interception (singleton)
 # ---------------------------------------------------------------------------
 
+
 class _SysStreamDispatcher(io.TextIOBase):
     """Replacement for sys.stdout/stderr that dispatches to active SUT sinks."""
 
@@ -70,7 +72,7 @@ class _SysStreamDispatcher(io.TextIOBase):
         original: TextIO,
         sinks: ContextVar[tuple[_OutputSink, ...]],
         swallow: ContextVar[bool],
-        manager: "_SysCaptureManager",
+        manager: _SysCaptureManager,
         *,
         is_stdout: bool,
     ) -> None:
@@ -87,7 +89,7 @@ class _SysStreamDispatcher(io.TextIOBase):
                 sink(self._stream, s)
             if self._swallow.get():
                 return len(s)
-        listener = self._manager._global_listener
+        listener = self._manager.global_listener
         if listener is not None:
             listener(self._stream, s)
             return len(s)
@@ -95,17 +97,14 @@ class _SysStreamDispatcher(io.TextIOBase):
         return len(s)
 
     def flush(self) -> None:
-        try:
-            self._original.flush()
-        except Exception:
-            pass
+        self._original.flush()
 
     def writable(self) -> bool:
         return True
 
     @property
-    def encoding(self) -> str | None:
-        return getattr(self._original, "encoding", "utf-8")
+    def encoding(self) -> str:  # type: ignore[override]
+        return self._original.encoding or "utf-8"
 
     def fileno(self) -> int:
         return self._original.fileno()
@@ -135,6 +134,10 @@ class _SysCaptureManager:
 
     def clear_global_listener(self) -> None:
         self._global_listener = None
+
+    @property
+    def global_listener(self) -> _OutputSink | None:
+        return self._global_listener
 
     @property
     def is_installed(self) -> bool:
@@ -210,6 +213,7 @@ _sys_capture = _SysCaptureManager()
 # Per-SUT output capture
 # ---------------------------------------------------------------------------
 
+
 class SUTOutputCapture:
     def __init__(self) -> None:
         self._execution_id: ContextVar[UUID | None] = ContextVar(
@@ -257,7 +261,7 @@ class SUTOutputCapture:
             async def async_wrapped(*args: object, **kwargs: object) -> object:
                 with self.capturing():
                     return await cast(
-                        Awaitable[object],
+                        "Awaitable[object]",
                         original_callable(*args, **kwargs),
                     )
 

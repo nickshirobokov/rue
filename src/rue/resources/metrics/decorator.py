@@ -5,7 +5,7 @@ import inspect
 import math
 from collections.abc import AsyncGenerator, Callable, Generator
 from dataclasses import replace
-from typing import Any, ParamSpec
+from typing import TYPE_CHECKING, Any, ParamSpec, cast
 
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
@@ -15,20 +15,57 @@ from rue.context.runtime import (
     CURRENT_RESOURCE_RESOLVER,
     bind,
 )
-from rue.resources.registry import ResourceIdentity, Scope, resource
+from rue.resources.models import ResourceSpec, Scope
+from rue.resources.registry import resource
 
 from .base import CalculatedValue, Metric, MetricResult
 
 
+if TYPE_CHECKING:
+    from rue.assertions.base import AssertionResult
+
+
 P = ParamSpec("P")
+type MetricYield = Metric | CalculatedValue
+
+
+def _finalize_metric_result(
+    metric_instance: Metric,
+    assertions_results: list[AssertionResult],
+    value: CalculatedValue,
+) -> None:
+    provider = CURRENT_RESOURCE_PROVIDER.get()
+    resolver = CURRENT_RESOURCE_RESOLVER.get()
+    metadata = replace(metric_instance.metadata)
+    if provider is not None:
+        ident = metadata.identity
+        metadata = replace(
+            metadata,
+            identity=replace(
+                ident,
+                provider_path=provider.spec.provider_path,
+                provider_dir=provider.spec.provider_dir,
+            ),
+        )
+    dependencies = (
+        resolver.direct_dependencies_for(provider.spec)
+        if provider is not None and resolver is not None
+        else []
+    )
+    MetricResult(
+        metadata=metadata,
+        dependencies=dependencies,
+        assertion_results=assertions_results,
+        value=value,
+    )
 
 
 def metric(
-    fn: Callable[P, Generator[Metric | CalculatedValue, Any, Any]]
-    | Callable[P, AsyncGenerator[Metric | CalculatedValue, Any]]
+    fn: Callable[P, Generator[MetricYield, Any, Any]]
+    | Callable[P, AsyncGenerator[MetricYield, Any]]
     | None = None,
     *,
-    scope: Scope | str = Scope.SESSION,
+    scope: Scope | str = Scope.PROCESS,
 ) -> Any:
     """Register a metric resource and capture its final result.
 
@@ -47,12 +84,19 @@ def metric(
     fn : callable, optional
         The generator/async-generator function to register. If None, returns a
         decorator.
-    scope : Scope or str, default Scope.SESSION
-        The lifecycle scope of the metric resource. Can be "case", "suite",
-        or "session".
+    scope : Scope or str, default Scope.PROCESS
+        The lifecycle scope of the metric resource. Can be "test", "module",
+        or "process".
     """
     if fn is None:
-        return lambda f: metric(f, scope=scope)
+
+        def decorator(
+            wrapped_fn: Callable[P, Generator[MetricYield, Any, Any]]
+            | Callable[P, AsyncGenerator[MetricYield, Any]],
+        ) -> object:
+            return metric(wrapped_fn, scope=scope)
+
+        return decorator
 
     name = fn.__name__
 
@@ -62,7 +106,7 @@ def metric(
     def on_resolve_hook(m: Metric) -> Metric:
         scope_val = scope if isinstance(scope, Scope) else Scope(scope)
         ident = m.metadata.identity
-        m.metadata.identity = ResourceIdentity(
+        m.metadata.identity = ResourceSpec(
             name=name,
             scope=scope_val,
             provider_path=ident.provider_path,
@@ -72,62 +116,38 @@ def metric(
 
     def on_injection_hook(m: Metric) -> Metric:
         consumer_name = CURRENT_RESOURCE_CONSUMER.get()
-        if (
-            consumer_name
-            and CURRENT_RESOURCE_CONSUMER_KIND.get() == "resource"
-        ):
+        if consumer_name and CURRENT_RESOURCE_CONSUMER_KIND.get() == "resource":
             m.metadata.collected_from_resources.add(consumer_name)
         return m
 
     if is_generator:
+        sync_fn = cast("Callable[..., Generator[MetricYield, Any, Any]]", fn)
 
         @functools.wraps(fn)
         def wrapped_gen(
             *args: Any, **kwargs: Any
         ) -> Generator[Metric, Any, Any]:
-            assertions_results = []
+            assertions_results: list[AssertionResult] = []
 
             with bind(CURRENT_ASSERTION_RESULTS, assertions_results):
-                gen = fn(*args, **kwargs)
-                metric_instance: Metric = next(gen)
+                gen = sync_fn(*args, **kwargs)
+                metric_instance = cast("Metric", next(gen))
 
             yield metric_instance
 
             with bind(CURRENT_ASSERTION_RESULTS, assertions_results):
-                final_value = None
+                final_value: CalculatedValue | None = None
                 while True:
                     try:
-                        final_value = next(gen)
+                        final_value = cast("CalculatedValue", next(gen))
                     except StopIteration:
-                        if final_value is None:
-                            value = math.nan
-                        else:
-                            value = final_value
-                        provider = CURRENT_RESOURCE_PROVIDER.get()
-                        resolver = CURRENT_RESOURCE_RESOLVER.get()
-                        metadata = replace(metric_instance.metadata)
-                        if provider is not None:
-                            ident = metadata.identity
-                            metadata = replace(
-                                metadata,
-                                identity=replace(
-                                    ident,
-                                    provider_path=provider.identity.provider_path,
-                                    provider_dir=provider.identity.provider_dir,
-                                ),
-                            )
-                        dependencies = (
-                            resolver.direct_dependencies_for(
-                                provider.identity
-                            )
-                            if provider is not None and resolver is not None
-                            else []
+                        value: CalculatedValue = (
+                            math.nan if final_value is None else final_value
                         )
-                        MetricResult(
-                            metadata=metadata,
-                            dependencies=dependencies,
-                            assertion_results=assertions_results,
-                            value=value,
+                        _finalize_metric_result(
+                            metric_instance,
+                            assertions_results,
+                            value,
                         )
                         break
 
@@ -140,52 +160,35 @@ def metric(
         )
 
     if is_async_generator:
+        async_fn = cast("Callable[..., AsyncGenerator[MetricYield, Any]]", fn)
 
         @functools.wraps(fn)
-        async def wrapped_async_gen(*args: Any, **kwargs: Any):
-            assertions_results = []
+        async def wrapped_async_gen(
+            *args: Any, **kwargs: Any
+        ) -> AsyncGenerator[Metric, None]:
+            assertions_results: list[AssertionResult] = []
 
             with bind(CURRENT_ASSERTION_RESULTS, assertions_results):
-                gen = fn(*args, **kwargs)
-                metric_instance: Metric = await gen.__anext__()
+                gen = async_fn(*args, **kwargs)
+                metric_instance = cast("Metric", await gen.__anext__())
 
             yield metric_instance
 
             with bind(CURRENT_ASSERTION_RESULTS, assertions_results):
-                final_value = None
+                final_value: CalculatedValue | None = None
                 while True:
                     try:
-                        final_value = await gen.__anext__()
-                    except StopAsyncIteration:
-                        if final_value is None:
-                            value = math.nan
-                        else:
-                            value = final_value
-                        provider = CURRENT_RESOURCE_PROVIDER.get()
-                        resolver = CURRENT_RESOURCE_RESOLVER.get()
-                        metadata = replace(metric_instance.metadata)
-                        if provider is not None:
-                            ident = metadata.identity
-                            metadata = replace(
-                                metadata,
-                                identity=replace(
-                                    ident,
-                                    provider_path=provider.identity.provider_path,
-                                    provider_dir=provider.identity.provider_dir,
-                                ),
-                            )
-                        dependencies = (
-                            resolver.direct_dependencies_for(
-                                provider.identity
-                            )
-                            if provider is not None and resolver is not None
-                            else []
+                        final_value = cast(
+                            "CalculatedValue", await gen.__anext__()
                         )
-                        MetricResult(
-                            metadata=metadata,
-                            dependencies=dependencies,
-                            assertion_results=assertions_results,
-                            value=value,
+                    except StopAsyncIteration:
+                        value: CalculatedValue = (
+                            math.nan if final_value is None else final_value
+                        )
+                        _finalize_metric_result(
+                            metric_instance,
+                            assertions_results,
+                            value,
                         )
                         break
 

@@ -23,11 +23,11 @@ from rue.context.runtime import (
     bind,
 )
 from rue.resources import ResourceResolver
-from rue.resources.resolver import Scope
-from rue.testing.execution.interfaces import Test
+from rue.resources.models import Scope
+from rue.testing.execution.interfaces import ExecutableTest
 from rue.testing.models import (
-    TestDefinition,
-    TestExecution,
+    ExecutedTest,
+    LoadedTestDef,
     TestResult,
     TestStatus,
 )
@@ -39,26 +39,25 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class SingleTest(Test):
+class LocalSingleTest(ExecutableTest):
     """Executes a single test directly."""
 
-    definition: TestDefinition
+    definition: LoadedTestDef
     params: dict[str, Any]
     tracer: TestTracer
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
-    on_trace_collected: Callable | None = None
 
     def __post_init__(self) -> None:
         """Validate that this test has no modifiers."""
-        if self.definition.modifiers:
-            raise ValueError("SingleTest should not have modifiers")
+        if self.definition.spec.modifiers:
+            raise ValueError("LocalSingleTest should not have modifiers")
 
-    async def execute(self, resolver: ResourceResolver) -> TestExecution:
+    async def execute(self, resolver: ResourceResolver) -> ExecutedTest:
         """Execute the test and return result."""
         if self.is_stopped():
-            execution = TestExecution(
+            execution = ExecutedTest(
                 definition=self.definition,
                 result=TestResult(
                     status=TestStatus.SKIPPED,
@@ -71,13 +70,13 @@ class SingleTest(Test):
                 await self.on_complete(execution)
             return execution
 
-        if self.definition.skip_reason:
-            execution = TestExecution(
+        if self.definition.spec.skip_reason:
+            execution = ExecutedTest(
                 definition=self.definition,
                 result=TestResult(
                     status=TestStatus.SKIPPED,
                     duration_ms=0,
-                    error=Exception(self.definition.skip_reason),
+                    error=Exception(self.definition.spec.skip_reason),
                 ),
                 execution_id=uuid4(),
             )
@@ -87,14 +86,14 @@ class SingleTest(Test):
 
         exec_id = uuid4()
 
-        forked_resolver = resolver.fork_for_case()
+        forked_resolver = resolver.fork_for_test()
 
         assertion_results: list[AssertionResult] = []
         error: BaseException | None = None
+        telemetry_artifacts = ()
 
         with bind(CURRENT_TEST_TRACER, self.tracer):
-            self.tracer.start_otel_root_span(self.definition)
-            self.tracer.start_otel_trace(execution_id=exec_id)
+            self.tracer.start(self.definition, execution_id=exec_id)
 
             ctx = TestContext(
                 item=self.definition,
@@ -137,9 +136,17 @@ class SingleTest(Test):
 
             duration_ms = (time.perf_counter() - start) * 1000
 
+            forked_resolver.flush_live_changes(
+                [
+                    identity
+                    for identity in forked_resolver.cached_identities
+                    if identity.scope is not Scope.TEST
+                ]
+            )
+
             with bind(CURRENT_TEST, ctx):
                 try:
-                    await forked_resolver.teardown_scope(Scope.CASE)
+                    await forked_resolver.teardown_scope(Scope.TEST)
                 except Exception as teardown_err:
                     logger.warning(
                         f"Error during resource teardown: {teardown_err}"
@@ -155,7 +162,7 @@ class SingleTest(Test):
                     assertion_results=assertion_results,
                 )
             else:
-                expect_failure = self.definition.xfail_reason is not None
+                expect_failure = self.definition.spec.xfail_reason is not None
                 failed_assertions = [
                     ar for ar in assertion_results if not ar.passed
                 ]
@@ -187,10 +194,11 @@ class SingleTest(Test):
                         else:
                             result_error = error
                     # xfail test passed when it shouldn't have (strict mode)
-                    case (_, _, True) if self.definition.xfail_strict:
+                    case (_, _, True) if self.definition.spec.xfail_strict:
                         status = TestStatus.FAILED
                         result_error = AssertionError(
-                            self.definition.xfail_reason or "xfail test passed"
+                            self.definition.spec.xfail_reason
+                            or "xfail test passed"
                         )
                     # xfail test passed unexpectedly (non-strict)
                     case (_, _, True):
@@ -206,16 +214,14 @@ class SingleTest(Test):
                     assertion_results=assertion_results.copy(),
                 )
 
-            self.tracer.record_otel_result(result)
-            self.tracer.finish_otel_trace()
+            self.tracer.record_result(result)
+            telemetry_artifacts = self.tracer.finish()
 
-        if self.tracer.completed_otel_trace_session is not None and self.on_trace_collected:
-            await self.on_trace_collected(self.tracer, exec_id)
-
-        execution = TestExecution(
+        execution = ExecutedTest(
             definition=self.definition,
             result=result,
             execution_id=exec_id,
+            telemetry_artifacts=telemetry_artifacts,
         )
         if self.on_complete:
             await self.on_complete(execution)
@@ -227,10 +233,10 @@ class SingleTest(Test):
         """Resolve test parameters from resources."""
         kwargs = dict(self.params)
         with (
-            bind(CURRENT_RESOURCE_CONSUMER, self.definition.name),
+            bind(CURRENT_RESOURCE_CONSUMER, self.definition.spec.name),
             bind(CURRENT_RESOURCE_CONSUMER_KIND, "test"),
         ):
-            for param in self.definition.params:
+            for param in self.definition.spec.params:
                 if param not in kwargs:
                     kwargs[param] = await resolver.resolve(param)
         return kwargs
@@ -240,12 +246,12 @@ class SingleTest(Test):
         fn = self.definition.fn
         instance = None
 
-        if self.definition.class_name:
-            cls = fn.__globals__.get(self.definition.class_name)
+        if self.definition.spec.class_name:
+            cls = fn.__globals__.get(self.definition.spec.class_name)
 
             if cls is None:
                 raise RuntimeError(
-                    f"Test class '{self.definition.class_name}' not found for test '{self.definition.name}'"
+                    f"Test class '{self.definition.spec.class_name}' not found for test '{self.definition.spec.name}'"
                 )
 
             instance = cls()
@@ -256,9 +262,9 @@ class SingleTest(Test):
             else partial(fn, **kwargs)
         )
 
-        if self.definition.is_async:
+        if self.definition.spec.is_async:
             await call()
-        elif self.definition.inline:
+        elif self.definition.spec.inline:
             call()
         else:
             await asyncio.to_thread(call)

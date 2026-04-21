@@ -14,9 +14,9 @@ from rue.config import Config
 from rue.resources import ResourceResolver, registry as resources_registry
 from rue.resources.sut import sut
 from rue.resources.sut.output import SUTOutputCapture
-from rue.testing.discovery import collect
 from rue.testing.models import Case
 from rue.testing.runner import Runner
+from tests.unit.factories import materialize_tests
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +33,14 @@ def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
     return mod_name, mod_path
 
 
+def _artifact_payload(artifact) -> dict[str, object]:
+    return {
+        "run_id": str(artifact.run_id),
+        "execution_id": str(artifact.execution_id),
+        "spans": artifact.spans,
+    }
+
+
 async def _run_module_with_tracing(
     *,
     tmp_path: Path,
@@ -44,13 +52,13 @@ async def _run_module_with_tracing(
 
     try:
         monkeypatch.chdir(tmp_path)
-        items = collect(mod_path)
+        items = materialize_tests(mod_path)
         runner = Runner(
             config=Config.model_construct(otel=True, db_enabled=False),
             reporters=[trace_reporter],
         )
         run = await runner.run(items=items)
-        return mod_name, run, trace_reporter.sessions
+        return mod_name, run, trace_reporter.artifacts
     finally:
         sys.modules.pop(mod_name, None)
 
@@ -128,7 +136,8 @@ class TestSutObject:
         assert target.stderr.text == "err-1"
         assert target.captured_output.combined.text == "out-1err-1out-2"
         assert [
-            (event.stream, event.text) for event in target.captured_output.events
+            (event.stream, event.text)
+            for event in target.captured_output.events
         ] == [
             ("stdout", "out-1"),
             ("stderr", "err-1"),
@@ -389,7 +398,7 @@ async def test_sample(traced_service):
         span_name: str,
         expected_attrs: dict[str, object],
     ):
-        mod_name, run, sessions = await _run_module_with_tracing(
+        mod_name, run, artifacts = await _run_module_with_tracing(
             tmp_path=tmp_path,
             trace_reporter=trace_reporter,
             monkeypatch=monkeypatch,
@@ -397,7 +406,7 @@ async def test_sample(traced_service):
         )
 
         assert run.result.passed == 1
-        payloads = [session.serialize() for session in sessions]
+        payloads = [_artifact_payload(artifact) for artifact in artifacts]
         span = next(
             span
             for payload in payloads
@@ -419,7 +428,7 @@ async def test_sample(traced_service):
         trace_reporter,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        _, _, sessions = await _run_module_with_tracing(
+        _, _, artifacts = await _run_module_with_tracing(
             tmp_path=tmp_path,
             trace_reporter=trace_reporter,
             monkeypatch=monkeypatch,
@@ -436,11 +445,11 @@ def test_sample():
             return x + y
 
         target = SUT(run)
-        before = [session.serialize() for session in sessions]
+        before = [_artifact_payload(artifact) for artifact in artifacts]
 
         assert target.instance(2, 3) == 5
 
-        after = [session.serialize() for session in sessions]
+        after = [_artifact_payload(artifact) for artifact in artifacts]
         assert before == after
 
     @pytest.mark.asyncio
@@ -493,7 +502,7 @@ async def test_sample(traced_pipeline):
 
         assert run.result.passed == 1
 
-    @pytest.mark.parametrize("scope", ["suite", "session"])
+    @pytest.mark.parametrize("scope", ["module", "process"])
     @pytest.mark.parametrize("concurrency", [1, 2])
     @pytest.mark.asyncio
     async def test_shared_scope_sut_trace_state_stays_isolated(

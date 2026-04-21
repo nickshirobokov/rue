@@ -1,12 +1,10 @@
-from __future__ import annotations
-
-
-"""
-Metric abstractions for the Rue testing framework.
+"""Metric abstractions for the Rue testing framework.
 
 This module provides the core classes for recording, computing, and managing
 metrics during test execution.
 """
+
+from __future__ import annotations
 
 import math
 import statistics
@@ -22,7 +20,7 @@ from pydantic import validate_call
 
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.runtime import CURRENT_TEST
-from rue.resources.registry import ResourceIdentity, Scope
+from rue.resources.models import ResourceSpec, Scope
 
 
 if TYPE_CHECKING:
@@ -52,7 +50,7 @@ class MetricMetadata:
         Timestamp of the most recently recorded value.
     first_item_recorded_at : datetime, optional
         Timestamp of the first recorded value.
-    identity : ResourceIdentity
+    identity : ResourceSpec
         Name, scope, and provider origin for the metric.
     collected_from_tests : set of str
         Names of tests that contributed to this metric.
@@ -64,7 +62,9 @@ class MetricMetadata:
 
     last_item_recorded_at: datetime | None = None
     first_item_recorded_at: datetime | None = None
-    identity: ResourceIdentity = field(default=ResourceIdentity(name="", scope=Scope.SESSION))
+    identity: ResourceSpec = field(
+        default=ResourceSpec(name="", scope=Scope.PROCESS)
+    )
     collected_from_tests: set[str] = field(default_factory=set)
     collected_from_resources: set[str] = field(default_factory=set)
     collected_from_cases: set[str] = field(default_factory=set)
@@ -165,18 +165,22 @@ class Metric:
         with self._values_lock:
             test_ctx = CURRENT_TEST.get()
             if test_ctx is not None:
-                if test_ctx.item.name:
-                    self.metadata.collected_from_tests.add(test_ctx.item.name)
-                if test_ctx.item.module_path:
+                if test_ctx.item.spec.name:
+                    self.metadata.collected_from_tests.add(
+                        test_ctx.item.spec.name
+                    )
+                if test_ctx.item.spec.module_path:
                     self.metadata.collected_from_modules.add(
-                        str(test_ctx.item.module_path)
+                        str(test_ctx.item.spec.module_path)
                     )
-                if test_ctx.item.case_id:
+                if test_ctx.item.spec.case_id:
                     self.metadata.collected_from_cases.add(
-                        str(test_ctx.item.case_id)
+                        str(test_ctx.item.spec.case_id)
                     )
-                elif test_ctx.item.suffix:
-                    self.metadata.collected_from_cases.add(test_ctx.item.suffix)
+                elif test_ctx.item.spec.suffix:
+                    self.metadata.collected_from_cases.add(
+                        test_ctx.item.spec.suffix
+                    )
 
             if self.metadata.first_item_recorded_at is None:
                 self.metadata.first_item_recorded_at = datetime.now(UTC)
@@ -490,7 +494,7 @@ class MetricResult:
     metadata : MetricMetadata
         Snapshot of metadata describing where/when the metric was recorded
         (identity, contributors, timestamps).
-    dependencies : list[ResourceIdentity]
+    dependencies : list[ResourceSpec]
         Direct resource dependencies for the metric provider.
     assertion_results : list[AssertionResult]
         Assertion results collected while the metric resource was running.
@@ -503,7 +507,7 @@ class MetricResult:
     metadata: MetricMetadata
     assertion_results: list[AssertionResult]
     value: CalculatedValue
-    dependencies: list[ResourceIdentity] = field(default_factory=list)
+    dependencies: list[ResourceSpec] = field(default_factory=list)
     execution_id: UUID | None = None
 
     @property

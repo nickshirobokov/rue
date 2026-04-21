@@ -15,7 +15,7 @@ Register a function as a dependency injection resource.
 @resource(
     fn: Callable | None = None,
     *,
-    scope: Scope | str = Scope.CASE,
+    scope: Scope | str = Scope.TEST,
     on_resolve: Callable[[Any], Any] | None = None,
     on_injection: Callable[[Any], Any] | None = None,
     on_teardown: Callable[[Any], Any] | None = None,
@@ -27,14 +27,14 @@ Register a function as a dependency injection resource.
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `fn` | `Callable \| None` | `None` | The resource factory function |
-| `scope` | `Scope \| str` | `Scope.CASE` | Lifecycle scope: `"case"`, `"suite"`, or `"session"` |
+| `scope` | `Scope \| str` | `Scope.TEST` | Lifecycle scope: `"test"`, `"module"`, or `"process"` |
 | `on_resolve` | `Callable \| None` | `None` | Hook called once when resource is first created |
 | `on_injection` | `Callable \| None` | `None` | Hook called every time resource is injected |
 | `on_teardown` | `Callable \| None` | `None` | Hook called after generator teardown runs |
 
 **Returns:** Decorated function registered as a resource
 
-`SESSION` resources are hierarchical. Same-name `SESSION` providers can coexist in different directories, and Rue picks the nearest ancestor provider for the requesting test module. Define those shared providers in `conftest.py` or `confrue_*.py` files.
+`PROCESS` resources are hierarchical. Same-name `PROCESS` providers can coexist in different directories, and Rue picks the nearest ancestor provider for the requesting test module. Define those shared providers in `conftest.py` or `confrue_*.py` files.
 
 **Example:**
 ```python
@@ -44,14 +44,14 @@ import rue
 def api_client():
     return APIClient()
 
-@rue.resource(scope="session")
+@rue.resource(scope="process")
 async def database():
     conn = await connect()
     yield conn
     await conn.close()
 
 @rue.resource(
-    scope="suite",
+    scope="module",
     on_injection=lambda client: client.refresh_token()
 )
 def authenticated_client():
@@ -77,7 +77,7 @@ Register a function factory as an OpenTelemetry-observable system-under-test res
 @sut(
     fn: Callable | None = None,
     *,
-    scope: Scope | str = Scope.CASE,
+    scope: Scope | str = Scope.TEST,
 )
 ```
 
@@ -86,7 +86,7 @@ Register a function factory as an OpenTelemetry-observable system-under-test res
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `fn` | `Callable \| None` | `None` | The SUT factory function to register |
-| `scope` | `Scope \| str` | `Scope.CASE` | Resource lifecycle scope: `"case"`, `"suite"`, `"session"` |
+| `scope` | `Scope \| str` | `Scope.TEST` | Resource lifecycle scope: `"test"`, `"module"`, `"process"` |
 
 **Returns:** Decorated function registered as an OpenTelemetry-observable resource. The factory must return or yield `SUT(...)`.
 
@@ -552,24 +552,24 @@ Enum defining resource lifecycle scopes.
 
 | Value | Description |
 |-------|-------------|
-| `Scope.CASE` | Fresh instance per parametrized test case |
-| `Scope.SUITE` | Shared within a single test file/module |
-| `Scope.SESSION` | Shared across the run for the active provider |
+| `Scope.TEST` | Fresh instance per parametrized test case |
+| `Scope.MODULE` | Shared within a single test file/module |
+| `Scope.PROCESS` | Shared across the run for the active provider |
 
 **Example:**
 ```python
 from rue import resource
 from rue.resources import Scope
 
-@resource(scope=Scope.SESSION)
+@resource(scope=Scope.PROCESS)
 def expensive_model():
     return load_model()  # Loaded once for the active provider
 
-@resource(scope=Scope.SUITE)
+@resource(scope=Scope.MODULE)
 def api_client():
     return APIClient()  # Shared within file
 
-@resource(scope=Scope.CASE)
+@resource(scope=Scope.TEST)
 def temp_dir():
     import tempfile
     tmpdir = tempfile.mkdtemp()
@@ -577,7 +577,7 @@ def temp_dir():
     shutil.rmtree(tmpdir)  # Fresh per case
 ```
 
-If multiple `SESSION` resources share the same name, Rue keeps them side by side and selects the nearest ancestor provider relative to the requesting test module. Sibling branches do not see each other's child overrides. Without an active test context, resolution falls back to the flat/latest registered definition.
+If multiple `PROCESS` resources share the same name, Rue keeps them side by side and selects the nearest ancestor provider relative to the requesting test module. Sibling branches do not see each other's child overrides. Without an active test context, resolution falls back to the flat/latest registered definition.
 
 ---
 
@@ -595,7 +595,7 @@ Execute discovered tests and return a `Run`.
 **Run methods:**
 ```python
 await runner.run(
-    items: list[TestDefinition] | None = None,
+    items: list[LoadedTestDef] | None = None,
     path: str | None = None,
     run_id: UUID | str | None = None,
 ) -> Run
@@ -648,7 +648,7 @@ result = await runner.run(
 )
 ```
 
-OpenTelemetry persistence is configured through reporters. In a normal fresh process, the default reporter set includes `OtelReporter`; if you supply your own reporters, keep it attached for local `.rue/traces` storage or implement `Reporter.on_trace_collected()` in a custom reporter.
+OpenTelemetry persistence is configured through reporters. In a normal fresh process, the default reporter set includes `OtelReporter`; if you supply your own reporters, keep it attached for local `.rue/traces` storage or handle `execution.telemetry_artifacts` in `Reporter.on_execution_complete()`.
 
 ---
 

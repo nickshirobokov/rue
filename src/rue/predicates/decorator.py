@@ -9,6 +9,7 @@ from typing import Any, Protocol, TypeVar, overload, ParamSpec, Concatenate
 from rue.context.collectors import CURRENT_PREDICATE_RESULTS
 from rue.context.runtime import CURRENT_TEST_TRACER
 from rue.predicates.models import PredicateResult
+from rue.telemetry.otel.backend import OtelTelemetryBackend
 from rue.telemetry.otel.runtime import otel_runtime
 
 P = ParamSpec("P")
@@ -135,7 +136,12 @@ def predicate(
                 bound = sig.bind(*args, **kwargs)
                 bound.apply_defaults()
                 tracer = CURRENT_TEST_TRACER.get()
-                if tracer is None or not tracer.has_otel_trace:
+                backend = (
+                    None
+                    if tracer is None
+                    else tracer.get_backend(OtelTelemetryBackend)
+                )
+                if backend is None or backend.active_session is None:
                     predicate_result = _normalize_result(
                         await f(*args, **kwargs),
                         predicate_name,
@@ -163,7 +169,12 @@ def predicate(
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
             tracer = CURRENT_TEST_TRACER.get()
-            if tracer is None or not tracer.has_otel_trace:
+            backend = (
+                None
+                if tracer is None
+                else tracer.get_backend(OtelTelemetryBackend)
+            )
+            if backend is None or backend.active_session is None:
                 predicate_result = _normalize_result(
                     f(*args, **kwargs),
                     predicate_name,

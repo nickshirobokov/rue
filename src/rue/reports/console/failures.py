@@ -14,7 +14,7 @@ from rich.traceback import Traceback
 from .shared import STATUS_STYLES
 
 if TYPE_CHECKING:
-    from rue.testing.models.result import TestExecution
+    from rue.testing.models.executed import ExecutedTest
 
 _RUE_MODULE = __import__("rue")
 
@@ -24,7 +24,7 @@ class ExceptionRenderer:
         self.show_locals = show_locals
 
     @staticmethod
-    def _should_show_error(execution: TestExecution) -> bool:
+    def _should_show_error(execution: ExecutedTest) -> bool:
         result = execution.result
         if result.error is None:
             return False
@@ -32,25 +32,32 @@ class ExceptionRenderer:
         return not (isinstance(result.error, AssertionError) and failed)
 
     @classmethod
-    def _has_exception(cls, execution: TestExecution) -> bool:
+    def _has_exception(cls, execution: ExecutedTest) -> bool:
         if cls._should_show_error(execution):
             return True
         return any(cls._has_exception(s) for s in execution.sub_executions)
 
-    def render(self, failures: list[TestExecution]) -> list[RenderableType]:
+    def render(self, failures: list[ExecutedTest]) -> list[RenderableType]:
         relevant = [f for f in failures if self._has_exception(f)]
         if not relevant:
             return []
-        renderables: list[RenderableType] = [Text(""), Rule("ERRORS", characters="=")]
+        renderables: list[RenderableType] = [
+            Text(""),
+            Rule("ERRORS", characters="="),
+        ]
         for index, failure in enumerate(relevant):
             if index:
                 renderables.append(Text(""))
-            renderables.append(self.render_panel(failure, title=failure.item.full_name))
+            renderables.append(
+                self.render_panel(
+                    failure, title=failure.definition.spec.full_name
+                )
+            )
         renderables.append(Text(""))
         return renderables
 
     def render_panel(
-        self, execution: TestExecution, *, title: str | None = None
+        self, execution: ExecutedTest, *, title: str | None = None
     ) -> Panel:
         result = execution.result
         style = STATUS_STYLES[result.status]

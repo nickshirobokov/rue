@@ -5,7 +5,8 @@ import threading
 from pathlib import Path
 
 from rue.testing import Runner, test as t_decorator
-from rue.testing.models import IterateModifier, TestDefinition
+from rue.testing.models import IterateModifier
+from tests.unit.factories import make_definition
 
 
 def test_sync_test_runs_in_worker_thread(null_reporter):
@@ -16,12 +17,8 @@ def test_sync_test_runs_in_worker_thread(null_reporter):
         nonlocal observed_thread
         observed_thread = threading.current_thread()
 
-    item = TestDefinition(
-        name="test_check_thread",
-        fn=test_check_thread,
-        module_path=Path("sample.py"),
-        is_async=False,
-        params=[],
+    item = make_definition(
+        "test_check_thread", fn=test_check_thread, module_path="sample.py"
     )
 
     asyncio.run(runner.run(items=[item]))
@@ -39,13 +36,8 @@ def test_tag_inline_runs_on_main_thread(null_reporter):
         nonlocal observed_thread
         observed_thread = threading.current_thread()
 
-    item = TestDefinition(
-        name="test_inline",
-        fn=test_inline,
-        module_path=Path("sample.py"),
-        is_async=False,
-        params=[],
-        inline=True,
+    item = make_definition(
+        "test_inline", fn=test_inline, module_path="sample.py", inline=True
     )
 
     asyncio.run(runner.run(items=[item]))
@@ -60,13 +52,7 @@ def test_sync_exception_propagates(null_reporter):
     def test_raise():
         raise ValueError("sync boom")
 
-    item = TestDefinition(
-        name="test_raise",
-        fn=test_raise,
-        module_path=Path("sample.py"),
-        is_async=False,
-        params=[],
-    )
+    item = make_definition("test_raise", fn=test_raise, module_path="sample.py")
 
     run_result = asyncio.run(runner.run(items=[item]))
 
@@ -85,12 +71,10 @@ def test_tag_inline_propagates_through_iterate(null_reporter):
     def test_inline_repeat():
         threads.append(threading.current_thread())
 
-    item = TestDefinition(
-        name="test_inline_repeat",
+    item = make_definition(
+        "test_inline_repeat",
         fn=test_inline_repeat,
-        module_path=Path("sample.py"),
-        is_async=False,
-        params=[],
+        module_path="sample.py",
         inline=True,
         modifiers=[IterateModifier(count=3, min_passes=3)],
     )
