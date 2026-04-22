@@ -95,6 +95,13 @@ class BlockingPool(FakePool):
         return future
 
 
+def make_runner(reporter) -> Runner:
+    return Runner(
+        config=Config.model_construct(db_enabled=False),
+        reporters=[reporter],
+    )
+
+
 @contextmanager
 def bind_pool(pool: FakePool):
     token = CURRENT_PROCESS_POOL.set(pool)  # type: ignore[arg-type]
@@ -487,7 +494,7 @@ class TestRemoteEndToEnd:
         )
 
         items = materialize_tests(module_path)
-        runner = Runner(reporters=[null_reporter])
+        runner = make_runner(null_reporter)
         run = await runner.run(items=items)
 
         assert run.result.passed == 1
@@ -545,7 +552,7 @@ class TestRemoteEndToEnd:
         )
 
         items = materialize_tests(module_path)
-        run = await Runner(reporters=[trace_reporter]).run(items=items)
+        run = await make_runner(trace_reporter).run(items=items)
 
         execution = run.result.executions[0]
         assert run.result.passed == 1
@@ -601,7 +608,7 @@ class TestRemoteEndToEnd:
         )
 
         items = materialize_tests(module_path)
-        runner = Runner(reporters=[null_reporter])
+        runner = make_runner(null_reporter)
         run = await runner.run(items=items)
 
         assert run.result.passed == 1, run.result.executions[0].result.error
@@ -638,7 +645,7 @@ class TestRemoteEndToEnd:
         )
 
         items = materialize_tests(module_path)
-        runner = Runner(reporters=[null_reporter])
+        runner = make_runner(null_reporter)
         run = await runner.run(items=items)
 
         assert run.result.passed == 2, [
@@ -683,7 +690,7 @@ class TestRemoteEndToEnd:
         )
 
         items = materialize_tests(module_path)
-        runner = Runner(reporters=[null_reporter])
+        runner = make_runner(null_reporter)
         run = await runner.run(items=items)
 
         assert run.result.passed == 2, [
@@ -731,7 +738,7 @@ class TestRemoteEndToEnd:
         )
 
         items = materialize_tests(module_path)
-        runner = Runner(reporters=[null_reporter])
+        runner = make_runner(null_reporter)
         run = await runner.run(items=items)
 
         assert run.result.passed == 2, [

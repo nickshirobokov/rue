@@ -9,6 +9,7 @@ from rue.config import Config
 from rue.context.collectors import CURRENT_PREDICATE_RESULTS
 from rue.context.runtime import bind
 from rue.predicates import PredicateResult, predicate
+from rue.storage import SQLiteStore
 from rue.testing.runner import Runner
 from tests.unit.factories import materialize_tests
 
@@ -78,6 +79,7 @@ async def _run_module_with_tracing(
     try:
         monkeypatch.chdir(tmp_path)
         items = materialize_tests(mod_path)
+        store = SQLiteStore(db_path) if db_enabled else None
         runner = Runner(
             config=Config.model_construct(
                 otel=True,
@@ -85,6 +87,7 @@ async def _run_module_with_tracing(
                 db_path=db_path,
             ),
             reporters=[trace_reporter],
+            store=store,
         )
         run = await runner.run(items=items)
         return mod_name, run, trace_reporter.artifacts

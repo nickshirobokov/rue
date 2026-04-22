@@ -114,6 +114,61 @@ def test_run_tests_returns_2_when_run_id_already_exists(
     assert result.exit_code == 2
 
 
+def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeRunner:
+        def __init__(
+            self,
+            *,
+            config,
+            reporters,
+            store=None,
+            fail_fast=False,
+            capture_output=True,
+        ) -> None:
+            captured["config"] = config
+            captured["reporters"] = reporters
+            captured["store"] = store
+            captured["fail_fast"] = fail_fast
+            captured["capture_output"] = capture_output
+
+        async def run(self, items, *, run_id=None):
+            captured["items"] = items
+            captured["run_id"] = run_id
+            return Run()
+
+    monkeypatch.setattr(
+        "rue.cli.TestSpecCollector.build_spec_collection",
+        lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
+    )
+    monkeypatch.setattr(
+        "rue.cli.TestLoader.load_from_collection",
+        lambda self, collection: [make_item("test_ok", set())],
+    )
+    monkeypatch.setattr("rue.cli.Runner", FakeRunner)
+
+    result = runner.invoke(
+        app,
+        [
+            "test",
+            "--db-path",
+            str(tmp_path / "rue.db"),
+            "--reporter",
+            "ConsoleReporter",
+            "--show-output",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["config"].reporters == ["ConsoleReporter"]
+    assert [type(r).__name__ for r in captured["reporters"]] == [
+        "ConsoleReporter"
+    ]
+    assert isinstance(captured["store"], SQLiteStore)
+    assert captured["capture_output"] is False
+
+
 def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(monkeypatch):
     monkeypatch.setattr(
         "rue.cli.TestSpecCollector.build_spec_collection",

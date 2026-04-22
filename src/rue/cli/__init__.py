@@ -14,8 +14,12 @@ from tomlkit.container import OutOfOrderTableProxy
 from tomlkit.items import Table
 from typer import Argument, Option, Typer
 
+import rue.reports.console as console_reports
+import rue.reports.otel as otel_reports
 from rue.cli.db import DatabaseCommands, db_app
-from rue.config import load_config
+from rue.config import Config, load_config
+from rue.reports.base import Reporter
+from rue.storage import SQLiteStore
 from rue.testing.discovery import KeywordMatcher, TestLoader, TestSpecCollector
 from rue.testing.runner import Runner
 
@@ -171,19 +175,41 @@ def test(
     collector = TestSpecCollector(
         include_tags, exclude_tags, keyword or runner_config.keyword
     )
-
-    runner = Runner(
-        config=runner_config,
-        fail_fast=fail_fast,
-        capture_output=not show_output,
+    _ = console_reports, otel_reports
+    if not runner_config.reporters:
+        reporters = list(Reporter.REGISTRY.values())
+    else:
+        reporters = []
+        for name in runner_config.reporters:
+            if name not in Reporter.REGISTRY:
+                available = ", ".join(sorted(Reporter.REGISTRY))
+                msg = f"Unknown reporter: {name}. Available: {available}"
+                raise ValueError(msg)
+            reporters.append(Reporter.REGISTRY[name])
+    store = (
+        None
+        if not runner_config.db_enabled
+        else SQLiteStore(runner_config.resolved_db_path)
     )
 
     collection = collector.build_spec_collection(resolved_paths)
     items = TestLoader(collection.suite_root).load_from_collection(collection)
 
-    if runner_config.db_enabled and run_id and runner.run_id_exists(run_id):
+    if (
+        run_id is not None
+        and store is not None
+        and store.get_run(run_id) is not None
+    ):
         Console().print(f"[red]run_id '{run_id}' already exists[/red]")
         raise SystemExit(2)
+
+    runner = Runner(
+        config=runner_config,
+        reporters=reporters,
+        store=store,
+        fail_fast=fail_fast,
+        capture_output=not show_output,
+    )
 
     run = asyncio.run(runner.run(items, run_id=run_id))
 

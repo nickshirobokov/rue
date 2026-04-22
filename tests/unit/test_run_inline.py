@@ -11,7 +11,10 @@ from tests.unit.factories import make_definition
 
 
 def test_sync_test_runs_in_worker_thread(null_reporter):
-    runner = Runner(reporters=[null_reporter])
+    runner = Runner(
+        config=Config.model_construct(db_enabled=False),
+        reporters=[null_reporter],
+    )
     observed_thread = None
 
     def test_check_thread():
@@ -29,7 +32,10 @@ def test_sync_test_runs_in_worker_thread(null_reporter):
 
 
 def test_main_backend_runs_on_main_thread(null_reporter):
-    runner = Runner(reporters=[null_reporter])
+    runner = Runner(
+        config=Config.model_construct(db_enabled=False),
+        reporters=[null_reporter],
+    )
     observed_thread = None
 
     def test_main():
@@ -50,7 +56,10 @@ def test_main_backend_runs_on_main_thread(null_reporter):
 
 
 def test_module_main_backend_runs_in_worker_thread(null_reporter):
-    runner = Runner(reporters=[null_reporter])
+    runner = Runner(
+        config=Config.model_construct(db_enabled=False),
+        reporters=[null_reporter],
+    )
     observed_thread = None
 
     def test_module_main():
@@ -71,7 +80,10 @@ def test_module_main_backend_runs_in_worker_thread(null_reporter):
 
 
 def test_sync_exception_propagates(null_reporter):
-    runner = Runner(reporters=[null_reporter])
+    runner = Runner(
+        config=Config.model_construct(db_enabled=False),
+        reporters=[null_reporter],
+    )
 
     def test_raise():
         raise ValueError("sync boom")
@@ -88,7 +100,10 @@ def test_sync_exception_propagates(null_reporter):
 
 
 def test_main_backend_propagates_through_iterate(null_reporter):
-    runner = Runner(reporters=[null_reporter])
+    runner = Runner(
+        config=Config.model_construct(db_enabled=False),
+        reporters=[null_reporter],
+    )
     threads: list[threading.Thread] = []
 
     def test_main_repeat():

@@ -1,10 +1,17 @@
 import asyncio
-from pathlib import Path
 
+from rue.config import Config
 from rue.resources import registry, resource
 from rue.testing import Runner, test as t_decorator
 from rue.testing.models import ParameterSet, ParamsIterateModifier
 from tests.unit.factories import make_definition
+
+
+def make_runner(null_reporter) -> Runner:
+    return Runner(
+        config=Config.model_construct(db_enabled=False),
+        reporters=[null_reporter],
+    )
 
 
 def test_iterate_params_invalid_inputs_are_deferred_to_execution():
@@ -47,7 +54,7 @@ def test_runner_iterate_params_applies_values_and_runs_all_sets(null_reporter):
 
     try:
         run_result = asyncio.run(
-            Runner(reporters=[null_reporter]).run(items=[item])
+            make_runner(null_reporter).run(items=[item])
         )
     finally:
         registry.reset()
@@ -81,7 +88,7 @@ def test_runner_iterate_params_reports_invalid_definition_as_error(
     )
 
     run_result = asyncio.run(
-        Runner(reporters=[null_reporter]).run(items=[item])
+        make_runner(null_reporter).run(items=[item])
     )
 
     assert run_result.result.errors == 1
@@ -116,7 +123,7 @@ def test_runner_iterate_params_uses_min_passes_threshold(null_reporter):
     )
 
     run_result = asyncio.run(
-        Runner(reporters=[null_reporter]).run(items=[item])
+        make_runner(null_reporter).run(items=[item])
     )
 
     assert recorded == ["one", "two", "three"]
