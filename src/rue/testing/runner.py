@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import time
 import warnings
 from datetime import UTC, datetime
@@ -30,9 +29,6 @@ from rue.testing.models import (
     Run,
     ExecutedTest,
     LoadedTestDef,
-)
-UUID_STRING_PATTERN = re.compile(
-    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
 
 
@@ -148,14 +144,20 @@ class Runner:
 
     @staticmethod
     def _normalize_run_id(run_id: UUID | str | None) -> UUID | None:
-        if run_id is None:
-            return None
-        if isinstance(run_id, UUID):
-            return run_id
-        if isinstance(run_id, str) and UUID_STRING_PATTERN.fullmatch(run_id):
-            return UUID(run_id)
-        msg = f"Invalid run_id '{run_id}'. Expected UUID string."
-        raise ValueError(msg)
+        match run_id:
+            case None:
+                return None
+            case UUID() as uid:
+                return uid
+            case str() as s:
+                try:
+                    return UUID(s)
+                except ValueError as e:
+                    msg = f"Invalid run_id '{s}'. Expected UUID string."
+                    raise ValueError(msg) from e
+            case _:
+                msg = f"Invalid run_id '{run_id}'. Expected UUID string."
+                raise ValueError(msg)
 
     def _resolve_run_id(self, run_id: UUID | str | None) -> UUID | None:
         normalized_run_id = self._normalize_run_id(run_id)
