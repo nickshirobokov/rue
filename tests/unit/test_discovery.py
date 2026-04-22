@@ -4,6 +4,7 @@ from textwrap import dedent
 
 import pytest
 
+from rue.config import Config
 from rue.resources import Scope, registry
 from rue.testing.discovery import KeywordMatcher, TestLoader, TestSpecCollector
 from rue.testing.execution.types import ExecutionBackend
@@ -34,6 +35,13 @@ def write_files(root, files):
 def materialize(path):
     plan = TestSpecCollector((), (), None).build_spec_collection((path,))
     return TestLoader(plan.suite_root).load_from_collection(plan)
+
+
+def make_runner(null_reporter) -> Runner:
+    return Runner(
+        config=Config.model_construct(db_enabled=False),
+        reporters=[null_reporter],
+    )
 
 
 def test_selector_filters_by_tags_and_keyword():
@@ -303,9 +311,7 @@ async def test_materialize_supports_same_dir_setup_without_pyproject(
         },
     )
 
-    run = await Runner(reporters=[null_reporter]).run(
-        items=materialize(tmp_path)
-    )
+    run = await make_runner(null_reporter).run(items=materialize(tmp_path))
 
     assert run.result.passed == 1
     assert run.result.failed == 0
@@ -504,9 +510,7 @@ async def test_materialize_promotes_pytest_fixtures(
 
     write_files(tmp_path, files)
 
-    run = await Runner(reporters=[null_reporter]).run(
-        items=materialize(tmp_path)
-    )
+    run = await make_runner(null_reporter).run(items=materialize(tmp_path))
 
     assert run.result.passed == 1
     assert run.result.failed == 0

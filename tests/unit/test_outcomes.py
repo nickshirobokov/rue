@@ -1,9 +1,8 @@
 """Tests for imperative outcomes (skip, fail, xfail)."""
 
-from pathlib import Path
-
 import pytest
 
+from rue.config import Config
 from rue.testing import TestStatus, fail, skip, xfail
 from rue.testing.models import LoadedTestDef
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
@@ -15,6 +14,13 @@ def make_item(
     fn, name: str | None = None, is_async: bool = False
 ) -> LoadedTestDef:
     return make_definition(name or fn.__name__, fn=fn, is_async=is_async)
+
+
+def make_runner(null_reporter) -> Runner:
+    return Runner(
+        config=Config.model_construct(db_enabled=False),
+        reporters=[null_reporter],
+    )
 
 
 @pytest.mark.parametrize(
@@ -37,7 +43,7 @@ async def test_imperative_outcome_sets_status_and_reason(
     def outcome_test():
         outcome_fn(reason)
 
-    result = await Runner(reporters=[null_reporter]).run(
+    result = await make_runner(null_reporter).run(
         items=[make_item(outcome_test)]
     )
     execution = result.result.executions[0]
@@ -66,7 +72,7 @@ async def test_imperative_outcome_without_reason_uses_expected_error_type(
     def outcome_test():
         outcome_fn()
 
-    result = await Runner(reporters=[null_reporter]).run(
+    result = await make_runner(null_reporter).run(
         items=[make_item(outcome_test)]
     )
 
@@ -87,6 +93,6 @@ async def test_imperative_outcome_stops_execution(
         outcome_fn("stopping")
         executed.append("after")
 
-    await Runner(reporters=[null_reporter]).run(items=[make_item(outcome_test)])
+    await make_runner(null_reporter).run(items=[make_item(outcome_test)])
 
     assert executed == ["before"]

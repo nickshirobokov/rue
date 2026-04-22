@@ -3,9 +3,17 @@ from pathlib import Path
 
 import pytest
 
+from rue.config import Config
 from rue.testing import Runner, test as t_decorator
 from rue.testing.models import IterateModifier, LoadedTestDef
 from tests.unit.factories import make_definition
+
+
+def make_runner(null_reporter) -> Runner:
+    return Runner(
+        config=Config.model_construct(db_enabled=False),
+        reporters=[null_reporter],
+    )
 
 
 def test_iterate_decorator_validation():
@@ -34,7 +42,7 @@ def test_iterate_decorator_validation():
 
 
 def test_runner_iterate_passes_when_minimum_threshold_is_met(null_reporter):
-    runner = Runner(reporters=[null_reporter])
+    runner = make_runner(null_reporter)
     call_count = 0
 
     def test_flaky():
@@ -67,7 +75,7 @@ def test_runner_iterate_passes_when_minimum_threshold_is_met(null_reporter):
 
 
 def test_runner_iterate_fails_when_threshold_is_not_met(null_reporter):
-    runner = Runner(reporters=[null_reporter])
+    runner = make_runner(null_reporter)
     call_count = 0
 
     def test_mostly_fail():

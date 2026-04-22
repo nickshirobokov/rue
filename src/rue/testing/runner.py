@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-import warnings
 from datetime import UTC, datetime
-from pathlib import Path
 from uuid import UUID
 
-from rue.config import Config, load_config
+from rue.config import Config
 from rue.context.collectors import CURRENT_METRIC_RESULTS
+from rue.context.process_pool import process_pool_scope
 from rue.context.runtime import bind
 from rue.reports.base import Reporter
 from rue.resources import (
@@ -19,17 +18,16 @@ from rue.resources import (
 )
 from rue.resources.metrics.base import MetricResult
 from rue.resources.sut.output import SUTOutputCapture
-from rue.storage import SQLiteStore
+from rue.storage import Store
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.environment import capture_environment
 from rue.testing.execution import DefaultTestFactory
-from rue.testing.queue import RunnerStep, SessionQueue
-from rue.context.process_pool import process_pool_scope
 from rue.testing.models import (
-    Run,
     ExecutedTest,
     LoadedTestDef,
+    Run,
 )
+from rue.testing.queue import RunnerStep, SessionQueue
 
 
 class Runner:
@@ -37,20 +35,8 @@ class Runner:
 
     Args:
         config: Runner configuration values.
-        reporters: Optional reporters. Defaults to all registered reporters.
-
-    Examples:
-        # Build items with TestSpecCollector + TestLoader, then run.
-        # runner = Runner()
-        # collection = TestSpecCollector(
-        #     include_tags, exclude_tags, keyword
-        # ).build_spec_collection(resolved_paths)
-        # items = TestLoader(collection.suite_root).load_from_collection(collection)
-        # result = await runner.run(items)
-
-        # Concurrent execution with 5 workers (same item preparation as above)
-        # runner = Runner(config=Config(concurrency=5))
-        # result = await runner.run(items)
+        reporters: Reporter instances for lifecycle notifications.
+        store: Optional persistence backend for completed runs.
     """
 
     DEFAULT_MAX_CONCURRENCY = 10
@@ -58,17 +44,17 @@ class Runner:
     def __init__(
         self,
         *,
-        config: Config | None = None,
-        reporters: list[Reporter] | None = None,
+        config: Config,
+        reporters: list[Reporter],
+        store: Store | None = None,
         fail_fast: bool = False,
         capture_output: bool = True,
-        run_id: UUID | str | None = None,
     ) -> None:
-        self.config = config or load_config()
+        self.config = config
         self.fail_fast = fail_fast
         self.capture_output = capture_output
-        self._default_run_id = self._normalize_run_id(run_id)
-        self.reporters = self._resolve_reporters(reporters)
+        self.reporters = reporters
+        self.store = store
         for reporter in self.reporters:
             reporter.configure(self.config)
 
@@ -79,7 +65,6 @@ class Runner:
         self._completed_executions: dict[int, ExecutedTest] = {}
 
         self.current_run: Run | None = None
-        self._store: SQLiteStore | None = None
 
     def _concurrency_limit(self) -> int:
         return (
@@ -87,28 +72,6 @@ class Runner:
             if self.config.concurrency > 0
             else self.DEFAULT_MAX_CONCURRENCY
         )
-
-    def _db_path(self) -> Path | None:
-        return Path(self.config.db_path) if self.config.db_path else None
-
-    def _resolve_reporters(
-        self, reporters: list[Reporter] | None
-    ) -> list[Reporter]:
-        from rue.reports.console import console_reporter  # noqa: F401
-        from rue.reports.otel import otel_reporter  # noqa: F401
-
-        if self.config.reporters:
-            resolved_reporters: list[Reporter] = []
-            for name in self.config.reporters:
-                if name not in Reporter.REGISTRY:
-                    available = ", ".join(sorted(Reporter.REGISTRY))
-                    msg = f"Unknown reporter: {name}. Available: {available}"
-                    raise ValueError(msg)
-                resolved_reporters.append(Reporter.REGISTRY[name])
-            return resolved_reporters
-        if reporters is not None:
-            return reporters
-        return list(Reporter.REGISTRY.values())
 
     async def _notify_no_tests_found(self) -> None:
         await asyncio.gather(*[r.on_no_tests_found() for r in self.reporters])
@@ -139,77 +102,27 @@ class Runner:
             *[r.on_run_stopped_early(failure_count) for r in self.reporters]
         )
 
-    def _ensure_db_ready(self) -> None:
-        """Initialize DB and run migrations. Raises MigrationError if not possible."""
-        self._store = SQLiteStore(self._db_path())
-
-    @staticmethod
-    def _normalize_run_id(run_id: UUID | str | None) -> UUID | None:
-        match run_id:
-            case None:
-                return None
-            case UUID() as uid:
-                return uid
-            case str() as s:
-                try:
-                    return UUID(s)
-                except ValueError as e:
-                    msg = f"Invalid run_id '{s}'. Expected UUID string."
-                    raise ValueError(msg) from e
-            case _:
-                msg = f"Invalid run_id '{run_id}'. Expected UUID string."
-                raise ValueError(msg)
-
-    def _resolve_run_id(self, run_id: UUID | str | None) -> UUID | None:
-        normalized_run_id = self._normalize_run_id(run_id)
-        if normalized_run_id is not None:
-            return normalized_run_id
-        return self._default_run_id
-
-    def run_id_exists(self, run_id: UUID | str) -> bool:
-        """Return True when run_id already exists in configured SQLite storage."""
-        normalized_run_id = self._normalize_run_id(run_id)
-        if normalized_run_id is None:
-            msg = "run_id cannot be None."
-            raise ValueError(msg)
-        if self._store is None:
-            self._ensure_db_ready()
-        return (
-            self._store is not None
-            and self._store.get_run(normalized_run_id) is not None
-        )
-
     async def run(
         self,
         items: list[LoadedTestDef],
         *,
-        run_id: UUID | str | None = None,
+        run_id: UUID | None = None,
     ) -> Run:
         """Run tests and return results.
 
         Args:
-            items: Test definitions to execute (discover via TestSpecCollector and
-                TestLoader before calling).
-            run_id: Optional UUID for this run. Overrides constructor-level run_id.
+            items: Test definitions to execute. Discover them with
+                TestSpecCollector and TestLoader before calling.
+            run_id: Optional UUID for this run.
 
         Returns:
             Run with environment, results, and test executions.
         """
-        selected_run_id = self._resolve_run_id(run_id)
-
-        if self.config.db_enabled:
-            self._ensure_db_ready()
-            if selected_run_id and self.run_id_exists(selected_run_id):
-                msg = f"run_id '{selected_run_id}' already exists"
-                raise ValueError(msg)
-
         environment = capture_environment()
-        if selected_run_id is None:
+        if run_id is None:
             self.current_run = Run(environment=environment)
         else:
-            self.current_run = Run(
-                environment=environment, run_id=selected_run_id
-            )
+            self.current_run = Run(environment=environment, run_id=run_id)
 
         if self.config.otel:
             otel_runtime.configure()
@@ -265,13 +178,8 @@ class Runner:
 
         await self._notify_run_complete(self.current_run)
 
-        if self.config.db_enabled and self._store:
-            try:
-                self._store.save_run(self.current_run)
-            except Exception as e:
-                warnings.warn(
-                    f"Failed to persist run to database: {e}", stacklevel=2
-                )
+        if self.store is not None:
+            self.store.save_run(self.current_run)
 
         return self.current_run
 

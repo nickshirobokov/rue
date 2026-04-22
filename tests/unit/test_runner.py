@@ -19,6 +19,7 @@ from rue.reports.base import Reporter
 from rue.reports.otel import DEFAULT_OTEL_OUTPUT_ROOT, MAX_STORED_OTEL_RUNS
 from rue.resources import ResourceRegistry, registry, resource
 from rue.resources.sut import sut
+from rue.storage import Store
 from rue.telemetry import OtelTraceArtifact
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.environment import _filter_env_vars
@@ -28,6 +29,7 @@ from rue.testing.queue import SessionQueue
 from rue.testing.models import (
     ParameterSet,
     ParamsIterateModifier,
+    Run,
     RunResult,
     ExecutedTest,
     LoadedTestDef,
@@ -77,6 +79,25 @@ def make_item(
 
 def make_runner_config(**kwargs) -> Config:
     return Config.model_construct(**kwargs)
+
+
+def make_runner(
+    *,
+    reporters: list[Reporter],
+    store: Store | None = None,
+    fail_fast: bool = False,
+    capture_output: bool = True,
+    **config_kwargs,
+) -> Runner:
+    if "db_enabled" not in config_kwargs:
+        config_kwargs["db_enabled"] = False
+    return Runner(
+        config=make_runner_config(**config_kwargs),
+        reporters=reporters,
+        store=store,
+        fail_fast=fail_fast,
+        capture_output=capture_output,
+    )
 
 
 class EventReporter(Reporter):
@@ -138,6 +159,36 @@ class EventReporter(Reporter):
 
     async def on_run_stopped_early(self, failure_count: int) -> None:
         pass
+
+
+class RecordingStore(Store):
+    def __init__(self) -> None:
+        self.saved_runs: list[Run] = []
+        self._runs_by_id: dict[UUID, Run] = {}
+
+    def save_run(self, run: Run) -> None:
+        self.saved_runs.append(run)
+        self._runs_by_id[run.run_id] = run
+
+    def get_run(self, run_id: UUID) -> Run | None:
+        return self._runs_by_id.get(run_id)
+
+    def list_runs(self, limit: int = 10) -> list[Run]:
+        return self.saved_runs[-limit:]
+
+
+class ExplodingStore(Store):
+    def save_run(self, run: Run) -> None:
+        _ = run
+        raise RuntimeError("store boom")
+
+    def get_run(self, run_id: UUID) -> Run | None:
+        _ = run_id
+        return None
+
+    def list_runs(self, limit: int = 10) -> list[Run]:
+        _ = limit
+        return []
 
 
 class TestRunResult:
@@ -212,19 +263,6 @@ class TestEnvironmentCapture:
 class TestRunner:
     """Tests for Runner class."""
 
-    def test_uses_all_registered_reporters_when_not_specified(self):
-        extra = EventReporter()
-        runner = Runner(
-            config=make_runner_config(db_enabled=False, verbosity=4)
-        )
-
-        assert runner.reporters[:2] == [
-            Reporter.REGISTRY["ConsoleReporter"],
-            Reporter.REGISTRY["OtelReporter"],
-        ]
-        assert runner.reporters[2] is extra
-        assert extra.verbosity == 4
-
     def test_configures_provided_reporters(self):
         reporter = EventReporter()
         config = make_runner_config(db_enabled=False, verbosity=5)
@@ -233,22 +271,29 @@ class TestRunner:
         assert runner.reporters == [reporter]
         assert reporter.verbosity == 5
 
-    def test_config_reporter_names_override_provided_instances(self):
-        class SelectedReporter(EventReporter):
-            pass
+    @pytest.mark.asyncio
+    async def test_persists_completed_run_with_injected_store(
+        self, null_reporter
+    ):
+        store = RecordingStore()
 
-        class OtherReporter(EventReporter):
-            pass
+        result = await make_runner(
+            reporters=[null_reporter],
+            store=store,
+        ).run(items=[make_item(lambda: None)])
 
-        selected = SelectedReporter()
-        other = OtherReporter()
-        config = make_runner_config(
-            db_enabled=False, reporters=["SelectedReporter"]
-        )
+        assert store.saved_runs == [result]
+        assert store.get_run(result.run_id) is result
 
-        runner = Runner(config=config, reporters=[other])
-
-        assert runner.reporters == [selected]
+    @pytest.mark.asyncio
+    async def test_injected_store_errors_are_not_swallowed(
+        self, null_reporter
+    ):
+        with pytest.raises(RuntimeError, match="store boom"):
+            await make_runner(
+                reporters=[null_reporter],
+                store=ExplodingStore(),
+            ).run(items=[make_item(lambda: None)])
 
     @pytest.mark.asyncio
     async def test_xfail_strict_fails_on_pass(self, null_reporter):
@@ -258,7 +303,7 @@ class TestRunner:
         item = make_item(
             strict_xfail_test, xfail_reason="must fail", xfail_strict=True
         )
-        runner = Runner(reporters=[null_reporter])
+        runner = make_runner(reporters=[null_reporter])
         result = await runner.run(items=[item])
 
         assert result.result.failed == 1
@@ -288,7 +333,7 @@ class TestRunner:
         )
         monkeypatch.setattr(builtins, "fail_fast_events", [], raising=False)
 
-        result = await Runner(
+        result = await make_runner(
             reporters=[null_reporter],
             fail_fast=True,
         ).run(items=materialize_tests(module_path))
@@ -308,7 +353,7 @@ class TestRunner:
             definition_error="broken decorator state",
         )
 
-        result = await Runner(reporters=[null_reporter]).run(items=[item])
+        result = await make_runner(reporters=[null_reporter]).run(items=[item])
 
         execution = result.result.executions[0]
         assert execution.result.status == TestStatus.ERROR
@@ -317,107 +362,20 @@ class TestRunner:
 
 class TestRunId:
     @pytest.mark.asyncio
-    async def test_constructor_run_id_used_when_run_id_not_passed(
-        self, null_reporter
-    ):
+    async def test_run_uses_provided_run_id(self, null_reporter):
         run_id = uuid4()
-        runner = Runner(
-            config=make_runner_config(db_enabled=False),
-            reporters=[null_reporter],
-            run_id=run_id,
-        )
+        runner = make_runner(reporters=[null_reporter])
 
-        result = await runner.run(items=[make_item(lambda: None)])
+        result = await runner.run(items=[make_item(lambda: None)], run_id=run_id)
 
         assert result.run_id == run_id
 
     @pytest.mark.asyncio
-    async def test_run_run_id_overrides_constructor_run_id(self, null_reporter):
-        constructor_run_id = uuid4()
-        run_level_run_id = uuid4()
-        runner = Runner(
-            config=make_runner_config(db_enabled=False),
-            reporters=[null_reporter],
-            run_id=constructor_run_id,
-        )
-
-        result = await runner.run(
-            items=[make_item(lambda: None)], run_id=run_level_run_id
-        )
-
-        assert result.run_id == run_level_run_id
-
-    @pytest.mark.asyncio
-    async def test_run_id_string_is_accepted_and_normalized(
-        self, null_reporter
-    ):
-        run_id = uuid4()
-        runner = Runner(
-            config=make_runner_config(db_enabled=False),
-            reporters=[null_reporter],
-            run_id=str(run_id),
-        )
-
+    async def test_run_generates_uuid_when_not_provided(self, null_reporter):
+        runner = make_runner(reporters=[null_reporter])
         result = await runner.run(items=[make_item(lambda: None)])
 
         assert isinstance(result.run_id, UUID)
-        assert result.run_id == run_id
-
-    def test_invalid_constructor_run_id_raises_value_error(self, null_reporter):
-        with pytest.raises(ValueError, match="Invalid run_id"):
-            Runner(
-                config=make_runner_config(db_enabled=False),
-                reporters=[null_reporter],
-                run_id="not-a-uuid",
-            )
-
-    @pytest.mark.asyncio
-    async def test_invalid_run_level_run_id_raises_value_error(
-        self, null_reporter
-    ):
-        runner = Runner(
-            config=make_runner_config(db_enabled=False),
-            reporters=[null_reporter],
-        )
-
-        with pytest.raises(ValueError, match="Invalid run_id"):
-            await runner.run(
-                items=[make_item(lambda: None)], run_id="not-a-uuid"
-            )
-
-    @pytest.mark.asyncio
-    async def test_reused_constructor_run_id_fails_on_second_run_when_db_enabled(
-        self, null_reporter, tmp_path: Path
-    ):
-        run_id = uuid4()
-        runner = Runner(
-            config=make_runner_config(db_path=tmp_path / "rue.db"),
-            reporters=[null_reporter],
-            run_id=run_id,
-        )
-
-        first_result = await runner.run(items=[make_item(lambda: None)])
-        assert first_result.run_id == run_id
-
-        with pytest.raises(ValueError, match="already exists"):
-            await runner.run(items=[make_item(lambda: None)])
-
-    @pytest.mark.asyncio
-    async def test_reused_constructor_run_id_allowed_when_db_disabled(
-        self, null_reporter
-    ):
-        run_id = uuid4()
-        runner = Runner(
-            config=make_runner_config(db_enabled=False),
-            reporters=[null_reporter],
-            run_id=run_id,
-        )
-
-        first_result = await runner.run(items=[make_item(lambda: None)])
-        second_result = await runner.run(items=[make_item(lambda: None)])
-
-        assert first_result.run_id == run_id
-        assert second_result.run_id == run_id
 
 
 class TestResourceInjection:
@@ -435,7 +393,7 @@ class TestResourceInjection:
             captured.append(injected)
 
         item = make_item(test_with_resource, params=["injected"])
-        runner = Runner(reporters=[null_reporter])
+        runner = make_runner(reporters=[null_reporter])
         await runner.run(items=[item])
 
         assert captured == ["injected_value"]
@@ -446,7 +404,7 @@ class TestResourceInjection:
             pass
 
         item = make_item(test_needs_trace, params=["otel_trace"])
-        runner = Runner(reporters=[null_reporter])
+        runner = make_runner(reporters=[null_reporter])
         result = await runner.run(items=[item])
 
         assert result.result.errors == 1
@@ -460,7 +418,7 @@ class TestResourceInjection:
             pass
 
         item = make_item(test_unknown, params=["unknown_param"])
-        runner = Runner(reporters=[null_reporter])
+        runner = make_runner(reporters=[null_reporter])
         result = await runner.run(items=[item])
 
         # Should error because unknown_param is not provided
@@ -488,7 +446,7 @@ class TestResourceInjection:
             agent.instance()
             captured.append((agent.stdout.text, agent.stderr.text))
 
-        result = await Runner(
+        result = await make_runner(
             reporters=[null_reporter],
             capture_output=capture_output,
         ).run(items=[make_item(test_output, params=["agent"])])
@@ -803,24 +761,24 @@ class TestOpenTelemetry:
         first_run = await Runner(
             config=make_runner_config(otel=True, db_enabled=False),
             reporters=[OtelReporter()],
-            run_id=run_id,
         ).run(
             items=[
                 make_item(first_trace, name="test_first_trace", is_async=True),
                 make_item(
                     second_trace, name="test_second_trace", is_async=True
                 ),
-            ]
+            ],
+            run_id=run_id,
         )
 
         second_run = await Runner(
             config=make_runner_config(otel=True, db_enabled=False),
             reporters=[OtelReporter()],
-            run_id=run_id,
         ).run(
             items=[
                 make_item(second_trace, name="test_second_trace", is_async=True)
-            ]
+            ],
+            run_id=run_id,
         )
 
         run_dir = tmp_path / DEFAULT_OTEL_OUTPUT_ROOT / str(run_id)
@@ -1586,7 +1544,7 @@ class TestResourceTeardown:
             make_item(test_with_case, name="test_2", params=["case_res"]),
         ]
 
-        runner = Runner(reporters=[null_reporter])
+        runner = make_runner(reporters=[null_reporter])
         result = await runner.run(items=items)
 
         assert result.result.passed == 2
@@ -1612,7 +1570,7 @@ class TestResourceTeardown:
             make_item(test_suite, name="test_2", params=["suite_res"]),
         ]
 
-        runner = Runner(reporters=[null_reporter])
+        runner = make_runner(reporters=[null_reporter])
         await runner.run(items=items)
 
         assert create_count == 1
@@ -1668,7 +1626,7 @@ class TestResourceResolutionErrors:
             pass
 
         item = make_item(test_with_unknown, params=["unknown_resource"])
-        runner = Runner(reporters=[null_reporter])
+        runner = make_runner(reporters=[null_reporter])
         result = await runner.run(items=[item])
 
         assert result.result.errors == 1
@@ -1695,7 +1653,7 @@ class TestResourceResolutionErrors:
         item = make_item(
             test_that_fails, params=["resource_with_teardown_error"]
         )
-        runner = Runner(reporters=[null_reporter])
+        runner = make_runner(reporters=[null_reporter])
         result = await runner.run(items=[item])
 
         # Test should fail due to assertion, not error
@@ -1792,7 +1750,7 @@ class TestResourceResolutionErrors:
                 test_with_suite, name="test_2", params=["suite_resource"]
             ),
         ]
-        runner = Runner(reporters=[null_reporter])
+        runner = make_runner(reporters=[null_reporter])
         result = await runner.run(items=items)
 
         # Both tests should error due to suite resource failure
