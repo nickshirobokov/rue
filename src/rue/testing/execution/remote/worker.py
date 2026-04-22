@@ -4,19 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import time
-from functools import partial
-from typing import TYPE_CHECKING, Any
 
 from rue.assertions.base import AssertionResult
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
-    CURRENT_RESOURCE_CONSUMER,
-    CURRENT_RESOURCE_CONSUMER_KIND,
     CURRENT_TEST,
     CURRENT_TEST_TRACER,
     TestContext,
     bind,
 )
+
 from rue.resources import ResourceResolver
 from rue.resources.registry import registry as default_resource_registry
 from rue.testing.discovery.loader import TestLoader
@@ -27,10 +24,6 @@ from rue.testing.execution.remote.models import (
 from rue.testing.models import TestResult, TestStatus
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
 from rue.testing.tracing import build_test_tracer
-
-
-if TYPE_CHECKING:
-    from rue.testing.models import LoadedTestDef
 
 
 def run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
@@ -53,15 +46,13 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
         default_resource_registry,
     )
 
-    assertion_results: list[AssertionResult] = []
-    error: BaseException | None = None
-    imperative_outcome: TestStatus | None = None
-    telemetry_artifacts = ()
     tracer = build_test_tracer(
         config=payload.config,
         run_id=payload.run_id,
     )
-
+    assertion_results: list[AssertionResult] = []
+    error: BaseException | None = None
+    imperative_outcome: TestStatus | None = None
     ctx = TestContext(item=definition, execution_id=payload.execution_id)
 
     with bind(CURRENT_TEST_TRACER, tracer):
@@ -72,73 +63,39 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
         ):
             try:
                 start = time.perf_counter()
-                kwargs = await _resolve_params(
-                    resolver, definition, payload.params
+                unresolved_params = tuple(
+                    param
+                    for param in definition.spec.params
+                    if param not in payload.params
                 )
-                await _invoke(definition, kwargs)
-            except SkipTest as e:
+                kwargs = await resolver.partially_resolve(
+                    unresolved_params,
+                    payload.params,
+                )
+                await definition.call_test_fn(
+                    kwargs=kwargs,
+                    run_sync_in_thread=False,
+                )
+            except SkipTest as raised:
                 imperative_outcome = TestStatus.SKIPPED
-                error = e
-            except FailTest as e:
+                error = raised
+            except FailTest as raised:
                 imperative_outcome = TestStatus.FAILED
-                error = e
-            except XFailTest as e:
+                error = raised
+            except XFailTest as raised:
                 imperative_outcome = TestStatus.XFAILED
-                error = e
-            except Exception as e:  # noqa: BLE001
-                error = e
+                error = raised
+            except Exception as raised:  # noqa: BLE001
+                error = raised
 
         duration_ms = (time.perf_counter() - start) * 1000
-
-        if imperative_outcome is not None:
-            result = TestResult(
-                status=imperative_outcome,
-                duration_ms=duration_ms,
-                error=error,
-                assertion_results=assertion_results,
-            )
-        else:
-            expect_failure = definition.spec.xfail_reason is not None
-            failed_assertions = [ar for ar in assertion_results if not ar.passed]
-            has_error = error is not None and not isinstance(
-                error, AssertionError
-            )
-            has_assertion_fail = bool(failed_assertions) or isinstance(
-                error, AssertionError
-            )
-
-            match (has_error, has_assertion_fail, expect_failure):
-                case (True, _, True):
-                    status, result_error = TestStatus.XFAILED, error
-                case (True, _, False):
-                    status, result_error = TestStatus.ERROR, error
-                case (_, True, xfail):
-                    status = TestStatus.XFAILED if xfail else TestStatus.FAILED
-                    if error is None and failed_assertions:
-                        msg = (
-                            failed_assertions[0].error_message
-                            or failed_assertions[0].expression_repr.expr
-                        )
-                        result_error = AssertionError(msg)
-                    else:
-                        result_error = error
-                case (_, _, True) if definition.spec.xfail_strict:
-                    status = TestStatus.FAILED
-                    result_error = AssertionError(
-                        definition.spec.xfail_reason or "xfail test passed"
-                    )
-                case (_, _, True):
-                    status, result_error = TestStatus.XPASSED, None
-                case _:
-                    status, result_error = TestStatus.PASSED, None
-
-            result = TestResult(
-                status=status,
-                duration_ms=duration_ms,
-                error=result_error,
-                assertion_results=assertion_results.copy(),
-            )
-
+        result = TestResult.build(
+            definition=definition,
+            imperative_outcome=imperative_outcome,
+            duration_ms=duration_ms,
+            error=error,
+            assertion_results=assertion_results,
+        )
         tracer.record_result(result)
         telemetry_artifacts = tracer.finish()
 
@@ -152,41 +109,3 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
         telemetry_artifacts=telemetry_artifacts,
         sync_update=sync_update,
     )
-
-
-async def _resolve_params(
-    resolver: ResourceResolver,
-    definition: LoadedTestDef,
-    preset: dict[str, Any],
-) -> dict[str, Any]:
-    kwargs = dict(preset)
-    with (
-        bind(CURRENT_RESOURCE_CONSUMER, definition.spec.name),
-        bind(CURRENT_RESOURCE_CONSUMER_KIND, "test"),
-    ):
-        for param in definition.spec.params:
-            if param not in kwargs:
-                kwargs[param] = await resolver.resolve(param)
-    return kwargs
-
-
-async def _invoke(definition: LoadedTestDef, kwargs: dict[str, Any]) -> None:
-    fn = definition.fn
-    instance = None
-
-    if definition.spec.class_name:
-        cls = fn.__globals__.get(definition.spec.class_name)
-        if cls is None:
-            raise RuntimeError(
-                f"Test class '{definition.spec.class_name}' not found for test '{definition.spec.name}'"
-            )
-        instance = cls()
-
-    call = (
-        partial(fn, instance, **kwargs) if instance else partial(fn, **kwargs)
-    )
-
-    if definition.spec.is_async:
-        await call()
-    else:
-        call()

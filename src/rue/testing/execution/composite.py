@@ -6,16 +6,16 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
-from rue.testing.execution.types import ExecutionBackend
-from rue.testing.execution.interfaces import ExecutableTest
-from rue.testing.models.loaded import LoadedTestDef
-from rue.testing.models.executed import ExecutedTest
-from rue.testing.models.result import TestResult, TestStatus
 from rue.resources.resolver import ResourceResolver
+from rue.testing.execution.interfaces import ExecutableTest
+from rue.testing.execution.types import ExecutionBackend
+from rue.testing.models.executed import ExecutedTest
+from rue.testing.models.loaded import LoadedTestDef
+from rue.testing.models.result import TestResult, TestStatus
 
 
 @dataclass
-class LocalCompositeTest(ExecutableTest):
+class CompositeTest(ExecutableTest):
     """Executes pre-built child tests concurrently and aggregates results."""
 
     definition: LoadedTestDef
@@ -30,20 +30,21 @@ class LocalCompositeTest(ExecutableTest):
             for child in self.children:
                 sub_executions.append(await child.execute(resolver))
         else:
+
             async def run_child(index: int) -> tuple[int, ExecutedTest]:
                 execution = await self.children[index].execute(resolver)
                 return index, execution
 
             sub_executions = await self._run_children(run_child)
         passed = sum(
-            1 for e in sub_executions if e.result.status == TestStatus.PASSED
+            1 for execution in sub_executions if execution.status is TestStatus.PASSED
         )
         status = (
             TestStatus.PASSED
             if passed >= self.min_passes
             else TestStatus.FAILED
         )
-        duration = sum(e.result.duration_ms for e in sub_executions)
+        duration = sum(execution.result.duration_ms for execution in sub_executions)
         return ExecutedTest(
             definition=self.definition,
             result=TestResult(status=status, duration_ms=duration),
@@ -72,4 +73,4 @@ class LocalCompositeTest(ExecutableTest):
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             raise
-        return [e for e in sub_executions if e is not None]
+        return [execution for execution in sub_executions if execution is not None]

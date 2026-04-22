@@ -164,6 +164,26 @@ class ResourceResolver:
         finally:
             _RESOLUTION_PATH.reset(token)
 
+    async def partially_resolve(
+        self,
+        unresolved_params: tuple[str, ...],
+        resolved_params: dict[str, Any],
+        *,
+        apply_injection_hook: bool = True,
+    ) -> dict[str, Any]:
+        kwargs = dict(resolved_params)
+        test_ctx = CURRENT_TEST.get()
+        with (
+            bind(CURRENT_RESOURCE_CONSUMER, test_ctx.item.spec.name),
+            bind(CURRENT_RESOURCE_CONSUMER_KIND, "test"),
+        ):
+            for param in unresolved_params:
+                kwargs[param] = await self.resolve(
+                    param,
+                    apply_injection_hook=apply_injection_hook,
+                )
+        return kwargs
+
     def fork_for_test(self) -> "ResourceResolver":
         """Create a child resolver for isolated TEST-scope execution."""
         child = ResourceResolver(self._registry, parent=self)

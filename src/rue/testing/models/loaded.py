@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -34,3 +36,32 @@ class LoadedTestDef:
     suite_root: Path = field(default_factory=Path)
     setup_chain: tuple[SetupFileRef, ...] = field(default_factory=tuple)
     fail_fast: bool = field(default=False)
+
+    async def call_test_fn(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        run_sync_in_thread: bool,
+    ) -> None:
+        instance = None
+
+        if self.spec.class_name:
+            cls = self.fn.__globals__.get(self.spec.class_name)
+            if cls is None:
+                raise RuntimeError(
+                    f"Test class '{self.spec.class_name}' not found for test '{self.spec.name}'"
+                )
+            instance = cls()
+
+        call = (
+            partial(self.fn, instance, **kwargs)
+            if instance
+            else partial(self.fn, **kwargs)
+        )
+
+        if self.spec.is_async:
+            await call()
+        elif run_sync_in_thread:
+            await asyncio.to_thread(call)
+        else:
+            call()

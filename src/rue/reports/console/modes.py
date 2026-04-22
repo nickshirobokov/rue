@@ -12,7 +12,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
-from rue.testing.execution.local.composite import LocalCompositeTest
+from rue.testing.execution.composite import CompositeTest
 from rue.testing.models import TestStatus
 
 from .shared import STATUS_STYLES, safe_relative_path
@@ -210,7 +210,10 @@ class VerboseMode(OutputMode):
                     self._add_live_sub_executions(
                         branch, execution.sub_executions, state
                     )
-                elif isinstance(test, LocalCompositeTest) and execution is None:
+                elif (
+                    execution is None
+                    and isinstance(test, CompositeTest)
+                ):
                     self._add_live_composite_children(branch, test, state)
                 elif execution is None:
                     early = self._early_sub_executions(item, state)
@@ -305,7 +308,7 @@ class VerboseMode(OutputMode):
         return text
 
     def _add_live_composite_children(
-        self, parent: Tree, test: LocalCompositeTest, state: ConsoleReporter
+        self, parent: Tree, test: CompositeTest, state: ConsoleReporter
     ) -> None:
         for child in test.children:
             child_exec = state.all_executions.get(id(child.definition))
@@ -324,7 +327,7 @@ class VerboseMode(OutputMode):
                     self._add_live_sub_executions(
                         node, child_exec.sub_executions, state
                     )
-            elif isinstance(child, LocalCompositeTest):
+            elif isinstance(child, CompositeTest):
                 pending = f"[{child.definition.spec.suffix or 'case'}]"
                 node = parent.add(
                     Text.from_markup(f"{escape(pending)} [dim]⋯[/dim]")
