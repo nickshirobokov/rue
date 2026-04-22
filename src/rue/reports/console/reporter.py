@@ -58,12 +58,13 @@ class ConsoleReporter(Reporter):
         self._captured_renderer = CapturedOutputRenderer()
         self._lock = asyncio.Lock()
         self.items: list[LoadedTestDef] = []
-        self.item_ids: set[int] = set()
+        self.item_keys: set[int] = set()
         self.items_by_file: dict[Path, list[LoadedTestDef]] = {}
         self.total_tests: int = 0
         self.completed_count: int = 0
         self.tests: dict[int, ExecutableTest] = {}
         self.executions: dict[int, ExecutedTest] = {}
+        self.all_executions: dict[int, ExecutedTest] = {}
         self.failures: list[ExecutedTest] = []
         self._status_counts: dict[TestStatus, int] = {}
         self.current_module: Path | None = None
@@ -160,6 +161,16 @@ class ConsoleReporter(Reporter):
         )
         return Group(progress, live)
 
+    def _top_level_key(self, item: LoadedTestDef) -> int:
+        return item.spec.collection_index
+
+    def is_top_level_definition(self, item: LoadedTestDef) -> bool:
+        return (
+            self._top_level_key(item) in self.item_keys
+            and item.spec.suffix is None
+            and item.spec.case_id is None
+        )
+
     # ── Reporter hooks ────────────────────────────────────────────────────────
 
     async def on_no_tests_found(self) -> None:
@@ -172,7 +183,7 @@ class ConsoleReporter(Reporter):
             self._live.stop()
             self._live = None
         self.items = list(items)
-        self.item_ids = {id(item) for item in items}
+        self.item_keys = {self._top_level_key(item) for item in items}
         self.items_by_file = {}
         for item in items:
             self.items_by_file.setdefault(item.spec.module_path, []).append(
@@ -182,6 +193,7 @@ class ConsoleReporter(Reporter):
         self.completed_count = 0
         self.tests = {}
         self.executions = {}
+        self.all_executions = {}
         self.failures = []
         self._status_counts = {}
         self.current_module = None
@@ -207,7 +219,8 @@ class ConsoleReporter(Reporter):
 
     async def on_tests_ready(self, tests: list[ExecutableTest]) -> None:
         for test in tests:
-            self.tests[id(test.definition)] = test
+            if self.is_top_level_definition(test.definition):
+                self.tests[self._top_level_key(test.definition)] = test
 
     async def on_test_start(self, item: LoadedTestDef) -> None:
         if self._live is not None:
@@ -215,10 +228,13 @@ class ConsoleReporter(Reporter):
 
     async def on_execution_complete(self, execution: ExecutedTest) -> None:
         async with self._lock:
-            self.executions[id(execution.definition)] = execution
+            self.all_executions[id(execution.definition)] = execution
 
-            is_top_level = id(execution.definition) in self.item_ids
+            is_top_level = self.is_top_level_definition(execution.definition)
             if is_top_level:
+                self.executions[self._top_level_key(execution.definition)] = (
+                    execution
+                )
                 self.completed_count += 1
                 status = execution.result.status
                 self._status_counts[status] = (
@@ -230,7 +246,7 @@ class ConsoleReporter(Reporter):
             if self._live is not None:
                 module_path = execution.definition.spec.module_path
                 if module_path not in self.completed_modules and all(
-                    id(i) in self.executions
+                    self._top_level_key(i) in self.executions
                     for i in self.items_by_file.get(module_path, [])
                 ):
                     self._mode.print_completed_module(

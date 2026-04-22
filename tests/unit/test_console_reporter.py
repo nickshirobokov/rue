@@ -1,6 +1,7 @@
 """Tests for rue.reports.console module."""
 
 import io
+from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
 
@@ -16,7 +17,9 @@ from rue.resources.metrics.base import (
     MetricResult,
 )
 from rue.resources.sut.output import SUTOutputCapture
+from rue.testing.execution.types import ExecutionBackend
 from rue.testing.models import (
+    IterateModifier,
     Run,
     LoadedTestDef,
     ExecutedTest,
@@ -614,7 +617,7 @@ async def test_verbose_live_streams_subtests_before_parent_completion(
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     parent = make_item("test_matrix", "tests/test_matrix.py")
-    case_one = make_item("test_matrix", "tests/test_matrix.py", suffix="case=1")
+    case_one = replace(parent, spec=replace(parent.spec, suffix="case=1"))
     sub_execution = make_execution(case_one, TestStatus.PASSED, 8.0)
 
     await reporter.on_collection_complete([parent], Run())
@@ -626,6 +629,95 @@ async def test_verbose_live_streams_subtests_before_parent_completion(
     assert "running" in text
     assert "case=1" in text
     assert "↳" not in text
+
+
+@pytest.mark.asyncio
+async def test_verbose_live_backend_wrapped_single_completes_top_level(
+    monkeypatch,
+):
+    monkeypatch.setattr("rue.reports.console.reporter.Live", FakeLive)
+    FakeLive.instances.clear()
+
+    output = io.StringIO()
+    console = Console(
+        file=output, force_terminal=True, color_system=None, width=120
+    )
+    reporter = ConsoleReporter(console=console, verbosity=1)
+
+    item = make_definition(
+        "test_sync_inline",
+        module_path="tests/test_backends.py",
+        backend=ExecutionBackend.MAIN,
+    )
+    executed_item = replace(item, spec=replace(item.spec, modifiers=()))
+
+    await reporter.on_collection_complete([item], Run())
+    await reporter.on_test_start(item)
+    await reporter.on_execution_complete(
+        make_execution(executed_item, TestStatus.PASSED, 5.0)
+    )
+
+    live_text = render_to_text(FakeLive.instances[-1].renderables[-1])
+    assert "running" not in live_text
+
+    static_text = output.getvalue()
+    assert "tests/test_backends.py" in static_text
+    assert "test_backends::test_sync_inline" in static_text
+    assert "PASSED" in static_text
+
+
+@pytest.mark.asyncio
+async def test_verbose_live_backend_wrapped_composite_clears_after_parent(
+    monkeypatch,
+):
+    monkeypatch.setattr("rue.reports.console.reporter.Live", FakeLive)
+    FakeLive.instances.clear()
+
+    output = io.StringIO()
+    console = Console(
+        file=output, force_terminal=True, color_system=None, width=120
+    )
+    reporter = ConsoleReporter(console=console, verbosity=1)
+
+    item = make_definition(
+        "test_subprocess_iterations",
+        module_path="tests/test_backends.py",
+        backend=ExecutionBackend.SUBPROCESS,
+        modifiers=(IterateModifier(count=2, min_passes=2),),
+    )
+    executed_item = replace(
+        item, spec=replace(item.spec, modifiers=item.spec.modifiers[1:])
+    )
+    case_one = replace(
+        executed_item,
+        spec=replace(executed_item.spec, modifiers=(), suffix="iterate=0"),
+    )
+    case_execution = make_execution(case_one, TestStatus.PASSED, 8.0)
+
+    await reporter.on_collection_complete([item], Run())
+    await reporter.on_test_start(item)
+    await reporter.on_execution_complete(case_execution)
+
+    running_text = render_to_text(FakeLive.instances[-1].renderables[-1])
+    assert "test_backends::test_subprocess_iterations" in running_text
+    assert "iterate=0" in running_text
+
+    await reporter.on_execution_complete(
+        make_execution(
+            executed_item,
+            TestStatus.PASSED,
+            8.0,
+            sub_executions=[case_execution],
+        )
+    )
+
+    live_text = render_to_text(FakeLive.instances[-1].renderables[-1])
+    assert "running" not in live_text
+
+    static_text = output.getvalue()
+    assert "test_backends::test_subprocess_iterations" in static_text
+    assert "iterate=0" in static_text
+    assert "PASSED" in static_text
 
 
 @pytest.mark.asyncio
