@@ -256,6 +256,8 @@ class TestSpecCollector:
                 )
 
             setup_chains[module_path] = tuple(chain)
+            for offset, spec in enumerate(module_specs, start=len(specs)):
+                spec.collection_index = offset
             specs.extend(module_specs)
 
         return TestSpecCollection(

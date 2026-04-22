@@ -1,6 +1,7 @@
 """Shared test factories for unit tests."""
 
 from collections.abc import Callable
+from itertools import count
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -10,6 +11,8 @@ from rue.testing.execution.types import ExecutionBackend
 from rue.testing.models import BackendModifier, LoadedTestDef
 from rue.testing.models.modifiers import Modifier
 from rue.testing.models.spec import SetupFileRef, TestLocator, TestSpec
+
+_COLLECTION_INDEX = count()
 
 
 def make_definition(
@@ -32,6 +35,7 @@ def make_definition(
     case_id: UUID | None = None,
     suite_root: str | Path | None = None,
     setup_chain: tuple[SetupFileRef, ...] = (),
+    collection_index: int | None = None,
 ) -> LoadedTestDef:
     """Build a LoadedTestDef for use in unit tests without needing a real module."""
     module_path = Path(module_path)
@@ -54,6 +58,11 @@ def make_definition(
         definition_error=definition_error,
         suffix=suffix,
         case_id=case_id,
+        collection_index=(
+            next(_COLLECTION_INDEX)
+            if collection_index is None
+            else collection_index
+        ),
     )
     return LoadedTestDef(
         spec=spec,

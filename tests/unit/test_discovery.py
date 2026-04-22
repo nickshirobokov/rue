@@ -104,6 +104,7 @@ def test_selector_plan_discovers_rue_tests_and_static_tags(tmp_path):
     specs_by_name = {spec.full_name: spec.tags for spec in plan.specs}
 
     assert plan.suite_root == tmp_path
+    assert [spec.collection_index for spec in plan.specs] == [0, 1, 2, 3]
     assert specs_by_name == {
         "test_sample::helper": frozenset(),
         "test_sample::test_top": frozenset({"smoke"}),

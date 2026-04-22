@@ -61,6 +61,7 @@ class TestSpec:
     definition_error: str | None = None
     suffix: str | None = None
     case_id: UUID | None = None
+    collection_index: int = -1
 
     # --- Convenience accessors derived from locator / case fields ---
 

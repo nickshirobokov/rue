@@ -23,7 +23,7 @@ from rue.storage import SQLiteStore
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.environment import capture_environment
 from rue.testing.execution import DefaultTestFactory
-from rue.testing.queue import QueueSegment, QueueEntry, RunnerStep, TestQueue
+from rue.testing.queue import QueueSegment, RunnerStep, TestQueue
 from rue.context.process_pool import process_pool_scope
 from rue.testing.models import (
     Run,
@@ -77,6 +77,7 @@ class Runner:
         self._failure_count: int = 0
         self._queue = TestQueue()
         self._ordered_executions: list[ExecutedTest | None] = []
+        self._execution_slots: dict[int, int] = {}
         self._next_result_index: int = 0
         self._result_lock: asyncio.Lock | None = None
 
@@ -297,8 +298,16 @@ class Runner:
             )
             for item in items:
                 self._factory.build(item)
-            await self._notify_tests_ready(self._queue.tests)
-            self._ordered_executions = [None] * len(self._queue.tests)
+            ordered_tests = self._queue.tests
+            await self._notify_tests_ready(ordered_tests)
+            self._execution_slots = {
+                test.definition.spec.collection_index: slot
+                for slot, test in enumerate(ordered_tests)
+            }
+            if len(self._execution_slots) != len(ordered_tests):
+                msg = "Duplicate test collection_index values are not supported."
+                raise ValueError(msg)
+            self._ordered_executions = [None] * len(ordered_tests)
             self._next_result_index = 0
             self._result_lock = asyncio.Lock()
             try:
@@ -330,24 +339,24 @@ class Runner:
         """Run a blocking main-backend step."""
         if step is None:
             return
-        for entry in step.entries:
+        for test in step.tests:
             if self.stop_flag:
                 break
-            await self._notify_test_start(entry.test.definition)
-            execution = await entry.test.execute(resolver)
-            await self._record_execution(run, entry, execution)
+            await self._notify_test_start(test.definition)
+            execution = await test.execute(resolver)
+            await self._record_execution(run, execution)
 
     async def _record_execution(
         self,
         run: Run,
-        entry: QueueEntry,
         execution: ExecutedTest,
     ) -> None:
         """Store completed executions in stable discovery order."""
         if self._result_lock is None:
             return
         async with self._result_lock:
-            self._ordered_executions[entry.index] = execution
+            index = execution.definition.spec.collection_index
+            self._ordered_executions[self._execution_slots[index]] = execution
             while self._next_result_index < len(self._ordered_executions):
                 ready = self._ordered_executions[self._next_result_index]
                 if ready is None:
@@ -370,8 +379,11 @@ class Runner:
         run: Run,
     ) -> None:
         """Run one concurrent queue segment across all module queues."""
-        if segment.total_tests == 0:
-            return
+        test_count = sum(
+            len(step.tests)
+            for queue in segment.module_queues
+            for step in queue.steps
+        )
 
         condition = asyncio.Condition()
 
@@ -387,11 +399,11 @@ class Runner:
                         if segment.is_complete():
                             return
                         await condition.wait()
-                    queue, step, entry = queued
-                    await self._notify_test_start(entry.test.definition)
+                    queue, step, test = queued
+                    await self._notify_test_start(test.definition)
 
-                execution = await entry.test.execute(resolver)
-                await self._record_execution(run, entry, execution)
+                execution = await test.execute(resolver)
+                await self._record_execution(run, execution)
 
                 async with condition:
                     segment.finish(queue, step)
@@ -399,7 +411,7 @@ class Runner:
 
         workers = [
             asyncio.create_task(worker())
-            for _ in range(min(self._concurrency_limit(), segment.total_tests))
+            for _ in range(min(self._concurrency_limit(), test_count))
         ]
         try:
             for task in asyncio.as_completed(workers):
