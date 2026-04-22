@@ -76,10 +76,7 @@ class Runner:
         self.stop_flag: bool = False
         self._failure_count: int = 0
         self._queue = SessionQueue()
-        self._ordered_executions: list[ExecutedTest | None] = []
-        self._execution_slots: dict[int, int] = {}
-        self._next_result_index: int = 0
-        self._result_lock: asyncio.Lock | None = None
+        self._completed_executions: dict[int, ExecutedTest] = {}
 
         self.current_run: Run | None = None
         self._store: SQLiteStore | None = None
@@ -298,18 +295,8 @@ class Runner:
             )
             for item in items:
                 self._factory.build(item)
-            ordered_tests = self._queue.tests
-            await self._notify_tests_ready(ordered_tests)
-            self._execution_slots = {
-                test.definition.spec.collection_index: slot
-                for slot, test in enumerate(ordered_tests)
-            }
-            if len(self._execution_slots) != len(ordered_tests):
-                msg = "Duplicate test collection_index values are not supported."
-                raise ValueError(msg)
-            self._ordered_executions = [None] * len(ordered_tests)
-            self._next_result_index = 0
-            self._result_lock = asyncio.Lock()
+            await self._notify_tests_ready(self._queue.tests)
+            self._completed_executions = {}
             try:
                 for step in self._queue.steps:
                     if self.stop_flag:
@@ -321,6 +308,16 @@ class Runner:
                         )
                         break
             finally:
+                run.result.executions = [
+                    execution
+                    for test in self._queue.tests
+                    if (
+                        execution := self._completed_executions.get(
+                            test.definition.spec.collection_index
+                        )
+                    )
+                    is not None
+                ]
                 await resolver.teardown()
 
     async def _run_step(
@@ -339,7 +336,7 @@ class Runner:
                     break
                 await self._notify_test_start(test.definition)
                 execution = await test.execute(resolver)
-                await self._record_execution(run, execution)
+                self._record_execution(run, execution)
             return
 
         condition = asyncio.Condition()
@@ -360,7 +357,7 @@ class Runner:
                     await self._notify_test_start(test.definition)
 
                 execution = await test.execute(resolver)
-                await self._record_execution(run, execution)
+                self._record_execution(run, execution)
 
                 async with condition:
                     step.finish(mq, batch)
@@ -382,28 +379,17 @@ class Runner:
             await asyncio.gather(*workers, return_exceptions=True)
             raise
 
-    async def _record_execution(
+    def _record_execution(
         self,
         run: Run,
         execution: ExecutedTest,
     ) -> None:
-        """Store completed executions in stable discovery order."""
-        if self._result_lock is None:
+        self._completed_executions[
+            execution.definition.spec.collection_index
+        ] = execution
+        if not execution.result.status.is_failure:
             return
-        async with self._result_lock:
-            index = execution.definition.spec.collection_index
-            self._ordered_executions[self._execution_slots[index]] = execution
-            while self._next_result_index < len(self._ordered_executions):
-                ready = self._ordered_executions[self._next_result_index]
-                if ready is None:
-                    break
-                run.result.executions.append(ready)
-                if ready.result.status.is_failure:
-                    self._failure_count += 1
-                    if (
-                        self.config.maxfail
-                        and self._failure_count >= self.config.maxfail
-                    ):
-                        self.stop_flag = True
-                        run.result.stopped_early = True
-                self._next_result_index += 1
+        self._failure_count += 1
+        if self.config.maxfail and self._failure_count >= self.config.maxfail:
+            self.stop_flag = True
+            run.result.stopped_early = True

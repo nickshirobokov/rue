@@ -898,6 +898,54 @@ class TestMaxfail:
         assert result.result.errors == 1
         assert result.result.stopped_early
 
+    @pytest.mark.asyncio
+    async def test_concurrent_maxfail_stops_without_waiting_for_order(
+        self, null_reporter
+    ):
+        started: list[str] = []
+
+        async def slow_pass() -> None:
+            started.append("slow_pass")
+            await asyncio.sleep(0.1)
+
+        async def fail_1() -> None:
+            started.append("fail_1")
+            await asyncio.sleep(0.01)
+            raise AssertionError
+
+        async def fail_2() -> None:
+            started.append("fail_2")
+            await asyncio.sleep(0.01)
+            raise AssertionError
+
+        async def late_test() -> None:
+            started.append("late_test")
+            await asyncio.sleep(0.01)
+
+        items = [
+            make_item(slow_pass, name="slow_pass", is_async=True),
+            make_item(fail_1, name="fail_1", is_async=True),
+            make_item(fail_2, name="fail_2", is_async=True),
+            make_item(late_test, name="late_test", is_async=True),
+        ]
+
+        runner = Runner(
+            config=make_runner_config(
+                concurrency=2,
+                maxfail=2,
+                db_enabled=False,
+            ),
+            reporters=[null_reporter],
+        )
+        result = await runner.run(items=items)
+
+        assert result.result.stopped_early
+        assert started == ["slow_pass", "fail_1", "fail_2"]
+        assert [
+            execution.definition.spec.name
+            for execution in result.result.executions
+        ] == ["slow_pass", "fail_1", "fail_2"]
+
 
 class TestConcurrency:
     """Tests for concurrent test execution."""
