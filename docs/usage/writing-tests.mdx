@@ -212,7 +212,7 @@ def test_mostly_correct(llm):
 
 By default, Rue treats tests as `ExecutionBackend.ASYNCIO`: `async def test_*` functions are awaited on the event loop, and synchronous `def test_*` functions are offloaded to a worker thread via `asyncio.to_thread(...)`.
 
-Use `ExecutionBackend.MAIN` when a test must run on the main event-loop thread and block all other tests until it finishes. Use `ExecutionBackend.SUBPROCESS` to isolate the test in a worker process.
+Use `ExecutionBackend.MAIN` when a test must run on the main event-loop thread and block all other tests until it finishes. Use `ExecutionBackend.MODULE_MAIN` when a test should block only its own module queue while still running like a normal in-process test. Use `ExecutionBackend.SUBPROCESS` to isolate the test in a worker process.
 
 ```python
 import rue
@@ -228,6 +228,11 @@ def test_default_threaded():
 def test_main_thread_only():
     # Runs on the main event-loop thread and acts as a queue barrier.
     assert threading.current_thread() is threading.main_thread()
+
+@rue.test.backend(ExecutionBackend.MODULE_MAIN)
+def test_module_barrier():
+    # Blocks only this module's queue and still runs in a worker thread.
+    assert threading.current_thread() is not threading.main_thread()
 
 @rue.test.backend(ExecutionBackend.SUBPROCESS)
 def test_isolated_worker():

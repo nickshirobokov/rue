@@ -9,5 +9,6 @@ class ExecutionBackend(StrEnum):
     """Where a test node runs."""
 
     MAIN = "main"
+    MODULE_MAIN = "module_main"
     ASYNCIO = "asyncio"
     SUBPROCESS = "subprocess"

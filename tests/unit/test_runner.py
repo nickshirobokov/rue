@@ -57,11 +57,13 @@ def make_item(
     suffix: str | None = None,
     case_id: UUID | None = None,
     backend: ExecutionBackend = ExecutionBackend.ASYNCIO,
+    module_path: str = "test_module.py",
 ) -> LoadedTestDef:
     """Helper to create LoadedTestDef for testing."""
     return make_definition(
         name or fn.__name__,
         fn=fn,
+        module_path=module_path,
         is_async=is_async,
         params=params or [],
         skip_reason=skip_reason,
@@ -1002,6 +1004,81 @@ class TestConcurrency:
             ["L"],
         ]
 
+    def test_stage_planner_builds_module_scoped_steps(self):
+        runner = Runner(
+            config=make_runner_config(concurrency=4, db_enabled=False),
+            reporters=[],
+        )
+        items = [
+            make_item(
+                lambda: None,
+                name="a1_async",
+                module_path="a1.py",
+            ),
+            make_item(
+                lambda: None,
+                name="a1_barrier",
+                backend=ExecutionBackend.MODULE_MAIN,
+                module_path="a1.py",
+            ),
+            make_item(
+                lambda: None,
+                name="a2_async",
+                module_path="a2.py",
+            ),
+            make_item(
+                lambda: None,
+                name="a2_subprocess",
+                backend=ExecutionBackend.SUBPROCESS,
+                module_path="a2.py",
+            ),
+            make_item(
+                lambda: None,
+                name="global_main",
+                backend=ExecutionBackend.MAIN,
+                module_path="a1.py",
+            ),
+            make_item(
+                lambda: None,
+                name="a1_after",
+                module_path="a1.py",
+            ),
+        ]
+
+        runner._factory = DefaultTestFactory(
+            config=runner.config,
+            run_id=uuid4(),
+            queue=TestQueue(),
+        )
+        for item in items:
+            runner._factory.build(item)
+
+        segments = runner._factory.queue.segments
+        assert len(segments) == 3
+
+        first = segments[0]
+        assert not first.is_main
+        assert [
+            [test.definition.spec.name for test in step.tests]
+            for step in first.module_queues[0].steps
+        ] == [["a1_async"], ["a1_barrier"]]
+        assert [
+            [test.definition.spec.name for test in step.tests]
+            for step in first.module_queues[1].steps
+        ] == [["a2_async", "a2_subprocess"]]
+
+        assert segments[1].main_step is not None
+        assert [
+            test.definition.spec.name for test in segments[1].main_step.tests
+        ] == ["global_main"]
+
+        third = segments[2]
+        assert not third.is_main
+        assert [
+            [test.definition.spec.name for test in step.tests]
+            for step in third.module_queues[0].steps
+        ] == [["a1_after"]]
+
     @pytest.mark.asyncio
     async def test_concurrent_callbacks_stream_before_run_complete(self):
         items = []
@@ -1126,6 +1203,113 @@ class TestConcurrency:
             for name in ("async_one", "async_two")
         ]
         assert all(index < main_start_idx for index in async_completes)
+
+    @pytest.mark.asyncio
+    async def test_module_main_blocks_only_its_module(self):
+        async def async_test(delay: float) -> None:
+            await asyncio.sleep(delay)
+
+        def sync_test(delay: float) -> None:
+            time.sleep(delay)
+
+        items = [
+            make_item(
+                lambda: async_test(0.01),  # type: ignore[arg-type]
+                name="a1_before",
+                is_async=True,
+                module_path="a1.py",
+            ),
+            make_item(
+                lambda: sync_test(0.08),
+                name="a1_barrier",
+                backend=ExecutionBackend.MODULE_MAIN,
+                module_path="a1.py",
+            ),
+            make_item(
+                lambda: async_test(0.04),  # type: ignore[arg-type]
+                name="a2_before",
+                is_async=True,
+                module_path="a2.py",
+            ),
+            make_item(
+                lambda: async_test(0.01),  # type: ignore[arg-type]
+                name="a2_after",
+                is_async=True,
+                module_path="a2.py",
+            ),
+        ]
+
+        reporter = EventReporter()
+        runner = Runner(
+            config=make_runner_config(concurrency=2, db_enabled=False),
+            reporters=[reporter],
+        )
+        run = await runner.run(items=items)
+
+        barrier_start = reporter.event_order.index(("start", "a1_barrier"))
+        barrier_complete = reporter.event_order.index(
+            ("complete", "a1_barrier")
+        )
+        a2_after_start = reporter.event_order.index(("start", "a2_after"))
+
+        assert barrier_start < a2_after_start < barrier_complete
+        assert [
+            execution.definition.spec.name for execution in run.result.executions
+        ] == [item.spec.name for item in items]
+
+    @pytest.mark.asyncio
+    async def test_global_main_still_blocks_everything(self):
+        async def async_test(delay: float) -> None:
+            await asyncio.sleep(delay)
+
+        def sync_test() -> None:
+            pass
+
+        items = [
+            make_item(
+                lambda: async_test(0.04),  # type: ignore[arg-type]
+                name="a1_before",
+                is_async=True,
+                module_path="a1.py",
+            ),
+            make_item(
+                lambda: async_test(0.02),  # type: ignore[arg-type]
+                name="a2_before",
+                is_async=True,
+                module_path="a2.py",
+            ),
+            make_item(
+                sync_test,
+                name="global_main",
+                backend=ExecutionBackend.MAIN,
+                module_path="a1.py",
+            ),
+            make_item(
+                lambda: async_test(0.01),  # type: ignore[arg-type]
+                name="a2_after",
+                is_async=True,
+                module_path="a2.py",
+            ),
+        ]
+
+        reporter = EventReporter()
+        runner = Runner(
+            config=make_runner_config(concurrency=2, db_enabled=False),
+            reporters=[reporter],
+        )
+        await runner.run(items=items)
+
+        main_start = reporter.event_order.index(("start", "global_main"))
+        a2_after_start = reporter.event_order.index(("start", "a2_after"))
+        before_completes = [
+            reporter.event_order.index(("complete", name))
+            for name in ("a1_before", "a2_before")
+        ]
+
+        assert all(index < main_start for index in before_completes)
+        assert reporter.event_order.index(("complete", "global_main")) < (
+            a2_after_start
+        )
 
     @pytest.mark.asyncio
     async def test_concurrent_raises_when_on_test_start_fails(self):

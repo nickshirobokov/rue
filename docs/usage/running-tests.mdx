@@ -114,9 +114,10 @@ uv run rue test --concurrency 0
 
 Rue plans work in queue stages:
 - `ExecutionBackend.MAIN` tests run on the main thread in discovery order and block all other execution.
-- `ExecutionBackend.ASYNCIO` and `ExecutionBackend.SUBPROCESS` tests run in concurrent batches and share the same `--concurrency` budget.
+- `ExecutionBackend.MODULE_MAIN` tests block only their own module queue.
+- `ExecutionBackend.ASYNCIO`, `ExecutionBackend.MODULE_MAIN`, and `ExecutionBackend.SUBPROCESS` tests share the same `--concurrency` budget.
 
-For synchronous tests (`def test_*`), the default `ASYNCIO` backend runs test bodies in worker threads to keep the event loop responsive. Use `@rue.test.backend(ExecutionBackend.MAIN)` when a sync test must run on the main event-loop thread.
+For synchronous tests (`def test_*`), the default `ASYNCIO` backend runs test bodies in worker threads to keep the event loop responsive. Use `@rue.test.backend(ExecutionBackend.MODULE_MAIN)` for a module-scoped queue barrier, and `@rue.test.backend(ExecutionBackend.MAIN)` only when a sync test must run on the main event-loop thread.
 
 ### Timeout
 

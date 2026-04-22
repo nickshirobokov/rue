@@ -23,7 +23,7 @@ from rue.storage import SQLiteStore
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.environment import capture_environment
 from rue.testing.execution import DefaultTestFactory
-from rue.testing.queue import RunnerStep, TestQueue
+from rue.testing.queue import QueueSegment, QueueEntry, RunnerStep, TestQueue
 from rue.context.process_pool import process_pool_scope
 from rue.testing.models import (
     Run,
@@ -76,6 +76,9 @@ class Runner:
         self.stop_flag: bool = False
         self._failure_count: int = 0
         self._queue = TestQueue()
+        self._ordered_executions: list[ExecutedTest | None] = []
+        self._next_result_index: int = 0
+        self._result_lock: asyncio.Lock | None = None
 
         self.current_run: Run | None = None
         self._store: SQLiteStore | None = None
@@ -295,14 +298,21 @@ class Runner:
             for item in items:
                 self._factory.build(item)
             await self._notify_tests_ready(self._queue.tests)
+            self._ordered_executions = [None] * len(self._queue.tests)
+            self._next_result_index = 0
+            self._result_lock = asyncio.Lock()
             try:
-                for step in self._queue.steps:
+                for segment in self._queue.segments:
                     if self.stop_flag:
                         break
-                    if step.is_main:
-                        await self._run_main_step(step, resolver, run)
+                    if segment.is_main:
+                        await self._run_main_step(
+                            segment.main_step,
+                            resolver,
+                            run,
+                        )
                     else:
-                        await self._run_parallel_step(step, resolver, run)
+                        await self._run_parallel_segment(segment, resolver, run)
                     if run.result.stopped_early and self.config.maxfail:
                         await self._notify_run_stopped_early(
                             self.config.maxfail
@@ -313,61 +323,83 @@ class Runner:
 
     async def _run_main_step(
         self,
-        step: RunnerStep,
+        step: RunnerStep | None,
         resolver: ResourceResolver,
         run: Run,
     ) -> None:
         """Run a blocking main-backend step."""
-        for test in step.tests:
+        if step is None:
+            return
+        for entry in step.entries:
             if self.stop_flag:
                 break
-            await self._notify_test_start(test.definition)
-            execution = await test.execute(resolver)
-            run.result.executions.append(execution)
+            await self._notify_test_start(entry.test.definition)
+            execution = await entry.test.execute(resolver)
+            await self._record_execution(run, entry, execution)
 
-            if execution.result.status.is_failure:
-                self._failure_count += 1
-                if (
-                    self.config.maxfail
-                    and self._failure_count >= self.config.maxfail
-                ):
-                    run.result.stopped_early = True
-                    self.stop_flag = True
-                    break
-
-    async def _run_parallel_step(
+    async def _record_execution(
         self,
-        step: RunnerStep,
+        run: Run,
+        entry: QueueEntry,
+        execution: ExecutedTest,
+    ) -> None:
+        """Store completed executions in stable discovery order."""
+        if self._result_lock is None:
+            return
+        async with self._result_lock:
+            self._ordered_executions[entry.index] = execution
+            while self._next_result_index < len(self._ordered_executions):
+                ready = self._ordered_executions[self._next_result_index]
+                if ready is None:
+                    break
+                run.result.executions.append(ready)
+                if ready.result.status.is_failure:
+                    self._failure_count += 1
+                    if (
+                        self.config.maxfail
+                        and self._failure_count >= self.config.maxfail
+                    ):
+                        self.stop_flag = True
+                        run.result.stopped_early = True
+                self._next_result_index += 1
+
+    async def _run_parallel_segment(
+        self,
+        segment: QueueSegment,
         resolver: ResourceResolver,
         run: Run,
     ) -> None:
-        """Run one concurrent queue step."""
-        def on_ready(execution: ExecutedTest) -> None:
-            run.result.executions.append(execution)
-            if execution.result.status.is_failure:
-                self._failure_count += 1
-                if (
-                    self.config.maxfail
-                    and self._failure_count >= self.config.maxfail
-                ):
-                    self.stop_flag = True
-                    run.result.stopped_early = True
+        """Run one concurrent queue segment across all module queues."""
+        if segment.total_tests == 0:
+            return
+
+        condition = asyncio.Condition()
 
         async def worker() -> None:
             while True:
-                queued = await step.dequeue(
-                    is_stopped=lambda: self.stop_flag,
-                    on_test_start=self._notify_test_start,
-                )
-                if queued is None:
-                    return
-                idx, test = queued
-                execution = await test.execute(resolver)
-                await step.record(idx, execution, on_ready=on_ready)
+                async with condition:
+                    while True:
+                        if self.stop_flag:
+                            return
+                        queued = segment.dequeue_ready()
+                        if queued is not None:
+                            break
+                        if segment.is_complete():
+                            return
+                        await condition.wait()
+                    queue, step, entry = queued
+                    await self._notify_test_start(entry.test.definition)
+
+                execution = await entry.test.execute(resolver)
+                await self._record_execution(run, entry, execution)
+
+                async with condition:
+                    segment.finish(queue, step)
+                    condition.notify_all()
 
         workers = [
             asyncio.create_task(worker())
-            for _ in range(step.worker_count(self._concurrency_limit()))
+            for _ in range(min(self._concurrency_limit(), segment.total_tests))
         ]
         try:
             for task in asyncio.as_completed(workers):

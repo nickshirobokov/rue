@@ -281,6 +281,7 @@ Select how a test executes and how it participates in Rue's queue.
 **Notes:**
 - Tests default to `ExecutionBackend.ASYNCIO` when no backend is specified.
 - `ExecutionBackend.MAIN` runs on the main event-loop thread and blocks all other tests until it finishes.
+- `ExecutionBackend.MODULE_MAIN` blocks only the current module queue and otherwise behaves like in-process execution.
 - `ExecutionBackend.ASYNCIO` runs in-process; sync tests use a worker thread, async tests are awaited on the event loop.
 - `ExecutionBackend.SUBPROCESS` runs the test in a worker process.
 
@@ -299,6 +300,11 @@ def test_default_threaded():
 def test_main_thread_only():
     # Runs on the main event-loop thread and blocks the queue.
     assert threading.current_thread() is threading.main_thread()
+
+@rue.test.backend(ExecutionBackend.MODULE_MAIN)
+def test_module_barrier():
+    # Blocks only this module's queue and still runs in a worker thread.
+    assert threading.current_thread() is not threading.main_thread()
 
 @rue.test.backend(ExecutionBackend.SUBPROCESS)
 def test_isolated_worker():

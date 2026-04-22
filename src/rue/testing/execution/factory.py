@@ -67,7 +67,11 @@ class DefaultTestFactory:
                         is_stopped=self.is_stopped,
                         on_complete=self.on_complete,
                     )
-                case ExecutionBackend.MAIN | ExecutionBackend.ASYNCIO:
+                case (
+                    ExecutionBackend.MAIN
+                    | ExecutionBackend.MODULE_MAIN
+                    | ExecutionBackend.ASYNCIO
+                ):
                     test = LocalSingleTest(
                         definition=definition,
                         params=params,
