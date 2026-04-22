@@ -254,7 +254,7 @@ async def test_runner_executes_multiple_modules_in_queue_order(
 
             @rue.test.backend(ExecutionBackend.MODULE_MAIN)
             def test_A():
-                time.sleep(0.01)
+                time.sleep(0.05)
 
             @rue.test
             async def test_B():
