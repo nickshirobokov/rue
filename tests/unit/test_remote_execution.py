@@ -21,14 +21,14 @@ from rue.resources import ResourceResolver, registry, resource
 from rue.resources.models import Scope
 from rue.telemetry import OtelTraceArtifact
 from rue.testing.execution.factory import DefaultTestFactory
-from rue.testing.execution.remote_worker import (
+from rue.testing.execution.worker import (
     ExecutorPayload,
     RemoteExecutionResult,
     run_remote_test,
 )
 from rue.context.process_pool import CURRENT_PROCESS_POOL
 from rue.testing.execution.single import SingleTest
-from rue.testing.execution.types import ExecutionBackend
+from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import (
     BackendModifier,
     IterateModifier,

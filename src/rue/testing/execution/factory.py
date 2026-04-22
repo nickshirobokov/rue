@@ -10,9 +10,8 @@ from uuid import UUID
 
 from rue.config import Config
 from rue.testing.execution.composite import CompositeTest
-from rue.testing.execution.interfaces import ExecutableTest
+from rue.testing.execution.base import ExecutableTest, ExecutionBackend
 from rue.testing.execution.single import SingleTest
-from rue.testing.execution.types import ExecutionBackend
 from rue.testing.models import (
     BackendModifier,
     CasesIterateModifier,
@@ -21,7 +20,7 @@ from rue.testing.models import (
     ParamsIterateModifier,
     LoadedTestDef,
 )
-from rue.testing.queue import SessionQueue
+from rue.testing.execution.queue import SessionQueue
 
 
 @dataclass

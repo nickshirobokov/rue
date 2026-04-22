@@ -1,4 +1,4 @@
-"""Remote worker entrypoint and payloads for subprocess test execution."""
+"""Worker entrypoint and payloads for subprocess test execution."""
 
 from __future__ import annotations
 

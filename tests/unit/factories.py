@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from rue.testing.discovery import TestLoader, TestSpecCollector
-from rue.testing.execution.types import ExecutionBackend
+from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import BackendModifier, LoadedTestDef
 from rue.testing.models.modifiers import Modifier
 from rue.testing.models.spec import SetupFileRef, TestLocator, TestSpec

@@ -17,7 +17,7 @@ from rue.resources.metrics.base import (
     MetricResult,
 )
 from rue.resources.sut.output import SUTOutputCapture
-from rue.testing.execution.types import ExecutionBackend
+from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import (
     IterateModifier,
     Run,

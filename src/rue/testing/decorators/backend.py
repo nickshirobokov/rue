@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from rue.testing.execution.types import ExecutionBackend
+from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import BackendModifier
 
 

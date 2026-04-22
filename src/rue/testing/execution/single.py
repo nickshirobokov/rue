@@ -20,13 +20,12 @@ from rue.context.runtime import (
 )
 from rue.resources import ResourceResolver
 from rue.resources.models import Scope
-from rue.testing.execution.interfaces import ExecutableTest
-from rue.testing.execution.remote_worker import (
+from rue.testing.execution.base import ExecutableTest, ExecutionBackend
+from rue.testing.execution.worker import (
     ExecutorPayload,
     RemoteExecutionResult,
     run_remote_test,
 )
-from rue.testing.execution.types import ExecutionBackend
 from rue.testing.models import (
     ExecutedTest,
     LoadedTestDef,

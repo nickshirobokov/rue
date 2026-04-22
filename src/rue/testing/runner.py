@@ -27,7 +27,7 @@ from rue.testing.models import (
     LoadedTestDef,
     Run,
 )
-from rue.testing.queue import RunnerStep, SessionQueue
+from rue.testing.execution.queue import RunnerStep, SessionQueue
 
 
 class Runner:

@@ -24,8 +24,8 @@ from rue.telemetry import OtelTraceArtifact
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.environment import _filter_env_vars
 from rue.testing.execution.factory import DefaultTestFactory
-from rue.testing.execution.types import ExecutionBackend
-from rue.testing.queue import SessionQueue
+from rue.testing.execution.base import ExecutionBackend
+from rue.testing.execution.queue import SessionQueue
 from rue.testing.models import (
     ParameterSet,
     ParamsIterateModifier,

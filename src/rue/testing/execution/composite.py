@@ -7,8 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from rue.resources.resolver import ResourceResolver
-from rue.testing.execution.interfaces import ExecutableTest
-from rue.testing.execution.types import ExecutionBackend
+from rue.testing.execution.base import ExecutableTest, ExecutionBackend
 from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.result import TestResult, TestStatus
