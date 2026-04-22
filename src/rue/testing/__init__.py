@@ -1,6 +1,7 @@
 """Rue testing package — discovery, execution, and decorators."""
 
 from ..resources import resource
+from .execution.types import ExecutionBackend
 from .decorators import backend, iterate, tag, test
 from .models import (
     Case,
@@ -11,6 +12,7 @@ from .models import (
     TestStatus,
 )
 from .outcomes import fail, skip, xfail
+from .queue import RunnerStep, TestQueue
 from .runner import Runner
 
 
@@ -23,8 +25,11 @@ __all__ = [
     "ExecutedTest",
     "TestStatus",
     "backend",
+    "ExecutionBackend",
     "fail",
     "resource",
+    "RunnerStep",
+    "TestQueue",
     "skip",
     "iterate",
     "tag",

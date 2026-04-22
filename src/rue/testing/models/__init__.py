@@ -1,5 +1,6 @@
 """Testing models - pure data classes."""
 
+from rue.testing.execution.types import ExecutionBackend
 from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.modifiers import (
     BackendModifier,
@@ -36,6 +37,7 @@ __all__ = [
     "TestSpecCollection",
     "BackendModifier",
     "CasesIterateModifier",
+    "ExecutionBackend",
     "IterateModifier",
     "Modifier",
     "ParameterSet",

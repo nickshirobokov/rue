@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
+import time
 from concurrent.futures import Future
 from contextlib import contextmanager
 from pathlib import Path
@@ -67,6 +70,31 @@ class FakePool:
         return self
 
 
+class BlockingPool(FakePool):
+    def __init__(self, result: RemoteExecutionResult, *, delay: float) -> None:
+        super().__init__(result)
+        self.delay = delay
+        self.active = 0
+        self.max_active = 0
+        self._lock = threading.Lock()
+
+    def submit(self, fn, *args, **kwargs) -> Future:
+        self.submitted.append((fn, args, kwargs))
+        future: Future = Future()
+
+        def complete() -> None:
+            with self._lock:
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+            time.sleep(self.delay)
+            with self._lock:
+                self.active -= 1
+            future.set_result(self._result)
+
+        threading.Thread(target=complete, daemon=True).start()
+        return future
+
+
 @contextmanager
 def bind_pool(pool: FakePool):
     token = CURRENT_PROCESS_POOL.set(pool)  # type: ignore[arg-type]
@@ -110,9 +138,8 @@ class TestBackendDecorator:
 
         item = make_definition("sample")
         item.spec.get_execution_from_fn(sample)
-        assert (
-            BackendModifier(backend=ExecutionBackend.SUBPROCESS)
-            in item.spec.modifiers
+        assert item.spec.modifiers == (
+            BackendModifier(backend=ExecutionBackend.SUBPROCESS),
         )
 
     def test_accepts_execution_backend_enum(self):
@@ -124,6 +151,26 @@ class TestBackendDecorator:
             BackendModifier(backend=ExecutionBackend.SUBPROCESS)
         ]
 
+    def test_removed_local_backend_raises_value_error(self):
+        with pytest.raises(ValueError, match="local"):
+            @rue.test.backend("local")
+            def sample():
+                pass
+
+    def test_rejects_multiple_backend_decorators(self):
+        @rue.test.backend("main")
+        @rue.test.backend("subprocess")
+        def sample():
+            pass
+
+        item = make_definition("sample")
+        item.spec.get_execution_from_fn(sample)
+
+        assert (
+            item.spec.definition_error
+            == "Multiple @rue.test.backend(...) decorators are not supported."
+        )
+
 
 # ---------------------------------------------------------------------------
 # factory dispatch
@@ -131,21 +178,24 @@ class TestBackendDecorator:
 
 
 class TestFactoryDispatch:
-    def _definition(self, *modifiers):
-        return make_definition("sample", modifiers=list(modifiers))
+    def _definition(self, *, backend=ExecutionBackend.ASYNCIO, modifiers=()):
+        return make_definition(
+            "sample",
+            backend=backend,
+            modifiers=list(modifiers),
+        )
 
     def test_local_by_default(self):
         factory = DefaultTestFactory(config=Config(), run_id=uuid4())
         built = factory.build(self._definition())
         assert isinstance(built, LocalSingleTest)
+        assert built.backend is ExecutionBackend.ASYNCIO
 
     def test_remote_when_backend_modifier_present(self):
         factory = DefaultTestFactory(config=Config(), run_id=uuid4())
 
         built = factory.build(
-            self._definition(
-                BackendModifier(backend=ExecutionBackend.SUBPROCESS)
-            )
+            self._definition(backend=ExecutionBackend.SUBPROCESS)
         )
 
         assert isinstance(built, RemoteSingleTest)
@@ -159,8 +209,8 @@ class TestFactoryDispatch:
 
         built = factory.build(
             self._definition(
-                BackendModifier(backend=ExecutionBackend.SUBPROCESS),
-                IterateModifier(count=3, min_passes=3),
+                backend=ExecutionBackend.SUBPROCESS,
+                modifiers=(IterateModifier(count=3, min_passes=3),),
             )
         )
 
@@ -180,9 +230,11 @@ class TestRemoteSingleTest:
         ):
             RemoteSingleTest(
                 definition=make_definition(
-                    modifiers=[IterateModifier(count=2, min_passes=2)]
+                    modifiers=[IterateModifier(count=2, min_passes=2)],
+                    backend=ExecutionBackend.SUBPROCESS,
                 ),
                 params={},
+                backend=ExecutionBackend.SUBPROCESS,
             )
 
     @pytest.mark.asyncio
@@ -209,6 +261,7 @@ class TestRemoteSingleTest:
         remote = RemoteSingleTest(
             definition=definition,
             params={},
+            backend=ExecutionBackend.SUBPROCESS,
             config=Config.model_construct(otel=False),
             run_id=UUID(int=1),
         )
@@ -271,6 +324,7 @@ class TestRemoteSingleTest:
         remote = RemoteSingleTest(
             definition=definition,
             params={},
+            backend=ExecutionBackend.SUBPROCESS,
             config=Config.model_construct(otel=True),
             run_id=UUID(int=1),
         )
@@ -294,6 +348,7 @@ class TestRemoteSingleTest:
         remote = RemoteSingleTest(
             definition=make_definition("sample"),
             params={},
+            backend=ExecutionBackend.SUBPROCESS,
             is_stopped=lambda: True,
         )
 
@@ -313,11 +368,15 @@ class TestRemoteSingleTest:
 
     @pytest.mark.asyncio
     async def test_honors_skip_reason(self):
-        definition = make_definition("sample", skip_reason="no thanks")
+        definition = make_definition(
+            "sample",
+            skip_reason="no thanks",
+        )
 
         remote = RemoteSingleTest(
             definition=definition,
             params={},
+            backend=ExecutionBackend.SUBPROCESS,
         )
 
         with bind_pool(
@@ -345,6 +404,7 @@ class TestRemoteSingleTest:
         remote = RemoteSingleTest(
             definition=make_definition("sample"),
             params={},
+            backend=ExecutionBackend.SUBPROCESS,
             on_complete=capture,
         )
 
@@ -360,6 +420,35 @@ class TestRemoteSingleTest:
             execution = await remote.execute(ResourceResolver(registry))
 
         on_complete.assert_called_once_with(execution)
+
+    @pytest.mark.asyncio
+    async def test_respects_shared_semaphore(self, tmp_path: Path):
+        expected = RemoteExecutionResult(
+            result=TestResult(status=TestStatus.PASSED, duration_ms=12.3),
+            telemetry_artifacts=(),
+            sync_update=b"",
+        )
+        semaphore = asyncio.Semaphore(1)
+        tests = [
+            RemoteSingleTest(
+                definition=make_definition(
+                    f"sample_{idx}",
+                    suite_root=tmp_path,
+                ),
+                params={},
+                backend=ExecutionBackend.SUBPROCESS,
+                semaphore=semaphore,
+            )
+            for idx in range(2)
+        ]
+
+        pool = BlockingPool(expected, delay=0.05)
+        with bind_pool(pool):
+            await asyncio.gather(
+                *[test.execute(ResourceResolver(registry)) for test in tests]
+            )
+
+        assert pool.max_active == 1
 
 
 # ---------------------------------------------------------------------------

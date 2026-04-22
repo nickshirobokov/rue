@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
+from rue.testing.execution.types import ExecutionBackend
 from rue.testing.execution.interfaces import ExecutableTest
 from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.executed import ExecutedTest
@@ -18,16 +19,22 @@ class LocalCompositeTest(ExecutableTest):
     """Executes pre-built child tests concurrently and aggregates results."""
 
     definition: LoadedTestDef
+    backend: ExecutionBackend
     min_passes: int
     children: list[ExecutableTest] = field(default_factory=list)
     on_complete: Callable | None = None
 
-    async def execute(self, resolver: ResourceResolver) -> ExecutedTest:
-        async def run_child(index: int) -> tuple[int, ExecutedTest]:
-            execution = await self.children[index].execute(resolver)
-            return index, execution
+    async def _execute(self, resolver: ResourceResolver) -> ExecutedTest:
+        if self.backend is ExecutionBackend.MAIN:
+            sub_executions = []
+            for child in self.children:
+                sub_executions.append(await child.execute(resolver))
+        else:
+            async def run_child(index: int) -> tuple[int, ExecutedTest]:
+                execution = await self.children[index].execute(resolver)
+                return index, execution
 
-        sub_executions = await self._run_children(run_child)
+            sub_executions = await self._run_children(run_child)
         passed = sum(
             1 for e in sub_executions if e.result.status == TestStatus.PASSED
         )
@@ -37,15 +44,12 @@ class LocalCompositeTest(ExecutableTest):
             else TestStatus.FAILED
         )
         duration = sum(e.result.duration_ms for e in sub_executions)
-        execution = ExecutedTest(
+        return ExecutedTest(
             definition=self.definition,
             result=TestResult(status=status, duration_ms=duration),
             execution_id=uuid4(),
             sub_executions=sub_executions,
         )
-        if self.on_complete:
-            await self.on_complete(execution)
-        return execution
 
     async def _run_children(
         self,

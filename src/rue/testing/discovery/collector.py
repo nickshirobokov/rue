@@ -131,10 +131,6 @@ class _StaticSpecVisitor(ast.NodeVisitor):
                     tags.add("skip")
                 case ast.Call(func=func) if self._is_tag_method(func, "xfail"):
                     tags.add("xfail")
-                case ast.Attribute() if self._is_tag_method(
-                    decorator, "inline"
-                ):
-                    tags.add("inline")
         return tags
 
 

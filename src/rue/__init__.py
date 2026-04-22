@@ -13,6 +13,9 @@ from .resources.sut import (
 from .testing import (
     Case,
     CaseGroup,
+    ExecutionBackend,
+    RunnerStep,
+    TestQueue,
     backend,
     fail,
     resource,
@@ -33,6 +36,9 @@ __all__ = [
     # Core testing
     "Case",
     "CaseGroup",
+    "ExecutionBackend",
+    "RunnerStep",
+    "TestQueue",
     "backend",
     "resource",
     "test",

@@ -19,7 +19,7 @@ import asyncio
 import time
 
 import rue
-from rue import Metric, SUT, metrics
+from rue import ExecutionBackend, Metric, SUT, metrics
 
 
 # Same worker: two queries handled by the async (in-process) tests.
@@ -121,7 +121,7 @@ async def test_local_async_iterations(
         assert len(document_pipeline.root_spans) == 3
 
 
-@rue.test.backend("subprocess")
+@rue.test.backend(ExecutionBackend.SUBPROCESS)
 @rue.test.iterate.params("query,pause", SUBPROCESS_QUERIES)
 def test_subprocess_iterations(
     query: str,

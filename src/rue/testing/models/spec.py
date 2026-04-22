@@ -59,7 +59,6 @@ class TestSpec:
     xfail_reason: str | None = None
     xfail_strict: bool = False
     definition_error: str | None = None
-    inline: bool = False
     suffix: str | None = None
     case_id: UUID | None = None
 
@@ -94,7 +93,6 @@ class TestSpec:
         self.skip_reason = data.skip_reason
         self.xfail_reason = data.xfail_reason
         self.xfail_strict = data.xfail_strict
-        self.inline = data.inline
 
     def get_execution_from_fn(self, fn: Callable[..., Any]) -> None:
         self.is_async = inspect.iscoroutinefunction(fn)

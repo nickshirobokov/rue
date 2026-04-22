@@ -8,5 +8,6 @@ from enum import StrEnum
 class ExecutionBackend(StrEnum):
     """Where a test node runs."""
 
-    LOCAL = "local"
+    MAIN = "main"
+    ASYNCIO = "asyncio"
     SUBPROCESS = "subprocess"

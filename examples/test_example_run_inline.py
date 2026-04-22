@@ -1,16 +1,18 @@
-"""Example demonstrating sync test threading and @rue.test.tag.inline.
+"""Example demonstrating sync test threading and ExecutionBackend.MAIN.
 
 By default, sync rue tests run in a worker thread so the event loop
-stays responsive (e.g. for live console updates).  Use @rue.test.tag.inline
+stays responsive (e.g. for live console updates). Use
+@rue.test.backend(ExecutionBackend.MAIN)
 when a test must execute on the main thread.
 
-    rue test examples/test_example_run_inline.py -v
+    uv run rue test examples/test_example_run_inline.py -v
 """
 
 import threading
 import time
 
 import rue
+from rue import ExecutionBackend
 
 
 @rue.test
@@ -20,9 +22,9 @@ def test_sync_default():
     assert threading.current_thread() is not threading.main_thread()
 
 
-@rue.test.tag.inline
+@rue.test.backend(ExecutionBackend.MAIN)
 def test_sync_inline():
-    """This sync test runs inline on the event loop thread."""
+    """This sync test runs on the main event-loop thread."""
     assert threading.current_thread() is threading.main_thread()
 
 
@@ -39,9 +41,9 @@ def test_sync_repeated():
     assert threading.current_thread() is not threading.main_thread()
 
 
-@rue.test.tag.inline
+@rue.test.backend(ExecutionBackend.MAIN)
 @rue.test.iterate(3)
 def test_inline_repeated():
-    """Repeated sync tests with @rue.test.tag.inline stay on the main thread."""
+    """Repeated MAIN tests stay on the main thread and block other work."""
     time.sleep(0.1)
     assert threading.current_thread() is threading.main_thread()

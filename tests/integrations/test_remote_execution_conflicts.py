@@ -20,6 +20,7 @@ async def test_iterated_subprocess_children_keep_distinct_process_updates(
             """
             import time
             import rue
+            from rue import ExecutionBackend
             from rue.resources import resource
             from rue.resources.models import Scope
 
@@ -36,7 +37,7 @@ async def test_iterated_subprocess_children_keep_distinct_process_updates(
                     time.sleep(0.3)
                 shared_events.append(event)
 
-            @rue.test
+            @rue.test.backend(ExecutionBackend.MAIN)
             def test_after(shared_events):
                 assert shared_events == ["one", "two"]
             """
@@ -48,7 +49,7 @@ async def test_iterated_subprocess_children_keep_distinct_process_updates(
         config=Config.model_construct(
             otel=False,
             db_enabled=False,
-            concurrency=1,
+            concurrency=4,
         ),
         reporters=[NullReporter()],
     ).run(items=items)
@@ -273,6 +274,69 @@ async def test_local_and_subprocess_shared_sut_trace_state_stays_isolated(
     ).run(items=items)
 
     assert run.result.passed == 2, [
+        (
+            execution.definition.spec.name,
+            execution.status.value,
+            str(execution.result.error) if execution.result.error else None,
+        )
+        for execution in run.result.executions
+    ]
+
+
+@pytest.mark.asyncio
+async def test_main_backend_waits_for_local_and_subprocess_stage(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_backend_queue_barrier.py"
+    module_path.write_text(
+        dedent(
+            """
+            import asyncio
+            import time
+            import rue
+            from rue import ExecutionBackend
+            from rue.resources import resource
+            from rue.resources.models import Scope
+
+            @resource(scope=Scope.PROCESS)
+            def events():
+                return []
+
+            @rue.test
+            async def test_async(events):
+                await asyncio.sleep(0.1)
+                events.append("async")
+
+            @rue.test.backend(ExecutionBackend.SUBPROCESS)
+            def test_remote(events):
+                time.sleep(0.05)
+                events.append("remote")
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_barrier(events):
+                assert len(events) == 2
+                assert set(events) == {"async", "remote"}
+                events.append("main")
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_after(events):
+                assert events[-1] == "main"
+                assert set(events[:-1]) == {"async", "remote"}
+            """
+        )
+    )
+
+    items = materialize_tests(module_path)
+    run = await Runner(
+        config=Config.model_construct(
+            otel=False,
+            db_enabled=False,
+            concurrency=3,
+        ),
+        reporters=[NullReporter()],
+    ).run(items=items)
+
+    assert run.result.passed == 4, [
         (
             execution.definition.spec.name,
             execution.status.value,

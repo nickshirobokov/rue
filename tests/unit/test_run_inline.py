@@ -1,10 +1,9 @@
-"""Tests for tag.inline decorator and threaded sync execution."""
+"""Tests for backend-controlled sync threading behavior."""
 
 import asyncio
 import threading
-from pathlib import Path
 
-from rue.testing import Runner, test as t_decorator
+from rue.testing import ExecutionBackend, Runner
 from rue.testing.models import IterateModifier
 from tests.unit.factories import make_definition
 
@@ -27,17 +26,19 @@ def test_sync_test_runs_in_worker_thread(null_reporter):
     assert observed_thread is not threading.main_thread()
 
 
-def test_tag_inline_runs_on_main_thread(null_reporter):
+def test_main_backend_runs_on_main_thread(null_reporter):
     runner = Runner(reporters=[null_reporter])
     observed_thread = None
 
-    @t_decorator.tag.inline
-    def test_inline():
+    def test_main():
         nonlocal observed_thread
         observed_thread = threading.current_thread()
 
     item = make_definition(
-        "test_inline", fn=test_inline, module_path="sample.py", inline=True
+        "test_main",
+        fn=test_main,
+        module_path="sample.py",
+        backend=ExecutionBackend.MAIN,
     )
 
     asyncio.run(runner.run(items=[item]))
@@ -63,19 +64,18 @@ def test_sync_exception_propagates(null_reporter):
     assert "sync boom" in str(execution.result.error)
 
 
-def test_tag_inline_propagates_through_iterate(null_reporter):
+def test_main_backend_propagates_through_iterate(null_reporter):
     runner = Runner(reporters=[null_reporter])
     threads: list[threading.Thread] = []
 
-    @t_decorator.tag.inline
-    def test_inline_repeat():
+    def test_main_repeat():
         threads.append(threading.current_thread())
 
     item = make_definition(
-        "test_inline_repeat",
-        fn=test_inline_repeat,
+        "test_main_repeat",
+        fn=test_main_repeat,
         module_path="sample.py",
-        inline=True,
+        backend=ExecutionBackend.MAIN,
         modifiers=[IterateModifier(count=3, min_passes=3)],
     )
 

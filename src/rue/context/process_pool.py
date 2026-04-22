@@ -9,12 +9,16 @@ from contextvars import ContextVar
 
 
 class LazyProcessPool:
-    def __init__(self) -> None:
+    def __init__(self, max_workers: int) -> None:
+        self._max_workers = max_workers
         self._pool: ProcessPoolExecutor | None = None
 
     def get(self) -> ProcessPoolExecutor:
         if self._pool is None:
-            self._pool = ProcessPoolExecutor(max_tasks_per_child=1)
+            self._pool = ProcessPoolExecutor(
+                max_workers=self._max_workers,
+                max_tasks_per_child=1,
+            )
         return self._pool
 
     def shutdown(self) -> None:
@@ -29,8 +33,8 @@ CURRENT_PROCESS_POOL: ContextVar[LazyProcessPool | None] = ContextVar(
 
 
 @contextmanager
-def process_pool_scope() -> Iterator[LazyProcessPool]:
-    holder = LazyProcessPool()
+def process_pool_scope(max_workers: int) -> Iterator[LazyProcessPool]:
+    holder = LazyProcessPool(max_workers=max_workers)
     token = CURRENT_PROCESS_POOL.set(holder)
     try:
         yield holder

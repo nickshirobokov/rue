@@ -22,6 +22,9 @@ from rue.resources.sut import sut
 from rue.telemetry import OtelTraceArtifact
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.environment import _filter_env_vars
+from rue.testing.execution.factory import DefaultTestFactory
+from rue.testing.execution.types import ExecutionBackend
+from rue.testing.queue import TestQueue
 from rue.testing.models import (
     ParameterSet,
     ParamsIterateModifier,
@@ -53,6 +56,7 @@ def make_item(
     xfail_strict: bool = False,
     suffix: str | None = None,
     case_id: UUID | None = None,
+    backend: ExecutionBackend = ExecutionBackend.ASYNCIO,
 ) -> LoadedTestDef:
     """Helper to create LoadedTestDef for testing."""
     return make_definition(
@@ -65,6 +69,7 @@ def make_item(
         xfail_strict=xfail_strict,
         suffix=suffix,
         case_id=case_id,
+        backend=backend,
     )
 
 
@@ -291,6 +296,21 @@ class TestRunner:
         assert builtins.fail_fast_events == ["before"]
         assert len(execution.result.assertion_results) == 1
         assert "first failure" in str(execution.result.error)
+
+    @pytest.mark.asyncio
+    async def test_definition_error_is_materialized_by_executable(
+        self, null_reporter
+    ):
+        item = make_definition(
+            "test_bad_definition",
+            definition_error="broken decorator state",
+        )
+
+        result = await Runner(reporters=[null_reporter]).run(items=[item])
+
+        execution = result.result.executions[0]
+        assert execution.result.status == TestStatus.ERROR
+        assert str(execution.result.error) == "broken decorator state"
 
 
 class TestRunId:
@@ -924,6 +944,64 @@ class TestConcurrency:
         # All should start within a small window (concurrent)
         assert max(start_times) - min(start_times) < 0.05
 
+    def test_stage_planner_groups_main_barriers(self):
+        runner = Runner(
+            config=make_runner_config(concurrency=4, db_enabled=False),
+            reporters=[],
+        )
+        items = [
+            make_item(lambda: None, name="A", backend=ExecutionBackend.MAIN),
+            make_item(lambda: None, name="B"),
+            make_item(lambda: None, name="C"),
+            make_item(
+                lambda: None,
+                name="D",
+                backend=ExecutionBackend.SUBPROCESS,
+            ),
+            make_item(lambda: None, name="E", backend=ExecutionBackend.MAIN),
+            make_item(lambda: None, name="F"),
+            make_item(lambda: None, name="G", backend=ExecutionBackend.MAIN),
+            make_item(
+                lambda: None,
+                name="H",
+                backend=ExecutionBackend.SUBPROCESS,
+            ),
+            make_item(
+                lambda: None,
+                name="I",
+                backend=ExecutionBackend.SUBPROCESS,
+            ),
+            make_item(
+                lambda: None,
+                name="J",
+                backend=ExecutionBackend.SUBPROCESS,
+            ),
+            make_item(lambda: None, name="K", backend=ExecutionBackend.MAIN),
+            make_item(lambda: None, name="L"),
+        ]
+
+        runner._factory = DefaultTestFactory(
+            config=runner.config,
+            run_id=uuid4(),
+            queue=TestQueue(),
+        )
+        for item in items:
+            runner._factory.build(item)
+        stages = runner._factory.queue.steps
+
+        assert [
+            [test.definition.spec.name for test in stage.tests] for stage in stages
+        ] == [
+            ["A"],
+            ["B", "C", "D"],
+            ["E"],
+            ["F"],
+            ["G"],
+            ["H", "I", "J"],
+            ["K"],
+            ["L"],
+        ]
+
     @pytest.mark.asyncio
     async def test_concurrent_callbacks_stream_before_run_complete(self):
         items = []
@@ -983,6 +1061,71 @@ class TestConcurrency:
                 ("complete", item.spec.name)
             )
             assert start_idx < complete_idx
+
+    @pytest.mark.asyncio
+    async def test_parallel_start_order_matches_dequeue_order(self):
+        async def test_fn(delay: float) -> None:
+            await asyncio.sleep(delay)
+
+        items = [
+            make_item(
+                lambda d=delay: test_fn(d),  # type: ignore[arg-type]
+                name=f"test_{idx}",
+                is_async=True,
+            )
+            for idx, delay in enumerate((0.05, 0.01, 0.03))
+        ]
+
+        reporter = EventReporter()
+        runner = Runner(
+            config=make_runner_config(concurrency=3, db_enabled=False),
+            reporters=[reporter],
+        )
+        await runner.run(items=items)
+
+        assert [
+            name for kind, name in reporter.event_order if kind == "start"
+        ] == [item.spec.name for item in items]
+
+    @pytest.mark.asyncio
+    async def test_main_stage_waits_for_parallel_stage_completion(self):
+        async def async_test(delay: float) -> None:
+            await asyncio.sleep(delay)
+
+        def main_test() -> None:
+            pass
+
+        items = [
+            make_item(
+                lambda: async_test(0.05),  # type: ignore[arg-type]
+                name="async_one",
+                is_async=True,
+            ),
+            make_item(
+                lambda: async_test(0.1),  # type: ignore[arg-type]
+                name="async_two",
+                is_async=True,
+            ),
+            make_item(
+                main_test,
+                name="main_barrier",
+                backend=ExecutionBackend.MAIN,
+            ),
+        ]
+
+        reporter = EventReporter()
+        runner = Runner(
+            config=make_runner_config(concurrency=2, db_enabled=False),
+            reporters=[reporter],
+        )
+        await runner.run(items=items)
+
+        main_start_idx = reporter.event_order.index(("start", "main_barrier"))
+        async_completes = [
+            reporter.event_order.index(("complete", name))
+            for name in ("async_one", "async_two")
+        ]
+        assert all(index < main_start_idx for index in async_completes)
 
     @pytest.mark.asyncio
     async def test_concurrent_raises_when_on_test_start_fails(self):

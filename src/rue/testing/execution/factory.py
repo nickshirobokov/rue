@@ -12,6 +12,7 @@ from rue.config import Config
 from rue.testing.execution.interfaces import ExecutableTest
 from rue.testing.execution.local.composite import LocalCompositeTest
 from rue.testing.execution.local.single import LocalSingleTest
+from rue.testing.queue import TestQueue
 from rue.testing.execution.remote.single import RemoteSingleTest
 from rue.testing.execution.types import ExecutionBackend
 from rue.testing.models import (
@@ -34,16 +35,20 @@ class DefaultTestFactory:
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
+    queue: TestQueue | None = None
     _next_sync_actor_id: int = field(default=1, init=False, repr=False)
 
     def build(
         self,
         definition: LoadedTestDef,
         params: dict[str, Any] | None = None,
-        backend: ExecutionBackend = ExecutionBackend.LOCAL,
+        backend: ExecutionBackend | None = None,
+        *,
+        enqueue: bool = True,
     ) -> ExecutableTest:
         """Recursively build the full test tree from definition."""
         params = params or {}
+        backend = backend or ExecutionBackend.ASYNCIO
         modifiers = definition.spec.modifiers
 
         if not modifiers:
@@ -51,19 +56,22 @@ class DefaultTestFactory:
                 case ExecutionBackend.SUBPROCESS:
                     sync_actor_id = self._next_sync_actor_id
                     self._next_sync_actor_id += 1
-                    return RemoteSingleTest(
+                    test = RemoteSingleTest(
                         definition=definition,
                         params=params,
                         config=self.config,
                         run_id=self.run_id,
                         sync_actor_id=sync_actor_id,
+                        backend=backend,
+                        semaphore=self.semaphore,
                         is_stopped=self.is_stopped,
                         on_complete=self.on_complete,
                     )
-                case ExecutionBackend.LOCAL:
-                    return LocalSingleTest(
+                case ExecutionBackend.MAIN | ExecutionBackend.ASYNCIO:
+                    test = LocalSingleTest(
                         definition=definition,
                         params=params,
+                        backend=backend,
                         tracer=build_test_tracer(
                             config=self.config,
                             run_id=self.run_id,
@@ -74,6 +82,9 @@ class DefaultTestFactory:
                     )
                 case _:
                     raise NotImplementedError(f"Unknown backend: {backend}")
+            if enqueue and self.queue is not None:
+                self.queue.add(test)
+            return test
 
         mod, *rest = modifiers
         rest_tuple = tuple(rest)
@@ -87,6 +98,7 @@ class DefaultTestFactory:
                     ),
                     params,
                     backend=sub_backend,
+                    enqueue=enqueue,
                 )
             case IterateModifier(count=count, min_passes=min_passes):
                 children = [
@@ -101,15 +113,20 @@ class DefaultTestFactory:
                         ),
                         params,
                         backend=backend,
+                        enqueue=False,
                     )
                     for i in range(count)
                 ]
-                return LocalCompositeTest(
+                test = LocalCompositeTest(
                     definition=definition,
+                    backend=backend,
                     min_passes=min_passes,
                     children=children,
                     on_complete=self.on_complete,
                 )
+                if enqueue and self.queue is not None:
+                    self.queue.add(test)
+                return test
             case CasesIterateModifier(cases=cases, min_passes=min_passes):
                 children = [
                     self.build(
@@ -124,15 +141,20 @@ class DefaultTestFactory:
                         ),
                         {**params, "case": c},
                         backend=backend,
+                        enqueue=False,
                     )
                     for c in cases
                 ]
-                return LocalCompositeTest(
+                test = LocalCompositeTest(
                     definition=definition,
+                    backend=backend,
                     min_passes=min_passes,
                     children=children,
                     on_complete=self.on_complete,
                 )
+                if enqueue and self.queue is not None:
+                    self.queue.add(test)
+                return test
             case GroupsIterateModifier(groups=groups, min_passes=min_passes):
                 children = [
                     self.build(
@@ -152,15 +174,20 @@ class DefaultTestFactory:
                         ),
                         {**params, "group": g},
                         backend=backend,
+                        enqueue=False,
                     )
                     for g in groups
                 ]
-                return LocalCompositeTest(
+                test = LocalCompositeTest(
                     definition=definition,
+                    backend=backend,
                     min_passes=min_passes,
                     children=children,
                     on_complete=self.on_complete,
                 )
+                if enqueue and self.queue is not None:
+                    self.queue.add(test)
+                return test
             case ParamsIterateModifier(
                 parameter_sets=parameter_sets, min_passes=min_passes
             ):
@@ -176,14 +203,19 @@ class DefaultTestFactory:
                         ),
                         {**params, **ps.values},
                         backend=backend,
+                        enqueue=False,
                     )
                     for ps in parameter_sets
                 ]
-                return LocalCompositeTest(
+                test = LocalCompositeTest(
                     definition=definition,
+                    backend=backend,
                     min_passes=min_passes,
                     children=children,
                     on_complete=self.on_complete,
                 )
+                if enqueue and self.queue is not None:
+                    self.queue.add(test)
+                return test
             case _:
                 raise NotImplementedError(f"Unknown modifier: {mod}")
