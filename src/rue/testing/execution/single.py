@@ -5,15 +5,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid4
 
-from rue.assertions.base import AssertionResult
 from rue.config import Config
-from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.process_pool import get_process_pool
 from rue.context.runtime import (
     CURRENT_TEST,
@@ -24,7 +21,11 @@ from rue.context.runtime import (
 from rue.resources import ResourceResolver
 from rue.resources.models import Scope
 from rue.testing.execution.interfaces import ExecutableTest
-from rue.testing.execution.remote.models import ExecutorPayload
+from rue.testing.execution.remote_worker import (
+    ExecutorPayload,
+    RemoteExecutionResult,
+    run_remote_test,
+)
 from rue.testing.execution.types import ExecutionBackend
 from rue.testing.models import (
     ExecutedTest,
@@ -32,8 +33,7 @@ from rue.testing.models import (
     TestResult,
     TestStatus,
 )
-from rue.testing.outcomes import FailTest, SkipTest, XFailTest
-from rue.testing.tracing import TestTracer, build_test_tracer
+from rue.testing.tracing import TestTracer
 
 
 @dataclass
@@ -54,7 +54,7 @@ class SingleTest(ExecutableTest):
     def __post_init__(self) -> None:
         if self.definition.spec.modifiers:
             raise ValueError("SingleTest should not have modifiers")
-        self.tracer = build_test_tracer(
+        self.tracer = TestTracer.build(
             config=self.config,
             run_id=self.run_id,
         )
@@ -100,52 +100,21 @@ class SingleTest(ExecutableTest):
         execution_id: UUID,
     ) -> ExecutedTest:
         semaphore = self.semaphore if self.semaphore else contextlib.nullcontext()
-        assertion_results: list[AssertionResult] = []
-        error: BaseException | None = None
-        imperative_outcome: TestStatus | None = None
-        telemetry_artifacts = ()
         ctx = TestContext(item=self.definition, execution_id=execution_id)
 
         with bind(CURRENT_TEST_TRACER, self.tracer):
             self.tracer.start(self.definition, execution_id=execution_id)
-            with (
-                bind(CURRENT_TEST, ctx),
-                bind(CURRENT_ASSERTION_RESULTS, assertion_results),
-            ):
-                try:
-                    async with semaphore:
-                        start = time.perf_counter()
-                        unresolved_params = tuple(
-                            param
-                            for param in self.definition.spec.params
-                            if param not in self.params
-                        )
-                        kwargs = await resolver.partially_resolve(
-                            unresolved_params,
-                            self.params,
-                        )
-                        if self.is_stopped():
-                            imperative_outcome = TestStatus.SKIPPED
-                            error = Exception("Run stopped early")
-                        else:
-                            await self.definition.call_test_fn(
-                                kwargs=kwargs,
-                                run_sync_in_thread=self.backend
-                                is not ExecutionBackend.MAIN,
-                            )
-                except SkipTest as raised:
-                    imperative_outcome = TestStatus.SKIPPED
-                    error = raised
-                except FailTest as raised:
-                    imperative_outcome = TestStatus.FAILED
-                    error = raised
-                except XFailTest as raised:
-                    imperative_outcome = TestStatus.XFAILED
-                    error = raised
-                except Exception as raised:  # noqa: BLE001
-                    error = raised
-
-            duration_ms = (time.perf_counter() - start) * 1000
+            async with semaphore:
+                duration_ms, imperative_outcome, error, assertion_results = (
+                    await self.definition.run_loaded_test(
+                        resolver=resolver,
+                        params=self.params,
+                        execution_id=execution_id,
+                        run_sync_in_thread=self.backend
+                        is not ExecutionBackend.MAIN,
+                        is_stopped=self.is_stopped,
+                    )
+                )
             resolver.flush_live_changes(
                 [
                     identity
@@ -186,6 +155,7 @@ class SingleTest(ExecutableTest):
         execution_id: UUID,
     ) -> ExecutedTest:
         ctx = TestContext(item=self.definition, execution_id=execution_id)
+        remote_result: RemoteExecutionResult
 
         try:
             semaphore = self.semaphore if self.semaphore else contextlib.nullcontext()
@@ -196,7 +166,7 @@ class SingleTest(ExecutableTest):
                         for param in self.definition.spec.params
                         if param not in self.params
                     )
-                    kwargs = await resolver.partially_resolve(
+                    await resolver.partially_resolve(
                         unresolved_params,
                         self.params,
                         apply_injection_hook=False,
@@ -218,7 +188,10 @@ class SingleTest(ExecutableTest):
                         execution_id=execution_id,
                     )
 
-                    future = get_process_pool().submit(run_remote_test, payload)
+                    future = get_process_pool().submit(
+                        run_remote_test,
+                        payload,
+                    )
                     remote_result = await asyncio.wrap_future(future)
                     resolver.apply_sync_update(
                         snapshot,
@@ -234,6 +207,3 @@ class SingleTest(ExecutableTest):
             execution_id=execution_id,
             telemetry_artifacts=remote_result.telemetry_artifacts,
         )
-
-
-from rue.testing.execution.remote.worker import run_remote_test

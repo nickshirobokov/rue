@@ -21,11 +21,12 @@ from rue.resources import ResourceResolver, registry, resource
 from rue.resources.models import Scope
 from rue.telemetry import OtelTraceArtifact
 from rue.testing.execution.factory import DefaultTestFactory
-from rue.context.process_pool import CURRENT_PROCESS_POOL
-from rue.testing.execution.remote.models import (
+from rue.testing.execution.remote_worker import (
     ExecutorPayload,
     RemoteExecutionResult,
+    run_remote_test,
 )
+from rue.context.process_pool import CURRENT_PROCESS_POOL
 from rue.testing.execution.single import SingleTest
 from rue.testing.execution.types import ExecutionBackend
 from rue.testing.models import (
@@ -277,8 +278,6 @@ class TestSingleTestSubprocess:
 
         assert len(pool.submitted) == 1
         submitted_fn, args, _ = pool.submitted[0]
-        from rue.testing.execution.remote.worker import run_remote_test
-
         assert submitted_fn is run_remote_test
         (payload,) = args
         assert isinstance(payload, ExecutorPayload)

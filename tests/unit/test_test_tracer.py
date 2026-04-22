@@ -8,7 +8,7 @@ from rue.config import Config
 from rue.telemetry import OtelTraceArtifact
 from rue.telemetry.otel.backend import OtelTelemetryBackend
 from rue.testing.models import LoadedTestDef, TestResult, TestStatus
-from rue.testing.tracing import build_test_tracer
+from rue.testing.tracing import TestTracer
 from tests.unit.factories import make_definition as _make_definition
 
 
@@ -102,7 +102,7 @@ def test_test_tracer_records_root_span_metadata(
         lambda *_args, **_kwargs: session,
     )
 
-    tracer = build_test_tracer(
+    tracer = TestTracer.build(
         config=Config.model_construct(otel=True),
         run_id=UUID(int=1),
     )
@@ -144,7 +144,7 @@ def test_test_tracer_records_result_and_emits_otel_artifact(monkeypatch):
         lambda current_session: current_session,
     )
 
-    tracer = build_test_tracer(
+    tracer = TestTracer.build(
         config=Config.model_construct(otel=True),
         run_id=UUID(int=1),
     )
@@ -173,7 +173,7 @@ def test_test_tracer_records_result_and_emits_otel_artifact(monkeypatch):
 
 
 def test_test_tracer_supports_backend_lookup_and_empty_finish():
-    tracer = build_test_tracer(
+    tracer = TestTracer.build(
         config=Config.model_construct(otel=True),
         run_id=UUID(int=1),
     )
@@ -185,8 +185,8 @@ def test_test_tracer_supports_backend_lookup_and_empty_finish():
     assert tracer.finish() == ()
 
 
-def test_build_test_tracer_adds_otel_backend_when_enabled():
-    tracer = build_test_tracer(
+def test_test_tracer_build_adds_otel_backend_when_enabled():
+    tracer = TestTracer.build(
         config=Config.model_construct(otel=True),
         run_id=UUID(int=1),
     )
@@ -194,8 +194,8 @@ def test_build_test_tracer_adds_otel_backend_when_enabled():
     assert len(tracer.backends) == 1
 
 
-def test_build_test_tracer_skips_otel_when_disabled():
-    tracer = build_test_tracer(
+def test_test_tracer_build_skips_otel_when_disabled():
+    tracer = TestTracer.build(
         config=Config.model_construct(otel=False),
         run_id=UUID(int=1),
     )

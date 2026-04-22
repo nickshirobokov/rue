@@ -24,6 +24,19 @@ class TestTracer:
     run_id: UUID
     backends: tuple[TelemetryBackend, ...] = ()
 
+    @classmethod
+    def build(
+        cls,
+        *,
+        config: Config,
+        run_id: UUID,
+    ) -> TestTracer:
+        """Build a tracer by resolving telemetry backends from config flags."""
+        backends: list[TelemetryBackend] = []
+        if config.otel:
+            backends.append(OtelTelemetryBackend())
+        return cls(run_id=run_id, backends=tuple(backends))
+
     def start(self, definition: LoadedTestDef, execution_id: UUID) -> None:
         for backend in self.backends:
             backend.start(
@@ -47,13 +60,3 @@ class TestTracer:
             if isinstance(backend, backend_type):
                 return backend
         return None
-
-
-def build_test_tracer(
-    *, config: Config, run_id: UUID
-) -> TestTracer:
-    """Build a tracer by resolving telemetry backends from config flags."""
-    backends: list[TelemetryBackend] = []
-    if config.otel:
-        backends.append(OtelTelemetryBackend())
-    return TestTracer(run_id=run_id, backends=tuple(backends))
