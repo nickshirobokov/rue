@@ -17,14 +17,6 @@ class TagData:
     xfail_strict: bool = False
 
 
-def _ensure_tag_data(target: Any) -> TagData:
-    data: TagData | None = getattr(target, "__rue_tag_data__", None)
-    if data is None:
-        data = TagData()
-        target.__rue_tag_data__ = data
-    return data
-
-
 def get_tag_data(target: Any) -> TagData:
     """Return a copy of tag metadata for the target."""
     data: TagData | None = getattr(target, "__rue_tag_data__", None)
@@ -58,7 +50,8 @@ class TagDecorator:
 
     def __call__(self, *names: str) -> Callable[[Any], Any]:
         def decorator(target: Any) -> Any:
-            data = _ensure_tag_data(target)
+            data = getattr(target, "__rue_tag_data__", None)
+            target.__rue_tag_data__ = data = TagData() if data is None else data
             for name in names:
                 if not name:
                     continue
@@ -70,7 +63,8 @@ class TagDecorator:
 
     def skip(self, *, reason: str | None = None) -> Callable[[Any], Any]:
         def decorator(target: Any) -> Any:
-            data = _ensure_tag_data(target)
+            data = getattr(target, "__rue_tag_data__", None)
+            target.__rue_tag_data__ = data = TagData() if data is None else data
             data.skip_reason = reason or "skipped via tag"
             data.tags.add("skip")
             target.__rue_test__ = True
@@ -85,7 +79,8 @@ class TagDecorator:
         strict: bool = False,
     ) -> Callable[[Any], Any]:
         def decorator(target: Any) -> Any:
-            data = _ensure_tag_data(target)
+            data = getattr(target, "__rue_tag_data__", None)
+            target.__rue_tag_data__ = data = TagData() if data is None else data
             data.xfail_reason = reason or "expected failure"
             data.xfail_strict = strict
             data.tags.add("xfail")

@@ -494,7 +494,6 @@ class SQLiteStore(Store):
             hostname=env_data.get("hostname", ""),
             working_directory=env_data.get("working_directory", ""),
             rue_version=env_data.get("rue_version", ""),
-            env_vars=env_data.get("env_vars", {}),
         )
 
         exec_rows = conn.execute(

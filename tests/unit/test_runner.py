@@ -22,7 +22,7 @@ from rue.resources.sut import sut
 from rue.storage import Store
 from rue.telemetry import OtelTraceArtifact
 from rue.telemetry.otel.runtime import otel_runtime
-from rue.testing.environment import _filter_env_vars
+from rue.testing.environment import capture_environment
 from rue.testing.execution.factory import DefaultTestFactory
 from rue.testing.execution.base import ExecutionBackend
 from rue.testing.execution.queue import SessionQueue
@@ -234,30 +234,15 @@ class TestRunResult:
 class TestEnvironmentCapture:
     """Tests for environment capture functionality."""
 
-    def test_filter_env_vars_masks_keys(self):
-        """Test that sensitive keys are masked."""
+    def test_capture_environment_does_not_record_process_environment(self):
         with patch.dict(
             os.environ,
-            {
-                "OPENAI_API_KEY": "sk-1234567890abcdef",
-                "ANTHROPIC_API_KEY": "sk-ant-1234567890abcdef",
-                "MODEL_VENDOR": "openai",
-                "RANDOM_VAR": "should_not_be_captured",
-            },
-            clear=True,
+            {"OPENAI_API_KEY": "sk-1234567890abcdef", "MODEL_VENDOR": "openai"},
         ):
-            captured = _filter_env_vars()
-
-            assert captured["MODEL_VENDOR"] == "openai"
-            assert "RANDOM_VAR" not in captured
-            assert captured["OPENAI_API_KEY"] == "***cdef"
-            assert captured["ANTHROPIC_API_KEY"] == "***cdef"
-
-    def test_filter_env_vars_short_keys(self):
-        """Test masking of short keys."""
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "123"}, clear=True):
-            captured = _filter_env_vars()
-            assert captured["OPENAI_API_KEY"] == "***"
+            env = capture_environment()
+        blob = json.dumps(env.to_dict())
+        assert "env_vars" not in env.to_dict()
+        assert "1234567890abcdef" not in blob
 
 
 class TestRunner:

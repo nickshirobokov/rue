@@ -91,7 +91,6 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         hostname="host",
         working_directory="/tmp/project",
         rue_version="1.0.0",
-        env_vars={"ENV": "1"},
     )
 
     run = Run(

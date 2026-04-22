@@ -53,9 +53,6 @@ class RunEnvironment:
     working_directory: str = field(default_factory=_get_cwd)
     rue_version: str = field(default_factory=_get_rue_version)
 
-    # Environment variables (filtered)
-    env_vars: dict[str, str] = field(default_factory=dict)
-
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
         return {
@@ -67,7 +64,6 @@ class RunEnvironment:
             "hostname": self.hostname,
             "working_directory": self.working_directory,
             "rue_version": self.rue_version,
-            "env_vars": self.env_vars,
         }
 
 
