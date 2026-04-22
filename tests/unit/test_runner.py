@@ -24,7 +24,7 @@ from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.environment import _filter_env_vars
 from rue.testing.execution.factory import DefaultTestFactory
 from rue.testing.execution.types import ExecutionBackend
-from rue.testing.queue import TestQueue
+from rue.testing.queue import SessionQueue
 from rue.testing.models import (
     ParameterSet,
     ParamsIterateModifier,
@@ -985,14 +985,14 @@ class TestConcurrency:
         runner._factory = DefaultTestFactory(
             config=runner.config,
             run_id=uuid4(),
-            queue=TestQueue(),
+            queue=SessionQueue(),
         )
         for item in items:
             runner._factory.build(item)
-        stages = runner._factory.queue.steps
+        batches = runner._factory.queue.batches
 
         assert [
-            [test.definition.spec.name for test in stage.tests] for stage in stages
+            [test.definition.spec.name for test in batch.tests] for batch in batches
         ] == [
             ["A"],
             ["B", "C", "D"],
@@ -1048,35 +1048,35 @@ class TestConcurrency:
         runner._factory = DefaultTestFactory(
             config=runner.config,
             run_id=uuid4(),
-            queue=TestQueue(),
+            queue=SessionQueue(),
         )
         for item in items:
             runner._factory.build(item)
 
-        segments = runner._factory.queue.segments
-        assert len(segments) == 3
+        steps = runner._factory.queue.steps
+        assert len(steps) == 3
 
-        first = segments[0]
+        first = steps[0]
         assert not first.is_main
         assert [
-            [test.definition.spec.name for test in step.tests]
-            for step in first.module_queues[0].steps
+            [test.definition.spec.name for test in batch.tests]
+            for batch in first.module_queues[0].batches
         ] == [["a1_async"], ["a1_barrier"]]
         assert [
-            [test.definition.spec.name for test in step.tests]
-            for step in first.module_queues[1].steps
+            [test.definition.spec.name for test in batch.tests]
+            for batch in first.module_queues[1].batches
         ] == [["a2_async", "a2_subprocess"]]
 
-        assert segments[1].main_step is not None
+        assert steps[1].main_batch is not None
         assert [
-            test.definition.spec.name for test in segments[1].main_step.tests
+            test.definition.spec.name for test in steps[1].main_batch.tests
         ] == ["global_main"]
 
-        third = segments[2]
+        third = steps[2]
         assert not third.is_main
         assert [
-            [test.definition.spec.name for test in step.tests]
-            for step in third.module_queues[0].steps
+            [test.definition.spec.name for test in batch.tests]
+            for batch in third.module_queues[0].batches
         ] == [["a1_after"]]
 
     @pytest.mark.asyncio

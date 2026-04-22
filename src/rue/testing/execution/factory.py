@@ -12,7 +12,7 @@ from rue.config import Config
 from rue.testing.execution.interfaces import ExecutableTest
 from rue.testing.execution.local.composite import LocalCompositeTest
 from rue.testing.execution.local.single import LocalSingleTest
-from rue.testing.queue import TestQueue
+from rue.testing.queue import SessionQueue
 from rue.testing.execution.remote.single import RemoteSingleTest
 from rue.testing.execution.types import ExecutionBackend
 from rue.testing.models import (
@@ -35,7 +35,7 @@ class DefaultTestFactory:
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
-    queue: TestQueue | None = None
+    queue: SessionQueue | None = None
     _next_sync_actor_id: int = field(default=1, init=False, repr=False)
 
     def build(

@@ -12,7 +12,7 @@ from .models import (
     TestStatus,
 )
 from .outcomes import fail, skip, xfail
-from .queue import RunnerStep, TestQueue
+from .queue import QueueBatch, RunnerStep, SessionQueue
 from .runner import Runner
 
 
@@ -28,8 +28,9 @@ __all__ = [
     "ExecutionBackend",
     "fail",
     "resource",
+    "QueueBatch",
     "RunnerStep",
-    "TestQueue",
+    "SessionQueue",
     "skip",
     "iterate",
     "tag",
