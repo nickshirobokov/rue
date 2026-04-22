@@ -188,7 +188,5 @@ async def _invoke(definition: LoadedTestDef, kwargs: dict[str, Any]) -> None:
 
     if definition.spec.is_async:
         await call()
-    elif definition.spec.inline:
-        call()
     else:
-        await asyncio.to_thread(call)
+        call()

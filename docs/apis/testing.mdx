@@ -261,37 +261,54 @@ def test_mostly_reliable(llm):
 
 ---
 
-### @test.tag.inline
+### @test.backend
 
-Run a synchronous test inline on the event-loop thread.
-
-By default, synchronous tests are offloaded to a worker thread via `asyncio.to_thread(...)`. Use `@test.tag.inline` to opt out when thread affinity matters.
+Select how a test executes and how it participates in Rue's queue.
 
 **Signature:**
 ```python
-@test.tag.inline
+@test.backend(spec: str | ExecutionBackend)
 ```
 
-**Returns:** Decorated sync function marked to run inline on the event-loop thread
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `spec` | `str \| ExecutionBackend` | One of `"main"`, `"asyncio"`, or `"subprocess"` |
+
+**Returns:** Decorator that applies the selected execution backend
 
 **Notes:**
-- Applies only to synchronous `def test_*` functions.
-- `async def test_*` functions already run on the event-loop thread.
+- Tests default to `ExecutionBackend.ASYNCIO` when no backend is specified.
+- `ExecutionBackend.MAIN` runs on the main event-loop thread and blocks all other tests until it finishes.
+- `ExecutionBackend.MODULE_MAIN` blocks only the current module queue and otherwise behaves like in-process execution.
+- `ExecutionBackend.ASYNCIO` runs in-process; sync tests use a worker thread, async tests are awaited on the event loop.
+- `ExecutionBackend.SUBPROCESS` runs the test in a worker process.
 
 **Example:**
 ```python
 import threading
 import rue
+from rue import ExecutionBackend
 
 @rue.test
 def test_default_threaded():
-    # Default sync behavior: worker thread.
+    # Default sync behavior: ASYNCIO backend in a worker thread.
     assert threading.current_thread() is not threading.main_thread()
 
-@rue.test.tag.inline
+@rue.test.backend(ExecutionBackend.MAIN)
 def test_main_thread_only():
-    # Opt-out: runs inline on main event-loop thread.
+    # Runs on the main event-loop thread and blocks the queue.
     assert threading.current_thread() is threading.main_thread()
+
+@rue.test.backend(ExecutionBackend.MODULE_MAIN)
+def test_module_barrier():
+    # Blocks only this module's queue and still runs in a worker thread.
+    assert threading.current_thread() is not threading.main_thread()
+
+@rue.test.backend(ExecutionBackend.SUBPROCESS)
+def test_isolated_worker():
+    assert True
 ```
 
 ---

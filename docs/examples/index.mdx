@@ -18,10 +18,11 @@ uv run rue test examples/test_example_otel_spans.py
 | `test_example_cases.py` | `Case` iteration basics |
 | `test_example_concurrency.py` | Concurrent execution and shared resources |
 | `test_example_metrics.py` | Metrics, scopes, and aggregated assertions |
-| `test_example_mixed_backends.py` | Mixed local/subprocess iteration with shared metrics and SUT state |
+| `test_example_mixed_backends.py` | Mixed `ASYNCIO`/`SUBPROCESS` iteration with shared metrics and SUT state |
 | `test_example_outcomes.py` | `rue.skip()`, `rue.fail()`, and `rue.xfail()` |
 | `test_example_parametrize_and_tags.py` | Parameter iteration, tags, skip, xfail, and iterate |
 | `test_example_predicates.py` | Predicate assertions |
-| `test_example_run_inline.py` | `@rue.test.tag.inline` and sync threading behavior |
+| `test_example_run_inline.py` | `ExecutionBackend.MAIN` / `MODULE_MAIN` sync threading and barrier behavior |
+| `test_example_subprocess.py` | `SUBPROCESS` work followed by a `MAIN` barrier |
 | `test_example_otel_trace.py` | Inspecting SUT-owned OpenTelemetry data |
 | `test_example_otel_spans.py` | SUT OpenTelemetry spans and reporter output |

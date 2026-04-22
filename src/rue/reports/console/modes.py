@@ -97,7 +97,7 @@ class CompactMode(OutputMode):
             line = Text(f" • {rel.as_posix()} ")
             has_running = False
             for item in items:
-                execution = state.executions.get(id(item))
+                execution = state.executions.get(item.spec.collection_index)
                 if execution is None:
                     has_running = True
                     line.append("⋯", style="dim")
@@ -131,7 +131,7 @@ class CompactMode(OutputMode):
         rel = safe_relative_path(path)
         line = Text(f" • {rel.as_posix()} ")
         for item in items:
-            execution = state.executions.get(id(item))
+            execution = state.executions.get(item.spec.collection_index)
             if execution is not None:
                 style = STATUS_STYLES[execution.result.status]
                 line.append(style.symbol, style=style.color)
@@ -202,8 +202,9 @@ class VerboseMode(OutputMode):
             rel = safe_relative_path(path)
             tree = Tree(f"• {rel.as_posix()}")
             for item in items:
-                test = state.tests.get(id(item))
-                execution = state.executions.get(id(item))
+                key = item.spec.collection_index
+                test = state.tests.get(key)
+                execution = state.executions.get(key)
                 branch = tree.add(self._build_live_item_line(item, execution))
                 if execution is not None and execution.sub_executions:
                     self._add_live_sub_executions(
@@ -224,10 +225,12 @@ class VerboseMode(OutputMode):
         """Sub-executions that completed before the parent finished."""
         return [
             ex
-            for item_id, ex in state.executions.items()
-            if item_id not in state.item_ids
-            and ex.definition.spec.name == item.spec.name
-            and ex.definition.spec.module_path == item.spec.module_path
+            for ex in state.all_executions.values()
+            if (
+                ex.definition.spec.collection_index
+                == item.spec.collection_index
+                and not state.is_top_level_definition(ex.definition)
+            )
         ]
 
     def print_completed_module(
@@ -239,7 +242,7 @@ class VerboseMode(OutputMode):
         rel = safe_relative_path(path)
         tree = Tree(f"• {rel.as_posix()}")
         for item in items:
-            execution = state.executions.get(id(item))
+            execution = state.executions.get(item.spec.collection_index)
             branch = tree.add(self._build_live_item_line(item, execution))
             if execution is not None and execution.sub_executions:
                 self._add_live_sub_executions(
@@ -305,7 +308,7 @@ class VerboseMode(OutputMode):
         self, parent: Tree, test: LocalCompositeTest, state: ConsoleReporter
     ) -> None:
         for child in test.children:
-            child_exec = state.executions.get(id(child.definition))
+            child_exec = state.all_executions.get(id(child.definition))
             if child_exec is not None:
                 style = STATUS_STYLES[child_exec.result.status]
                 sub_label = f"[{child_exec.label}]"

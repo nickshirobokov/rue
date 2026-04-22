@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import time
 import warnings
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from rue.config import Config, load_config
 from rue.context.collectors import CURRENT_METRIC_RESULTS
@@ -24,17 +23,12 @@ from rue.storage import SQLiteStore
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.environment import capture_environment
 from rue.testing.execution import DefaultTestFactory
-from rue.testing.execution.interfaces import ExecutableTest
+from rue.testing.queue import RunnerStep, SessionQueue
 from rue.context.process_pool import process_pool_scope
 from rue.testing.models import (
     Run,
     ExecutedTest,
     LoadedTestDef,
-    TestResult,
-    TestStatus,
-)
-UUID_STRING_PATTERN = re.compile(
-    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
 
 
@@ -80,6 +74,9 @@ class Runner:
 
         self.semaphore: asyncio.Semaphore | None = None
         self.stop_flag: bool = False
+        self._failure_count: int = 0
+        self._queue = SessionQueue()
+        self._completed_executions: dict[int, ExecutedTest] = {}
 
         self.current_run: Run | None = None
         self._store: SQLiteStore | None = None
@@ -148,14 +145,20 @@ class Runner:
 
     @staticmethod
     def _normalize_run_id(run_id: UUID | str | None) -> UUID | None:
-        if run_id is None:
-            return None
-        if isinstance(run_id, UUID):
-            return run_id
-        if isinstance(run_id, str) and UUID_STRING_PATTERN.fullmatch(run_id):
-            return UUID(run_id)
-        msg = f"Invalid run_id '{run_id}'. Expected UUID string."
-        raise ValueError(msg)
+        match run_id:
+            case None:
+                return None
+            case UUID() as uid:
+                return uid
+            case str() as s:
+                try:
+                    return UUID(s)
+                except ValueError as e:
+                    msg = f"Invalid run_id '{s}'. Expected UUID string."
+                    raise ValueError(msg) from e
+            case _:
+                msg = f"Invalid run_id '{run_id}'. Expected UUID string."
+                raise ValueError(msg)
 
     def _resolve_run_id(self, run_id: UUID | str | None) -> UUID | None:
         normalized_run_id = self._normalize_run_id(run_id)
@@ -233,6 +236,7 @@ class Runner:
 
             self.semaphore = asyncio.Semaphore(self._concurrency_limit())
             self.stop_flag = False
+            self._failure_count = 0
 
             execution = self._execute_run(
                 items=items,
@@ -279,128 +283,113 @@ class Runner:
         run: Run,
     ) -> None:
         """Execute the test run with the given items and resolver."""
-        with process_pool_scope():
+        with process_pool_scope(self._concurrency_limit()):
+            self._queue = SessionQueue()
             self._factory = DefaultTestFactory(
                 config=self.config,
                 run_id=run.run_id,
                 semaphore=self.semaphore,
                 is_stopped=lambda: self.stop_flag,
                 on_complete=self._on_execution_complete,
+                queue=self._queue,
             )
-            self._built_tests: dict[int, ExecutableTest] = {}
             for item in items:
-                if not item.spec.definition_error:
-                    self._built_tests[id(item)] = self._factory.build(item)
-            await self._notify_tests_ready(list(self._built_tests.values()))
+                self._factory.build(item)
+            await self._notify_tests_ready(self._queue.tests)
+            self._completed_executions = {}
             try:
-                if self._concurrency_limit() == 1:
-                    await self._run_sequential(items, resolver, run)
-                else:
-                    await self._run_concurrent(items, resolver, run)
+                for step in self._queue.steps:
+                    if self.stop_flag:
+                        break
+                    await self._run_step(step, resolver, run)
+                    if run.result.stopped_early and self.config.maxfail:
+                        await self._notify_run_stopped_early(
+                            self.config.maxfail
+                        )
+                        break
             finally:
+                run.result.executions = [
+                    execution
+                    for test in self._queue.tests
+                    if (
+                        execution := self._completed_executions.get(
+                            test.definition.spec.collection_index
+                        )
+                    )
+                    is not None
+                ]
                 await resolver.teardown()
 
-    async def _execute_item(
-        self, item: LoadedTestDef, resolver: ResourceResolver
-    ) -> ExecutedTest:
-        """Execute a single test with error handling."""
-        if item.spec.definition_error:
-            execution = ExecutedTest(
-                definition=item,
-                result=TestResult(
-                    status=TestStatus.ERROR,
-                    duration_ms=0,
-                    error=ValueError(item.spec.definition_error),
-                ),
-                execution_id=uuid4(),
-            )
-            await self._on_execution_complete(execution)
-            return execution
-
-        test = self._built_tests[id(item)]
-        t_start = time.perf_counter()
-
-        try:
-            execution = await test.execute(resolver)
-        except Exception as e:
-            duration = (time.perf_counter() - t_start) * 1000
-            execution = ExecutedTest(
-                definition=item,
-                result=TestResult(
-                    status=TestStatus.ERROR, duration_ms=duration, error=e
-                ),
-                execution_id=uuid4(),
-            )
-            await self._on_execution_complete(execution)
-            return execution
-
-        return execution
-
-    async def _run_sequential(
-        self, items: list[LoadedTestDef], resolver: ResourceResolver, run: Run
+    async def _run_step(
+        self,
+        step: RunnerStep,
+        resolver: ResourceResolver,
+        run: Run,
     ) -> None:
-        """Run tests sequentially."""
-        failures = 0
-
-        for item in items:
-            if self.stop_flag:
-                break
-            await self._notify_test_start(item)
-            execution = await self._execute_item(item, resolver)
-            run.result.executions.append(execution)
-
-            if execution.result.status.is_failure:
-                failures += 1
-                if self.config.maxfail and failures >= self.config.maxfail:
-                    run.result.stopped_early = True
-                    self.stop_flag = True
-                    await self._notify_run_stopped_early(self.config.maxfail)
-                    break
-
-    async def _run_concurrent(
-        self, items: list[LoadedTestDef], resolver: ResourceResolver, run: Run
-    ) -> None:
-        """Run tests concurrently."""
-        state_lock = asyncio.Lock()
-        failures = 0
-        results: list[ExecutedTest | None] = [None] * len(items)
-
-        async def run_one(idx: int, item: LoadedTestDef) -> None:
-            nonlocal failures
-
-            async with state_lock:
+        """Run one queue step: sequential main batch or parallel module queues."""
+        if step.is_main:
+            batch = step.main_batch
+            if batch is None:
+                return
+            for test in batch.tests:
                 if self.stop_flag:
-                    return
+                    break
+                await self._notify_test_start(test.definition)
+                execution = await test.execute(resolver)
+                self._record_execution(run, execution)
+            return
 
-            await self._notify_test_start(item)
-            execution = await self._execute_item(item, resolver)
+        condition = asyncio.Condition()
 
-            async with state_lock:
-                results[idx] = execution
-                if execution.result.status.is_failure:
-                    failures += 1
-                    if self.config.maxfail and failures >= self.config.maxfail:
-                        self.stop_flag = True
-                        run.result.stopped_early = True
+        async def worker() -> None:
+            while True:
+                async with condition:
+                    while True:
+                        if self.stop_flag:
+                            return
+                        queued = step.dequeue_ready()
+                        if queued is not None:
+                            break
+                        if step.is_complete:
+                            return
+                        await condition.wait()
+                    mq, batch, test = queued
+                    await self._notify_test_start(test.definition)
 
-        task_results = await asyncio.gather(
-            *[run_one(i, item) for i, item in enumerate(items)],
-            return_exceptions=True,
-        )
+                execution = await test.execute(resolver)
+                self._record_execution(run, execution)
 
-        task_errors = [
-            result for result in task_results if isinstance(result, Exception)
-        ]
-        if task_errors:
-            if len(task_errors) == 1:
-                raise task_errors[0]
-            raise ExceptionGroup(
-                "Concurrent test callbacks failed", task_errors
+                async with condition:
+                    step.finish(mq, batch)
+                    condition.notify_all()
+
+        workers = [
+            asyncio.create_task(worker())
+            for _ in range(
+                min(self._concurrency_limit(), step.total_tests_count)
             )
+        ]
+        try:
+            for task in asyncio.as_completed(workers):
+                await task
+        except Exception:
+            for task in workers:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
+            raise
 
-        for execution in results:
-            if execution is not None:
-                run.result.executions.append(execution)
-
-        if run.result.stopped_early and self.config.maxfail:
-            await self._notify_run_stopped_early(self.config.maxfail)
+    def _record_execution(
+        self,
+        run: Run,
+        execution: ExecutedTest,
+    ) -> None:
+        self._completed_executions[
+            execution.definition.spec.collection_index
+        ] = execution
+        if not execution.result.status.is_failure:
+            return
+        self._failure_count += 1
+        if self.config.maxfail and self._failure_count >= self.config.maxfail:
+            self.stop_flag = True
+            run.result.stopped_early = True

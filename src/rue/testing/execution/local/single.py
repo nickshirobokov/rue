@@ -25,6 +25,7 @@ from rue.context.runtime import (
 from rue.resources import ResourceResolver
 from rue.resources.models import Scope
 from rue.testing.execution.interfaces import ExecutableTest
+from rue.testing.execution.types import ExecutionBackend
 from rue.testing.models import (
     ExecutedTest,
     LoadedTestDef,
@@ -45,6 +46,7 @@ class LocalSingleTest(ExecutableTest):
     definition: LoadedTestDef
     params: dict[str, Any]
     tracer: TestTracer
+    backend: ExecutionBackend = ExecutionBackend.ASYNCIO
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
@@ -53,11 +55,13 @@ class LocalSingleTest(ExecutableTest):
         """Validate that this test has no modifiers."""
         if self.definition.spec.modifiers:
             raise ValueError("LocalSingleTest should not have modifiers")
+        if self.backend is ExecutionBackend.SUBPROCESS:
+            raise ValueError("LocalSingleTest cannot use subprocess backend")
 
-    async def execute(self, resolver: ResourceResolver) -> ExecutedTest:
+    async def _execute(self, resolver: ResourceResolver) -> ExecutedTest:
         """Execute the test and return result."""
         if self.is_stopped():
-            execution = ExecutedTest(
+            return ExecutedTest(
                 definition=self.definition,
                 result=TestResult(
                     status=TestStatus.SKIPPED,
@@ -66,12 +70,9 @@ class LocalSingleTest(ExecutableTest):
                 ),
                 execution_id=uuid4(),
             )
-            if self.on_complete:
-                await self.on_complete(execution)
-            return execution
 
         if self.definition.spec.skip_reason:
-            execution = ExecutedTest(
+            return ExecutedTest(
                 definition=self.definition,
                 result=TestResult(
                     status=TestStatus.SKIPPED,
@@ -80,9 +81,6 @@ class LocalSingleTest(ExecutableTest):
                 ),
                 execution_id=uuid4(),
             )
-            if self.on_complete:
-                await self.on_complete(execution)
-            return execution
 
         exec_id = uuid4()
 
@@ -217,15 +215,12 @@ class LocalSingleTest(ExecutableTest):
             self.tracer.record_result(result)
             telemetry_artifacts = self.tracer.finish()
 
-        execution = ExecutedTest(
+        return ExecutedTest(
             definition=self.definition,
             result=result,
             execution_id=exec_id,
             telemetry_artifacts=telemetry_artifacts,
         )
-        if self.on_complete:
-            await self.on_complete(execution)
-        return execution
 
     async def _resolve_params(
         self, resolver: ResourceResolver
@@ -264,7 +259,7 @@ class LocalSingleTest(ExecutableTest):
 
         if self.definition.spec.is_async:
             await call()
-        elif self.definition.spec.inline:
+        elif self.backend is ExecutionBackend.MAIN:
             call()
         else:
             await asyncio.to_thread(call)

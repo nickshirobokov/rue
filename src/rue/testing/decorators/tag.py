@@ -15,7 +15,6 @@ class TagData:
     skip_reason: str | None = None
     xfail_reason: str | None = None
     xfail_strict: bool = False
-    inline: bool = False
 
 
 def _ensure_tag_data(target: Any) -> TagData:
@@ -36,7 +35,6 @@ def get_tag_data(target: Any) -> TagData:
         skip_reason=data.skip_reason,
         xfail_reason=data.xfail_reason,
         xfail_strict=data.xfail_strict,
-        inline=data.inline,
     )
 
 
@@ -52,8 +50,6 @@ def merge_tag_data(*datas: TagData | None) -> TagData:
         if data.xfail_reason is not None:
             merged.xfail_reason = data.xfail_reason
             merged.xfail_strict = data.xfail_strict
-        if data.inline:
-            merged.inline = True
     return merged
 
 
@@ -93,17 +89,6 @@ class TagDecorator:
             data.xfail_reason = reason or "expected failure"
             data.xfail_strict = strict
             data.tags.add("xfail")
-            target.__rue_test__ = True
-            return target
-
-        return decorator
-
-    @property
-    def inline(self) -> Callable[[Any], Any]:
-        def decorator(target: Any) -> Any:
-            data = _ensure_tag_data(target)
-            data.inline = True
-            data.tags.add("inline")
             target.__rue_test__ = True
             return target
 

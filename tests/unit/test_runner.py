@@ -22,6 +22,9 @@ from rue.resources.sut import sut
 from rue.telemetry import OtelTraceArtifact
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.environment import _filter_env_vars
+from rue.testing.execution.factory import DefaultTestFactory
+from rue.testing.execution.types import ExecutionBackend
+from rue.testing.queue import SessionQueue
 from rue.testing.models import (
     ParameterSet,
     ParamsIterateModifier,
@@ -53,11 +56,14 @@ def make_item(
     xfail_strict: bool = False,
     suffix: str | None = None,
     case_id: UUID | None = None,
+    backend: ExecutionBackend = ExecutionBackend.ASYNCIO,
+    module_path: str = "test_module.py",
 ) -> LoadedTestDef:
     """Helper to create LoadedTestDef for testing."""
     return make_definition(
         name or fn.__name__,
         fn=fn,
+        module_path=module_path,
         is_async=is_async,
         params=params or [],
         skip_reason=skip_reason,
@@ -65,6 +71,7 @@ def make_item(
         xfail_strict=xfail_strict,
         suffix=suffix,
         case_id=case_id,
+        backend=backend,
     )
 
 
@@ -291,6 +298,21 @@ class TestRunner:
         assert builtins.fail_fast_events == ["before"]
         assert len(execution.result.assertion_results) == 1
         assert "first failure" in str(execution.result.error)
+
+    @pytest.mark.asyncio
+    async def test_definition_error_is_materialized_by_executable(
+        self, null_reporter
+    ):
+        item = make_definition(
+            "test_bad_definition",
+            definition_error="broken decorator state",
+        )
+
+        result = await Runner(reporters=[null_reporter]).run(items=[item])
+
+        execution = result.result.executions[0]
+        assert execution.result.status == TestStatus.ERROR
+        assert str(execution.result.error) == "broken decorator state"
 
 
 class TestRunId:
@@ -876,6 +898,54 @@ class TestMaxfail:
         assert result.result.errors == 1
         assert result.result.stopped_early
 
+    @pytest.mark.asyncio
+    async def test_concurrent_maxfail_stops_without_waiting_for_order(
+        self, null_reporter
+    ):
+        started: list[str] = []
+
+        async def slow_pass() -> None:
+            started.append("slow_pass")
+            await asyncio.sleep(0.1)
+
+        async def fail_1() -> None:
+            started.append("fail_1")
+            await asyncio.sleep(0.01)
+            raise AssertionError
+
+        async def fail_2() -> None:
+            started.append("fail_2")
+            await asyncio.sleep(0.01)
+            raise AssertionError
+
+        async def late_test() -> None:
+            started.append("late_test")
+            await asyncio.sleep(0.01)
+
+        items = [
+            make_item(slow_pass, name="slow_pass", is_async=True),
+            make_item(fail_1, name="fail_1", is_async=True),
+            make_item(fail_2, name="fail_2", is_async=True),
+            make_item(late_test, name="late_test", is_async=True),
+        ]
+
+        runner = Runner(
+            config=make_runner_config(
+                concurrency=2,
+                maxfail=2,
+                db_enabled=False,
+            ),
+            reporters=[null_reporter],
+        )
+        result = await runner.run(items=items)
+
+        assert result.result.stopped_early
+        assert started == ["slow_pass", "fail_1", "fail_2"]
+        assert [
+            execution.definition.spec.name
+            for execution in result.result.executions
+        ] == ["slow_pass", "fail_1", "fail_2"]
+
 
 class TestConcurrency:
     """Tests for concurrent test execution."""
@@ -923,6 +993,139 @@ class TestConcurrency:
         assert result.result.passed == 3
         # All should start within a small window (concurrent)
         assert max(start_times) - min(start_times) < 0.05
+
+    def test_stage_planner_groups_main_barriers(self):
+        runner = Runner(
+            config=make_runner_config(concurrency=4, db_enabled=False),
+            reporters=[],
+        )
+        items = [
+            make_item(lambda: None, name="A", backend=ExecutionBackend.MAIN),
+            make_item(lambda: None, name="B"),
+            make_item(lambda: None, name="C"),
+            make_item(
+                lambda: None,
+                name="D",
+                backend=ExecutionBackend.SUBPROCESS,
+            ),
+            make_item(lambda: None, name="E", backend=ExecutionBackend.MAIN),
+            make_item(lambda: None, name="F"),
+            make_item(lambda: None, name="G", backend=ExecutionBackend.MAIN),
+            make_item(
+                lambda: None,
+                name="H",
+                backend=ExecutionBackend.SUBPROCESS,
+            ),
+            make_item(
+                lambda: None,
+                name="I",
+                backend=ExecutionBackend.SUBPROCESS,
+            ),
+            make_item(
+                lambda: None,
+                name="J",
+                backend=ExecutionBackend.SUBPROCESS,
+            ),
+            make_item(lambda: None, name="K", backend=ExecutionBackend.MAIN),
+            make_item(lambda: None, name="L"),
+        ]
+
+        runner._factory = DefaultTestFactory(
+            config=runner.config,
+            run_id=uuid4(),
+            queue=SessionQueue(),
+        )
+        for item in items:
+            runner._factory.build(item)
+        batches = runner._factory.queue.batches
+
+        assert [
+            [test.definition.spec.name for test in batch.tests] for batch in batches
+        ] == [
+            ["A"],
+            ["B", "C", "D"],
+            ["E"],
+            ["F"],
+            ["G"],
+            ["H", "I", "J"],
+            ["K"],
+            ["L"],
+        ]
+
+    def test_stage_planner_builds_module_scoped_steps(self):
+        runner = Runner(
+            config=make_runner_config(concurrency=4, db_enabled=False),
+            reporters=[],
+        )
+        items = [
+            make_item(
+                lambda: None,
+                name="a1_async",
+                module_path="a1.py",
+            ),
+            make_item(
+                lambda: None,
+                name="a1_barrier",
+                backend=ExecutionBackend.MODULE_MAIN,
+                module_path="a1.py",
+            ),
+            make_item(
+                lambda: None,
+                name="a2_async",
+                module_path="a2.py",
+            ),
+            make_item(
+                lambda: None,
+                name="a2_subprocess",
+                backend=ExecutionBackend.SUBPROCESS,
+                module_path="a2.py",
+            ),
+            make_item(
+                lambda: None,
+                name="global_main",
+                backend=ExecutionBackend.MAIN,
+                module_path="a1.py",
+            ),
+            make_item(
+                lambda: None,
+                name="a1_after",
+                module_path="a1.py",
+            ),
+        ]
+
+        runner._factory = DefaultTestFactory(
+            config=runner.config,
+            run_id=uuid4(),
+            queue=SessionQueue(),
+        )
+        for item in items:
+            runner._factory.build(item)
+
+        steps = runner._factory.queue.steps
+        assert len(steps) == 3
+
+        first = steps[0]
+        assert not first.is_main
+        assert [
+            [test.definition.spec.name for test in batch.tests]
+            for batch in first.module_queues[0].batches
+        ] == [["a1_async"], ["a1_barrier"]]
+        assert [
+            [test.definition.spec.name for test in batch.tests]
+            for batch in first.module_queues[1].batches
+        ] == [["a2_async", "a2_subprocess"]]
+
+        assert steps[1].main_batch is not None
+        assert [
+            test.definition.spec.name for test in steps[1].main_batch.tests
+        ] == ["global_main"]
+
+        third = steps[2]
+        assert not third.is_main
+        assert [
+            [test.definition.spec.name for test in batch.tests]
+            for batch in third.module_queues[0].batches
+        ] == [["a1_after"]]
 
     @pytest.mark.asyncio
     async def test_concurrent_callbacks_stream_before_run_complete(self):
@@ -983,6 +1186,178 @@ class TestConcurrency:
                 ("complete", item.spec.name)
             )
             assert start_idx < complete_idx
+
+    @pytest.mark.asyncio
+    async def test_parallel_start_order_matches_dequeue_order(self):
+        async def test_fn(delay: float) -> None:
+            await asyncio.sleep(delay)
+
+        items = [
+            make_item(
+                lambda d=delay: test_fn(d),  # type: ignore[arg-type]
+                name=f"test_{idx}",
+                is_async=True,
+            )
+            for idx, delay in enumerate((0.05, 0.01, 0.03))
+        ]
+
+        reporter = EventReporter()
+        runner = Runner(
+            config=make_runner_config(concurrency=3, db_enabled=False),
+            reporters=[reporter],
+        )
+        await runner.run(items=items)
+
+        assert [
+            name for kind, name in reporter.event_order if kind == "start"
+        ] == [item.spec.name for item in items]
+
+    @pytest.mark.asyncio
+    async def test_main_stage_waits_for_parallel_stage_completion(self):
+        async def async_test(delay: float) -> None:
+            await asyncio.sleep(delay)
+
+        def main_test() -> None:
+            pass
+
+        items = [
+            make_item(
+                lambda: async_test(0.05),  # type: ignore[arg-type]
+                name="async_one",
+                is_async=True,
+            ),
+            make_item(
+                lambda: async_test(0.1),  # type: ignore[arg-type]
+                name="async_two",
+                is_async=True,
+            ),
+            make_item(
+                main_test,
+                name="main_barrier",
+                backend=ExecutionBackend.MAIN,
+            ),
+        ]
+
+        reporter = EventReporter()
+        runner = Runner(
+            config=make_runner_config(concurrency=2, db_enabled=False),
+            reporters=[reporter],
+        )
+        await runner.run(items=items)
+
+        main_start_idx = reporter.event_order.index(("start", "main_barrier"))
+        async_completes = [
+            reporter.event_order.index(("complete", name))
+            for name in ("async_one", "async_two")
+        ]
+        assert all(index < main_start_idx for index in async_completes)
+
+    @pytest.mark.asyncio
+    async def test_module_main_blocks_only_its_module(self):
+        async def async_test(delay: float) -> None:
+            await asyncio.sleep(delay)
+
+        def sync_test(delay: float) -> None:
+            time.sleep(delay)
+
+        items = [
+            make_item(
+                lambda: async_test(0.01),  # type: ignore[arg-type]
+                name="a1_before",
+                is_async=True,
+                module_path="a1.py",
+            ),
+            make_item(
+                lambda: sync_test(0.08),
+                name="a1_barrier",
+                backend=ExecutionBackend.MODULE_MAIN,
+                module_path="a1.py",
+            ),
+            make_item(
+                lambda: async_test(0.04),  # type: ignore[arg-type]
+                name="a2_before",
+                is_async=True,
+                module_path="a2.py",
+            ),
+            make_item(
+                lambda: async_test(0.01),  # type: ignore[arg-type]
+                name="a2_after",
+                is_async=True,
+                module_path="a2.py",
+            ),
+        ]
+
+        reporter = EventReporter()
+        runner = Runner(
+            config=make_runner_config(concurrency=2, db_enabled=False),
+            reporters=[reporter],
+        )
+        run = await runner.run(items=items)
+
+        barrier_start = reporter.event_order.index(("start", "a1_barrier"))
+        barrier_complete = reporter.event_order.index(
+            ("complete", "a1_barrier")
+        )
+        a2_after_start = reporter.event_order.index(("start", "a2_after"))
+
+        assert barrier_start < a2_after_start < barrier_complete
+        assert [
+            execution.definition.spec.name for execution in run.result.executions
+        ] == [item.spec.name for item in items]
+
+    @pytest.mark.asyncio
+    async def test_global_main_still_blocks_everything(self):
+        async def async_test(delay: float) -> None:
+            await asyncio.sleep(delay)
+
+        def sync_test() -> None:
+            pass
+
+        items = [
+            make_item(
+                lambda: async_test(0.04),  # type: ignore[arg-type]
+                name="a1_before",
+                is_async=True,
+                module_path="a1.py",
+            ),
+            make_item(
+                lambda: async_test(0.02),  # type: ignore[arg-type]
+                name="a2_before",
+                is_async=True,
+                module_path="a2.py",
+            ),
+            make_item(
+                sync_test,
+                name="global_main",
+                backend=ExecutionBackend.MAIN,
+                module_path="a1.py",
+            ),
+            make_item(
+                lambda: async_test(0.01),  # type: ignore[arg-type]
+                name="a2_after",
+                is_async=True,
+                module_path="a2.py",
+            ),
+        ]
+
+        reporter = EventReporter()
+        runner = Runner(
+            config=make_runner_config(concurrency=2, db_enabled=False),
+            reporters=[reporter],
+        )
+        await runner.run(items=items)
+
+        main_start = reporter.event_order.index(("start", "global_main"))
+        a2_after_start = reporter.event_order.index(("start", "a2_after"))
+        before_completes = [
+            reporter.event_order.index(("complete", name))
+            for name in ("a1_before", "a2_before")
+        ]
+
+        assert all(index < main_start for index in before_completes)
+        assert reporter.event_order.index(("complete", "global_main")) < (
+            a2_after_start
+        )
 
     @pytest.mark.asyncio
     async def test_concurrent_raises_when_on_test_start_fails(self):

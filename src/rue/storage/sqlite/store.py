@@ -566,6 +566,7 @@ class SQLiteStore(Store):
                 xfail_reason=row["xfail_reason"],
                 suffix=row["suffix"],
                 case_id=UUID(row["case_id"]) if row["case_id"] else None,
+                collection_index=0,
             ),
             fn=lambda: None,
             suite_root=(

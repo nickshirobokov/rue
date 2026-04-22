@@ -1,5 +1,6 @@
 import time
 import rue
+from rue import ExecutionBackend
 from rue.resources import resource
 from rue.resources.models import Scope
 
@@ -7,7 +8,7 @@ from rue.resources.models import Scope
 def shared_events():
     return []
 
-@rue.test.backend("subprocess")
+@rue.test.backend(ExecutionBackend.SUBPROCESS)
 @rue.test.iterate.params("event", [("one",), ("two",)])
 def test_remote(event, shared_events):
     if event == "one":
@@ -16,6 +17,6 @@ def test_remote(event, shared_events):
         time.sleep(0.3)
     shared_events.append(event)
 
-@rue.test
+@rue.test.backend(ExecutionBackend.MAIN)
 def test_after(shared_events):
     assert shared_events == ["one", "two"]

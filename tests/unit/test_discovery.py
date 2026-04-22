@@ -6,7 +6,9 @@ import pytest
 
 from rue.resources import Scope, registry
 from rue.testing.discovery import KeywordMatcher, TestLoader, TestSpecCollector
+from rue.testing.execution.types import ExecutionBackend
 from rue.testing.models import (
+    BackendModifier,
     ParameterSet,
     ParamsIterateModifier,
     TestLocator,
@@ -78,7 +80,6 @@ def test_selector_plan_discovers_rue_tests_and_static_tags(tmp_path):
                     pass
 
                 @test.tag("smoke")
-                @test.tag.inline
                 def test_top():
                     pass
 
@@ -103,9 +104,10 @@ def test_selector_plan_discovers_rue_tests_and_static_tags(tmp_path):
     specs_by_name = {spec.full_name: spec.tags for spec in plan.specs}
 
     assert plan.suite_root == tmp_path
+    assert [spec.collection_index for spec in plan.specs] == [0, 1, 2, 3]
     assert specs_by_name == {
         "test_sample::helper": frozenset(),
-        "test_sample::test_top": frozenset({"smoke", "inline"}),
+        "test_sample::test_top": frozenset({"smoke"}),
         "test_sample::Flows::test_nested": frozenset(
             {"suite", "skip", "fast", "xfail"}
         ),
@@ -210,10 +212,10 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
             "test_metadata.py": """
                 from rue import test
 
-                @test.tag.inline
+                @test.backend("main")
                 @test.tag.skip(reason="skip me")
                 @test.iterate.params("value", [1], ids=["one"])
-                def test_inline_skip(value):
+                def test_main_skip(value):
                     assert value == 1
 
                 @test.tag.xfail(reason="known", strict=True)
@@ -223,6 +225,11 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
                 @test.iterate.params("value", [])
                 def test_bad(value):
                     assert value
+
+                @test.backend("main")
+                @test.backend("subprocess")
+                def test_duplicate_backend():
+                    assert True
             """
         },
     )
@@ -232,21 +239,23 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
     )
     planned_specs = {spec.name: spec for spec in plan.specs}
 
-    assert planned_specs["test_inline_skip"].params == ()
-    assert planned_specs["test_inline_skip"].skip_reason is None
-    assert planned_specs["test_inline_skip"].inline is False
+    assert planned_specs["test_main_skip"].params == ()
+    assert planned_specs["test_main_skip"].skip_reason is None
+    assert planned_specs["test_main_skip"].modifiers == ()
     assert planned_specs["test_expected_failure"].xfail_reason is None
     assert planned_specs["test_bad"].definition_error is None
 
     items = TestLoader(plan.suite_root).load_from_collection(plan)
     items_by_name = {item.spec.name: item for item in items}
-    [modifier] = items_by_name["test_inline_skip"].spec.modifiers
+    backend_modifier, params_modifier = items_by_name[
+        "test_main_skip"
+    ].spec.modifiers
 
-    assert items_by_name["test_inline_skip"].spec.params == ("value",)
-    assert items_by_name["test_inline_skip"].spec.skip_reason == "skip me"
-    assert items_by_name["test_inline_skip"].spec.inline is True
-    assert isinstance(modifier, ParamsIterateModifier)
-    assert modifier.parameter_sets == (
+    assert items_by_name["test_main_skip"].spec.params == ("value",)
+    assert items_by_name["test_main_skip"].spec.skip_reason == "skip me"
+    assert backend_modifier == BackendModifier(ExecutionBackend.MAIN)
+    assert isinstance(params_modifier, ParamsIterateModifier)
+    assert params_modifier.parameter_sets == (
         ParameterSet(values={"value": 1}, suffix="one"),
     )
     assert items_by_name["test_expected_failure"].spec.xfail_reason == "known"
@@ -254,6 +263,10 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
     assert (
         items_by_name["test_bad"].spec.definition_error
         == "iterate.params() requires at least one value set"
+    )
+    assert (
+        items_by_name["test_duplicate_backend"].spec.definition_error
+        == "Multiple @rue.test.backend(...) decorators are not supported."
     )
 
 
