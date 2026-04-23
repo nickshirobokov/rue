@@ -22,7 +22,6 @@ from rue.resources.sut import sut
 from rue.storage import Store
 from rue.telemetry import OtelTraceArtifact
 from rue.telemetry.otel.runtime import otel_runtime
-from rue.testing.environment import capture_environment
 from rue.testing.execution.factory import DefaultTestFactory
 from rue.testing.execution.base import ExecutionBackend
 from rue.testing.execution.queue import SessionQueue
@@ -30,6 +29,7 @@ from rue.testing.models import (
     ParameterSet,
     ParamsIterateModifier,
     Run,
+    RunEnvironment,
     RunResult,
     ExecutedTest,
     LoadedTestDef,
@@ -239,9 +239,9 @@ class TestEnvironmentCapture:
             os.environ,
             {"OPENAI_API_KEY": "sk-1234567890abcdef", "MODEL_VENDOR": "openai"},
         ):
-            env = capture_environment()
-        blob = json.dumps(env.to_dict())
-        assert "env_vars" not in env.to_dict()
+            env = RunEnvironment.build_from_current()
+        blob = json.dumps(env.model_dump())
+        assert "env_vars" not in env.model_dump()
         assert "1234567890abcdef" not in blob
 
 

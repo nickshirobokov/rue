@@ -1,4 +1,4 @@
-"""Testing models - pure data classes."""
+"""Testing models."""
 
 from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.modifiers import (

@@ -20,12 +20,12 @@ from rue.resources.metrics.base import MetricResult
 from rue.resources.sut.output import SUTOutputCapture
 from rue.storage import Store
 from rue.telemetry.otel.runtime import otel_runtime
-from rue.testing.environment import capture_environment
 from rue.testing.execution import DefaultTestFactory
 from rue.testing.models import (
     ExecutedTest,
     LoadedTestDef,
     Run,
+    RunEnvironment,
 )
 from rue.testing.execution.queue import RunnerStep, SessionQueue
 
@@ -118,7 +118,7 @@ class Runner:
         Returns:
             Run with environment, results, and test executions.
         """
-        environment = capture_environment()
+        environment = RunEnvironment.build_from_current()
         if run_id is None:
             self.current_run = Run(environment=environment)
         else:
