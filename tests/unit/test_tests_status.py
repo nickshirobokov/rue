@@ -193,25 +193,64 @@ def test_status_builder_reports_circular_resource_dependencies(tmp_path):
     )
 
 
+def test_status_builder_groups_resources_by_runtime_type(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "test_types.py": """
+                import rue
+
+                @rue.resource
+                def db():
+                    return 1
+
+                @rue.metric
+                def latency():
+                    yield rue.Metric()
+
+                @rue.sut
+                def agent():
+                    return rue.SUT(lambda: "ok")
+
+                @rue.test
+                def test_types(db, latency, agent):
+                    pass
+            """
+        },
+    )
+
+    report = build_report(tmp_path / "test_types.py")
+    [node] = next(iter(report.module_nodes.values()))
+
+    assert set(node.resources_by_type) == {"int", "Metric", "SUT"}
+    assert [spec.name for spec in node.resources_by_type["int"]] == ["db"]
+    assert [spec.name for spec in node.resources_by_type["Metric"]] == [
+        "latency"
+    ]
+    assert [spec.name for spec in node.resources_by_type["SUT"]] == ["agent"]
+
+
 def test_status_renderer_respects_verbosity_levels():
     child_one = StatusNode(
         definition=make_definition("test_tree", suffix="one"),
         backend=ExecutionBackend.ASYNCIO,
         history=(TestStatus.PASSED, TestStatus.FAILED),
-        resources=(
-            ResourceSpec(
-                name="db",
-                scope=Scope.TEST,
-                provider_path="/tmp/project/conftest.py",
+        resources_by_type={
+            "Metric": (
+                ResourceSpec(
+                    name="latency",
+                    scope=Scope.PROCESS,
+                    provider_path="/tmp/project/confrue_metrics.py",
+                ),
             ),
-        ),
-        metrics=(
-            ResourceSpec(
-                name="latency",
-                scope=Scope.PROCESS,
-                provider_path="/tmp/project/confrue_metrics.py",
+            "SUT": (
+                ResourceSpec(
+                    name="agent",
+                    scope=Scope.TEST,
+                    provider_path="/tmp/project/conftest.py",
+                ),
             ),
-        ),
+        },
     )
     child_two = StatusNode(
         definition=make_definition("test_tree", suffix="two"),
@@ -237,7 +276,7 @@ def test_status_renderer_respects_verbosity_levels():
     compact.print(renderer.render(report, 0))
     compact_text = compact.export_text()
     assert "2 variations" in compact_text
-    assert "resources" not in compact_text
+    assert "Metric" not in compact_text
 
     verbose = Console(record=True, width=140)
     verbose.print(renderer.render(report, 1))
@@ -248,6 +287,6 @@ def test_status_renderer_respects_verbosity_levels():
     very_verbose = Console(record=True, width=140)
     very_verbose.print(renderer.render(report, 2))
     very_verbose_text = very_verbose.export_text()
-    assert "resources" in very_verbose_text
-    assert "metrics" in very_verbose_text
+    assert "Metric" in very_verbose_text
+    assert "SUT" in very_verbose_text
     assert "confrue_metrics.py" in very_verbose_text

@@ -88,14 +88,10 @@ class StatusRenderer:
             branch.add(self._issue_text(issue))
 
         if verbosity >= 2 and not node.children:
-            if node.resources:
-                resources = branch.add(Text("resources", style="bold"))
-                for resource in node.resources:
-                    resources.add(self._resource_text(resource))
-            if node.metrics:
-                metrics = branch.add(Text("metrics", style="bold"))
-                for metric in node.metrics:
-                    metrics.add(self._resource_text(metric))
+            for type_name, resources in sorted(node.resources_by_type.items()):
+                group = branch.add(Text(type_name, style="bold"))
+                for resource in resources:
+                    group.add(self._resource_text(resource))
 
         for child in node.children:
             self._add_node(branch, child, verbosity)

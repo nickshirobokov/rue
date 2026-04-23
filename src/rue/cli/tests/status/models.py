@@ -24,8 +24,9 @@ class StatusNode:
     backend: ExecutionBackend | None
     history: tuple[TestStatus | None, ...] = ()
     issues: tuple[StatusIssue, ...] = ()
-    resources: tuple[ResourceSpec, ...] = ()
-    metrics: tuple[ResourceSpec, ...] = ()
+    resources_by_type: dict[str, tuple[ResourceSpec, ...]] = field(
+        default_factory=dict
+    )
     children: tuple["StatusNode", ...] = ()
     leaf_count: int = 1
 

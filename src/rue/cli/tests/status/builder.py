@@ -5,14 +5,13 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 from uuid import uuid4
 
 from rue.cli.tests.status.models import StatusIssue, StatusNode, TestsStatusReport
 from rue.config import Config
 from rue.context.runtime import CURRENT_TEST, TestContext, bind
 from rue.resources import ResourceResolver, ResourceSpec
-from rue.resources.metrics.base import Metric
 from rue.resources.registry import registry as default_resource_registry
 from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.store import MAX_STORED_RUNS
@@ -67,9 +66,7 @@ class TestsStatusBuilder:
             if isinstance(leaf, SingleTest)
         ]
         connected_by_key = self._collect_static_dependencies(leaves)
-        resources_by_key, metrics_by_key = asyncio.run(
-            self._preflight(leaves, connected_by_key)
-        )
+        resources_by_key = asyncio.run(self._preflight(leaves, connected_by_key))
 
         module_nodes: dict[Path, list[StatusNode]] = defaultdict(list)
         for test in tests:
@@ -78,7 +75,6 @@ class TestsStatusBuilder:
                     test,
                     history_by_key,
                     resources_by_key,
-                    metrics_by_key,
                 )
             )
 
@@ -132,18 +128,13 @@ class TestsStatusBuilder:
         self,
         leaves: list[SingleTest],
         connected_by_key: dict[str, tuple[ResourceSpec, ...]],
-    ) -> tuple[
-        dict[str, tuple[ResourceSpec, ...]],
-        dict[str, tuple[ResourceSpec, ...]],
-    ]:
-        resources_by_key: dict[str, tuple[ResourceSpec, ...]] = {}
-        metrics_by_key: dict[str, tuple[ResourceSpec, ...]] = {}
+    ) -> dict[str, dict[str, tuple[ResourceSpec, ...]]]:
+        resources_by_key: dict[str, dict[str, tuple[ResourceSpec, ...]]] = {}
 
         for leaf in leaves:
             connected = connected_by_key[leaf.node_key]
             if self._has_blocking_issue(leaf.node_key):
-                resources_by_key[leaf.node_key] = connected
-                metrics_by_key[leaf.node_key] = ()
+                resources_by_key[leaf.node_key] = {}
                 continue
 
             resolver = ResourceResolver(default_resource_registry)
@@ -161,34 +152,26 @@ class TestsStatusBuilder:
             except Exception as error:
                 self._add_issue(leaf.node_key, "resolve", str(error))
             finally:
-                resources_by_key[leaf.node_key], metrics_by_key[leaf.node_key] = (
-                    self._split_connected_identities(
-                        connected,
-                        resolver.cached_identities,
-                    )
-                )
+                grouped_resources: dict[str, list[ResourceSpec]] = {}
+                for identity in connected:
+                    value = resolver.cached_identities.get(identity)
+                    if value is None:
+                        continue
+                    grouped_resources.setdefault(
+                        type(value).__name__,
+                        [],
+                    ).append(identity)
+                resources_by_key[leaf.node_key] = {
+                    type_name: tuple(specs)
+                    for type_name, specs in grouped_resources.items()
+                }
                 try:
                     with bind(CURRENT_TEST, ctx):
                         await resolver.teardown()
                 except Exception as error:
                     self._add_issue(leaf.node_key, "resolve", str(error))
 
-        return resources_by_key, metrics_by_key
-
-    def _split_connected_identities(
-        self,
-        connected: tuple[ResourceSpec, ...],
-        cached: dict[ResourceSpec, Any],
-    ) -> tuple[tuple[ResourceSpec, ...], tuple[ResourceSpec, ...]]:
-        resources: list[ResourceSpec] = []
-        metrics: list[ResourceSpec] = []
-        for identity in connected:
-            value = cached.get(identity)
-            if isinstance(value, Metric):
-                metrics.append(identity)
-                continue
-            resources.append(identity)
-        return tuple(resources), tuple(metrics)
+        return resources_by_key
 
     def _has_blocking_issue(self, node_key: str) -> bool:
         return any(
@@ -215,15 +198,13 @@ class TestsStatusBuilder:
         self,
         test: ExecutableTest,
         history_by_key: dict[str, tuple[TestStatus | None, ...]],
-        resources_by_key: dict[str, tuple[ResourceSpec, ...]],
-        metrics_by_key: dict[str, tuple[ResourceSpec, ...]],
+        resources_by_key: dict[str, dict[str, tuple[ResourceSpec, ...]]],
     ) -> StatusNode:
         children = tuple(
             self._finalize_node(
                 child,
                 history_by_key,
                 resources_by_key,
-                metrics_by_key,
             )
             for child in test.children
         )
@@ -233,8 +214,7 @@ class TestsStatusBuilder:
             backend=test.backend,
             history=history_by_key.get(test.node_key, ()),
             issues=tuple(self._issues_by_key.get(test.node_key, ())),
-            resources=resources_by_key.get(test.node_key, ()),
-            metrics=metrics_by_key.get(test.node_key, ()),
+            resources_by_type=resources_by_key.get(test.node_key, {}),
             children=children,
             leaf_count=leaf_count,
         )

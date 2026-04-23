@@ -60,6 +60,7 @@ class BackendModifier:
     """Select the execution backend for the test subtree."""
 
     backend: ExecutionBackend
+    display_name: str = "backend changed"
 
 
 Modifier = (
