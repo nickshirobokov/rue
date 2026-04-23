@@ -6,6 +6,7 @@ from tomlkit import parse
 from typer.testing import CliRunner
 
 from rue.cli import app
+from rue.cli.tests.status import TestsStatusReport
 from rue.config import Config
 from rue.storage.sqlite import SQLiteStore
 from rue.testing import LoadedTestDef
@@ -79,6 +80,15 @@ def test_tests_run_help_exposes_run_options():
     assert "--otel" in result.stdout
 
 
+def test_tests_status_help_exposes_status_options():
+    result = runner.invoke(app, ["tests", "status", "--help"])
+    assert result.exit_code == 0
+    assert "--db-path" in result.stdout
+    assert "--keyword" in result.stdout
+    assert "--run-id" not in result.stdout
+    assert "--no-db" not in result.stdout
+
+
 def test_cli_otel_flag_parsing():
     config = Config(otel=False)
     overridden = config.with_overrides(otel=True)
@@ -127,13 +137,13 @@ def test_run_tests_returns_2_when_run_id_already_exists(
         raise AssertionError(msg)
 
     monkeypatch.setattr(
-        "rue.cli.tests.TestSpecCollector.build_spec_collection", _build
+        "rue.cli.tests.options.TestSpecCollector.build_spec_collection", _build
     )
     monkeypatch.setattr(
-        "rue.cli.tests.TestLoader.load_from_collection",
+        "rue.cli.tests.run.TestLoader.load_from_collection",
         lambda self, collection: [make_item("test_ok", set())],
     )
-    monkeypatch.setattr("rue.cli.tests.Runner.run", _fail_run)
+    monkeypatch.setattr("rue.cli.tests.run.Runner.run", _fail_run)
 
     result = runner.invoke(
         app,
@@ -174,14 +184,14 @@ def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
             return Run()
 
     monkeypatch.setattr(
-        "rue.cli.tests.TestSpecCollector.build_spec_collection",
+        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.tests.TestLoader.load_from_collection",
+        "rue.cli.tests.run.TestLoader.load_from_collection",
         lambda self, collection: [make_item("test_ok", set())],
     )
-    monkeypatch.setattr("rue.cli.tests.Runner", FakeRunner)
+    monkeypatch.setattr("rue.cli.tests.run.Runner", FakeRunner)
 
     result = runner.invoke(
         app,
@@ -214,11 +224,11 @@ def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(
     command: list[str], monkeypatch
 ):
     monkeypatch.setattr(
-        "rue.cli.tests.TestSpecCollector.build_spec_collection",
+        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.tests.TestLoader.load_from_collection",
+        "rue.cli.tests.run.TestLoader.load_from_collection",
         lambda self, collection: [make_item("test_ok", set())],
     )
 
@@ -258,17 +268,17 @@ def test_tests_without_subcommand_defaults_to_run(monkeypatch):
         return TestSpecCollection(suite_root=Path.cwd())
 
     monkeypatch.setattr(
-        "rue.cli.tests.load_config", lambda: Config(db_enabled=False)
+        "rue.cli.tests.run.load_config", lambda: Config(db_enabled=False)
     )
     monkeypatch.setattr(
-        "rue.cli.tests.TestSpecCollector.build_spec_collection",
+        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
         build_spec_collection,
     )
     monkeypatch.setattr(
-        "rue.cli.tests.TestLoader.load_from_collection",
+        "rue.cli.tests.run.TestLoader.load_from_collection",
         lambda self, collection: [make_item("test_ok", set())],
     )
-    monkeypatch.setattr("rue.cli.tests.Runner", FakeRunner)
+    monkeypatch.setattr("rue.cli.tests.run.Runner", FakeRunner)
 
     result = runner.invoke(app, ["tests"])
 
@@ -281,6 +291,117 @@ def test_rue_test_command_is_unknown():
     result = runner.invoke(app, ["test", "--no-db"])
     assert result.exit_code == 2
     assert "No such command 'test'" in result.output
+
+
+@pytest.mark.parametrize(
+    ("command", "status_mode"),
+    [
+        (["tests", "run"], False),
+        (["tests", "status"], True),
+    ],
+    ids=["run", "status"],
+)
+def test_run_and_status_share_selection_parsing(
+    command: list[str],
+    status_mode: bool,
+    tmp_path: Path,
+    monkeypatch,
+):
+    captured: dict[str, object] = {}
+
+    def build_spec_collection(self, paths, **kwargs):
+        del kwargs
+        captured["paths"] = paths
+        captured["include_tags"] = tuple(self.include_tags)
+        captured["exclude_tags"] = tuple(self.exclude_tags)
+        captured["keyword"] = self.keyword
+        return TestSpecCollection(suite_root=Path.cwd())
+
+    monkeypatch.setattr(
+        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        build_spec_collection,
+    )
+
+    if status_mode:
+        monkeypatch.setattr(
+            "rue.cli.tests.status.command.TestsStatusBuilder.load_items",
+            lambda self, collection: [],
+        )
+        monkeypatch.setattr(
+            "rue.cli.tests.status.command.TestsStatusBuilder.build",
+            lambda self, collection, items, store=None: TestsStatusReport(),
+        )
+        monkeypatch.setattr(
+            "rue.cli.tests.status.command.status_renderer.render",
+            lambda report, verbosity: f"status:{verbosity}",
+        )
+    else:
+        monkeypatch.setattr(
+            "rue.cli.tests.run.TestLoader.load_from_collection",
+            lambda self, collection: [make_item("test_ok", set())],
+        )
+
+        class FakeRunner:
+            def __init__(self, **kwargs) -> None:
+                captured["verbosity"] = kwargs["config"].verbosity
+
+            async def run(self, items, *, run_id=None):
+                del items, run_id
+                return Run()
+
+        monkeypatch.setattr("rue.cli.tests.run.Runner", FakeRunner)
+
+    result = runner.invoke(
+        app,
+        [
+            *command,
+            "tests/sample",
+            "-k",
+            "fast and not slow",
+            "-t",
+            "smoke",
+            "--skip-tag",
+            "slow",
+            "-v",
+            "--db-path",
+            str(tmp_path / "custom.db"),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["paths"] == ["tests/sample"]
+    assert captured["include_tags"] == ("smoke",)
+    assert captured["exclude_tags"] == ("slow",)
+    assert captured["keyword"] == "fast and not slow"
+
+
+def test_tests_status_does_not_create_missing_db(tmp_path, monkeypatch):
+    missing_db = tmp_path / "missing.db"
+
+    monkeypatch.setattr(
+        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
+    )
+    monkeypatch.setattr(
+        "rue.cli.tests.status.command.TestsStatusBuilder.load_items",
+        lambda self, collection: [],
+    )
+    monkeypatch.setattr(
+        "rue.cli.tests.status.command.TestsStatusBuilder.build",
+        lambda self, collection, items, store=None: TestsStatusReport(),
+    )
+    monkeypatch.setattr(
+        "rue.cli.tests.status.command.status_renderer.render",
+        lambda report, verbosity: "status",
+    )
+
+    result = runner.invoke(
+        app,
+        ["tests", "status", "--db-path", str(missing_db)],
+    )
+
+    assert result.exit_code == 0
+    assert not missing_db.exists()
 
 
 def test_rue_init_writes_pytest_entrypoint(tmp_path, monkeypatch):

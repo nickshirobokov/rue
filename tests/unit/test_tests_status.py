@@ -1,0 +1,253 @@
+from pathlib import Path
+from textwrap import dedent
+
+from rich.console import Console
+
+from rue.cli.tests.status import (
+    StatusNode,
+    StatusRenderer,
+    TestsStatusBuilder,
+    TestsStatusReport,
+)
+from rue.config import Config
+from rue.resources import Scope
+from rue.resources.models import ResourceSpec
+from rue.testing.discovery import TestSpecCollector
+from rue.testing.models import TestStatus
+from rue.testing.models.modifiers import IterateModifier
+from tests.unit.factories import make_definition
+
+
+def write_files(root: Path, files: dict[str, str]) -> None:
+    for relative_path, source in files.items():
+        path = root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(dedent(source))
+
+
+def build_report(path: Path) -> TestsStatusReport:
+    collection = TestSpecCollector((), (), None).build_spec_collection((path,))
+    builder = TestsStatusBuilder(Config.model_construct(db_enabled=False))
+    items = builder.load_items(collection)
+    return builder.build(collection, items, store=None)
+
+
+def test_status_builder_matches_execution_tree_shape(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "test_status_tree.py": """
+                import rue
+                from rue.testing import Case, CaseGroup
+
+                @rue.test
+                def test_plain():
+                    pass
+
+                @rue.test.backend("main")
+                @rue.test.iterate(2)
+                def test_repeat():
+                    pass
+
+                @rue.test.iterate.params("value", [1, 2], ids=["one", "two"])
+                def test_params(value):
+                    pass
+
+                @rue.test.iterate.cases(
+                    Case(metadata={"slug": "one"}),
+                    Case(metadata={"slug": "two"}),
+                )
+                def test_cases(case):
+                    pass
+
+                @rue.test.iterate.groups(
+                    CaseGroup(
+                        name="alpha",
+                        cases=[
+                            Case(metadata={"slug": "a"}),
+                            Case(metadata={"slug": "b"}),
+                        ],
+                    ),
+                    CaseGroup(
+                        name="beta",
+                        cases=[Case(metadata={"slug": "c"})],
+                    ),
+                )
+                def test_groups(group, case):
+                    pass
+            """
+        },
+    )
+
+    report = build_report(tmp_path / "test_status_tree.py")
+    [module_path] = report.module_nodes
+    nodes = {
+        node.definition.spec.full_name: node
+        for node in report.module_nodes[module_path]
+    }
+
+    assert nodes["test_status_tree::test_plain"].leaf_count == 1
+    assert nodes["test_status_tree::test_repeat"].backend == "main"
+    assert len(nodes["test_status_tree::test_repeat"].children) == 2
+    assert nodes["test_status_tree::test_params"].leaf_count == 2
+    assert len(nodes["test_status_tree::test_params"].children) == 2
+    assert nodes["test_status_tree::test_params"].children[0].definition.spec.suffix == "one"
+    assert nodes["test_status_tree::test_cases"].leaf_count == 2
+    assert nodes["test_status_tree::test_groups"].leaf_count == 3
+    assert len(nodes["test_status_tree::test_groups"].children[0].children) == 2
+
+
+def test_status_builder_reports_load_definition_and_resolve_issues(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "bad/conftest.py": 'raise RuntimeError("bad setup")\n',
+            "bad/test_bad.py": """
+                import rue
+
+                @rue.test
+                def test_bad():
+                    pass
+            """,
+            "test_definition.py": """
+                from rue import test
+
+                @test.iterate.params("value", [])
+                def test_definition(value):
+                    pass
+            """,
+            "test_unknown.py": """
+                import rue
+
+                @rue.test
+                def test_unknown(missing_resource):
+                    pass
+            """,
+            "test_sut.py": """
+                import rue
+                from rue.resources.sut import sut
+
+                @sut
+                def broken():
+                    return 1
+
+                @rue.test
+                def test_sut(broken):
+                    pass
+            """,
+        },
+    )
+
+    report = build_report(tmp_path)
+    nodes = {
+        node.definition.spec.full_name: node
+        for module_nodes in report.module_nodes.values()
+        for node in module_nodes
+    }
+
+    assert any(issue.phase == "load" for issue in nodes["test_bad::test_bad"].issues)
+    assert any(
+        issue.phase == "definition"
+        and "requires at least one value set" in issue.message
+        for issue in nodes["test_definition::test_definition"].issues
+    )
+    assert any(
+        issue.phase == "resolve" and "Unknown resource: missing_resource" in issue.message
+        for issue in nodes["test_unknown::test_unknown"].issues
+    )
+    assert any(
+        issue.phase == "resolve"
+        and "@sut factories must return or yield a SUT." in issue.message
+        for issue in nodes["test_sut::test_sut"].issues
+    )
+
+
+def test_status_builder_reports_circular_resource_dependencies(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "test_cycle.py": """
+                import rue
+
+                @rue.resource
+                def first(second):
+                    return 1
+
+                @rue.resource
+                def second(first):
+                    return 2
+
+                @rue.test
+                def test_cycle(first):
+                    pass
+            """
+        },
+    )
+
+    report = build_report(tmp_path / "test_cycle.py")
+    [node] = next(iter(report.module_nodes.values()))
+    assert any(
+        issue.phase == "resolve"
+        and "Circular resource dependency detected" in issue.message
+        for issue in node.issues
+    )
+
+
+def test_status_renderer_respects_verbosity_levels():
+    child_one = StatusNode(
+        definition=make_definition("test_tree", suffix="one"),
+        backend="asyncio",
+        history=(TestStatus.PASSED, TestStatus.FAILED),
+        resources=(
+            ResourceSpec(
+                name="db",
+                scope=Scope.TEST,
+                provider_path="/tmp/project/conftest.py",
+            ),
+        ),
+        metrics=(
+            ResourceSpec(
+                name="latency",
+                scope=Scope.PROCESS,
+                provider_path="/tmp/project/confrue_metrics.py",
+            ),
+        ),
+    )
+    child_two = StatusNode(
+        definition=make_definition("test_tree", suffix="two"),
+        backend="asyncio",
+        history=(TestStatus.PASSED, None),
+    )
+    root = StatusNode(
+        definition=make_definition(
+            "test_tree",
+            modifiers=(IterateModifier(count=2, min_passes=1),),
+        ),
+        backend="asyncio",
+        history=(TestStatus.PASSED, None),
+        children=(child_one, child_two),
+        leaf_count=2,
+    )
+    report = TestsStatusReport(
+        module_nodes={Path("tests/test_tree.py"): [root]},
+    )
+    renderer = StatusRenderer()
+
+    compact = Console(record=True, width=140)
+    compact.print(renderer.render(report, 0))
+    compact_text = compact.export_text()
+    assert "2 variations" in compact_text
+    assert "resources" not in compact_text
+
+    verbose = Console(record=True, width=140)
+    verbose.print(renderer.render(report, 1))
+    verbose_text = verbose.export_text()
+    assert "[one]" in verbose_text
+    assert "[two]" in verbose_text
+
+    very_verbose = Console(record=True, width=140)
+    very_verbose.print(renderer.render(report, 2))
+    very_verbose_text = very_verbose.export_text()
+    assert "resources" in very_verbose_text
+    assert "metrics" in very_verbose_text
+    assert "confrue_metrics.py" in very_verbose_text

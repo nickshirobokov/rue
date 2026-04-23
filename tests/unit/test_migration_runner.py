@@ -296,6 +296,73 @@ class TestMigrationRunner:
         runner.migrate()
         assert runner.get_current_version() == runner.get_target_version()
 
+    def test_node_key_migration_preserves_existing_rows(
+        self, sqlite_db_path: Path
+    ) -> None:
+        full_runner = MigrationRunner(sqlite_db_path)
+        legacy_runner = MigrationRunner.__new__(MigrationRunner)
+        legacy_runner.path = sqlite_db_path
+        legacy_runner._migrations = full_runner._migrations[:3]
+        legacy_runner.migrate()
+
+        conn = sqlite3.connect(sqlite_db_path)
+        conn.execute(
+            "INSERT INTO runs (run_id, start_time, total_duration_ms, "
+            "passed, failed, errors, skipped, xfailed, xpassed, total, stopped_early) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("run-1", "2024-01-01T00:00:00", 10.0, 1, 0, 0, 0, 0, 0, 1, 0),
+        )
+        conn.execute(
+            "INSERT INTO test_executions ("
+            "execution_id, run_id, parent_id, test_name, file_path, class_name, "
+            "case_id, suffix, tags_json, skip_reason, xfail_reason, "
+            "status, duration_ms, error_message, error_traceback"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "exec-1",
+                "run-1",
+                None,
+                "test_sample",
+                "tests/test_sample.py",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                "passed",
+                1.0,
+                None,
+                None,
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        full_runner.migrate()
+
+        conn = sqlite3.connect(sqlite_db_path)
+        columns = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(test_executions)"
+            ).fetchall()
+        }
+        indexes = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA index_list(test_executions)"
+            ).fetchall()
+        }
+        row = conn.execute(
+            "SELECT execution_id, node_key FROM test_executions"
+        ).fetchone()
+
+        assert "node_key" in columns
+        assert "idx_tests_node_key" in indexes
+        assert row == ("exec-1", None)
+        conn.close()
+
 
 class TestMigrationFailure:
     """Tests for migration failure scenarios."""

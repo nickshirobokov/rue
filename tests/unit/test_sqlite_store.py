@@ -14,6 +14,11 @@ from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.store import MAX_STORED_RUNS
 from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.executed import ExecutedTest
+from rue.testing.models.modifiers import (
+    IterateModifier,
+    ParameterSet,
+    ParamsIterateModifier,
+)
 from rue.testing.models.result import TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
 from tests.unit.factories import make_definition
@@ -43,6 +48,7 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         tags={"smoke"},
         suffix="{'slug': 'sample'}",
         case_id=case_id,
+        modifiers=(IterateModifier(count=1, min_passes=1),),
     )
     sub_definition = make_definition(
         "test_sub", module_path="tests/test_sample.py"
@@ -293,3 +299,62 @@ def test_sqlite_store_prunes_old_runs(sqlite_store: SQLiteStore) -> None:
     stored_run_ids = {r.run_id for r in stored_runs}
     expected_run_ids = set(created_run_ids[-MAX_STORED_RUNS:])
     assert stored_run_ids == expected_run_ids
+
+
+def test_sqlite_store_persists_node_keys_and_histories(
+    sqlite_store: SQLiteStore,
+) -> None:
+    node_key = "test_sample::test_history/params[0]=one"
+    statuses = [
+        TestStatus.PASSED,
+        TestStatus.FAILED,
+        TestStatus.ERROR,
+    ]
+
+    for index, status in enumerate(statuses):
+        child = ExecutedTest(
+            definition=make_definition(
+                "test_history",
+                module_path="tests/test_sample.py",
+                suffix="one",
+            ),
+            result=TestResult(status=status, duration_ms=1.0),
+        )
+        run = Run(
+            run_id=uuid4(),
+            start_time=datetime(2024, 1, index + 1, 10, 0, tzinfo=UTC),
+            end_time=datetime(2024, 1, index + 1, 10, 1, tzinfo=UTC),
+            environment=make_environment(),
+            result=RunResult(
+                executions=[
+                    ExecutedTest(
+                        definition=make_definition(
+                            "test_history",
+                            module_path="tests/test_sample.py",
+                            modifiers=(
+                                ParamsIterateModifier(
+                                    parameter_sets=(
+                                        ParameterSet(
+                                            values={},
+                                            suffix="one",
+                                        ),
+                                    ),
+                                    min_passes=1,
+                                ),
+                            ),
+                        ),
+                        result=TestResult(status=status, duration_ms=1.0),
+                        sub_executions=[child],
+                    )
+                ]
+            ),
+        )
+        sqlite_store.save_run(run)
+
+    assert sqlite_store.get_test_history([node_key])[node_key] == (
+        TestStatus.ERROR,
+        TestStatus.FAILED,
+        TestStatus.PASSED,
+        None,
+        None,
+    )

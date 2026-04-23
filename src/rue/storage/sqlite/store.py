@@ -1,5 +1,6 @@
 """SQLite storage backend for Rue test runs."""
 
+from collections.abc import Sequence
 import json
 import linecache
 import sqlite3
@@ -19,10 +20,19 @@ from rue.resources.metrics.base import (
 )
 from rue.storage.base import Store
 from rue.storage.sqlite.migrations import MigrationError, MigrationRunner
-from rue.testing.models.loaded import LoadedTestDef
-from rue.testing.models.executed import ExecutedTest
-from rue.testing.models.result import TestResult, TestStatus
-from rue.testing.models.run import Run, RunEnvironment, RunResult
+from rue.testing.models import (
+    CasesIterateModifier,
+    ExecutedTest,
+    GroupsIterateModifier,
+    IterateModifier,
+    LoadedTestDef,
+    ParamsIterateModifier,
+    Run,
+    RunEnvironment,
+    RunResult,
+    TestStatus,
+)
+from rue.testing.models.result import TestResult
 from rue.testing.models.spec import TestLocator, TestSpec
 
 
@@ -42,9 +52,9 @@ RUN_INSERT_SQL = """
 EXECUTION_INSERT_SQL = """
     INSERT INTO test_executions (
         execution_id, run_id, parent_id, test_name, file_path, class_name,
-        case_id, suffix, tags_json, skip_reason, xfail_reason,
+        case_id, suffix, node_key, tags_json, skip_reason, xfail_reason,
         status, duration_ms, error_message, error_traceback
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 METRIC_INSERT_SQL = """
@@ -196,49 +206,13 @@ class SQLiteStore(Store):
             )
 
             execution_rows: list[tuple[object, ...]] = []
-            stack: list[tuple[ExecutedTest, str | None]] = [
-                (execution, None) for execution in run.result.executions
-            ]
-            while stack:
-                execution, parent_id = stack.pop()
-                defn = execution.definition
-                spec = defn.spec
-                error = execution.result.error
-                error_msg = str(error) if error else None
-                error_tb = self._format_traceback(error) if error else None
-                test_name = spec.name
-                module_path = spec.module_path
-                file_path = str(module_path) if module_path else None
-                class_name = spec.class_name
-                suffix = spec.suffix
-                tags: set[str] = set(spec.tags)
-                skip_reason = spec.skip_reason
-                xfail_reason = spec.xfail_reason
-                case_id = spec.case_id
-                execution_id = str(execution.execution_id)
-
-                execution_rows.append(
-                    (
-                        execution_id,
-                        run_id,
-                        parent_id,
-                        test_name,
-                        file_path,
-                        class_name,
-                        str(case_id) if case_id else None,
-                        suffix,
-                        json.dumps(list(tags)) if tags else None,
-                        skip_reason,
-                        xfail_reason,
-                        execution.status.value,
-                        execution.duration_ms,
-                        error_msg,
-                        error_tb,
-                    )
-                )
-
-                stack.extend(
-                    (sub, execution_id) for sub in execution.sub_executions
+            for execution in run.result.executions:
+                self._append_execution_rows(
+                    execution_rows,
+                    execution,
+                    run_id=run_id,
+                    parent_id=None,
+                    node_key=execution.definition.spec.full_name,
                 )
 
             if execution_rows:
@@ -419,6 +393,136 @@ class SQLiteStore(Store):
                 for item in items
             ]
         )
+
+    def _append_execution_rows(
+        self,
+        rows: list[tuple[object, ...]],
+        execution: ExecutedTest,
+        *,
+        run_id: str,
+        parent_id: str | None,
+        node_key: str,
+    ) -> None:
+        spec = execution.definition.spec
+        error = execution.result.error
+        error_msg = str(error) if error else None
+        error_tb = self._format_traceback(error) if error else None
+        module_path = spec.module_path
+        file_path = str(module_path) if module_path else None
+        tags: set[str] = set(spec.tags)
+        execution_id = str(execution.execution_id)
+
+        rows.append(
+            (
+                execution_id,
+                run_id,
+                parent_id,
+                spec.name,
+                file_path,
+                spec.class_name,
+                str(spec.case_id) if spec.case_id else None,
+                spec.suffix,
+                node_key,
+                json.dumps(list(tags)) if tags else None,
+                spec.skip_reason,
+                spec.xfail_reason,
+                execution.status.value,
+                execution.duration_ms,
+                error_msg,
+                error_tb,
+            )
+        )
+
+        for index, child in enumerate(execution.sub_executions):
+            self._append_execution_rows(
+                rows,
+                child,
+                run_id=run_id,
+                parent_id=execution_id,
+                node_key=self._child_node_key(execution, child, node_key, index),
+            )
+
+    def _child_node_key(
+        self,
+        parent: ExecutedTest,
+        child: ExecutedTest,
+        parent_node_key: str,
+        index: int,
+    ) -> str:
+        modifiers = parent.definition.spec.modifiers
+        if not modifiers:
+            msg = "Composite execution is missing its active modifier"
+            raise ValueError(msg)
+
+        modifier = modifiers[0]
+        label: str | None = None
+        match modifier:
+            case IterateModifier():
+                pass
+            case ParamsIterateModifier():
+                label = child.definition.spec.suffix
+            case CasesIterateModifier():
+                label = child.definition.spec.suffix
+            case GroupsIterateModifier():
+                label = child.definition.spec.suffix
+            case _:
+                msg = f"Unknown modifier: {type(modifier).__name__}"
+                raise NotImplementedError(msg)
+
+        segment = f"{modifier.display_name}[{index}]"
+        if label:
+            segment = f"{segment}={label}"
+        return f"{parent_node_key}/{segment}"
+
+    def get_test_history(
+        self,
+        node_keys: Sequence[str],
+        limit: int = MAX_STORED_RUNS,
+    ) -> dict[str, tuple[TestStatus | None, ...]]:
+        requested = tuple(dict.fromkeys(node_keys))
+        if not requested:
+            return {}
+
+        with self._connect() as conn:
+            run_ids = [
+                row["run_id"]
+                for row in conn.execute(
+                    "SELECT run_id FROM runs ORDER BY start_time DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            ]
+            if not run_ids:
+                return {
+                    node_key: tuple(None for _ in range(limit))
+                    for node_key in requested
+                }
+
+            by_node = {
+                node_key: [None for _ in range(limit)] for node_key in requested
+            }
+            placeholders = ", ".join("?" for _ in run_ids)
+            key_placeholders = ", ".join("?" for _ in requested)
+            rows = conn.execute(
+                f"""
+                SELECT run_id, node_key, status
+                FROM test_executions
+                WHERE run_id IN ({placeholders}) AND node_key IN ({key_placeholders})
+                """,
+                (*run_ids, *requested),
+            ).fetchall()
+            run_index = {run_id: index for index, run_id in enumerate(run_ids)}
+            for row in rows:
+                node_key = row["node_key"]
+                if node_key is None:
+                    continue
+                by_node[node_key][run_index[row["run_id"]]] = TestStatus(
+                    row["status"]
+                )
+
+            return {
+                node_key: tuple(statuses)
+                for node_key, statuses in by_node.items()
+            }
 
     def get_run(self, run_id: UUID) -> Run | None:
         """Retrieve a test run by ID."""
