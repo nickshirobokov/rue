@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from rich.console import Console, Group, RenderableType
-from rich.markup import escape
 from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
@@ -32,6 +31,33 @@ if TYPE_CHECKING:
     from rue.testing.models.result import TestResult
 
     from .reporter import ConsoleReporter
+
+
+def _test_name_text(full_name: str) -> Text:
+    """Dim the `module::` prefix, bold the function name."""
+    text = Text()
+    if "::" in full_name:
+        prefix, _, func = full_name.rpartition("::")
+        text.append(f"{prefix}::", style="dim")
+        text.append(func, style="bold")
+    else:
+        text.append(full_name, style="bold")
+    return text
+
+
+def _sub_label_text(sub_label: str) -> Text:
+    """Dim the outer `[` `]` so the label content reads as the identifier."""
+    if (
+        len(sub_label) >= 2
+        and sub_label.startswith("[")
+        and sub_label.endswith("]")
+    ):
+        text = Text()
+        text.append("[", style="dim")
+        text.append(sub_label[1:-1])
+        text.append("]", style="dim")
+        return text
+    return Text(sub_label)
 
 
 class OutputMode(ABC):
@@ -101,7 +127,7 @@ class CompactMode(OutputMode):
             if path in state.completed_modules:
                 continue
             rel = safe_relative_path(path)
-            line = Text(f" • {rel.as_posix()} ")
+            line = Text(f" • {rel.as_posix()} ", style="dim")
             has_running = False
             for item in items:
                 execution = state.executions.get(item.spec.collection_index)
@@ -125,7 +151,7 @@ class CompactMode(OutputMode):
             if state.current_module is not None:
                 self.console.print()
             rel = safe_relative_path(definition.spec.module_path)
-            self.console.print(f" • {rel.as_posix()} ", end="")
+            self.console.print(Text(f" • {rel.as_posix()} ", style="dim"), end="")
             state.current_module = definition.spec.module_path
         self.console.print(Text(style.symbol, style=style.color), end="")
 
@@ -136,7 +162,7 @@ class CompactMode(OutputMode):
         state: ConsoleReporter,
     ) -> None:
         rel = safe_relative_path(path)
-        line = Text(f" • {rel.as_posix()} ")
+        line = Text(f" • {rel.as_posix()} ", style="dim")
         for item in items:
             execution = state.executions.get(item.spec.collection_index)
             if execution is not None:
@@ -178,12 +204,18 @@ class VerboseMode(OutputMode):
         name: str,
         result: TestResult,
         *,
+        modifier: str = "",
         extra: str = "",
         indent: int = 2,
+        sub: bool = False,
     ) -> Text:
         style = STATUS_STYLES[result.status]
         text = Text(" " * indent + "• ")
-        text.append(name)
+        text.append_text(
+            _sub_label_text(name) if sub else _test_name_text(name)
+        )
+        if modifier:
+            text.append(modifier, style="dim")
         text.append(f" ({result.duration_ms:.1f}ms)", style="dim")
         if extra:
             text.append(f" {extra}", style="dim")
@@ -200,14 +232,15 @@ class VerboseMode(OutputMode):
                 TestStatus.FAILED,
                 TestStatus.ERROR,
             }:
-                style = STATUS_STYLES[sub.result.status]
-                sub_label = f"[{sub.label}]"
-                modifier_suffix = self._get_modifier_suffix(sub)
-                line = Text(" " * indent + "• ")
-                line.append(f"{sub_label}{modifier_suffix}")
-                line.append(f" ({sub.result.duration_ms:.1f}ms)", style="dim")
-                line.append(f" {style.label}", style=style.color)
-                renderables.append(line)
+                renderables.append(
+                    self._render_test_line(
+                        f"[{sub.label}]",
+                        sub.result,
+                        modifier=self._get_modifier_suffix(sub),
+                        indent=indent,
+                        sub=True,
+                    )
+                )
             if sub.sub_executions:
                 renderables.extend(
                     self._iter_sub_executions(sub.sub_executions, indent + 2)
@@ -220,7 +253,7 @@ class VerboseMode(OutputMode):
             if path in state.completed_modules:
                 continue
             rel = safe_relative_path(path)
-            tree = Tree(f"• {rel.as_posix()}")
+            tree = Tree(Text(f"• {rel.as_posix()}", style="bold"))
             for item in items:
                 key = item.spec.collection_index
                 test = state.tests.get(key)
@@ -263,7 +296,7 @@ class VerboseMode(OutputMode):
         state: ConsoleReporter,
     ) -> None:
         rel = safe_relative_path(path)
-        tree = Tree(f"• {rel.as_posix()}")
+        tree = Tree(Text(f"• {rel.as_posix()}", style="bold"))
         for item in items:
             execution = state.executions.get(item.spec.collection_index)
             branch = tree.add(self._build_live_item_line(item, execution))
@@ -282,15 +315,15 @@ class VerboseMode(OutputMode):
             rel = safe_relative_path(definition.spec.module_path)
             if state.current_module is not None:
                 self.console.print(Text(""))
-            self.console.print(Text(f"• {rel.as_posix()}"))
+            self.console.print(Text(f"• {rel.as_posix()}", style="bold"))
             state.current_module = definition.spec.module_path
 
         if execution.sub_executions:
-            modifier_suffix = self._get_modifier_suffix(execution)
             self.console.print(
                 self._render_test_line(
-                    f"{definition.spec.full_name}{modifier_suffix}",
+                    definition.spec.full_name,
                     execution.result,
+                    modifier=self._get_modifier_suffix(execution),
                 )
             )
             for renderable in self._iter_sub_executions(
@@ -298,10 +331,11 @@ class VerboseMode(OutputMode):
             ):
                 self.console.print(renderable)
         else:
-            extra = execution.result.status_repr
             self.console.print(
                 self._render_test_line(
-                    definition.spec.full_name, execution.result, extra=extra
+                    definition.spec.full_name,
+                    execution.result,
+                    extra=execution.result.status_repr,
                 )
             )
 
@@ -311,20 +345,21 @@ class VerboseMode(OutputMode):
         execution: ExecutedTest | None,
     ) -> RenderableType:
         if execution is None:
-            text = Text.from_markup(
-                f"{item.spec.full_name} [dim]⋯ running[/dim]"
-            )
+            text = _test_name_text(item.spec.full_name)
+            text.append("  ")
+            text.append("⋯ running", style="dim")
             return self._render_spinner_line(text)
         result = execution.result
         style = STATUS_STYLES[result.status]
         extra = result.status_repr
         modifier_suffix = self._get_modifier_suffix(execution)
-        text = Text()
-        text.append(f"{item.spec.full_name}{modifier_suffix} ")
-        text.append(f"({result.duration_ms:.1f}ms) ", style="dim")
+        text = _test_name_text(item.spec.full_name)
+        if modifier_suffix:
+            text.append(modifier_suffix, style="dim")
+        text.append(f" ({result.duration_ms:.1f}ms)", style="dim")
         if extra:
-            text.append(f"{extra} ", style="dim")
-        text.append(style.label, style=style.color)
+            text.append(f" {extra}", style="dim")
+        text.append(f" {style.label}", style=style.color)
         return text
 
     def _add_live_composite_children(
@@ -333,25 +368,23 @@ class VerboseMode(OutputMode):
         for child in test.children:
             child_exec = state.all_executions.get(id(child.definition))
             if child_exec is not None:
-                style = STATUS_STYLES[child_exec.result.status]
-                sub_label = f"[{child_exec.label}]"
-                modifier_suffix = self._get_modifier_suffix(child_exec)
-                text = Text()
-                text.append(f"{sub_label}{modifier_suffix} ")
-                text.append(
-                    f"({child_exec.result.duration_ms:.1f}ms) ", style="dim"
+                parent.add(
+                    self._render_sub_live_line(
+                        f"[{child_exec.label}]",
+                        child_exec,
+                    )
                 )
-                text.append(style.label, style=style.color)
-                node = parent.add(text)
                 if child_exec.sub_executions:
                     self._add_live_sub_executions(
-                        node, child_exec.sub_executions, state
+                        parent.children[-1],
+                        child_exec.sub_executions,
+                        state,
                     )
             elif isinstance(child, CompositeTest):
-                pending = f"[{child.definition.spec.suffix or 'case'}]"
-                node = parent.add(
-                    Text.from_markup(f"{escape(pending)} [dim]⋯[/dim]")
-                )
+                pending_label = child.definition.spec.suffix or "case"
+                pending = _sub_label_text(f"[{pending_label}]")
+                pending.append("  ⋯", style="dim")
+                node = parent.add(pending)
                 self._add_live_composite_children(node, child, state)
 
     def _add_live_sub_executions(
@@ -367,16 +400,25 @@ class VerboseMode(OutputMode):
                 TestStatus.FAILED,
                 TestStatus.ERROR,
             }:
-                style = STATUS_STYLES[sub.result.status]
-                sub_label = f"[{sub.label}]"
-                modifier_suffix = self._get_modifier_suffix(sub)
-                text = Text()
-                text.append(f"{sub_label}{modifier_suffix} ")
-                text.append(f"({sub.result.duration_ms:.1f}ms) ", style="dim")
-                text.append(style.label, style=style.color)
-                node = parent.add(text)
+                node = parent.add(
+                    self._render_sub_live_line(f"[{sub.label}]", sub)
+                )
             if sub.sub_executions:
                 self._add_live_sub_executions(node, sub.sub_executions, state)
+
+    def _render_sub_live_line(
+        self, sub_label: str, execution: ExecutedTest
+    ) -> Text:
+        style = STATUS_STYLES[execution.result.status]
+        modifier_suffix = self._get_modifier_suffix(execution)
+        text = _sub_label_text(sub_label)
+        if modifier_suffix:
+            text.append(modifier_suffix, style="dim")
+        text.append(
+            f" ({execution.result.duration_ms:.1f}ms)", style="dim"
+        )
+        text.append(f" {style.label}", style=style.color)
+        return text
 
 
 def make_mode(verbosity: int, console: Console) -> OutputMode:

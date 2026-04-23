@@ -150,7 +150,9 @@ class MetricsRenderer:
         self._execution_lookup = lookup
         self._parents, self._children = self._build_graph()
 
-        renderables: list[RenderableType] = [Rule("METRICS", characters="=")]
+        renderables: list[RenderableType] = [
+            Rule(Text("METRICS", style="bold cyan"), characters="=")
+        ]
         if not self._groups:
             return renderables
 
@@ -258,13 +260,16 @@ class MetricsRenderer:
         for group in self._groups:
             match len(group.metrics):
                 case 1:
-                    scope_cell = group.key.scope.value
+                    scope_cell = Text(group.key.scope.value, style="dim")
                 case n:
-                    scope_cell = f"{group.key.scope.value} ×{n}"
+                    scope_text = Text(group.key.scope.value, style="dim")
+                    scope_text.append(f" ×{n}")
+                    scope_cell = scope_text
+            name_style = "bold red" if group.has_failures else "bold"
             table.add_row(
-                group.display_name,
+                Text(group.display_name, style=name_style),
                 scope_cell,
-                group.value_summary(),
+                Text(group.value_summary(), style="bold"),
                 self._assertion_summary(group),
                 self._contributor_counts(group),
             )
@@ -297,9 +302,10 @@ class MetricsRenderer:
             self._append_section(renderables, "Assertions", assertions)
 
         border_style = "red" if group.has_failures else "cyan"
+        title_style = "bold red" if group.has_failures else "bold"
         return Panel(
             Group(*renderables),
-            title=group.display_name,
+            title=Text(group.display_name, style=title_style),
             title_align="left",
             border_style=border_style,
             expand=True,
@@ -310,13 +316,19 @@ class MetricsRenderer:
         table = Table.grid(padding=(0, 1))
         table.add_column(style="bold", no_wrap=True)
         table.add_column()
-        table.add_row("Scope", group.key.scope.value)
+        table.add_row("Scope", Text(group.key.scope.value, style="dim"))
         table.add_row("Instances", str(len(group.metrics)))
-        table.add_row("Value", group.value_summary())
+        table.add_row("Value", Text(group.value_summary(), style="bold"))
 
         path_str = group.key.provider_path or group.key.provider_dir
         if path_str:
-            table.add_row("Path", safe_relative_path(Path(path_str)).as_posix())
+            table.add_row(
+                "Path",
+                Text(
+                    safe_relative_path(Path(path_str)).as_posix(),
+                    style="dim",
+                ),
+            )
 
         return table
 
@@ -428,7 +440,7 @@ class MetricsRenderer:
                 or "—",
                 self._format_values(metric.metadata.collected_from_tests)
                 or "—",
-                mv.value_str,
+                Text(mv.value_str, style="bold"),
                 self._instance_assertions(metric),
             )
         return table
@@ -579,7 +591,9 @@ class MetricsRenderer:
 
     @staticmethod
     def _tree_label(group: MetricGroup, *, current: bool) -> Text:
-        text = Text(group.display_name, style="bold" if current else "")
+        text = Text(
+            group.display_name, style="bold cyan" if current else ""
+        )
         if group.key.scope:
             text.append(f" [{group.key.scope.value}]", style="dim")
         return text

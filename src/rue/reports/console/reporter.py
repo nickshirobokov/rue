@@ -81,31 +81,46 @@ class ConsoleReporter(Reporter):
     def _build_run_header(
         self, environment: RunEnvironment, run_id: object
     ) -> Group:
+        platform_text = Text()
+        platform_text.append("platform ", style="dim")
+        platform_text.append(environment.platform)
+        platform_text.append("  python ", style="dim")
+        platform_text.append(environment.python_version)
+        platform_text.append("  rue ", style="dim")
+        platform_text.append(environment.rue_version)
+
+        rootdir_text = Text()
+        rootdir_text.append("rootdir: ", style="dim")
+        rootdir_text.append(str(environment.working_directory))
+
         parts: list[RenderableType] = [
-            Rule("RUE RUN STARTS", characters="="),
-            Text(
-                f"platform {environment.platform} -- python {environment.python_version}"
-                f" -- rue {environment.rue_version}"
-            ),
-            Text(f"rootdir: {environment.working_directory}"),
+            Rule(Text("RUE RUN STARTS", style="bold cyan"), characters="="),
+            platform_text,
+            rootdir_text,
         ]
         if run_id:
-            parts.append(Text(f"run_id: {run_id}"))
+            run_id_text = Text()
+            run_id_text.append("run_id: ", style="dim")
+            run_id_text.append(str(run_id), style="dim")
+            parts.append(run_id_text)
         if environment.branch and environment.commit_hash:
             commit = environment.commit_hash[:8]
             dirty = " dirty" if environment.dirty else ""
-            parts.append(Text(f"git: {environment.branch} ({commit}){dirty}"))
+            git_text = Text()
+            git_text.append("git: ", style="dim")
+            git_text.append(f"{environment.branch} ({commit}){dirty}")
+            parts.append(git_text)
         return Group(*parts)
 
     def _build_summary(self, run: Run) -> Group:
         result = run.result
         parts: list[str] = []
         if result.passed:
-            parts.append(f"[green]{result.passed} passed[/green]")
+            parts.append(f"[bold green]{result.passed} passed[/bold green]")
         if result.failed:
-            parts.append(f"[red]{result.failed} failed[/red]")
+            parts.append(f"[bold red]{result.failed} failed[/bold red]")
         if result.errors:
-            parts.append(f"[yellow]{result.errors} errors[/yellow]")
+            parts.append(f"[bold yellow]{result.errors} errors[/bold yellow]")
         if result.skipped:
             parts.append(f"[yellow]{result.skipped} skipped[/yellow]")
         if result.xfailed:
@@ -114,10 +129,12 @@ class ConsoleReporter(Reporter):
             parts.append(f"[magenta]{result.xpassed} xpassed[/magenta]")
 
         summary = ", ".join(parts) if parts else "[dim]0 tests[/dim]"
-        summary_line = f"run_id: {run.run_id}\n{summary} in {result.total_duration_ms:.0f}ms"
+        duration_line = f"{summary} [dim]in {result.total_duration_ms:.0f}ms[/dim]"
+        run_id_line = f"[dim]run_id: {run.run_id}[/dim]"
         return Group(
-            Rule("SUMMARY", characters="="),
-            Text.from_markup(f"[bold]{summary_line}[/bold]", justify="center"),
+            Rule(Text("SUMMARY", style="bold cyan"), characters="="),
+            Text.from_markup(duration_line, justify="center"),
+            Text.from_markup(run_id_line, justify="center"),
             Rule(characters="="),
         )
 
@@ -202,7 +219,9 @@ class ConsoleReporter(Reporter):
         self.console.print(self._build_run_header(run.environment, run.run_id))
         self.console.print()
         if self._mode.show_collected_count:
-            self.console.print(f"[bold]Collected {len(items)} tests[/bold]\n")
+            self.console.print(
+                f"Collected [bold cyan]{len(items)}[/bold cyan] tests\n"
+            )
 
         if self.console.is_terminal:
             self._live = Live(

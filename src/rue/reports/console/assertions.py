@@ -31,7 +31,11 @@ class AssertionRenderer:
             return []
         renderables: list[RenderableType] = [
             Text(""),
-            Rule("ASSERTIONS", characters="=", style="bold red"),
+            Rule(
+                Text("ASSERTIONS", style="bold red"),
+                characters="=",
+                style="red",
+            ),
         ]
         for index, failure in enumerate(relevant):
             if index:
@@ -81,7 +85,7 @@ class AssertionRenderer:
 
         return Panel(
             panel_content,
-            title=title or execution.label,
+            title=Text(title or execution.label, style=f"bold {style.color}"),
             title_align="left",
             border_style=style.color,
             expand=True,

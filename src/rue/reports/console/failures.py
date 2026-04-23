@@ -43,7 +43,11 @@ class ExceptionRenderer:
             return []
         renderables: list[RenderableType] = [
             Text(""),
-            Rule("ERRORS", characters="="),
+            Rule(
+                Text("ERRORS", style="bold red"),
+                characters="=",
+                style="red",
+            ),
         ]
         for index, failure in enumerate(relevant):
             if index:
@@ -95,7 +99,7 @@ class ExceptionRenderer:
 
         return Panel(
             panel_content,
-            title=title or execution.label,
+            title=Text(title or execution.label, style=f"bold {style.color}"),
             title_align="left",
             border_style=style.color,
             expand=True,

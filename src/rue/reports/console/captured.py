@@ -47,7 +47,11 @@ class CapturedOutputRenderer:
             return []
         renderables: list[RenderableType] = [
             Text(""),
-            Rule("WARNINGS", characters="="),
+            Rule(
+                Text("WARNINGS", style="bold yellow"),
+                characters="=",
+                style="yellow",
+            ),
         ]
         for line, count in Counter(lines).items():
             label = f"{line} (x{count})" if count > 1 else line
