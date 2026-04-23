@@ -1,6 +1,7 @@
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 from tomlkit import parse
 from typer.testing import CliRunner
 
@@ -56,9 +57,26 @@ class TestResolveReporters:
         assert overridden.reporters == ["ConsoleReporter"]
 
 
-def test_resolve_otel_defaults_to_enabled():
-    result = runner.invoke(app, ["test", "--no-db", "--help"])
+def test_top_level_help_lists_tests_command():
+    result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
+    assert "│ tests " in result.stdout
+    assert "\n│ test  " not in result.stdout
+
+
+def test_tests_group_help_does_not_invoke_run_help():
+    result = runner.invoke(app, ["tests", "--help"])
+    assert result.exit_code == 0
+    assert "Usage: rue tests [OPTIONS] COMMAND [ARGS]..." in result.stdout
+    assert "--run-id" not in result.stdout
+
+
+def test_tests_run_help_exposes_run_options():
+    result = runner.invoke(app, ["tests", "run", "--help"])
+    assert result.exit_code == 0
+    assert "--run-id" in result.stdout
+    assert "--no-db" in result.stdout
+    assert "--otel" in result.stdout
 
 
 def test_cli_otel_flag_parsing():
@@ -74,11 +92,17 @@ def test_cli_no_otel_flag_overrides_config():
 
 
 def test_cli_rejects_invalid_run_id():
-    result = runner.invoke(app, ["test", "--run-id", "not-a-uuid"])
+    result = runner.invoke(app, ["tests", "run", "--run-id", "not-a-uuid"])
     assert result.exit_code == 2
 
 
+@pytest.mark.parametrize(
+    "command",
+    [["tests"], ["tests", "run"]],
+    ids=["alias", "run"],
+)
 def test_run_tests_returns_2_when_run_id_already_exists(
+    command: list[str],
     sqlite_db_path: Path, sqlite_store: SQLiteStore, monkeypatch
 ):
     existing_run_id = uuid4()
@@ -103,18 +127,18 @@ def test_run_tests_returns_2_when_run_id_already_exists(
         raise AssertionError(msg)
 
     monkeypatch.setattr(
-        "rue.cli.TestSpecCollector.build_spec_collection", _build
+        "rue.cli.tests.TestSpecCollector.build_spec_collection", _build
     )
     monkeypatch.setattr(
-        "rue.cli.TestLoader.load_from_collection",
+        "rue.cli.tests.TestLoader.load_from_collection",
         lambda self, collection: [make_item("test_ok", set())],
     )
-    monkeypatch.setattr("rue.cli.Runner.run", _fail_run)
+    monkeypatch.setattr("rue.cli.tests.Runner.run", _fail_run)
 
     result = runner.invoke(
         app,
         [
-            "test",
+            *command,
             "--db-path",
             str(sqlite_db_path),
             "--run-id",
@@ -150,19 +174,20 @@ def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
             return Run()
 
     monkeypatch.setattr(
-        "rue.cli.TestSpecCollector.build_spec_collection",
+        "rue.cli.tests.TestSpecCollector.build_spec_collection",
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.TestLoader.load_from_collection",
+        "rue.cli.tests.TestLoader.load_from_collection",
         lambda self, collection: [make_item("test_ok", set())],
     )
-    monkeypatch.setattr("rue.cli.Runner", FakeRunner)
+    monkeypatch.setattr("rue.cli.tests.Runner", FakeRunner)
 
     result = runner.invoke(
         app,
         [
-            "test",
+            "tests",
+            "run",
             "--db-path",
             str(tmp_path / "rue.db"),
             "--reporter",
@@ -180,18 +205,82 @@ def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
     assert captured["capture_output"] is False
 
 
-def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(monkeypatch):
+@pytest.mark.parametrize(
+    "command",
+    [["tests"], ["tests", "run"]],
+    ids=["alias", "run"],
+)
+def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(
+    command: list[str], monkeypatch
+):
     monkeypatch.setattr(
-        "rue.cli.TestSpecCollector.build_spec_collection",
+        "rue.cli.tests.TestSpecCollector.build_spec_collection",
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.TestLoader.load_from_collection",
+        "rue.cli.tests.TestLoader.load_from_collection",
         lambda self, collection: [make_item("test_ok", set())],
     )
 
-    result = runner.invoke(app, ["test", "--run-id", str(uuid4()), "--no-db"])
+    result = runner.invoke(
+        app, [*command, "--run-id", str(uuid4()), "--no-db"]
+    )
     assert result.exit_code == 0
+
+
+def test_tests_without_subcommand_defaults_to_run(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeRunner:
+        def __init__(
+            self,
+            *,
+            config,
+            reporters,
+            store=None,
+            fail_fast=False,
+            capture_output=True,
+        ) -> None:
+            captured["config"] = config
+            captured["reporters"] = reporters
+            captured["store"] = store
+            captured["fail_fast"] = fail_fast
+            captured["capture_output"] = capture_output
+
+        async def run(self, items, *, run_id=None):
+            captured["items"] = items
+            captured["run_id"] = run_id
+            return Run()
+
+    def build_spec_collection(self, paths, **kwargs):
+        del self, kwargs
+        captured["paths"] = paths
+        return TestSpecCollection(suite_root=Path.cwd())
+
+    monkeypatch.setattr(
+        "rue.cli.tests.load_config", lambda: Config(db_enabled=False)
+    )
+    monkeypatch.setattr(
+        "rue.cli.tests.TestSpecCollector.build_spec_collection",
+        build_spec_collection,
+    )
+    monkeypatch.setattr(
+        "rue.cli.tests.TestLoader.load_from_collection",
+        lambda self, collection: [make_item("test_ok", set())],
+    )
+    monkeypatch.setattr("rue.cli.tests.Runner", FakeRunner)
+
+    result = runner.invoke(app, ["tests"])
+
+    assert result.exit_code == 0
+    assert captured["paths"] == ["."]
+    assert captured["store"] is None
+
+
+def test_rue_test_command_is_unknown():
+    result = runner.invoke(app, ["test", "--no-db"])
+    assert result.exit_code == 2
+    assert "No such command 'test'" in result.output
 
 
 def test_rue_init_writes_pytest_entrypoint(tmp_path, monkeypatch):

@@ -2,7 +2,7 @@
 title: "Rue OpenTelemetry Traces"
 ---
 
-Rue OpenTelemetry capture is **Runner-managed**, while persistence is **reporter-managed**. Traces exist only while a test function is executing inside an active OpenTelemetry-enabled test execution created by `Runner` or `uv run rue test`.
+Rue OpenTelemetry capture is **Runner-managed**, while persistence is **reporter-managed**. Traces exist only while a test function is executing inside an active OpenTelemetry-enabled test execution created by `Runner` or `uv run rue tests run`.
 
 ## OpenTelemetry Defaults
 
@@ -10,16 +10,16 @@ Rue OpenTelemetry capture is **Runner-managed**, while persistence is **reporter
 
 ```bash
 # OpenTelemetry is enabled by default
-uv run rue test
+uv run rue tests run
 
 # Disable OpenTelemetry explicitly, even if config enables it
-uv run rue test --no-otel
+uv run rue tests run --no-otel
 
 # Force-enable OpenTelemetry if config or environment disabled it
-uv run rue test --otel
+uv run rue tests run --otel
 
 # If you override reporters, keep OtelReporter attached for local trace files
-uv run rue test --reporter ConsoleReporter --reporter OtelReporter
+uv run rue tests run --reporter ConsoleReporter --reporter OtelReporter
 ```
 
 ### Config
@@ -96,7 +96,7 @@ Available read-only span accessors on `SUT`:
 ## Storage
 
 - Capture is enabled by default; persistence still happens only when an `OtelReporter` is attached
-- In the usual fresh-process setup, `uv run rue test` writes `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set
+- In the usual fresh-process setup, `uv run rue tests run` writes `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set
 - If you override the reporter list and omit `OtelReporter`, Rue captures traces but does not persist local trace files
 - `OtelReporter` stores compact JSON payloads under `.rue/traces/<run_id>/<execution_id>.json`
 - `OtelReporter` keeps only the 5 most recent run directories under `.rue/traces`

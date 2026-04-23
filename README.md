@@ -24,7 +24,7 @@ Follow pytest habits...
 - Use 'rue.resource' instead of 'pytest.fixture'
 - Put shared suite setup, shared resources, and directory-specific overrides in `conftest.py` or `confrue_*.py` files. Rue loads `conftest.py` first in each directory. See [confrue files](docs/concepts/confrue-files.mdx)
 - Add 'assert' expressions within the functions
-- Run 'uv run rue test'
+- Run 'uv run rue tests run'
 
 Rue only collects tests marked through Rue decorators, so pytest and Rue tests can live side by side in the same `test_*.py` module.
 
@@ -97,13 +97,13 @@ async def test_chatbot_no_hallucinations(
 Run it:
 
 ```bash
-uv run rue test
+uv run rue tests run
 ```
 
 Use a custom run UUID when you need stable correlation IDs:
 
 ```bash
-uv run rue test --run-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
+uv run rue tests run --run-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
 ```
 
 Output:

@@ -3,13 +3,13 @@
 Run with different concurrency levels to see the difference:
 
     # Sequential (default) - ~3 seconds
-    rue test examples/test_example_concurrency.py
+    rue tests run examples/test_example_concurrency.py
 
     # Concurrent with 5 workers - ~1.2 seconds
-    rue test examples/test_example_concurrency.py --concurrency 5
+    rue tests run examples/test_example_concurrency.py --concurrency 5
 
     # Unlimited concurrency (capped at 10) - ~0.6 seconds
-    rue test examples/test_example_concurrency.py --concurrency 0
+    rue tests run examples/test_example_concurrency.py --concurrency 0
 """
 
 import asyncio

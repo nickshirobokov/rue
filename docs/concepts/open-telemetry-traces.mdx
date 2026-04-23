@@ -30,21 +30,21 @@ Inside that test span, you’ll typically see:
 OpenTelemetry capture is enabled by default:
 
 ```bash
-uv run rue test
+uv run rue tests run
 ```
 
 Use `--no-otel` to opt out for a run:
 
 ```bash
-uv run rue test --no-otel
+uv run rue tests run --no-otel
 ```
 
-In the usual fresh-process setup, `uv run rue test` also writes local JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set. Those files are separate from SQLite storage.
+In the usual fresh-process setup, `uv run rue tests run` also writes local JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set. Those files are separate from SQLite storage.
 
 If you override the reporter list, keep `OtelReporter` attached when you still want local trace files:
 
 ```bash
-uv run rue test --reporter ConsoleReporter --reporter OtelReporter
+uv run rue tests run --reporter ConsoleReporter --reporter OtelReporter
 ```
 
 If you override reporters and omit `OtelReporter`, Rue still captures trace data for the run, but it does not persist local `.rue/traces/...` files.

@@ -11,16 +11,18 @@ This page covers **how to run tests** and **how the reporting system works**, re
 Run all discovered tests in the current directory:
 
 ```bash
-uv run rue test
+uv run rue tests run
 ```
 
-After installation, the same entrypoint is also available as `rue test`.
+After installation, the same entrypoint is also available as `rue tests run`.
+Use `rue tests` as the shorthand alias when you want the default `run`
+subcommand.
 
 Run tests from specific paths:
 
 ```bash
-uv run rue test tests/
-uv run rue test test_chatbot.py test_agent.py
+uv run rue tests run tests/
+uv run rue tests run test_chatbot.py test_agent.py
 ```
 
 ## Filtering Tests
@@ -31,14 +33,14 @@ Use `-k` to filter tests by name with boolean expressions:
 
 ```bash
 # Run tests with "chatbot" in the name
-uv run rue test -k chatbot
+uv run rue tests run -k chatbot
 
 # Boolean operators: and, or, not
-uv run rue test -k "chatbot and not slow"
-uv run rue test -k "gpt4 or claude"
+uv run rue tests run -k "chatbot and not slow"
+uv run rue tests run -k "gpt4 or claude"
 
 # Grouping with parentheses
-uv run rue test -k "(fast or smoke) and not flaky"
+uv run rue tests run -k "(fast or smoke) and not flaky"
 ```
 
 Keyword matching is substring-based: `-k agent` matches `test_agent_response`, `test_weather_agent`, etc.
@@ -51,27 +53,27 @@ Use `-t`/`--tag` to include tests with specific tags:
 
 ```bash
 # Run tests tagged "smoke"
-uv run rue test --tag smoke
+uv run rue tests run --tag smoke
 
 # Multiple tags (OR logic)
-uv run rue test --tag smoke --tag fast
+uv run rue tests run --tag smoke --tag fast
 ```
 
 Use `--skip-tag` to exclude tests:
 
 ```bash
 # Skip slow tests
-uv run rue test --skip-tag slow
+uv run rue tests run --skip-tag slow
 
 # Skip multiple tags
-uv run rue test --skip-tag slow --skip-tag flaky
+uv run rue tests run --skip-tag slow --skip-tag flaky
 ```
 
 **Combine filters**:
 
 ```bash
 # Run fast smoke tests about chatbots
-uv run rue test --tag smoke --tag fast -k chatbot
+uv run rue tests run --tag smoke --tag fast -k chatbot
 ```
 
 ## Controlling Execution
@@ -81,13 +83,13 @@ uv run rue test --tag smoke --tag fast -k chatbot
 **`--maxfail N`** - Stop after N failures:
 
 ```bash
-uv run rue test --maxfail 3  # Stop after 3 failures
+uv run rue tests run --maxfail 3  # Stop after 3 failures
 ```
 
 **`--fail-fast`** - Stop at the first failed assertion within a test:
 
 ```bash
-uv run rue test --fail-fast
+uv run rue tests run --fail-fast
 ```
 
 Without `--fail-fast`, Rue collects all assertion failures in a test. With it, the test stops at the first failure.
@@ -98,13 +100,13 @@ Control parallel test execution with `--concurrency`:
 
 ```bash
 # Sequential (default)
-uv run rue test --concurrency 1
+uv run rue tests run --concurrency 1
 
 # 5 concurrent tests
-uv run rue test --concurrency 5
+uv run rue tests run --concurrency 5
 
 # Unlimited (capped at 10)
-uv run rue test --concurrency 0
+uv run rue tests run --concurrency 0
 ```
 
 **When to use concurrency**:
@@ -125,7 +127,7 @@ Set a global timeout for the entire test run:
 
 ```bash
 # Stop after 300 seconds (5 minutes)
-uv run rue test --timeout 300
+uv run rue tests run --timeout 300
 ```
 
 The timeout applies to the entire test session, not individual tests.
@@ -138,16 +140,16 @@ Control output detail with `-v` (verbose) or `-q` (quiet):
 
 ```bash
 # Minimal output (only failures)
-uv run rue test -q
+uv run rue tests run -q
 
 # Very minimal
-uv run rue test -qq
+uv run rue tests run -qq
 
 # Verbose output
-uv run rue test -v
+uv run rue tests run -v
 
 # Very verbose
-uv run rue test -vv
+uv run rue tests run -vv
 ```
 
 **Verbosity levels**:
@@ -162,10 +164,10 @@ By default, Rue captures stdout and stderr only while a wrapped `SUT` call is ru
 
 ```bash
 # Show SUT output in real-time (still captured on the SUT)
-uv run rue test -s
+uv run rue tests run -s
 
 # Or the long form
-uv run rue test --show-output
+uv run rue tests run --show-output
 ```
 
 Assert against `sut.stdout`, `sut.stderr`, or `sut.captured_output` inside your test. Output written outside an active wrapped `SUT` call is not stored on a Rue API.
@@ -176,16 +178,16 @@ Rue enables OpenTelemetry capture by default so spans from your SUT and tests ar
 
 ```bash
 # Default behavior
-uv run rue test
+uv run rue tests run
 
 # Disable OpenTelemetry for this run
-uv run rue test --no-otel
+uv run rue tests run --no-otel
 
 # If you override reporters, keep OtelReporter attached for local trace files
-uv run rue test --reporter ConsoleReporter --reporter OtelReporter
+uv run rue tests run --reporter ConsoleReporter --reporter OtelReporter
 ```
 
-In the usual fresh-process setup, `uv run rue test` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set. Each file stores `run_id`, `execution_id`, and a nested `trace` tree rooted at the test span.
+In the usual fresh-process setup, `uv run rue tests run` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set. Each file stores `run_id`, `execution_id`, and a nested `trace` tree rooted at the test span.
 
 If you override the reporter list and leave out `OtelReporter`, Rue still captures traces for the run, but it does not write local `.rue/traces/...` files.
 
@@ -206,7 +208,7 @@ need a stable external correlation ID (for example, linking CI jobs to Rue runs)
 Provide a UUID with `--run-id`:
 
 ```bash
-uv run rue test --run-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
+uv run rue tests run --run-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
 ```
 
 If that UUID already exists in the configured SQLite database, the command exits with code `2`
@@ -501,17 +503,17 @@ asyncio.run(main())
 
 **Run smoke tests concurrently**:
 ```bash
-uv run rue test --tag smoke --concurrency 5
+uv run rue tests run --tag smoke --concurrency 5
 ```
 
 **Debug a specific test with OpenTelemetry**:
 ```bash
-uv run rue test -k "agent_tool_call" -vv
+uv run rue tests run -k "agent_tool_call" -vv
 ```
 
 **Run fast tests, stop on first failure**:
 ```bash
-uv run rue test --tag fast --fail-fast
+uv run rue tests run --tag fast --fail-fast
 ```
 
 **CI configuration** (pyproject.toml):
@@ -543,7 +545,7 @@ The database location is determined by walking up from the current directory to 
 To disable database writes (e.g., for CI environments or quick local runs):
 
 ```bash
-uv run rue test --no-db
+uv run rue tests run --no-db
 ```
 
 ### Custom Database Path
@@ -551,7 +553,7 @@ uv run rue test --no-db
 Specify a custom database location:
 
 ```bash
-uv run rue test --db-path /path/to/custom/rue.db
+uv run rue tests run --db-path /path/to/custom/rue.db
 ```
 
 Or configure in `pyproject.toml`:

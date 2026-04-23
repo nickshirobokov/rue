@@ -9,7 +9,7 @@ assert the workflow ran end-to-end even when cases are split across local and
 subprocess backends.
 
 Run with concurrent local and subprocess workers:
-    uv run rue test examples/test_example_mixed_backends.py --concurrency 4
+    uv run rue tests run examples/test_example_mixed_backends.py --concurrency 4
 
 With the default reporter set, Rue also persists trace artifacts under
 `.rue/traces/<run_id>/<execution_id>.json`.

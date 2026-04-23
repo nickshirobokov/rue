@@ -7,7 +7,7 @@ when a test should block only its own module queue, and
 @rue.test.backend(ExecutionBackend.MAIN)
 when a test must execute on the true main thread and block all work.
 
-    uv run rue test examples/test_example_run_inline.py -v
+    uv run rue tests run examples/test_example_run_inline.py -v
 """
 
 import threading

@@ -6,10 +6,10 @@ This example shows how to:
 3. Persist local trace files with the `OtelReporter`
 
 Run with default OpenTelemetry capture:
-    uv run rue test examples/test_example_otel_spans.py
+    uv run rue tests run examples/test_example_otel_spans.py
 
 Persist local trace files too:
-    uv run rue test examples/test_example_otel_spans.py --reporter ConsoleReporter --reporter OtelReporter
+    uv run rue tests run examples/test_example_otel_spans.py --reporter ConsoleReporter --reporter OtelReporter
 """
 
 import asyncio
