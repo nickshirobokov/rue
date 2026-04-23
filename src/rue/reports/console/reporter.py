@@ -29,7 +29,7 @@ from rue.testing.models import TestStatus
 if TYPE_CHECKING:
     from rue.config import Config
     from rue.testing import LoadedTestDef
-    from rue.testing.execution.interfaces import ExecutableTest
+    from rue.testing.execution.base import ExecutableTest
     from rue.testing.models.executed import ExecutedTest
     from rue.testing.models.run import Run, RunEnvironment
 

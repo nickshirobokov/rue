@@ -5,8 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from dataclasses import dataclass, field
 
-from rue.testing.execution.interfaces import ExecutableTest
-from rue.testing.execution.types import ExecutionBackend
+from rue.testing.execution.base import ExecutableTest, ExecutionBackend
 
 
 @dataclass(slots=True)

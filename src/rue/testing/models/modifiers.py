@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from rue.testing.execution.types import ExecutionBackend
 from rue.testing.models.case import Case, CaseGroup
+
+if TYPE_CHECKING:
+    from rue.testing.execution.base import ExecutionBackend
 
 
 @dataclass(frozen=True)

@@ -21,16 +21,14 @@ from rue.resources import ResourceResolver, registry, resource
 from rue.resources.models import Scope
 from rue.telemetry import OtelTraceArtifact
 from rue.testing.execution.factory import DefaultTestFactory
-from rue.testing.execution.local.single import LocalSingleTest
-from rue.context.process_pool import CURRENT_PROCESS_POOL
-from rue.testing.execution.remote.models import (
+from rue.testing.execution.worker import (
     ExecutorPayload,
     RemoteExecutionResult,
+    run_remote_test,
 )
-from rue.testing.execution.remote.single import (
-    RemoteSingleTest,
-)
-from rue.testing.execution.types import ExecutionBackend
+from rue.context.process_pool import CURRENT_PROCESS_POOL
+from rue.testing.execution.single import SingleTest
+from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import (
     BackendModifier,
     IterateModifier,
@@ -195,7 +193,7 @@ class TestFactoryDispatch:
     def test_local_by_default(self):
         factory = DefaultTestFactory(config=Config(), run_id=uuid4())
         built = factory.build(self._definition())
-        assert isinstance(built, LocalSingleTest)
+        assert isinstance(built, SingleTest)
         assert built.backend is ExecutionBackend.ASYNCIO
 
     def test_remote_when_backend_modifier_present(self):
@@ -205,7 +203,7 @@ class TestFactoryDispatch:
             self._definition(backend=ExecutionBackend.SUBPROCESS)
         )
 
-        assert isinstance(built, RemoteSingleTest)
+        assert isinstance(built, SingleTest)
 
     def test_invalid_backend_string_rejected(self):
         with pytest.raises(ValueError):
@@ -222,20 +220,18 @@ class TestFactoryDispatch:
         )
 
         assert len(built.children) == 3
-        assert all(isinstance(c, RemoteSingleTest) for c in built.children)
+        assert all(isinstance(c, SingleTest) for c in built.children)
 
 
 # ---------------------------------------------------------------------------
-# RemoteSingleTest payload building + ExecutedTest wiring
+# SingleTest subprocess payload building + ExecutedTest wiring
 # ---------------------------------------------------------------------------
 
 
-class TestRemoteSingleTest:
+class TestSingleTestSubprocess:
     def test_rejects_modifiers(self):
-        with pytest.raises(
-            ValueError, match="RemoteSingleTest should not have modifiers"
-        ):
-            RemoteSingleTest(
+        with pytest.raises(ValueError, match="SingleTest should not have modifiers"):
+            SingleTest(
                 definition=make_definition(
                     modifiers=[IterateModifier(count=2, min_passes=2)],
                     backend=ExecutionBackend.SUBPROCESS,
@@ -265,7 +261,7 @@ class TestRemoteSingleTest:
             telemetry_artifacts=(),
             sync_update=b"",
         )
-        remote = RemoteSingleTest(
+        remote = SingleTest(
             definition=definition,
             params={},
             backend=ExecutionBackend.SUBPROCESS,
@@ -282,8 +278,6 @@ class TestRemoteSingleTest:
 
         assert len(pool.submitted) == 1
         submitted_fn, args, _ = pool.submitted[0]
-        from rue.testing.execution.remote.worker import run_remote_test
-
         assert submitted_fn is run_remote_test
         (payload,) = args
         assert isinstance(payload, ExecutorPayload)
@@ -328,7 +322,7 @@ class TestRemoteSingleTest:
                 )
                 return future
 
-        remote = RemoteSingleTest(
+        remote = SingleTest(
             definition=definition,
             params={},
             backend=ExecutionBackend.SUBPROCESS,
@@ -352,7 +346,7 @@ class TestRemoteSingleTest:
 
     @pytest.mark.asyncio
     async def test_skips_when_stopped(self):
-        remote = RemoteSingleTest(
+        remote = SingleTest(
             definition=make_definition("sample"),
             params={},
             backend=ExecutionBackend.SUBPROCESS,
@@ -380,7 +374,7 @@ class TestRemoteSingleTest:
             skip_reason="no thanks",
         )
 
-        remote = RemoteSingleTest(
+        remote = SingleTest(
             definition=definition,
             params={},
             backend=ExecutionBackend.SUBPROCESS,
@@ -408,7 +402,7 @@ class TestRemoteSingleTest:
         async def capture(execution):
             on_complete(execution)
 
-        remote = RemoteSingleTest(
+        remote = SingleTest(
             definition=make_definition("sample"),
             params={},
             backend=ExecutionBackend.SUBPROCESS,
@@ -437,7 +431,7 @@ class TestRemoteSingleTest:
         )
         semaphore = asyncio.Semaphore(1)
         tests = [
-            RemoteSingleTest(
+            SingleTest(
                 definition=make_definition(
                     f"sample_{idx}",
                     suite_root=tmp_path,

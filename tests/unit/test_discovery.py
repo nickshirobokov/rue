@@ -7,7 +7,7 @@ import pytest
 from rue.config import Config
 from rue.resources import Scope, registry
 from rue.testing.discovery import KeywordMatcher, TestLoader, TestSpecCollector
-from rue.testing.execution.types import ExecutionBackend
+from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import (
     BackendModifier,
     ParameterSet,

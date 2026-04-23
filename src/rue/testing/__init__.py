@@ -1,7 +1,7 @@
 """Rue testing package — discovery, execution, and decorators."""
 
 from ..resources import resource
-from .execution.types import ExecutionBackend
+from .execution.base import ExecutionBackend
 from .decorators import backend, iterate, tag, test
 from .models import (
     Case,
@@ -12,7 +12,7 @@ from .models import (
     TestStatus,
 )
 from .outcomes import fail, skip, xfail
-from .queue import QueueBatch, RunnerStep, SessionQueue
+from .execution.queue import QueueBatch, RunnerStep, SessionQueue
 from .runner import Runner
 
 

@@ -28,6 +28,17 @@ def make_item(
     )
 
 
+def make_environment(**updates) -> RunEnvironment:
+    return RunEnvironment(
+        python_version="3.12.0",
+        platform="darwin",
+        hostname="host",
+        working_directory="/tmp/project",
+        rue_version="1.0.0",
+        **updates,
+    )
+
+
 class TestResolveReporters:
     """Tests for reporter resolution via CLI and Config."""
 
@@ -75,7 +86,7 @@ def test_run_tests_returns_2_when_run_id_already_exists(
     sqlite_store.save_run(
         Run(
             run_id=existing_run_id,
-            environment=RunEnvironment(rue_version="1.0.0"),
+            environment=make_environment(),
             result=RunResult(),
         )
     )

@@ -19,6 +19,17 @@ from rue.testing.models.run import Run, RunEnvironment, RunResult
 from tests.unit.factories import make_definition
 
 
+def make_environment(**updates) -> RunEnvironment:
+    return RunEnvironment(
+        python_version="3.12.0",
+        platform="darwin",
+        hostname="host",
+        working_directory="/tmp/project",
+        rue_version="1.0.0",
+        **updates,
+    )
+
+
 def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     case_id = uuid4()
     execution_id = uuid4()
@@ -82,16 +93,10 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         execution_id=execution_id,
     )
 
-    environment = RunEnvironment(
+    environment = make_environment(
         commit_hash="abc123",
         branch="main",
         dirty=False,
-        python_version="3.12.0",
-        platform="darwin",
-        hostname="host",
-        working_directory="/tmp/project",
-        rue_version="1.0.0",
-        env_vars={"ENV": "1"},
     )
 
     run = Run(
@@ -156,14 +161,14 @@ def test_sqlite_store_list_runs(sqlite_store: SQLiteStore) -> None:
         run_id=uuid4(),
         start_time=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
         end_time=datetime(2024, 1, 1, 10, 10, tzinfo=UTC),
-        environment=RunEnvironment(rue_version="1.0.0"),
+        environment=make_environment(),
         result=RunResult(),
     )
     run_two = Run(
         run_id=uuid4(),
         start_time=datetime(2024, 1, 2, 10, 0, tzinfo=UTC),
         end_time=datetime(2024, 1, 2, 10, 10, tzinfo=UTC),
-        environment=RunEnvironment(rue_version="1.0.0"),
+        environment=make_environment(),
         result=RunResult(),
     )
 
@@ -235,7 +240,7 @@ def test_sqlite_store_assertions_and_predicates(
     run = Run(
         run_id=uuid4(),
         start_time=datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
-        environment=RunEnvironment(rue_version="1.0.0"),
+        environment=make_environment(),
         result=RunResult(
             executions=[execution],
             metric_results=[metric_result],
@@ -275,7 +280,7 @@ def test_sqlite_store_prunes_old_runs(sqlite_store: SQLiteStore) -> None:
             run_id=uuid4(),
             start_time=datetime(2024, 1, i + 1, 10, 0, tzinfo=UTC),
             end_time=datetime(2024, 1, i + 1, 10, 10, tzinfo=UTC),
-            environment=RunEnvironment(rue_version="1.0.0"),
+            environment=make_environment(),
             result=RunResult(),
         )
         created_run_ids.append(run.run_id)

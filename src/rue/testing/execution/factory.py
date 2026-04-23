@@ -9,12 +9,9 @@ from typing import Any
 from uuid import UUID
 
 from rue.config import Config
-from rue.testing.execution.interfaces import ExecutableTest
-from rue.testing.execution.local.composite import LocalCompositeTest
-from rue.testing.execution.local.single import LocalSingleTest
-from rue.testing.queue import SessionQueue
-from rue.testing.execution.remote.single import RemoteSingleTest
-from rue.testing.execution.types import ExecutionBackend
+from rue.testing.execution.composite import CompositeTest
+from rue.testing.execution.base import ExecutableTest, ExecutionBackend
+from rue.testing.execution.single import SingleTest
 from rue.testing.models import (
     BackendModifier,
     CasesIterateModifier,
@@ -23,7 +20,7 @@ from rue.testing.models import (
     ParamsIterateModifier,
     LoadedTestDef,
 )
-from rue.testing.tracing import build_test_tracer
+from rue.testing.execution.queue import SessionQueue
 
 
 @dataclass
@@ -52,34 +49,25 @@ class DefaultTestFactory:
         modifiers = definition.spec.modifiers
 
         if not modifiers:
+            if backend is ExecutionBackend.SUBPROCESS:
+                sync_actor_id = self._next_sync_actor_id
+                self._next_sync_actor_id += 1
+            else:
+                sync_actor_id = 1
             match backend:
-                case ExecutionBackend.SUBPROCESS:
-                    sync_actor_id = self._next_sync_actor_id
-                    self._next_sync_actor_id += 1
-                    test = RemoteSingleTest(
-                        definition=definition,
-                        params=params,
-                        config=self.config,
-                        run_id=self.run_id,
-                        sync_actor_id=sync_actor_id,
-                        backend=backend,
-                        semaphore=self.semaphore,
-                        is_stopped=self.is_stopped,
-                        on_complete=self.on_complete,
-                    )
                 case (
-                    ExecutionBackend.MAIN
+                    ExecutionBackend.SUBPROCESS
+                    | ExecutionBackend.MAIN
                     | ExecutionBackend.MODULE_MAIN
                     | ExecutionBackend.ASYNCIO
                 ):
-                    test = LocalSingleTest(
+                    test = SingleTest(
                         definition=definition,
                         params=params,
                         backend=backend,
-                        tracer=build_test_tracer(
-                            config=self.config,
-                            run_id=self.run_id,
-                        ),
+                        config=self.config,
+                        run_id=self.run_id,
+                        sync_actor_id=sync_actor_id,
                         semaphore=self.semaphore,
                         is_stopped=self.is_stopped,
                         on_complete=self.on_complete,
@@ -121,7 +109,7 @@ class DefaultTestFactory:
                     )
                     for i in range(count)
                 ]
-                test = LocalCompositeTest(
+                test = CompositeTest(
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
@@ -149,7 +137,7 @@ class DefaultTestFactory:
                     )
                     for c in cases
                 ]
-                test = LocalCompositeTest(
+                test = CompositeTest(
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
@@ -182,7 +170,7 @@ class DefaultTestFactory:
                     )
                     for g in groups
                 ]
-                test = LocalCompositeTest(
+                test = CompositeTest(
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
@@ -211,7 +199,7 @@ class DefaultTestFactory:
                     )
                     for ps in parameter_sets
                 ]
-                test = LocalCompositeTest(
+                test = CompositeTest(
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,

@@ -191,7 +191,7 @@ class SQLiteStore(Store):
                     run.result.xpassed,
                     run.result.total,
                     int(run.result.stopped_early),
-                    json.dumps(run.environment.to_dict()),
+                    json.dumps(run.environment.model_dump()),
                 ),
             )
 
@@ -485,17 +485,7 @@ class SQLiteStore(Store):
             if row["environment_json"]
             else {}
         )
-        environment = RunEnvironment(
-            commit_hash=env_data.get("commit_hash"),
-            branch=env_data.get("branch"),
-            dirty=env_data.get("dirty"),
-            python_version=env_data.get("python_version", ""),
-            platform=env_data.get("platform", ""),
-            hostname=env_data.get("hostname", ""),
-            working_directory=env_data.get("working_directory", ""),
-            rue_version=env_data.get("rue_version", ""),
-            env_vars=env_data.get("env_vars", {}),
-        )
+        environment = RunEnvironment.model_validate(env_data)
 
         exec_rows = conn.execute(
             "SELECT * FROM test_executions WHERE run_id = ?",

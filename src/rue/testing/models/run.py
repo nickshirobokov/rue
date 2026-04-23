@@ -4,71 +4,86 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import socket
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from importlib.metadata import distributions
-from typing import Any
 from uuid import UUID, uuid4
+
+from pydantic import BaseModel
 
 from rue.resources.metrics.base import MetricResult
 from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.result import TestStatus
 
 
-def _get_python_version() -> str:
-    return sys.version.split()[0]
-
-
-def _get_platform() -> str:
-    return platform.platform()
-
-
-def _get_hostname() -> str:
-    return socket.gethostname()
-
-
-def _get_cwd() -> str:
-    return os.getcwd()
-
-
-def _get_rue_version() -> str:
-    return next((dist.version for dist in distributions(name="rue")), "0.0.0")
-
-
-@dataclass
-class RunEnvironment:
+class RunEnvironment(BaseModel):
     """Metadata about the environment where tests were executed."""
 
-    # Git info
     commit_hash: str | None = None
     branch: str | None = None
     dirty: bool | None = None
 
-    # System info
-    python_version: str = field(default_factory=_get_python_version)
-    platform: str = field(default_factory=_get_platform)
-    hostname: str = field(default_factory=_get_hostname)
-    working_directory: str = field(default_factory=_get_cwd)
-    rue_version: str = field(default_factory=_get_rue_version)
+    python_version: str
+    platform: str
+    hostname: str
+    working_directory: str
+    rue_version: str
 
-    # Environment variables (filtered)
-    env_vars: dict[str, str] = field(default_factory=dict)
+    @classmethod
+    def build_from_current(cls) -> RunEnvironment:
+        commit_hash = None
+        branch = None
+        dirty = None
+        if shutil.which("git") is not None:
+            in_repo = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                capture_output=True,
+                check=False,
+                text=True,
+            )
+            if in_repo.returncode == 0:
+                commit = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    capture_output=True,
+                    check=False,
+                    text=True,
+                )
+                current_branch = subprocess.run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    capture_output=True,
+                    check=False,
+                    text=True,
+                )
+                status = subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    capture_output=True,
+                    check=False,
+                    text=True,
+                )
+                if commit.returncode == 0:
+                    commit_hash = commit.stdout.strip() or None
+                if current_branch.returncode == 0:
+                    branch = current_branch.stdout.strip() or None
+                if status.returncode == 0:
+                    dirty = bool(status.stdout.strip())
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dictionary."""
-        return {
-            "commit_hash": self.commit_hash,
-            "branch": self.branch,
-            "dirty": self.dirty,
-            "python_version": self.python_version,
-            "platform": self.platform,
-            "hostname": self.hostname,
-            "working_directory": self.working_directory,
-            "rue_version": self.rue_version,
-            "env_vars": self.env_vars,
-        }
+        return cls(
+            commit_hash=commit_hash,
+            branch=branch,
+            dirty=dirty,
+            python_version=sys.version.split()[0],
+            platform=platform.platform(),
+            hostname=socket.gethostname(),
+            working_directory=os.getcwd(),
+            rue_version=next(
+                (dist.version for dist in distributions(name="rue")),
+                "0.0.0",
+            ),
+        )
 
 
 @dataclass
@@ -131,23 +146,7 @@ class Run:
     start_time: datetime = field(default_factory=lambda: datetime.now(UTC))
     end_time: datetime | None = None
 
-    environment: RunEnvironment = field(default_factory=RunEnvironment)
+    environment: RunEnvironment = field(
+        default_factory=RunEnvironment.build_from_current
+    )
     result: RunResult = field(default_factory=RunResult)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize the complete run to a dictionary."""
-        return {
-            "run_id": str(self.run_id),
-            "start_time": self.start_time.isoformat(),
-            "end_time": self.end_time.isoformat() if self.end_time else None,
-            "environment": self.environment.to_dict(),
-            "total_duration_ms": self.result.total_duration_ms,
-            "stopped_early": self.result.stopped_early,
-            "passed": self.result.passed,
-            "failed": self.result.failed,
-            "errors": self.result.errors,
-            "skipped": self.result.skipped,
-            "xfailed": self.result.xfailed,
-            "xpassed": self.result.xpassed,
-            "total": self.result.total,
-        }
