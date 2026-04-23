@@ -32,13 +32,33 @@ class ExecutableTest(ABC):
 
     definition: LoadedTestDef
     backend: ExecutionBackend
+    node_key: str
+    children: list["ExecutableTest"]
     on_complete: Callable[[ExecutedTest], Awaitable[None]] | None = None
+
+    def walk(self) -> list["ExecutableTest"]:
+        nodes: list[ExecutableTest] = [self]
+        for child in self.children:
+            for node in child.walk():
+                nodes.append(node)
+        return nodes
+
+    def leaves(self) -> list["ExecutableTest"]:
+        if not self.children:
+            return [self]
+
+        leaves: list[ExecutableTest] = []
+        for child in self.children:
+            for leaf in child.leaves():
+                leaves.append(leaf)
+        return leaves
 
     async def execute(self, resolver: ResourceResolver) -> ExecutedTest:
         """Execute the test and return result."""
         if self.definition.spec.definition_error:
             execution = ExecutedTest(
                 definition=self.definition,
+                node_key=self.node_key,
                 result=TestResult(
                     status=TestStatus.ERROR,
                     duration_ms=0,
@@ -53,6 +73,7 @@ class ExecutableTest(ABC):
             except Exception as error:  # noqa: BLE001
                 execution = ExecutedTest(
                     definition=self.definition,
+                    node_key=self.node_key,
                     result=TestResult(
                         status=TestStatus.ERROR,
                         duration_ms=(time.perf_counter() - start) * 1000,

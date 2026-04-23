@@ -13,6 +13,7 @@ from rue.config import Config
 from rue.resources import Scope
 from rue.resources.models import ResourceSpec
 from rue.testing.discovery import TestSpecCollector
+from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import TestStatus
 from rue.testing.models.modifiers import IterateModifier
 from tests.unit.factories import make_definition
@@ -28,8 +29,7 @@ def write_files(root: Path, files: dict[str, str]) -> None:
 def build_report(path: Path) -> TestsStatusReport:
     collection = TestSpecCollector((), (), None).build_spec_collection((path,))
     builder = TestsStatusBuilder(Config.model_construct(db_enabled=False))
-    items = builder.load_items(collection)
-    return builder.build(collection, items, store=None)
+    return builder.build(collection, store=None)
 
 
 def test_status_builder_matches_execution_tree_shape(tmp_path):
@@ -87,7 +87,7 @@ def test_status_builder_matches_execution_tree_shape(tmp_path):
     }
 
     assert nodes["test_status_tree::test_plain"].leaf_count == 1
-    assert nodes["test_status_tree::test_repeat"].backend == "main"
+    assert nodes["test_status_tree::test_repeat"].backend is ExecutionBackend.MAIN
     assert len(nodes["test_status_tree::test_repeat"].children) == 2
     assert nodes["test_status_tree::test_params"].leaf_count == 2
     assert len(nodes["test_status_tree::test_params"].children) == 2
@@ -196,7 +196,7 @@ def test_status_builder_reports_circular_resource_dependencies(tmp_path):
 def test_status_renderer_respects_verbosity_levels():
     child_one = StatusNode(
         definition=make_definition("test_tree", suffix="one"),
-        backend="asyncio",
+        backend=ExecutionBackend.ASYNCIO,
         history=(TestStatus.PASSED, TestStatus.FAILED),
         resources=(
             ResourceSpec(
@@ -215,7 +215,7 @@ def test_status_renderer_respects_verbosity_levels():
     )
     child_two = StatusNode(
         definition=make_definition("test_tree", suffix="two"),
-        backend="asyncio",
+        backend=ExecutionBackend.ASYNCIO,
         history=(TestStatus.PASSED, None),
     )
     root = StatusNode(
@@ -223,7 +223,7 @@ def test_status_renderer_respects_verbosity_levels():
             "test_tree",
             modifiers=(IterateModifier(count=2, min_passes=1),),
         ),
-        backend="asyncio",
+        backend=ExecutionBackend.ASYNCIO,
         history=(TestStatus.PASSED, None),
         children=(child_one, child_two),
         leaf_count=2,

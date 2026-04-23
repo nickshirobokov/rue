@@ -374,6 +374,7 @@ class TestLoader:
                 self.prepare_setup(setup_ref.path)
 
             module = self._session.load_module(module_path.resolve())
+
             for spec in requested_specs:
                 items.append(
                     self.load_definition(
@@ -382,6 +383,70 @@ class TestLoader:
                         setup_chain=setup_chain,
                     )
                 )
+
+        return items
+
+    def load_from_collection_unsafe(
+        self, collection: TestSpecCollection
+    ) -> list[LoadedTestDef]:
+        """Resolve a collection while preserving load failures as placeholders."""
+        if not collection.specs:
+            return []
+
+        by_module: dict[Path, list[TestSpec]] = {}
+        for spec in collection.specs:
+            by_module.setdefault(spec.module_path, []).append(spec)
+
+        items: list[LoadedTestDef] = []
+        for module_path, requested_specs in by_module.items():
+            setup_chain = collection.setup_chain_for(module_path)
+            try:
+                for setup_ref in setup_chain:
+                    self.prepare_setup(setup_ref.path)
+            except Exception as error:
+                items.extend(
+                    LoadedTestDef.from_load_error(
+                        spec,
+                        suite_root=self._suite_root,
+                        setup_chain=setup_chain,
+                        load_error=str(error),
+                    )
+                    for spec in requested_specs
+                )
+                continue
+
+            try:
+                module = self._session.load_module(module_path.resolve())
+            except Exception as error:
+                items.extend(
+                    LoadedTestDef.from_load_error(
+                        spec,
+                        suite_root=self._suite_root,
+                        setup_chain=setup_chain,
+                        load_error=str(error),
+                    )
+                    for spec in requested_specs
+                )
+                continue
+
+            for spec in requested_specs:
+                try:
+                    items.append(
+                        self.load_definition(
+                            spec,
+                            module=module,
+                            setup_chain=setup_chain,
+                        )
+                    )
+                except Exception as error:
+                    items.append(
+                        LoadedTestDef.from_load_error(
+                            spec,
+                            suite_root=self._suite_root,
+                            setup_chain=setup_chain,
+                            load_error=str(error),
+                        )
+                    )
 
         return items
 

@@ -25,7 +25,7 @@ class IterateModifier:
 
     count: int
     min_passes: int
-    display_name: str = "iterate"
+    display_name: str = "iterations"
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ class ParamsIterateModifier:
 
     parameter_sets: tuple[ParameterSet, ...]
     min_passes: int
-    display_name: str = "params"
+    display_name: str = "parameter sets"
 
 
 @dataclass(frozen=True)
@@ -60,7 +60,6 @@ class BackendModifier:
     """Select the execution backend for the test subtree."""
 
     backend: ExecutionBackend
-    display_name: str = "backend"
 
 
 Modifier = (

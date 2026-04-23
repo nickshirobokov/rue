@@ -42,11 +42,10 @@ def status(
     )
     collection = collector.build_spec_collection(resolved_paths)
     builder = TestsStatusBuilder(status_config)
-    items = builder.load_items(collection)
     store = None
     if status_config.resolved_db_path.exists():
         store = SQLiteStore(status_config.resolved_db_path)
-    report = builder.build(collection, items, store=store)
+    report = builder.build(collection, store=store)
     Console().print(status_renderer.render(report, status_config.verbosity))
 
 

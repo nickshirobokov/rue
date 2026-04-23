@@ -324,12 +324,8 @@ def test_run_and_status_share_selection_parsing(
 
     if status_mode:
         monkeypatch.setattr(
-            "rue.cli.tests.status.command.TestsStatusBuilder.load_items",
-            lambda self, collection: [],
-        )
-        monkeypatch.setattr(
             "rue.cli.tests.status.command.TestsStatusBuilder.build",
-            lambda self, collection, items, store=None: TestsStatusReport(),
+            lambda self, collection, store=None: TestsStatusReport(),
         )
         monkeypatch.setattr(
             "rue.cli.tests.status.command.status_renderer.render",
@@ -383,12 +379,8 @@ def test_tests_status_does_not_create_missing_db(tmp_path, monkeypatch):
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.tests.status.command.TestsStatusBuilder.load_items",
-        lambda self, collection: [],
-    )
-    monkeypatch.setattr(
         "rue.cli.tests.status.command.TestsStatusBuilder.build",
-        lambda self, collection, items, store=None: TestsStatusReport(),
+        lambda self, collection, store=None: TestsStatusReport(),
     )
     monkeypatch.setattr(
         "rue.cli.tests.status.command.status_renderer.render",

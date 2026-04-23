@@ -22,6 +22,7 @@ class ExecutedTest:
 
     definition: LoadedTestDef
     result: TestResult
+    node_key: str
     execution_id: UUID = field(default_factory=uuid4)
     telemetry_artifacts: tuple[TelemetryArtifact, ...] = ()
     sub_executions: list[ExecutedTest] = field(default_factory=list)

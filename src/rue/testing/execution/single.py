@@ -41,10 +41,14 @@ class SingleTest(ExecutableTest):
 
     definition: LoadedTestDef
     params: dict[str, Any]
+    node_key: str
     backend: ExecutionBackend = ExecutionBackend.ASYNCIO
     config: Config = field(default_factory=Config)
     run_id: UUID = field(default_factory=uuid4)
     sync_actor_id: int = 1
+    children: list[ExecutableTest] = field(
+        default_factory=list, init=False, repr=False
+    )
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
@@ -64,6 +68,7 @@ class SingleTest(ExecutableTest):
             case SingleTest(is_stopped=is_stopped) if is_stopped():
                 return ExecutedTest(
                     definition=self.definition,
+                    node_key=self.node_key,
                     result=TestResult(
                         status=TestStatus.SKIPPED,
                         duration_ms=0,
@@ -74,6 +79,7 @@ class SingleTest(ExecutableTest):
             case SingleTest(definition=LoadedTestDef(spec=spec)) if spec.skip_reason:
                 return ExecutedTest(
                     definition=self.definition,
+                    node_key=self.node_key,
                     result=TestResult(
                         status=TestStatus.SKIPPED,
                         duration_ms=0,
@@ -142,6 +148,7 @@ class SingleTest(ExecutableTest):
 
         return ExecutedTest(
             definition=self.definition,
+            node_key=self.node_key,
             result=result,
             execution_id=execution_id,
             telemetry_artifacts=telemetry_artifacts,
@@ -202,6 +209,7 @@ class SingleTest(ExecutableTest):
 
         return ExecutedTest(
             definition=self.definition,
+            node_key=self.node_key,
             result=remote_result.result,
             execution_id=execution_id,
             telemetry_artifacts=remote_result.telemetry_artifacts,

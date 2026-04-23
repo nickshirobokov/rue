@@ -1002,6 +1002,15 @@ class TestResourceHooks:
 class TestResourceResolutionErrors:
     """Tests to ensure resource resolution errors are properly surfaced."""
 
+    def test_collect_dependency_closure_raises_for_unknown_resource(self):
+        resolver = ResourceResolver(registry)
+
+        with pytest.raises(ValueError, match="Unknown resource: unknown"):
+            resolver.collect_dependency_closure(
+                ("unknown",),
+                request_path=Path("tests/test_sample.py"),
+            )
+
     @pytest.mark.asyncio
     async def test_circular_suite_dependency_raises_error(self):
         @resource(scope="module")
@@ -1017,6 +1026,24 @@ class TestResourceResolutionErrors:
             RuntimeError, match="Circular resource dependency detected"
         ):
             await asyncio.wait_for(resolver.resolve("shared_left"), timeout=0.2)
+
+    def test_collect_dependency_closure_raises_for_circular_dependency(self):
+        @resource(scope="module")
+        def shared_left(shared_right):
+            return shared_right
+
+        @resource(scope="module")
+        def shared_right(shared_left):
+            return shared_left
+
+        resolver = ResourceResolver(registry)
+        with pytest.raises(
+            RuntimeError, match="Circular resource dependency detected"
+        ):
+            resolver.collect_dependency_closure(
+                ("shared_left",),
+                request_path=Path("tests/test_sample.py"),
+            )
 
     @pytest.mark.asyncio
     async def test_resource_on_injection_error(self):

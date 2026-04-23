@@ -114,7 +114,7 @@ class StatusRenderer:
 
         text = Text(name)
         if node.backend is not None:
-            text.append(f" [{node.backend}]", style="dim")
+            text.append(f" [{node.backend.value}]", style="dim")
         if node.children and verbosity == 0:
             text.append(f" ({node.leaf_count} variations)", style="dim")
         issue_count = self._issue_count(node) if verbosity == 0 else len(node.issues)

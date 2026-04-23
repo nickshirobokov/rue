@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from rue.resources import ResourceSpec
+from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import LoadedTestDef, Run, TestStatus
 
 
@@ -20,7 +21,7 @@ class StatusIssue:
 @dataclass(frozen=True)
 class StatusNode:
     definition: LoadedTestDef
-    backend: str | None
+    backend: ExecutionBackend | None
     history: tuple[TestStatus | None, ...] = ()
     issues: tuple[StatusIssue, ...] = ()
     resources: tuple[ResourceSpec, ...] = ()
@@ -35,13 +36,4 @@ class TestsStatusReport:
     module_nodes: dict[Path, list[StatusNode]] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
-class _DraftNode:
-    definition: LoadedTestDef
-    backend: str
-    params: dict[str, Any]
-    node_key: str
-    children: tuple["_DraftNode", ...] = ()
-
-
-__all__ = ["StatusIssue", "StatusNode", "TestsStatusReport", "_DraftNode"]
+__all__ = ["StatusIssue", "StatusNode", "TestsStatusReport"]

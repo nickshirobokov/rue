@@ -31,7 +31,13 @@ from rue.testing.execution.single import SingleTest
 from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import (
     BackendModifier,
+    Case,
+    CaseGroup,
+    CasesIterateModifier,
+    GroupsIterateModifier,
     IterateModifier,
+    ParameterSet,
+    ParamsIterateModifier,
     TestResult,
     TestStatus,
 )
@@ -222,6 +228,76 @@ class TestFactoryDispatch:
         assert len(built.children) == 3
         assert all(isinstance(c, SingleTest) for c in built.children)
 
+    def test_assigns_node_keys_across_modifier_tree(self):
+        factory = DefaultTestFactory(config=Config(), run_id=uuid4())
+
+        iterate = factory.build(
+            self._definition(
+                modifiers=(IterateModifier(count=2, min_passes=2),),
+            )
+        )
+        assert iterate.node_key == "test_module::sample"
+        assert [child.node_key for child in iterate.children] == [
+            "test_module::sample/iterations[0]",
+            "test_module::sample/iterations[1]",
+        ]
+
+        params = factory.build(
+            self._definition(
+                modifiers=(
+                    ParamsIterateModifier(
+                        parameter_sets=(
+                            ParameterSet(values={"value": 1}, suffix="one"),
+                            ParameterSet(values={"value": 2}, suffix="two"),
+                        ),
+                        min_passes=1,
+                    ),
+                ),
+            )
+        )
+        assert [child.node_key for child in params.children] == [
+            "test_module::sample/parameter sets[0]=one",
+            "test_module::sample/parameter sets[1]=two",
+        ]
+
+        cases = factory.build(
+            self._definition(
+                modifiers=(
+                    CasesIterateModifier(
+                        cases=(
+                            Case(metadata={"slug": "one"}),
+                            Case(metadata={"slug": "two"}),
+                        ),
+                        min_passes=1,
+                    ),
+                ),
+            )
+        )
+        assert [child.node_key for child in cases.children] == [
+            "test_module::sample/cases[0]={'slug': 'one'}",
+            "test_module::sample/cases[1]={'slug': 'two'}",
+        ]
+
+        groups = factory.build(
+            self._definition(
+                modifiers=(
+                    GroupsIterateModifier(
+                        groups=(
+                            CaseGroup(
+                                name="alpha",
+                                cases=[Case(metadata={"slug": "a"})],
+                            ),
+                        ),
+                        min_passes=1,
+                    ),
+                ),
+            )
+        )
+        assert groups.children[0].node_key == "test_module::sample/groups[0]=alpha"
+        assert groups.children[0].children[0].node_key == (
+            "test_module::sample/groups[0]=alpha/cases[0]={'slug': 'a'}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # SingleTest subprocess payload building + ExecutedTest wiring
@@ -230,13 +306,15 @@ class TestFactoryDispatch:
 
 class TestSingleTestSubprocess:
     def test_rejects_modifiers(self):
+        definition = make_definition(
+            modifiers=[IterateModifier(count=2, min_passes=2)],
+            backend=ExecutionBackend.SUBPROCESS,
+        )
         with pytest.raises(ValueError, match="SingleTest should not have modifiers"):
             SingleTest(
-                definition=make_definition(
-                    modifiers=[IterateModifier(count=2, min_passes=2)],
-                    backend=ExecutionBackend.SUBPROCESS,
-                ),
+                definition=definition,
                 params={},
+                node_key=definition.spec.full_name,
                 backend=ExecutionBackend.SUBPROCESS,
             )
 
@@ -264,6 +342,7 @@ class TestSingleTestSubprocess:
         remote = SingleTest(
             definition=definition,
             params={},
+            node_key=definition.spec.full_name,
             backend=ExecutionBackend.SUBPROCESS,
             config=Config.model_construct(otel=False),
             run_id=UUID(int=1),
@@ -325,6 +404,7 @@ class TestSingleTestSubprocess:
         remote = SingleTest(
             definition=definition,
             params={},
+            node_key=definition.spec.full_name,
             backend=ExecutionBackend.SUBPROCESS,
             config=Config.model_construct(otel=True),
             run_id=UUID(int=1),
@@ -346,9 +426,11 @@ class TestSingleTestSubprocess:
 
     @pytest.mark.asyncio
     async def test_skips_when_stopped(self):
+        definition = make_definition("sample")
         remote = SingleTest(
-            definition=make_definition("sample"),
+            definition=definition,
             params={},
+            node_key=definition.spec.full_name,
             backend=ExecutionBackend.SUBPROCESS,
             is_stopped=lambda: True,
         )
@@ -377,6 +459,7 @@ class TestSingleTestSubprocess:
         remote = SingleTest(
             definition=definition,
             params={},
+            node_key=definition.spec.full_name,
             backend=ExecutionBackend.SUBPROCESS,
         )
 
@@ -402,9 +485,11 @@ class TestSingleTestSubprocess:
         async def capture(execution):
             on_complete(execution)
 
+        definition = make_definition("sample")
         remote = SingleTest(
-            definition=make_definition("sample"),
+            definition=definition,
             params={},
+            node_key=definition.spec.full_name,
             backend=ExecutionBackend.SUBPROCESS,
             on_complete=capture,
         )
@@ -437,6 +522,7 @@ class TestSingleTestSubprocess:
                     suite_root=tmp_path,
                 ),
                 params={},
+                node_key=f"test_module::sample_{idx}",
                 backend=ExecutionBackend.SUBPROCESS,
                 semaphore=semaphore,
             )

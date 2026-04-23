@@ -13,7 +13,14 @@ from rich.text import Text
 from rich.tree import Tree
 
 from rue.testing.execution.composite import CompositeTest
-from rue.testing.models import TestStatus
+from rue.testing.models import (
+    BackendModifier,
+    CasesIterateModifier,
+    GroupsIterateModifier,
+    IterateModifier,
+    ParamsIterateModifier,
+    TestStatus,
+)
 
 from .shared import STATUS_STYLES, safe_relative_path
 
@@ -149,9 +156,22 @@ class VerboseMode(OutputMode):
         return True
 
     def _get_modifier_suffix(self, execution: ExecutedTest) -> str:
-        if execution.definition.spec.modifiers and execution.sub_executions:
-            return f"[{execution.definition.spec.modifiers[0].display_name}]"
-        return ""
+        if not execution.definition.spec.modifiers or not execution.sub_executions:
+            return ""
+        mod = execution.definition.spec.modifiers[0]
+        match mod:
+            case IterateModifier(count=n, display_name=name):
+                return f" x {n} {name}"
+            case CasesIterateModifier(cases=cases, display_name=name):
+                return f" x {len(cases)} {name}"
+            case GroupsIterateModifier(groups=groups, display_name=name):
+                return f" x {len(groups)} {name}"
+            case ParamsIterateModifier(parameter_sets=pss, display_name=name):
+                return f" x {len(pss)} {name}"
+            case BackendModifier():
+                return ""
+            case _:
+                return ""
 
     def _render_test_line(
         self,

@@ -1,4 +1,5 @@
 import builtins
+from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
 
@@ -276,6 +277,70 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
         items_by_name["test_duplicate_backend"].spec.definition_error
         == "Multiple @rue.test.backend(...) decorators are not supported."
     )
+
+
+def test_load_from_collection_preserves_setup_failures_when_requested(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "bad/conftest.py": 'raise RuntimeError("bad setup")\n',
+            "bad/test_bad.py": """
+                import rue
+
+                @rue.test
+                def test_bad():
+                    pass
+            """,
+        },
+    )
+
+    plan = TestSpecCollector((), (), None).build_spec_collection((tmp_path,))
+    [item] = TestLoader(plan.suite_root).load_from_collection_unsafe(plan)
+
+    assert item.spec.full_name == "test_bad::test_bad"
+    assert item.load_error == "bad setup"
+
+
+def test_load_from_collection_preserves_definition_failures_when_requested(
+    tmp_path,
+):
+    write_files(
+        tmp_path,
+        {
+            "test_sample.py": """
+                import rue
+
+                @rue.test
+                def test_good():
+                    pass
+
+                @rue.test
+                def test_bad():
+                    pass
+            """,
+        },
+    )
+
+    original_plan = TestSpecCollector((), (), None).build_spec_collection(
+        (tmp_path,)
+    )
+    bad_spec = replace(
+        original_plan.specs[1],
+        locator=TestLocator(
+            module_path=original_plan.specs[1].module_path,
+            function_name="missing_test",
+        ),
+    )
+    plan = replace(
+        original_plan,
+        specs=(original_plan.specs[0], bad_spec),
+    )
+
+    items = TestLoader(plan.suite_root).load_from_collection_unsafe(plan)
+
+    assert [item.spec.name for item in items] == ["test_good", "missing_test"]
+    assert items[0].load_error is None
+    assert "missing_test" in (items[1].load_error or "")
 
 
 @pytest.mark.asyncio

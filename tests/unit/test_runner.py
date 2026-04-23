@@ -201,26 +201,32 @@ class TestRunResult:
             ExecutedTest(
                 definition=items[0],
                 result=TestResult(status=TestStatus.PASSED, duration_ms=1),
+                node_key=items[0].spec.full_name,
             ),
             ExecutedTest(
                 definition=items[1],
                 result=TestResult(status=TestStatus.FAILED, duration_ms=1),
+                node_key=items[1].spec.full_name,
             ),
             ExecutedTest(
                 definition=items[2],
                 result=TestResult(status=TestStatus.ERROR, duration_ms=1),
+                node_key=items[2].spec.full_name,
             ),
             ExecutedTest(
                 definition=items[3],
                 result=TestResult(status=TestStatus.SKIPPED, duration_ms=1),
+                node_key=items[3].spec.full_name,
             ),
             ExecutedTest(
                 definition=items[4],
                 result=TestResult(status=TestStatus.XFAILED, duration_ms=1),
+                node_key=items[4].spec.full_name,
             ),
             ExecutedTest(
                 definition=items[5],
                 result=TestResult(status=TestStatus.XPASSED, duration_ms=1),
+                node_key=items[5].spec.full_name,
             ),
         ]
         assert result.passed == 1

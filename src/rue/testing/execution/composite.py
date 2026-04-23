@@ -20,6 +20,7 @@ class CompositeTest(ExecutableTest):
     definition: LoadedTestDef
     backend: ExecutionBackend
     min_passes: int
+    node_key: str
     children: list[ExecutableTest] = field(default_factory=list)
     on_complete: Callable | None = None
 
@@ -46,6 +47,7 @@ class CompositeTest(ExecutableTest):
         duration = sum(execution.result.duration_ms for execution in sub_executions)
         return ExecutedTest(
             definition=self.definition,
+            node_key=self.node_key,
             result=TestResult(status=status, duration_ms=duration),
             execution_id=uuid4(),
             sub_executions=sub_executions,

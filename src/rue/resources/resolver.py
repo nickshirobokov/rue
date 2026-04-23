@@ -79,6 +79,53 @@ class ResourceResolver:
     ) -> list[ResourceSpec]:
         return list(self._shared_dependency_graph.get(identity, []))
 
+    def collect_dependency_closure(
+        self,
+        names: tuple[str, ...],
+        *,
+        request_path: Path,
+    ) -> tuple[ResourceSpec, ...]:
+        connected: dict[str, ResourceSpec] = {}
+
+        def sort_key(spec: ResourceSpec) -> tuple[int, str, str, str]:
+            return (
+                {"process": 0, "module": 1, "test": 2}.get(
+                    spec.scope.value, 99
+                ),
+                spec.name,
+                spec.provider_path or "",
+                spec.provider_dir or "",
+            )
+
+        def visit(name: str, path: tuple[ResourceSpec, ...]) -> None:
+            definition = self._registry.select(name, request_path).definition
+            identity = definition.spec
+
+            if identity in path:
+                cycle = " -> ".join(
+                    (
+                        f"{key.scope.value}:{key.name}"
+                        if key.provider_dir is None
+                        else f"{key.scope.value}:{key.name}@{key.provider_dir}"
+                    )
+                    for key in (*path, identity)
+                )
+                raise RuntimeError(
+                    f"Circular resource dependency detected: {cycle}"
+                )
+
+            if identity.snapshot_key in connected:
+                return
+
+            connected[identity.snapshot_key] = identity
+            for dependency in identity.dependencies:
+                visit(dependency, (*path, identity))
+
+        for name in names:
+            visit(name, ())
+
+        return tuple(sorted(connected.values(), key=sort_key))
+
     async def resolve(
         self,
         name: str,

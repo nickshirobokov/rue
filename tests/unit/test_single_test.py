@@ -22,9 +22,11 @@ async def test_single_test_executes_without_runner():
     def test_body():
         called.append("called")
 
+    definition = make_item(test_body)
     test = SingleTest(
-        definition=make_item(test_body),
+        definition=definition,
         params={},
+        node_key=definition.spec.full_name,
     )
 
     execution = await test.execute(ResourceResolver(registry))
@@ -34,10 +36,10 @@ async def test_single_test_executes_without_runner():
 
 
 def test_single_test_rejects_modifiers():
+    definition = make_item(modifiers=[IterateModifier(count=2, min_passes=2)])
     with pytest.raises(ValueError, match="SingleTest should not have modifiers"):
         SingleTest(
-            definition=make_item(
-                modifiers=[IterateModifier(count=2, min_passes=2)]
-            ),
+            definition=definition,
             params={},
+            node_key=definition.spec.full_name,
         )

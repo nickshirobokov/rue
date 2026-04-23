@@ -44,6 +44,24 @@ class LoadedTestDef:
     suite_root: Path = field(default_factory=Path)
     setup_chain: tuple[SetupFileRef, ...] = field(default_factory=tuple)
     fail_fast: bool = field(default=False)
+    load_error: str | None = field(default=None)
+
+    @classmethod
+    def from_load_error(
+        cls,
+        spec: TestSpec,
+        *,
+        suite_root: Path,
+        setup_chain: tuple[SetupFileRef, ...],
+        load_error: str,
+    ) -> "LoadedTestDef":
+        return cls(
+            spec=spec,
+            fn=lambda: None,
+            suite_root=suite_root,
+            setup_chain=setup_chain,
+            load_error=load_error,
+        )
 
     async def call_test_fn(
         self,
@@ -100,7 +118,9 @@ class LoadedTestDef:
         ):
             try:
                 kwargs = await resolver.partially_resolve(
-                    tuple(param for param in self.spec.params if param not in params),
+                    tuple(
+                        param for param in self.spec.params if param not in params
+                    ),
                     params,
                 )
                 if is_stopped is not None and is_stopped():

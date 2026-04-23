@@ -20,13 +20,10 @@ from rue.resources.metrics.base import (
 )
 from rue.storage.base import Store
 from rue.storage.sqlite.migrations import MigrationError, MigrationRunner
+from rue.testing.execution.base import ExecutableTest
 from rue.testing.models import (
-    CasesIterateModifier,
     ExecutedTest,
-    GroupsIterateModifier,
-    IterateModifier,
     LoadedTestDef,
-    ParamsIterateModifier,
     Run,
     RunEnvironment,
     RunResult,
@@ -212,7 +209,6 @@ class SQLiteStore(Store):
                     execution,
                     run_id=run_id,
                     parent_id=None,
-                    node_key=execution.definition.spec.full_name,
                 )
 
             if execution_rows:
@@ -401,7 +397,6 @@ class SQLiteStore(Store):
         *,
         run_id: str,
         parent_id: str | None,
-        node_key: str,
     ) -> None:
         spec = execution.definition.spec
         error = execution.result.error
@@ -422,7 +417,7 @@ class SQLiteStore(Store):
                 spec.class_name,
                 str(spec.case_id) if spec.case_id else None,
                 spec.suffix,
-                node_key,
+                execution.node_key,
                 json.dumps(list(tags)) if tags else None,
                 spec.skip_reason,
                 spec.xfail_reason,
@@ -433,46 +428,13 @@ class SQLiteStore(Store):
             )
         )
 
-        for index, child in enumerate(execution.sub_executions):
+        for child in execution.sub_executions:
             self._append_execution_rows(
                 rows,
                 child,
                 run_id=run_id,
                 parent_id=execution_id,
-                node_key=self._child_node_key(execution, child, node_key, index),
             )
-
-    def _child_node_key(
-        self,
-        parent: ExecutedTest,
-        child: ExecutedTest,
-        parent_node_key: str,
-        index: int,
-    ) -> str:
-        modifiers = parent.definition.spec.modifiers
-        if not modifiers:
-            msg = "Composite execution is missing its active modifier"
-            raise ValueError(msg)
-
-        modifier = modifiers[0]
-        label: str | None = None
-        match modifier:
-            case IterateModifier():
-                pass
-            case ParamsIterateModifier():
-                label = child.definition.spec.suffix
-            case CasesIterateModifier():
-                label = child.definition.spec.suffix
-            case GroupsIterateModifier():
-                label = child.definition.spec.suffix
-            case _:
-                msg = f"Unknown modifier: {type(modifier).__name__}"
-                raise NotImplementedError(msg)
-
-        segment = f"{modifier.display_name}[{index}]"
-        if label:
-            segment = f"{segment}={label}"
-        return f"{parent_node_key}/{segment}"
 
     def get_test_history(
         self,
@@ -523,6 +485,61 @@ class SQLiteStore(Store):
                 node_key: tuple(statuses)
                 for node_key, statuses in by_node.items()
             }
+
+    def get_test_history_for_tests(
+        self,
+        tests: Sequence[ExecutableTest],
+        limit: int = MAX_STORED_RUNS,
+    ) -> dict[str, tuple[TestStatus | None, ...]]:
+        requested_by_key: dict[str, ExecutableTest] = {}
+        for test in tests:
+            for node in test.walk():
+                requested_by_key.setdefault(node.node_key, node)
+
+        if not requested_by_key:
+            return {}
+
+        history_by_key = self.get_test_history(tuple(requested_by_key), limit)
+        run_window = tuple(self.list_runs(limit=limit))
+        if not run_window:
+            return history_by_key
+
+        for node_key, test in requested_by_key.items():
+            history = list(history_by_key.get(node_key, (None,) * limit))
+            for index, run in enumerate(run_window):
+                if history[index] is not None:
+                    continue
+                status = self._find_legacy_status(test, run.result.executions)
+                if status is not None:
+                    history[index] = status
+            history_by_key[node_key] = tuple(history)
+
+        return history_by_key
+
+    def _find_legacy_status(
+        self,
+        test: ExecutableTest,
+        executions: list[ExecutedTest],
+    ) -> TestStatus | None:
+        spec = test.definition.spec
+        if test.node_key != spec.full_name and (
+            spec.suffix is None or "=" not in test.node_key.rsplit("/", 1)[-1]
+        ):
+            return None
+
+        for execution in executions:
+            exec_spec = execution.definition.spec
+            if (
+                exec_spec.module_path == spec.module_path
+                and exec_spec.class_name == spec.class_name
+                and exec_spec.name == spec.name
+                and exec_spec.suffix == spec.suffix
+            ):
+                return execution.status
+            match = self._find_legacy_status(test, execution.sub_executions)
+            if match is not None:
+                return match
+        return None
 
     def get_run(self, run_id: UUID) -> Run | None:
         """Retrieve a test run by ID."""
@@ -676,6 +693,7 @@ class SQLiteStore(Store):
 
         return ExecutedTest(
             definition=definition,
+            node_key=row["node_key"] or definition.spec.full_name,
             result=result,
             execution_id=UUID(row["execution_id"]),
         )

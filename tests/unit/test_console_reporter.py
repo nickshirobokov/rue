@@ -96,6 +96,7 @@ def make_execution(
             error=error,
             assertion_results=assertion_results or [],
         ),
+        node_key=item.spec.full_name,
         sub_executions=sub_executions or [],
     )
 
