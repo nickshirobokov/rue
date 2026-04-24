@@ -458,7 +458,7 @@ async def test_autouse_patch_applies_in_subprocess_worker(
 
             @rue.resource(scope="process", autouse=True)
             def patch_call(monkeypatch):
-                monkeypatch.setattr_path(__name__ + ":call", lambda: "patched")
+                monkeypatch.setattr(__name__ + ":call", lambda: "patched")
 
             @rue.test.backend(ExecutionBackend.SUBPROCESS)
             def test_remote():

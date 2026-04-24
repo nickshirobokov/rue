@@ -278,7 +278,7 @@ async def test_all_monkeypatch_operations_conflict_across_backends(
 
                 expected = f"main-one:{case}"
                 monkeypatch.setattr(Target, "value", expected)
-                monkeypatch.setattr_path(
+                monkeypatch.setattr(
                     __name__ + ":path_call",
                     lambda expected=expected: expected,
                 )
@@ -324,7 +324,7 @@ async def test_all_monkeypatch_operations_conflict_across_backends(
 
                 expected = f"default-async-one:{case}"
                 monkeypatch.setattr(Target, "value", expected)
-                monkeypatch.setattr_path(
+                monkeypatch.setattr(
                     __name__ + ":path_call",
                     lambda expected=expected: expected,
                 )
@@ -371,7 +371,7 @@ async def test_all_monkeypatch_operations_conflict_across_backends(
 
                 expected = f"subprocess:{case}"
                 monkeypatch.setattr(Target, "value", expected)
-                monkeypatch.setattr_path(
+                monkeypatch.setattr(
                     __name__ + ":path_call",
                     lambda expected=expected: expected,
                 )
@@ -417,7 +417,7 @@ async def test_all_monkeypatch_operations_conflict_across_backends(
 
                 expected = f"default-blocking:{case}"
                 monkeypatch.setattr(Target, "value", expected)
-                monkeypatch.setattr_path(
+                monkeypatch.setattr(
                     __name__ + ":path_call",
                     lambda expected=expected: expected,
                 )
@@ -460,7 +460,7 @@ async def test_all_monkeypatch_operations_conflict_across_backends(
 
                 expected = f"main-two:{case}"
                 monkeypatch.setattr(Target, "value", expected)
-                monkeypatch.setattr_path(
+                monkeypatch.setattr(
                     __name__ + ":path_call",
                     lambda expected=expected: expected,
                 )
@@ -506,7 +506,7 @@ async def test_all_monkeypatch_operations_conflict_across_backends(
 
                 expected = f"default-async-two:{case}"
                 monkeypatch.setattr(Target, "value", expected)
-                monkeypatch.setattr_path(
+                monkeypatch.setattr(
                     __name__ + ":path_call",
                     lambda expected=expected: expected,
                 )
