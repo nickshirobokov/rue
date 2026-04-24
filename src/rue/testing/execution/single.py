@@ -76,7 +76,9 @@ class SingleTest(ExecutableTest):
                     ),
                     execution_id=exec_id,
                 )
-            case SingleTest(definition=LoadedTestDef(spec=spec)) if spec.skip_reason:
+            case (
+                SingleTest(definition=LoadedTestDef(spec=spec))
+            ) if spec.skip_reason:
                 return ExecutedTest(
                     definition=self.definition,
                     node_key=self.node_key,
@@ -104,8 +106,14 @@ class SingleTest(ExecutableTest):
         *,
         execution_id: UUID,
     ) -> ExecutedTest:
-        semaphore = self.semaphore if self.semaphore else contextlib.nullcontext()
-        ctx = TestContext(item=self.definition, execution_id=execution_id)
+        semaphore = (
+            self.semaphore if self.semaphore else contextlib.nullcontext()
+        )
+        ctx = TestContext(
+            item=self.definition,
+            execution_id=execution_id,
+            run_id=self.run_id,
+        )
 
         with bind(CURRENT_TEST_TRACER, self.tracer):
             self.tracer.start(self.definition, execution_id=execution_id)
@@ -117,6 +125,7 @@ class SingleTest(ExecutableTest):
                         execution_id=execution_id,
                         run_sync_in_thread=self.backend
                         is not ExecutionBackend.MAIN,
+                        run_id=self.run_id,
                         is_stopped=self.is_stopped,
                     )
                 )
@@ -160,11 +169,17 @@ class SingleTest(ExecutableTest):
         *,
         execution_id: UUID,
     ) -> ExecutedTest:
-        ctx = TestContext(item=self.definition, execution_id=execution_id)
+        ctx = TestContext(
+            item=self.definition,
+            execution_id=execution_id,
+            run_id=self.run_id,
+        )
         remote_result: RemoteExecutionResult
 
         try:
-            semaphore = self.semaphore if self.semaphore else contextlib.nullcontext()
+            semaphore = (
+                self.semaphore if self.semaphore else contextlib.nullcontext()
+            )
             with bind(CURRENT_TEST, ctx):
                 async with semaphore:
                     unresolved_params = tuple(
@@ -172,13 +187,17 @@ class SingleTest(ExecutableTest):
                         for param in self.definition.spec.params
                         if param not in self.params
                     )
+                    autouse_names = await resolver.resolve_autouse(
+                        self.definition.spec.module_path,
+                        apply_injection_hook=False,
+                    )
                     await resolver.partially_resolve(
                         unresolved_params,
                         self.params,
                         apply_injection_hook=False,
                     )
                     snapshot = resolver.export_sync_snapshot(
-                        unresolved_params,
+                        (*autouse_names, *unresolved_params),
                         request_path=self.definition.spec.module_path,
                         sync_actor_id=self.sync_actor_id,
                     )

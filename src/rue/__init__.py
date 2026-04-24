@@ -1,6 +1,7 @@
 """Rue - Testing framework for AI agents."""
 
 from .predicates import PredicateResult, predicate
+from .patching import MonkeyPatch
 from .reports import Reporter
 from .resources.metrics import Metric, metric, metrics
 from .resources.sut import (
@@ -53,6 +54,7 @@ __all__ = [
     "CapturedEvent",
     "CapturedOutput",
     "CapturedStream",
+    "MonkeyPatch",
     # Predicates
     "predicate",
     "PredicateResult",

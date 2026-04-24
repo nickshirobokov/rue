@@ -24,6 +24,8 @@ class ResourceSpec:
     provider_path: str | None = None
     provider_dir: str | None = None
     dependencies: tuple[str, ...] = field(default=(), compare=False)
+    autouse: bool = field(default=False, compare=False)
+    sync: bool = field(default=True, compare=False)
 
     @property
     def origin_path(self) -> Path | None:

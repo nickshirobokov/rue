@@ -24,6 +24,7 @@ class TestContext:
 
     item: LoadedTestDef
     execution_id: UUID | None = None
+    run_id: UUID | None = None
 
 
 CURRENT_TEST: ContextVar[TestContext | None] = ContextVar(

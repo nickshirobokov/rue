@@ -69,6 +69,8 @@ class ResourceRegistry:
         on_injection: Callable[[Any], Any] | None = None,
         on_teardown: Callable[[Any], Any] | None = None,
         origin_fn: Callable[..., Any] | None = None,
+        autouse: bool = False,
+        sync: bool = True,
     ) -> Any:
         """Register a function as a resource for dependency injection."""
 
@@ -99,6 +101,8 @@ class ResourceRegistry:
                     if origin_dir is not None
                     else None,
                     dependencies=tuple(dependencies),
+                    autouse=autouse,
+                    sync=sync,
                 ),
                 fn=fn,
                 is_async=is_async or is_async_generator,
@@ -137,7 +141,9 @@ class ResourceRegistry:
         self._process_definitions.update(
             {
                 name: list(definitions)
-                for name, definitions in self._builtin_process_definitions.items()
+                for name, definitions in (
+                    self._builtin_process_definitions.items()
+                )
             }
         )
 
@@ -179,6 +185,29 @@ class ResourceRegistry:
         definition = self._require(name)
         return SelectedResource(definition=definition)
 
+    def autouse(
+        self,
+        request_path: Path | None,
+    ) -> tuple[LoadedResourceDef, ...]:
+        """Return autouse definitions active for the request path."""
+        names = {
+            name
+            for name, definition in self._definitions.items()
+            if definition.spec.autouse
+        }
+        names.update(
+            name
+            for name, definitions in self._process_definitions.items()
+            if any(definition.spec.autouse for definition in definitions)
+        )
+        return tuple(
+            definition
+            for name in sorted(names)
+            if (
+                definition := self.select(name, request_path).definition
+            ).spec.autouse
+        )
+
 
 registry = ResourceRegistry()
 
@@ -191,6 +220,8 @@ def resource(
     on_injection: Callable[[Any], Any] | None = None,
     on_teardown: Callable[[Any], Any] | None = None,
     origin_fn: Callable[..., Any] | None = None,
+    autouse: bool = False,
+    sync: bool = True,
 ) -> Any:
     """Register a function as a resource in the default registry."""
     return registry.resource(
@@ -200,4 +231,6 @@ def resource(
         on_injection=on_injection,
         on_teardown=on_teardown,
         origin_fn=origin_fn,
+        autouse=autouse,
+        sync=sync,
     )

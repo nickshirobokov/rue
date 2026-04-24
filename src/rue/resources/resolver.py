@@ -18,6 +18,7 @@ from rue.context.runtime import (
     CURRENT_TEST,
     bind,
 )
+from rue.patching.runtime import PatchHandle
 from rue.resources.models import (
     LoadedResourceDef,
     ResolverSyncSnapshot,
@@ -68,6 +69,7 @@ class ResourceResolver:
         self._shadow_mode = shadow_mode
         self._sync_graph = SyncGraph(actor_id=sync_actor_id)
         self._sync_lock = threading.RLock()
+        self._patch_handles: list[PatchHandle] = []
 
     @property
     def cached_identities(self) -> dict[ResourceSpec, Any]:
@@ -78,6 +80,41 @@ class ResourceResolver:
         self, identity: ResourceSpec
     ) -> list[ResourceSpec]:
         return list(self._shared_dependency_graph.get(identity, []))
+
+    def autouse_names(self, request_path: Path | None) -> tuple[str, ...]:
+        """Return autouse resource names selected for a request path."""
+        return tuple(
+            definition.spec.name
+            for definition in self._registry.autouse(request_path)
+        )
+
+    async def resolve_autouse(
+        self,
+        request_path: Path | None,
+        *,
+        apply_injection_hook: bool = True,
+    ) -> tuple[str, ...]:
+        """Resolve autouse resources selected for a request path."""
+        names = self.autouse_names(request_path)
+        for name in names:
+            await self.resolve(name, apply_injection_hook=apply_injection_hook)
+        return names
+
+    def register_patch(self, handle: PatchHandle) -> None:
+        """Attach a patch handle to the resolver that owns its lifetime."""
+        owner = handle.owner
+        match owner.scope:
+            case "resource" if owner.resource is not None:
+                resolver = self._owner_resolver_for_scope(
+                    owner.resource.scope
+                )
+            case "module":
+                resolver = self._owner_resolver_for_scope(Scope.MODULE)
+            case "session":
+                resolver = self._owner_resolver_for_scope(Scope.PROCESS)
+            case _:
+                resolver = self
+        resolver._patch_handles.append(handle)
 
     def collect_dependency_closure(
         self,
@@ -246,11 +283,27 @@ class ResourceResolver:
         if self._shadow_mode:
             self._cache.clear()
             self._teardowns.clear()
+            self._undo_all_patches()
             return
 
+        teardown_errors = await self._run_teardowns(self._teardowns)
+        self._teardowns.clear()
+        self._undo_all_patches()
+        self._raise_teardown_errors(teardown_errors)
+
+    async def _run_teardowns(
+        self,
+        teardowns: Sequence[
+            tuple[
+                ResourceSpec,
+                LoadedResourceDef,
+                Generator[Any, None, None] | AsyncGenerator[Any, None],
+            ]
+        ],
+    ) -> list[Exception]:
         teardown_errors: list[Exception] = []
 
-        for key, definition, generator in reversed(self._teardowns):
+        for key, definition, generator in reversed(teardowns):
             with (
                 bind(CURRENT_RESOURCE_PROVIDER, definition),
                 bind(CURRENT_RESOURCE_RESOLVER, self),
@@ -267,7 +320,8 @@ class ResourceResolver:
                 except Exception as e:
                     teardown_errors.append(
                         RuntimeError(
-                            f"Generator teardown failed for resource '{key.name}': {e}"
+                            "Generator teardown failed for resource "
+                            f"'{key.name}': {e}"
                         )
                     )
 
@@ -280,8 +334,10 @@ class ResourceResolver:
                         )
                     except RuntimeError as e:
                         teardown_errors.append(e)
-        self._teardowns.clear()
+        return teardown_errors
 
+    @staticmethod
+    def _raise_teardown_errors(teardown_errors: list[Exception]) -> None:
         match teardown_errors:
             case []:
                 return
@@ -295,12 +351,19 @@ class ResourceResolver:
     async def teardown_scope(self, scope: Scope) -> None:
         """Teardown only resources matching the given scope."""
         if self._shadow_mode:
+            scoped_resources = tuple(
+                key for key in self._cache if key.scope is scope
+            )
             for key in tuple(self._cache):
                 if key.scope is scope:
                     del self._cache[key]
+            self._undo_patches_for_scope(scope, scoped_resources)
             return
 
         owner = self._owner_resolver_for_scope(scope)
+        scoped_resources = tuple(
+            key for key in owner._cache if key.scope is scope
+        )
         matching: list[
             tuple[
                 ResourceSpec,
@@ -322,14 +385,45 @@ class ResourceResolver:
             else:
                 to_keep.append(teardown)
 
-        owner._teardowns = matching
+        owner._teardowns = to_keep
         try:
-            await owner.teardown()
+            teardown_errors = await owner._run_teardowns(matching)
         finally:
-            owner._teardowns = to_keep
             for key in tuple(owner._cache):
                 if key.scope == scope:
                     del owner._cache[key]
+            owner._undo_patches_for_scope(scope, scoped_resources)
+        owner._raise_teardown_errors(teardown_errors)
+
+    def _undo_all_patches(self) -> None:
+        for handle in reversed(self._patch_handles):
+            handle.undo()
+        self._patch_handles.clear()
+
+    def _undo_patches_for_scope(
+        self,
+        scope: Scope,
+        resources: Sequence[ResourceSpec],
+    ) -> None:
+        resources_set = set(resources)
+        keep: list[PatchHandle] = []
+        for handle in self._patch_handles:
+            owner = handle.owner
+            should_undo = (
+                (owner.scope == "test" and scope is Scope.TEST)
+                or (owner.scope == "module" and scope is Scope.MODULE)
+                or (owner.scope == "session" and scope is Scope.PROCESS)
+                or (
+                    owner.scope == "resource"
+                    and owner.resource is not None
+                    and owner.resource in resources_set
+                )
+            )
+            if should_undo:
+                handle.undo()
+            else:
+                keep.append(handle)
+        self._patch_handles = keep
 
     def export_sync_snapshot(
         self,
@@ -406,7 +500,7 @@ class ResourceResolver:
         base_state: bytes,
         resources: Sequence[str] | Sequence[ResourceSpec],
     ) -> bytes:
-        """Return the CRDT update for the given resources since ``base_state``."""
+        """Return the CRDT update since ``base_state``."""
         self.flush_live_changes(resources)
         return self._sync_graph.doc.get_update(base_state)
 
@@ -415,14 +509,22 @@ class ResourceResolver:
         snapshot: ResolverSyncSnapshot,
         sync_update: bytes,
     ) -> None:
-        """Merge a worker CRDT update and patch changed state onto live objects."""
+        """Merge worker CRDT updates onto live objects."""
         identities = list(snapshot.res_specs)
         if not identities:
             return
 
         merge_order = [
-            *[identity for identity in identities if identity.scope is not Scope.TEST],
-            *[identity for identity in identities if identity.scope is Scope.TEST],
+            *[
+                identity
+                for identity in identities
+                if identity.scope is not Scope.TEST
+            ],
+            *[
+                identity
+                for identity in identities
+                if identity.scope is Scope.TEST
+            ],
         ]
         root_keys = [identity.snapshot_key for identity in merge_order]
 
@@ -539,6 +641,7 @@ class ResourceResolver:
                     dependencies=tuple(d.name for d in dependencies),
                 )
                 for identity, dependencies in closure.items()
+                if identity.sync
             ]
         if all(isinstance(spec, ResourceSpec) for spec in resource_items):
             specs = cast("list[ResourceSpec]", resource_items)
@@ -554,6 +657,7 @@ class ResourceResolver:
                     ),
                 )
                 for identity in specs
+                if identity.sync
             ]
         msg = "resources must be list[str] or list[ResourceSpec]"
         raise TypeError(msg)
@@ -618,8 +722,12 @@ class ResourceResolver:
             if inspect.isawaitable(value):
                 value = await value
         except Exception as e:
+            msg = (
+                f"Hook {hook.__name__} failed for resource "
+                f"'{resource_name}': {e}"
+            )
             raise RuntimeError(
-                f"Hook {hook.__name__} failed for resource '{resource_name}': {e}"
+                msg
             ) from e
         return value
 
@@ -629,7 +737,7 @@ class ResourceResolver:
         cache: dict[ResourceSpec, Any],
         dep_graph: dict[ResourceSpec, list[ResourceSpec]],
     ) -> dict[ResourceSpec, list[ResourceSpec]]:
-        """Expand resource names into the dependency closure for a transfer snapshot."""
+        """Expand names into the dependency closure for a transfer snapshot."""
         name_to_identity = {identity.name: identity for identity in cache}
         for name in resource_names:
             if name not in name_to_identity:

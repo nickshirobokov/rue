@@ -9,7 +9,12 @@ from typing import Any
 from uuid import UUID
 
 from rue.config import Config
-from rue.context.runtime import CURRENT_TEST_TRACER, bind
+from rue.context.runtime import (
+    CURRENT_TEST,
+    CURRENT_TEST_TRACER,
+    TestContext,
+    bind,
+)
 from rue.resources import ResourceResolver
 from rue.resources.models import ResolverSyncSnapshot
 from rue.resources.registry import registry as default_resource_registry
@@ -57,37 +62,47 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
         payload.spec,
         setup_chain=payload.setup_chain,
     )
-    resolver = await ResourceResolver.hydrate_from_sync_snapshot(
-        payload.snapshot,
-        default_resource_registry,
+    test_ctx = TestContext(
+        item=definition,
+        execution_id=payload.execution_id,
+        run_id=payload.run_id,
     )
+    with bind(CURRENT_TEST, test_ctx):
+        resolver = await ResourceResolver.hydrate_from_sync_snapshot(
+            payload.snapshot,
+            default_resource_registry,
+        )
     tracer = TestTracer.build(
         config=payload.config,
         run_id=payload.run_id,
     )
-    with bind(CURRENT_TEST_TRACER, tracer):
-        tracer.start(definition, execution_id=payload.execution_id)
-        duration_ms, imperative_outcome, error, assertion_results = (
-            await definition.run_loaded_test(
-                resolver=resolver,
-                params=payload.params,
-                execution_id=payload.execution_id,
-                run_sync_in_thread=False,
+    try:
+        with bind(CURRENT_TEST_TRACER, tracer):
+            tracer.start(definition, execution_id=payload.execution_id)
+            duration_ms, imperative_outcome, error, assertion_results = (
+                await definition.run_loaded_test(
+                    resolver=resolver,
+                    params=payload.params,
+                    execution_id=payload.execution_id,
+                    run_sync_in_thread=False,
+                    run_id=payload.run_id,
+                )
             )
+            result = TestResult.build(
+                definition=definition,
+                imperative_outcome=imperative_outcome,
+                duration_ms=duration_ms,
+                error=error,
+                assertion_results=assertion_results,
+            )
+            tracer.record_result(result)
+            telemetry_artifacts = tracer.finish()
+        sync_update = resolver.sync_update_since(
+            payload.snapshot.base_state,
+            list(payload.snapshot.res_specs),
         )
-        result = TestResult.build(
-            definition=definition,
-            imperative_outcome=imperative_outcome,
-            duration_ms=duration_ms,
-            error=error,
-            assertion_results=assertion_results,
-        )
-        tracer.record_result(result)
-        telemetry_artifacts = tracer.finish()
-    sync_update = resolver.sync_update_since(
-        payload.snapshot.base_state,
-        list(payload.snapshot.res_specs),
-    )
+    finally:
+        await resolver.teardown()
     return RemoteExecutionResult(
         result=result,
         telemetry_artifacts=telemetry_artifacts,

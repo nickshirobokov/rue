@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-import time
 from typing import Any
 from uuid import UUID
 
 from rue.assertions.base import AssertionResult
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
-from rue.context.runtime import CURRENT_TEST, TestContext, bind
+from rue.context.runtime import (
+    CURRENT_RESOURCE_RESOLVER,
+    CURRENT_TEST,
+    TestContext,
+    bind,
+)
+from rue.patching.runtime import PatchContext, patch_manager
 from rue.resources import ResourceResolver
 from rue.testing.models.result import TestStatus
 from rue.testing.models.spec import SetupFileRef, TestSpec
@@ -75,7 +81,8 @@ class LoadedTestDef:
             cls = self.fn.__globals__.get(self.spec.class_name)
             if cls is None:
                 raise RuntimeError(
-                    f"Test class '{self.spec.class_name}' not found for test '{self.spec.name}'"
+                    f"Test class '{self.spec.class_name}' not found "
+                    f"for test '{self.spec.name}'"
                 )
             instance = cls()
 
@@ -99,6 +106,7 @@ class LoadedTestDef:
         params: dict[str, Any],
         execution_id: UUID,
         run_sync_in_thread: bool,
+        run_id: UUID | None = None,
         is_stopped: Callable[[], bool] | None = None,
     ) -> tuple[
         float,
@@ -109,28 +117,50 @@ class LoadedTestDef:
         assertion_results: list[AssertionResult] = []
         error: BaseException | None = None
         imperative_outcome: TestStatus | None = None
-        ctx = TestContext(item=self, execution_id=execution_id)
+        ctx = TestContext(item=self, execution_id=execution_id, run_id=run_id)
 
         start = time.perf_counter()
         with (
             bind(CURRENT_TEST, ctx),
             bind(CURRENT_ASSERTION_RESULTS, assertion_results),
+            bind(CURRENT_RESOURCE_RESOLVER, resolver),
         ):
             try:
+                autouse_names = await resolver.resolve_autouse(
+                    self.spec.module_path
+                )
+                unresolved_params = tuple(
+                    param for param in self.spec.params if param not in params
+                )
                 kwargs = await resolver.partially_resolve(
-                    tuple(
-                        param for param in self.spec.params if param not in params
-                    ),
+                    unresolved_params,
                     params,
                 )
                 if is_stopped is not None and is_stopped():
                     imperative_outcome = TestStatus.SKIPPED
                     error = Exception("Run stopped early")
                 else:
-                    await self.call_test_fn(
-                        kwargs=kwargs,
-                        run_sync_in_thread=run_sync_in_thread,
+                    resource_names = (*autouse_names, *unresolved_params)
+                    resources = (
+                        resolver.collect_dependency_closure(
+                            resource_names,
+                            request_path=self.spec.module_path,
+                        )
+                        if resource_names
+                        else ()
                     )
+                    with patch_manager.bind_context(
+                        PatchContext(
+                            execution_id=execution_id,
+                            run_id=run_id,
+                            module_path=self.spec.module_path.resolve(),
+                            resources=frozenset(resources),
+                        )
+                    ):
+                        await self.call_test_fn(
+                            kwargs=kwargs,
+                            run_sync_in_thread=run_sync_in_thread,
+                        )
             except SkipTest as raised:
                 imperative_outcome = TestStatus.SKIPPED
                 error = raised
