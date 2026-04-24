@@ -131,6 +131,312 @@ async def test_resource_scoped_patch_follows_dependent_tests(
 
 
 @pytest.mark.asyncio
+async def test_delattr_hides_attribute_in_active_test_scope(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_monkeypatch_delattr.py"
+    module_path.write_text(
+        dedent(
+            """
+            import asyncio
+            import rue
+            from rue import ExecutionBackend
+
+            class Target:
+                value = "original"
+
+            @rue.test.iterate.params(
+                "pause",
+                [0.05, 0.01],
+            )
+            async def test_delete(pause, monkeypatch):
+                assert Target.value == "original"
+                monkeypatch.delattr(Target, "value")
+                await asyncio.sleep(pause)
+                assert not hasattr(Target, "value")
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_missing_delete_is_optional(monkeypatch):
+                monkeypatch.delattr(Target, "missing", raising=False)
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_after():
+                assert Target.value == "original"
+            """
+        )
+    )
+
+    run = await make_runner().run(items=materialize_tests(module_path))
+
+    assert run.result.passed == 3, [
+        execution.result.error for execution in run.result.executions
+    ]
+
+
+@pytest.mark.asyncio
+async def test_setitem_patches_are_isolated_between_concurrent_cases(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_monkeypatch_setitem.py"
+    module_path.write_text(
+        dedent(
+            """
+            import asyncio
+            import rue
+            from rue import ExecutionBackend
+
+            target = {"value": "original"}
+
+            @rue.test.iterate.params(
+                "value,pause",
+                [("left", 0.05), ("right", 0.01)],
+            )
+            async def test_patch_item(value, pause, monkeypatch):
+                assert target["value"] == "original"
+                monkeypatch.setitem(target, "value", value)
+                await asyncio.sleep(pause)
+                assert target["value"] == value
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_after():
+                assert target["value"] == "original"
+            """
+        )
+    )
+
+    run = await make_runner().run(items=materialize_tests(module_path))
+
+    assert run.result.passed == 2, [
+        execution.result.error for execution in run.result.executions
+    ]
+
+
+@pytest.mark.asyncio
+async def test_setitem_replaces_list_items_between_concurrent_cases(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_monkeypatch_list_replace.py"
+    module_path.write_text(
+        dedent(
+            """
+            import asyncio
+            import rue
+            from rue import ExecutionBackend
+
+            target = ["original"]
+
+            @rue.test.iterate.params(
+                "value,pause",
+                [("left", 0.05), ("right", 0.01)],
+            )
+            async def test_patch_list_item(value, pause, monkeypatch):
+                assert target[0] == "original"
+                monkeypatch.setitem(
+                    target,
+                    value,
+                    idx=0,
+                    replace=True,
+                )
+                await asyncio.sleep(pause)
+                assert target[0] == value
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_after():
+                assert target == ["original"]
+            """
+        )
+    )
+
+    run = await make_runner().run(items=materialize_tests(module_path))
+
+    assert run.result.passed == 2, [
+        execution.result.error for execution in run.result.executions
+    ]
+
+
+@pytest.mark.asyncio
+async def test_setitem_inserts_list_items_and_restores_on_teardown(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_monkeypatch_list_insert.py"
+    module_path.write_text(
+        dedent(
+            """
+            import rue
+            from rue import ExecutionBackend
+
+            target = ["tail"]
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_insert_list_item(monkeypatch):
+                monkeypatch.setitem(
+                    target,
+                    "head",
+                    idx=0,
+                    replace=False,
+                )
+                assert target == ["head", "tail"]
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_after():
+                assert target == ["tail"]
+            """
+        )
+    )
+
+    run = await make_runner().run(items=materialize_tests(module_path))
+
+    assert run.result.passed == 2, [
+        execution.result.error for execution in run.result.executions
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delitem_hides_item_in_active_test_scope(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_monkeypatch_delitem.py"
+    module_path.write_text(
+        dedent(
+            """
+            import asyncio
+            import pytest
+            import rue
+            from rue import ExecutionBackend
+
+            target = {"value": "original"}
+
+            @rue.test.iterate.params(
+                "pause",
+                [0.05, 0.01],
+            )
+            async def test_delete_item(pause, monkeypatch):
+                assert target["value"] == "original"
+                monkeypatch.delitem(target, "value")
+                await asyncio.sleep(pause)
+                with pytest.raises(KeyError):
+                    str(target["value"])
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_missing_delete_is_optional(monkeypatch):
+                monkeypatch.delitem(target, "missing", raising=False)
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_after():
+                assert target["value"] == "original"
+            """
+        )
+    )
+
+    run = await make_runner().run(items=materialize_tests(module_path))
+
+    assert run.result.passed == 3, [
+        execution.result.error for execution in run.result.executions
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delitem_hides_list_item_in_active_test_scope(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_monkeypatch_list_delitem.py"
+    module_path.write_text(
+        dedent(
+            """
+            import asyncio
+            import pytest
+            import rue
+            from rue import ExecutionBackend
+
+            target = ["original"]
+
+            @rue.test.iterate.params(
+                "pause",
+                [0.05, 0.01],
+            )
+            async def test_delete_list_item(pause, monkeypatch):
+                assert target[0] == "original"
+                monkeypatch.delitem(target, idx=0, replace=True)
+                await asyncio.sleep(pause)
+                with pytest.raises(IndexError):
+                    str(target[0])
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_missing_delete_is_optional(monkeypatch):
+                monkeypatch.delitem(
+                    target,
+                    idx=12,
+                    replace=True,
+                    raising=False,
+                )
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_after():
+                assert target == ["original"]
+            """
+        )
+    )
+
+    run = await make_runner().run(items=materialize_tests(module_path))
+
+    assert run.result.passed == 3, [
+        execution.result.error for execution in run.result.executions
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resource_scoped_item_patches_follow_dependent_tests(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_resource_item_patch.py"
+    module_path.write_text(
+        dedent(
+            """
+            import pytest
+            import rue
+            from rue import ExecutionBackend
+
+            state = {"mode": "original", "token": "secret"}
+            calls = 0
+
+            @rue.resource
+            def patched_state(monkeypatch):
+                global calls
+                calls += 1
+                if calls == 1:
+                    monkeypatch.setitem(state, "mode", "patched")
+                    monkeypatch.delitem(state, "token")
+                return state
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_first_use(patched_state):
+                assert state["mode"] == "patched"
+                assert patched_state["mode"] == "patched"
+                with pytest.raises(KeyError):
+                    str(state["token"])
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_second_use(patched_state):
+                assert state["mode"] == "original"
+                assert patched_state["mode"] == "original"
+                assert state["token"] == "secret"
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_after():
+                assert state["mode"] == "original"
+                assert state["token"] == "secret"
+            """
+        )
+    )
+
+    run = await make_runner().run(items=materialize_tests(module_path))
+
+    assert run.result.passed == 3, [
+        execution.result.error for execution in run.result.executions
+    ]
+
+
+@pytest.mark.asyncio
 async def test_autouse_patch_applies_in_subprocess_worker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+from collections.abc import MutableMapping, MutableSequence
 from pkgutil import resolve_name
-from typing import Any
+from typing import Any, overload
 
 from rue.context.runtime import (
     CURRENT_RESOURCE_PROVIDER,
     CURRENT_RESOURCE_RESOLVER,
 )
-from rue.patching.runtime import PatchOwner, PatchScope, patch_manager
+from rue.patching.runtime import (
+    PatchHandle,
+    PatchOwner,
+    PatchScope,
+    patch_manager,
+)
+
+
+_UNSET = object()
 
 
 class MonkeyPatch:
@@ -33,13 +42,26 @@ class MonkeyPatch:
             owner=owner,
             raising=raising,
         )
-        resolver = CURRENT_RESOURCE_RESOLVER.get()
-        if resolver is None:
-            handle.undo()
-            raise RuntimeError(
-                "MonkeyPatch can only be used inside Rue execution."
-            )
-        resolver.register_patch(handle)
+        self._register(handle)
+
+    def delattr(
+        self,
+        target: Any,
+        name: str,
+        *,
+        raising: bool = True,
+        scope: PatchScope | None = None,
+    ) -> None:
+        """Delete an attribute while the selected Rue scope is active."""
+        owner = PatchOwner.build(scope or self._default_scope())
+        handle = patch_manager.delattr(
+            target,
+            name,
+            owner=owner,
+            raising=raising,
+        )
+        if handle is not None:
+            self._register(handle)
 
     def setattr_path(
         self,
@@ -52,6 +74,145 @@ class MonkeyPatch:
         """Replace an attribute addressed by a pkgutil-style import path."""
         target, name = self._resolve_attr_path(import_path)
         self.setattr(target, name, value, raising=raising, scope=scope)
+
+    @overload
+    def setitem(
+        self,
+        target: MutableMapping[Any, Any],
+        key: Any,
+        value: Any,
+        *,
+        idx: None = None,
+        replace: None = None,
+        scope: PatchScope | None = None,
+    ) -> None: ...
+
+    @overload
+    def setitem(
+        self,
+        target: MutableSequence[Any],
+        value: Any,
+        /,
+        *,
+        idx: int,
+        replace: bool,
+        scope: PatchScope | None = None,
+    ) -> None: ...
+
+    def setitem(
+        self,
+        target: MutableMapping[Any, Any] | MutableSequence[Any],
+        key: Any = _UNSET,
+        value: Any = _UNSET,
+        *,
+        idx: int | None = None,
+        replace: bool | None = None,
+        scope: PatchScope | None = None,
+    ) -> None:
+        """Replace an item while the selected Rue scope is active."""
+        if isinstance(target, MutableSequence):
+            if value is not _UNSET:
+                raise TypeError("List item patches use idx, not key.")
+            if key is _UNSET:
+                raise TypeError("List item patches require a value.")
+            if idx is None or replace is None:
+                raise TypeError(
+                    "List item patches require idx and replace."
+                )
+            name = idx
+            patch_value = key
+        else:
+            if key is _UNSET or value is _UNSET:
+                raise TypeError(
+                    "Mapping item patches require key and value."
+                )
+            if idx is not None or replace is not None:
+                raise TypeError(
+                    "Mapping item patches use key, not idx/replace."
+                )
+            name = key
+            patch_value = value
+
+        owner = PatchOwner.build(scope or self._default_scope())
+        handle = patch_manager.setitem(
+            target,
+            name,
+            patch_value,
+            owner=owner,
+            replace=replace,
+        )
+        self._register(handle)
+
+    @overload
+    def delitem(
+        self,
+        target: MutableMapping[Any, Any],
+        key: Any,
+        *,
+        idx: None = None,
+        replace: None = None,
+        raising: bool = True,
+        scope: PatchScope | None = None,
+    ) -> None: ...
+
+    @overload
+    def delitem(
+        self,
+        target: MutableSequence[Any],
+        *,
+        idx: int,
+        replace: bool,
+        raising: bool = True,
+        scope: PatchScope | None = None,
+    ) -> None: ...
+
+    def delitem(
+        self,
+        target: MutableMapping[Any, Any] | MutableSequence[Any],
+        key: Any = _UNSET,
+        *,
+        idx: int | None = None,
+        replace: bool | None = None,
+        raising: bool = True,
+        scope: PatchScope | None = None,
+    ) -> None:
+        """Delete an item while the selected Rue scope is active."""
+        if isinstance(target, MutableSequence):
+            if key is not _UNSET:
+                raise TypeError("List item patches use idx, not key.")
+            if idx is None or replace is None:
+                raise TypeError(
+                    "List item patches require idx and replace."
+                )
+            name = idx
+        else:
+            if key is _UNSET:
+                raise TypeError("Mapping item patches require key.")
+            if idx is not None or replace is not None:
+                raise TypeError(
+                    "Mapping item patches use key, not idx/replace."
+                )
+            name = key
+
+        owner = PatchOwner.build(scope or self._default_scope())
+        handle = patch_manager.delitem(
+            target,
+            name,
+            owner=owner,
+            raising=raising,
+        )
+        if handle is not None:
+            self._register(handle)
+
+    @staticmethod
+    def _register(handle: PatchHandle) -> None:
+        resolver = CURRENT_RESOURCE_RESOLVER.get()
+        if resolver is None:
+            handle.undo()
+            raise RuntimeError(
+                "MonkeyPatch can only be used inside Rue execution."
+            )
+        resolver.register_patch(handle)
 
     @staticmethod
     def _default_scope() -> PatchScope:

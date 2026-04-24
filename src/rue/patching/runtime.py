@@ -1,9 +1,9 @@
-"""Runtime-scoped attribute patch dispatch."""
+"""Runtime-scoped patch dispatch."""
 
 from __future__ import annotations
 
 import inspect
-from collections.abc import Iterator
+from collections.abc import Iterator, MutableMapping, MutableSequence
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +18,8 @@ from rue.context.runtime import (
 
 
 type PatchScope = Literal["test", "resource", "module", "session"]
+type PatchTargetKind = Literal["attr", "item"]
+type PatchTargetKey = tuple[PatchTargetKind, int, Any]
 
 
 _MISSING = object()
@@ -123,7 +125,7 @@ class PatchHandle:
     """A registered patch that can be undone by its owning resolver."""
 
     owner: PatchOwner
-    target_key: tuple[int, str]
+    target_key: PatchTargetKey
     record: _PatchRecord
     manager: PatchManager
 
@@ -139,11 +141,12 @@ class _PatchRecord:
 
 
 @dataclass(slots=True)
-class _PatchedAttribute:
+class _PatchedTarget:
+    kind: PatchTargetKind
     target: Any
-    name: str
+    name: Any
     original: Any
-    dispatcher: _AttributeDispatcher
+    dispatcher: Any
     records: list[_PatchRecord]
 
 
@@ -153,7 +156,7 @@ class _AttributeDispatcher:
     def __init__(
         self,
         manager: PatchManager,
-        target_key: tuple[int, str],
+        target_key: PatchTargetKey,
     ) -> None:
         self._manager = manager
         self._target_key = target_key
@@ -181,10 +184,10 @@ class _AttributeDispatcher:
         return bool(self._active_value())
 
     def __eq__(self, other: object) -> bool:
-        return self._active_value() == other
+        return bool(self._active_value() == other)
 
     def __ne__(self, other: object) -> bool:
-        return self._active_value() != other
+        return bool(self._active_value() != other)
 
     def __len__(self) -> int:
         return len(self._active_value())
@@ -205,11 +208,15 @@ class _AttributeDispatcher:
         return self._manager.active_value(self._target_key)
 
 
+class _ItemDispatcher(_AttributeDispatcher):
+    """Proxy installed once per patched mapping item."""
+
+
 class PatchManager:
-    """Installs dispatchers and routes patched attributes by Rue context."""
+    """Installs dispatchers and routes patched values by Rue context."""
 
     def __init__(self) -> None:
-        self._patched: dict[tuple[int, str], _PatchedAttribute] = {}
+        self._patched: dict[PatchTargetKey, _PatchedTarget] = {}
         self._lock = RLock()
         self._context: ContextVar[PatchContext | None] = ContextVar(
             "rue_patch_context",
@@ -238,7 +245,7 @@ class PatchManager:
         raising: bool,
     ) -> PatchHandle:
         """Install or append one context-routed attribute patch."""
-        target_key = (id(target), name)
+        target_key: PatchTargetKey = ("attr", id(target), name)
         with self._lock:
             patched = self._patched.get(target_key)
             if patched is None:
@@ -249,7 +256,8 @@ class PatchManager:
                         raise
                     original = _MISSING
                 dispatcher = _AttributeDispatcher(self, target_key)
-                patched = _PatchedAttribute(
+                patched = _PatchedTarget(
+                    kind="attr",
                     target=target,
                     name=name,
                     original=original,
@@ -259,26 +267,148 @@ class PatchManager:
                 self._patched[target_key] = patched
                 setattr(target, name, dispatcher)
 
-            record = _PatchRecord(owner=owner, value=value)
-            patched.records.append(record)
-            return PatchHandle(
-                owner=owner,
-                target_key=target_key,
-                record=record,
-                manager=self,
-            )
+            return self._add_record(patched, owner, value)
 
-    def active_value(self, target_key: tuple[int, str]) -> Any:
-        """Return the currently visible value for a patched attribute."""
+    def delattr(
+        self,
+        target: Any,
+        name: str,
+        *,
+        owner: PatchOwner,
+        raising: bool,
+    ) -> PatchHandle | None:
+        """Install or append one context-routed attribute deletion."""
+        target_key: PatchTargetKey = ("attr", id(target), name)
+        with self._lock:
+            patched = self._patched.get(target_key)
+            if patched is None:
+                try:
+                    original = inspect.getattr_static(target, name)
+                except AttributeError:
+                    if raising:
+                        raise
+                    return None
+                dispatcher = _AttributeDispatcher(self, target_key)
+                patched = _PatchedTarget(
+                    kind="attr",
+                    target=target,
+                    name=name,
+                    original=original,
+                    dispatcher=dispatcher,
+                    records=[],
+                )
+                self._patched[target_key] = patched
+                setattr(target, name, dispatcher)
+
+            return self._add_record(patched, owner, _MISSING)
+
+    def setitem(
+        self,
+        target: MutableMapping[Any, Any] | MutableSequence[Any],
+        name: Any,
+        value: Any,
+        *,
+        owner: PatchOwner,
+        replace: bool | None = None,
+    ) -> PatchHandle:
+        """Install or append one context-routed item patch."""
+        target_key: PatchTargetKey = ("item", id(target), name)
+        with self._lock:
+            patched = self._patched.get(target_key)
+            if patched is None:
+                if isinstance(target, MutableSequence):
+                    if replace:
+                        original = target[name]
+                    else:
+                        original = _MISSING
+                else:
+                    original = target.get(name, _MISSING)
+
+                dispatcher = _ItemDispatcher(self, target_key)
+                patched = _PatchedTarget(
+                    kind="item",
+                    target=target,
+                    name=name,
+                    original=original,
+                    dispatcher=dispatcher,
+                    records=[],
+                )
+                self._patched[target_key] = patched
+                if isinstance(target, MutableSequence) and not replace:
+                    target.insert(name, dispatcher)
+                else:
+                    target[name] = dispatcher
+
+            return self._add_record(patched, owner, value)
+
+    def delitem(
+        self,
+        target: MutableMapping[Any, Any] | MutableSequence[Any],
+        name: Any,
+        *,
+        owner: PatchOwner,
+        raising: bool,
+    ) -> PatchHandle | None:
+        """Install or append one context-routed item deletion."""
+        target_key: PatchTargetKey = ("item", id(target), name)
+        with self._lock:
+            patched = self._patched.get(target_key)
+            if patched is None:
+                if isinstance(target, MutableSequence):
+                    try:
+                        original = target[name]
+                    except IndexError:
+                        if raising:
+                            raise
+                        return None
+                else:
+                    if name not in target:
+                        if raising:
+                            raise KeyError(name)
+                        return None
+                    original = target[name]
+
+                dispatcher = _ItemDispatcher(self, target_key)
+                patched = _PatchedTarget(
+                    kind="item",
+                    target=target,
+                    name=name,
+                    original=original,
+                    dispatcher=dispatcher,
+                    records=[],
+                )
+                self._patched[target_key] = patched
+                target[name] = dispatcher
+
+            return self._add_record(patched, owner, _MISSING)
+
+    def _add_record(
+        self,
+        patched: _PatchedTarget,
+        owner: PatchOwner,
+        value: Any,
+    ) -> PatchHandle:
+        record = _PatchRecord(owner=owner, value=value)
+        patched.records.append(record)
+        return PatchHandle(
+            owner=owner,
+            target_key=(patched.kind, id(patched.target), patched.name),
+            record=record,
+            manager=self,
+        )
+
+    def active_value(self, target_key: PatchTargetKey) -> Any:
+        """Return the currently visible value for a patched target."""
         with self._lock:
             patched = self._patched[target_key]
             context = self._context.get()
             for record in reversed(patched.records):
                 if record.owner.is_active(context):
+                    if record.value is _MISSING:
+                        self._raise_missing(patched)
                     return record.value
             if patched.original is _MISSING:
-                msg = f"{patched.target!r} has no attribute {patched.name!r}"
-                raise AttributeError(msg)
+                self._raise_missing(patched)
             return patched.original
 
     def remove(self, handle: PatchHandle) -> None:
@@ -292,10 +422,39 @@ class PatchManager:
             if patched.records:
                 return
             if patched.original is _MISSING:
-                delattr(patched.target, patched.name)
+                self._delete_target(patched)
             else:
-                setattr(patched.target, patched.name, patched.original)
+                self._restore_target(patched)
             del self._patched[handle.target_key]
+
+    @staticmethod
+    def _raise_missing(patched: _PatchedTarget) -> None:
+        match patched.kind:
+            case "attr":
+                msg = (
+                    f"{patched.target!r} has no attribute {patched.name!r}"
+                )
+                raise AttributeError(msg)
+            case "item":
+                if isinstance(patched.target, MutableSequence):
+                    raise IndexError(patched.name)
+                raise KeyError(patched.name)
+
+    @staticmethod
+    def _delete_target(patched: _PatchedTarget) -> None:
+        match patched.kind:
+            case "attr":
+                delattr(patched.target, patched.name)
+            case "item":
+                del patched.target[patched.name]
+
+    @staticmethod
+    def _restore_target(patched: _PatchedTarget) -> None:
+        match patched.kind:
+            case "attr":
+                setattr(patched.target, patched.name, patched.original)
+            case "item":
+                patched.target[patched.name] = patched.original
 
 
 class _PatchContextToken:
