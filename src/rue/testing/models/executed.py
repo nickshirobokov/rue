@@ -39,7 +39,7 @@ class ExecutedTest:
 
     @property
     def label(self) -> str:
-        dlabel = self.definition.spec.label
+        dlabel = self.definition.spec.get_label()
         if dlabel:
             return dlabel
         if self.execution_id:

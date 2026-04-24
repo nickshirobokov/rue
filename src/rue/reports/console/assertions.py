@@ -11,6 +11,7 @@ from rich.text import Text
 
 from .shared import STATUS_STYLES, format_assertion_result
 
+
 if TYPE_CHECKING:
     from rue.testing.models.executed import ExecutedTest
 
@@ -25,7 +26,9 @@ class AssertionRenderer:
             for s in execution.sub_executions
         )
 
-    def render(self, failures: list[ExecutedTest]) -> list[RenderableType]:
+    def render(
+        self, failures: list[ExecutedTest], verbosity: int
+    ) -> list[RenderableType]:
         relevant = [f for f in failures if self._has_failed_assertions(f)]
         if not relevant:
             return []
@@ -42,14 +45,20 @@ class AssertionRenderer:
                 renderables.append(Text(""))
             renderables.append(
                 self.render_panel(
-                    failure, title=failure.definition.spec.full_name
+                    failure,
+                    title=failure.definition.spec.full_name,
+                    verbosity=verbosity,
                 )
             )
         renderables.append(Text(""))
         return renderables
 
     def render_panel(
-        self, execution: ExecutedTest, *, title: str | None = None
+        self,
+        execution: ExecutedTest,
+        *,
+        title: str | None = None,
+        verbosity: int,
     ) -> Panel:
         result = execution.result
         style = STATUS_STYLES[result.status]
@@ -70,7 +79,7 @@ class AssertionRenderer:
             renderables.append(combined)
 
         renderables.extend(
-            self.render_panel(sub)
+            self.render_panel(sub, verbosity=verbosity)
             for sub in execution.sub_executions
             if self._has_failed_assertions(sub)
         )
@@ -83,9 +92,15 @@ class AssertionRenderer:
             case _:
                 panel_content = Group(*renderables)
 
+        fallback_title = execution.definition.spec.get_label(
+            full=verbosity >= 2
+        )
         return Panel(
             panel_content,
-            title=Text(title or execution.label, style=f"bold {style.color}"),
+            title=Text(
+                title or fallback_title or execution.label,
+                style=f"bold {style.color}",
+            ),
             title_align="left",
             border_style=style.color,
             expand=True,

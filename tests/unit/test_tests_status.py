@@ -1,5 +1,6 @@
 from pathlib import Path
 from textwrap import dedent
+from uuid import UUID
 
 from rich.console import Console
 
@@ -93,6 +94,10 @@ def test_status_builder_matches_execution_tree_shape(tmp_path):
     assert len(nodes["test_status_tree::test_params"].children) == 2
     assert nodes["test_status_tree::test_params"].children[0].definition.spec.suffix == "one"
     assert nodes["test_status_tree::test_cases"].leaf_count == 2
+    assert (
+        nodes["test_status_tree::test_cases"].children[0].definition.spec.suffix
+        == "{'slug': 'one'}"
+    )
     assert nodes["test_status_tree::test_groups"].leaf_count == 3
     assert len(nodes["test_status_tree::test_groups"].children[0].children) == 2
 
@@ -232,7 +237,11 @@ def test_status_builder_groups_resources_by_runtime_type(tmp_path):
 
 def test_status_renderer_respects_verbosity_levels():
     child_one = StatusNode(
-        definition=make_definition("test_tree", suffix="one"),
+        definition=make_definition(
+            "test_tree",
+            suffix="one",
+            case_id=UUID("00000000-0000-0000-0000-000000000001"),
+        ),
         backend=ExecutionBackend.ASYNCIO,
         history=(TestStatus.PASSED, TestStatus.FAILED),
         resources_by_type={
@@ -277,16 +286,27 @@ def test_status_renderer_respects_verbosity_levels():
     compact_text = compact.export_text()
     assert "2 variations" in compact_text
     assert "Metric" not in compact_text
+    assert "History" not in compact_text
+    assert "test_module::test_tree" not in compact_text
 
     verbose = Console(record=True, width=140)
     verbose.print(renderer.render(report, 1))
     verbose_text = verbose.export_text()
     assert "[one]" in verbose_text
     assert "[two]" in verbose_text
+    assert "x 2 iterations" in verbose_text
+    assert "[backend: asyncio]" in verbose_text
+    assert verbose_text.count("[backend: asyncio]") == 2
+    assert "History" not in verbose_text
+    assert "00000000-0000-0000-0000-000000000001" not in verbose_text
 
     very_verbose = Console(record=True, width=140)
     very_verbose.print(renderer.render(report, 2))
     very_verbose_text = very_verbose.export_text()
+    assert "History" in very_verbose_text
+    assert "✓✗" in very_verbose_text
+    assert "[one | 00000000-0000-0000-0000-000000000001]" in very_verbose_text
     assert "Metric" in very_verbose_text
     assert "SUT" in very_verbose_text
     assert "confrue_metrics.py" in very_verbose_text
+    assert "00000000-0000-0000-0000-000000000001" in very_verbose_text

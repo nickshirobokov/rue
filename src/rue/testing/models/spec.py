@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
+
 if TYPE_CHECKING:
     from rue.testing.decorators.tag import TagData
     from rue.testing.models.modifiers import Modifier
@@ -36,7 +37,10 @@ class TestLocator:
 
     def __str__(self) -> str:
         if self.class_name:
-            return f"{self.module_path.stem}::{self.class_name}::{self.function_name}"
+            return (
+                f"{self.module_path.stem}::"
+                f"{self.class_name}::{self.function_name}"
+            )
         return f"{self.module_path.stem}::{self.function_name}"
 
 
@@ -82,9 +86,31 @@ class TestSpec:
         return str(self.locator)
 
     @property
-    def label(self) -> str | None:
+    def local_name(self) -> str:
+        if self.class_name:
+            return f"{self.class_name}::{self.name}"
+        return self.name
+
+    def get_label(
+        self,
+        *,
+        full: bool = False,
+        length: int = 50,
+        separator: str = " | ",
+    ) -> str | None:
+        if self.suffix and self.case_id and full:
+            case_id = str(self.case_id)
+            suffix_length = length - len(case_id) - len(separator)
+            if suffix_length <= 0:
+                return case_id
+            suffix = self.suffix
+            if len(suffix) > suffix_length:
+                suffix = f"{suffix[: suffix_length - 1]}…"
+            return f"{suffix}{separator}{case_id}"
         if self.suffix:
-            return self.suffix
+            if len(self.suffix) <= length:
+                return self.suffix
+            return f"{self.suffix[: length - 1]}…"
         if self.case_id:
             return str(self.case_id)
         return None

@@ -10,10 +10,13 @@ from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
+from rue.cli.tests.status.models import (
+    StatusIssue,
+    StatusNode,
+    TestsStatusReport,
+)
 from rue.resources import ResourceSpec
 from rue.testing.models import TestStatus
-
-from rue.cli.tests.status.models import StatusIssue, StatusNode, TestsStatusReport
 
 
 _STATUS_STYLES: dict[TestStatus, tuple[str, str]] = {
@@ -25,6 +28,12 @@ _STATUS_STYLES: dict[TestStatus, tuple[str, str]] = {
     TestStatus.XPASSED: ("!", "magenta"),
 }
 
+_BACKEND_STYLE = "dim blue"
+_MODIFIER_STYLE = "blue"
+_RESOURCE_SCOPE_STYLE = "dim blue"
+_RESOURCE_TYPE_STYLE = "bold magenta"
+_TREE_MODULE_STYLE = "medium_purple"
+
 
 class StatusRenderer:
     def render(
@@ -32,16 +41,20 @@ class StatusRenderer:
         report: TestsStatusReport,
         verbosity: int,
     ) -> RenderableType:
-        parts: list[RenderableType] = [self._summary(report)]
+        parts: list[RenderableType] = [self._summary(report, verbosity)]
         for module_path, nodes in sorted(report.module_nodes.items()):
-            root_label = Text(f"• {_safe_relative_path(module_path).as_posix()}", style="bold")
+            path_text = _safe_relative_path(module_path).as_posix()
+            root_label = Text(
+                f"• {path_text}",
+                style=_TREE_MODULE_STYLE,
+            )
             tree = Tree(root_label)
             for node in nodes:
                 self._add_node(tree, node, verbosity, top_level=True)
             parts.append(tree)
         return Group(*parts)
 
-    def _summary(self, report: TestsStatusReport) -> Panel:
+    def _summary(self, report: TestsStatusReport, verbosity: int) -> Panel:
         table = Table.grid(padding=(0, 2))
         table.add_column(style="dim")
         table.add_column()
@@ -56,11 +69,6 @@ class StatusRenderer:
             for nodes in report.module_nodes.values()
             for node in nodes
         )
-        history_available = report.run_window or any(
-            node.history
-            for nodes in report.module_nodes.values()
-            for node in nodes
-        )
         table.add_row(
             "Modules",
             Text(str(len(report.module_nodes)), style="bold"),
@@ -71,15 +79,21 @@ class StatusRenderer:
             str(issues), style="bold yellow" if issues else "dim"
         )
         table.add_row("Issues", issues_text)
-        if history_available:
-            history_text = Text()
-            history_text.append(
-                str(len(report.run_window)), style="bold"
+        if verbosity >= 2:
+            history_available = report.run_window or any(
+                node.history
+                for nodes in report.module_nodes.values()
+                for node in nodes
             )
-            history_text.append(" recorded run(s)", style="dim")
-        else:
-            history_text = Text("Unavailable", style="dim")
-        table.add_row("History", history_text)
+            if history_available:
+                history_text = Text()
+                history_text.append(
+                    str(len(report.run_window)), style="bold"
+                )
+                history_text.append(" recorded run(s)", style="dim")
+            else:
+                history_text = Text("Unavailable", style="dim")
+            table.add_row("History", history_text)
         border_style = "yellow" if issues else "cyan"
         return Panel(
             table,
@@ -95,7 +109,9 @@ class StatusRenderer:
         *,
         top_level: bool = False,
     ) -> None:
-        branch = parent.add(self._node_text(node, verbosity, top_level=top_level))
+        branch = parent.add(
+            self._node_text(node, verbosity, top_level=top_level)
+        )
         if verbosity == 0 and node.children:
             return
 
@@ -104,7 +120,12 @@ class StatusRenderer:
 
         if verbosity >= 2 and not node.children:
             for type_name, resources in sorted(node.resources_by_type.items()):
-                group = branch.add(Text(type_name, style="italic dim"))
+                group = branch.add(
+                    Text(
+                        f"[injected {type_name}]",
+                        style=_RESOURCE_TYPE_STYLE,
+                    )
+                )
                 for resource in resources:
                     group.add(self._resource_text(resource))
 
@@ -121,27 +142,39 @@ class StatusRenderer:
         spec = node.definition.spec
         text = Text()
         if top_level:
-            full = spec.full_name
-            if "::" in full:
-                prefix, _, func = full.rpartition("::")
+            name = spec.local_name
+            if "::" in name:
+                prefix, _, func = name.rpartition("::")
                 text.append(f"{prefix}::", style="dim")
                 text.append(func, style="bold")
             else:
-                text.append(full, style="bold")
+                text.append(name, style="bold")
         else:
-            text.append("[", style="dim")
-            text.append(spec.label or "case")
-            text.append("]", style="dim")
+            label = spec.get_label(full=verbosity >= 2)
+            label = label or "case"
+            if label.startswith("[") and label.endswith("]"):
+                text.append(label)
+            else:
+                text.append("[", style="dim")
+                text.append(label)
+                text.append("]", style="dim")
         if node.children and spec.modifiers:
-            text.append(f" [{spec.modifiers[0].display_name}]", style="dim")
-        if node.backend is not None:
-            text.append(f" [{node.backend.value}]", style="dim")
+            summary = spec.modifiers[0].display_summary
+            if summary:
+                text.append(f" {summary}", style=_MODIFIER_STYLE)
+        if not node.children and node.backend is not None:
+            text.append(
+                f" [backend: {node.backend.value}]",
+                style=_BACKEND_STYLE,
+            )
         if node.children and verbosity == 0:
             text.append(f" ({node.leaf_count} variations)", style="dim")
-        issue_count = self._issue_count(node) if verbosity == 0 else len(node.issues)
+        issue_count = (
+            self._issue_count(node) if verbosity == 0 else len(node.issues)
+        )
         if issue_count:
             text.append(f" {issue_count} issue(s)", style="bold yellow")
-        if node.history:
+        if verbosity >= 2 and node.history:
             text.append_text(self._history_text(node.history))
         return text
 
@@ -163,8 +196,11 @@ class StatusRenderer:
 
     def _resource_text(self, spec: ResourceSpec) -> Text:
         text = Text()
-        text.append(spec.name, style="bold")
-        text.append(f" [{spec.scope.value}]", style="dim")
+        text.append(spec.name)
+        text.append(
+            f" [scope: {spec.scope.value}]",
+            style=_RESOURCE_SCOPE_STYLE,
+        )
         origin = spec.provider_path or spec.provider_dir
         if origin:
             text.append(

@@ -2,7 +2,6 @@
 
 import io
 from dataclasses import replace
-from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -19,10 +18,10 @@ from rue.resources.metrics.base import (
 from rue.resources.sut.output import SUTOutputCapture
 from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import (
-    IterateModifier,
-    Run,
-    LoadedTestDef,
     ExecutedTest,
+    IterateModifier,
+    LoadedTestDef,
+    Run,
     TestResult,
     TestStatus,
 )
@@ -191,9 +190,11 @@ async def test_verbose_live_output_grouped_by_file(monkeypatch):
     static_text = output.getvalue()
     assert "tests/test_auth.py" in static_text
     assert "tests/test_users.py" in static_text
-    assert "test_auth::test_login" in static_text
-    assert "test_auth::test_logout" in static_text
-    assert "test_users::test_create" in static_text
+    assert "test_login" in static_text
+    assert "test_logout" in static_text
+    assert "test_create" in static_text
+    assert "test_auth::test_login" not in static_text
+    assert "test_users::test_create" not in static_text
     assert "FAILED" in static_text
 
 
@@ -626,10 +627,61 @@ async def test_verbose_live_streams_subtests_before_parent_completion(
     await reporter.on_execution_complete(sub_execution)
 
     text = render_to_text(FakeLive.instances[-1].renderables[-1])
-    assert "test_matrix::test_matrix" in text
+    assert "test_matrix" in text
+    assert "test_matrix::test_matrix" not in text
     assert "running" in text
     assert "case=1" in text
     assert "↳" not in text
+
+
+@pytest.mark.asyncio
+async def test_verbose_console_shows_case_uuid_only_in_very_verbose():
+    case_id = UUID("00000000-0000-0000-0000-000000000001")
+    parent = make_definition(
+        "test_cases",
+        module_path="tests/test_cases.py",
+        modifiers=(IterateModifier(count=1, min_passes=1),),
+    )
+    case = replace(
+        parent,
+        spec=replace(parent.spec, modifiers=(), suffix="one", case_id=case_id),
+    )
+    case_execution = make_execution(case, TestStatus.PASSED, 3.0)
+
+    verbose_output = io.StringIO()
+    verbose_reporter = ConsoleReporter(
+        console=Console(file=verbose_output, force_terminal=False, width=120),
+        verbosity=1,
+    )
+    await verbose_reporter.on_collection_complete([parent], Run())
+    await verbose_reporter.on_execution_complete(
+        make_execution(
+            parent,
+            TestStatus.PASSED,
+            3.0,
+            sub_executions=[case_execution],
+        )
+    )
+    assert "[one]" in verbose_output.getvalue()
+    assert str(case_id) not in verbose_output.getvalue()
+
+    very_verbose_output = io.StringIO()
+    very_verbose_reporter = ConsoleReporter(
+        console=Console(
+            file=very_verbose_output, force_terminal=False, width=120
+        ),
+        verbosity=2,
+    )
+    await very_verbose_reporter.on_collection_complete([parent], Run())
+    await very_verbose_reporter.on_execution_complete(
+        make_execution(
+            parent,
+            TestStatus.PASSED,
+            3.0,
+            sub_executions=[case_execution],
+        )
+    )
+    assert f"[one | {case_id}]" in very_verbose_output.getvalue()
 
 
 @pytest.mark.asyncio
@@ -663,7 +715,8 @@ async def test_verbose_live_backend_wrapped_single_completes_top_level(
 
     static_text = output.getvalue()
     assert "tests/test_backends.py" in static_text
-    assert "test_backends::test_sync_inline" in static_text
+    assert "test_sync_inline" in static_text
+    assert "test_backends::test_sync_inline" not in static_text
     assert "PASSED" in static_text
 
 
@@ -700,7 +753,8 @@ async def test_verbose_live_backend_wrapped_composite_clears_after_parent(
     await reporter.on_execution_complete(case_execution)
 
     running_text = render_to_text(FakeLive.instances[-1].renderables[-1])
-    assert "test_backends::test_subprocess_iterations" in running_text
+    assert "test_subprocess_iterations" in running_text
+    assert "test_backends::test_subprocess_iterations" not in running_text
     assert "iterate=0" in running_text
 
     await reporter.on_execution_complete(
@@ -716,7 +770,8 @@ async def test_verbose_live_backend_wrapped_composite_clears_after_parent(
     assert "running" not in live_text
 
     static_text = output.getvalue()
-    assert "test_backends::test_subprocess_iterations" in static_text
+    assert "test_subprocess_iterations" in static_text
+    assert "test_backends::test_subprocess_iterations" not in static_text
     assert "iterate=0" in static_text
     assert "PASSED" in static_text
 

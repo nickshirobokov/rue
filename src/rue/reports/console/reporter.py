@@ -16,6 +16,7 @@ from rich.table import Table
 from rich.text import Text
 
 from rue.reports.base import Reporter
+from rue.testing.models import TestStatus
 
 from .assertions import AssertionRenderer
 from .captured import CapturedOutputRenderer, StderrCapture
@@ -24,7 +25,6 @@ from .metrics import MetricsRenderer
 from .modes import OutputMode, make_mode
 from .shared import STATUS_STYLES
 
-from rue.testing.models import TestStatus
 
 if TYPE_CHECKING:
     from rue.config import Config
@@ -291,9 +291,13 @@ class ConsoleReporter(Reporter):
             self.console.print()
 
         if self._mode.show_failures and self.failures:
-            for renderable in self._assertions.render(self.failures):
+            for renderable in self._assertions.render(
+                self.failures, self.verbosity
+            ):
                 self.console.print(renderable)
-            for renderable in self._exceptions.render(self.failures):
+            for renderable in self._exceptions.render(
+                self.failures, self.verbosity
+            ):
                 self.console.print(renderable)
 
         if run.result.stopped_early:

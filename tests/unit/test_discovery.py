@@ -2,6 +2,7 @@ import builtins
 from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
+from uuid import UUID
 
 import pytest
 
@@ -43,6 +44,32 @@ def make_runner(null_reporter) -> Runner:
         config=Config.model_construct(db_enabled=False),
         reporters=[null_reporter],
     )
+
+
+def test_spec_labels_are_bounded_and_keep_full_case_id():
+    case_id = UUID("00000000-0000-0000-0000-000000000001")
+    spec = TestSpec(
+        locator=TestLocator(Path("test_sample.py"), "test_case"),
+        is_async=False,
+        params=(),
+        modifiers=(),
+        tags=frozenset(),
+        suffix="case-with-very-long-metadata-slug-that-needs-trimming",
+        case_id=case_id,
+    )
+
+    assert (
+        spec.get_label()
+        == "case-with-very-long-metadata-slug-that-needs-trim…"
+    )
+    assert spec.get_label(full=True) == f"case-with-… | {case_id}"
+    assert spec.get_label(full=True, length=44, separator=" / ") == (
+        f"case… / {case_id}"
+    )
+    assert spec.get_label(full=True, length=36) == str(case_id)
+    assert len(spec.get_label()) == 50
+    assert len(spec.get_label(full=True)) == 50
+    assert str(case_id) in spec.get_label(full=True)
 
 
 def test_selector_filters_by_tags_and_keyword():

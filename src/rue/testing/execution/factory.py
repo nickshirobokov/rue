@@ -104,7 +104,7 @@ class DefaultTestFactory:
                             spec=replace(
                                 definition.spec,
                                 modifiers=rest_tuple,
-                                suffix=f"iterate={i}",
+                                suffix=f"i={i}",
                             ),
                         ),
                         params,
