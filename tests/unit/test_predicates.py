@@ -9,6 +9,7 @@ from rue.config import Config
 from rue.context.collectors import CURRENT_PREDICATE_RESULTS
 from rue.context.runtime import bind
 from rue.predicates import PredicateResult, predicate
+from rue.resources import ResourceResolver, registry
 from rue.storage import SQLiteStore
 from rue.testing.runner import Runner
 from tests.unit.factories import materialize_tests
@@ -89,7 +90,10 @@ async def _run_module_with_tracing(
             reporters=[trace_reporter],
             store=store,
         )
-        run = await runner.run(items=items)
+        run = await runner.run(
+            items=items,
+            resolver=ResourceResolver(registry),
+        )
         return mod_name, run, trace_reporter.artifacts
     finally:
         sys.modules.pop(mod_name, None)

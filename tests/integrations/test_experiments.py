@@ -4,6 +4,7 @@ from textwrap import dedent
 import pytest
 
 from rue.config import Config
+from rue.experiments import registry as experiment_registry
 from rue.experiments.runner import ExperimentRunner
 from rue.resources import registry
 from rue.testing.discovery import TestSpecCollector
@@ -12,8 +13,10 @@ from rue.testing.discovery import TestSpecCollector
 @pytest.fixture(autouse=True)
 def clean_registry():
     registry.reset()
+    experiment_registry.reset()
     yield
     registry.reset()
+    experiment_registry.reset()
 
 
 def test_experiment_runner_executes_four_variants_with_iterated_tests(

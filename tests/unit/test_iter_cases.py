@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from rue.config import Config
+from rue.resources import ResourceResolver, registry
 from rue.testing import Runner, test as t_decorator
 from rue.testing.models import (
     Case,
@@ -72,7 +73,10 @@ def test_runner_iterate_cases_preserves_case_identity_and_metadata(
     )
 
     run_result = asyncio.run(
-        make_runner(null_reporter).run(items=[item])
+        make_runner(null_reporter).run(
+            items=[item],
+            resolver=ResourceResolver(registry),
+        )
     )
     execution = run_result.result.executions[0]
 
@@ -110,7 +114,10 @@ def test_runner_iterate_cases_passes_when_threshold_is_met(null_reporter):
     )
 
     run_result = asyncio.run(
-        make_runner(null_reporter).run(items=[item])
+        make_runner(null_reporter).run(
+            items=[item],
+            resolver=ResourceResolver(registry),
+        )
     )
     execution = run_result.result.executions[0]
     passed = sum(
@@ -141,7 +148,10 @@ def test_runner_iterate_cases_fails_when_threshold_is_not_met(null_reporter):
     )
 
     run_result = asyncio.run(
-        make_runner(null_reporter).run(items=[item])
+        make_runner(null_reporter).run(
+            items=[item],
+            resolver=ResourceResolver(registry),
+        )
     )
     execution = run_result.result.executions[0]
     passed = sum(
@@ -190,7 +200,10 @@ def test_runner_iterate_groups_injects_group_and_case_and_nests(
     )
 
     run_result = asyncio.run(
-        make_runner(null_reporter).run(items=[item])
+        make_runner(null_reporter).run(
+            items=[item],
+            resolver=ResourceResolver(registry),
+        )
     )
     execution = run_result.result.executions[0]
 
@@ -239,7 +252,10 @@ def test_runner_iterate_groups_uses_group_and_outer_min_passes(
     )
 
     run_result = asyncio.run(
-        make_runner(null_reporter).run(items=[item])
+        make_runner(null_reporter).run(
+            items=[item],
+            resolver=ResourceResolver(registry),
+        )
     )
     execution = run_result.result.executions[0]
     group_statuses = [

@@ -14,10 +14,11 @@ from rue.experiments.models import (
     ExperimentVariant,
     ExperimentVariantResult,
 )
-from rue.experiments.runtime import apply_experiment_variant
+from rue.experiments.registry import registry as default_experiment_registry
 from rue.resources import ResourceResolver
 from rue.resources.registry import registry as default_resource_registry
 from rue.testing.discovery import TestLoader
+from rue.testing.models import Run
 from rue.testing.models.spec import TestSpecCollection
 from rue.testing.runner import Runner
 
@@ -35,14 +36,11 @@ class ExperimentRunner:
     ) -> tuple[ExperimentSpec, ...]:
         """Load setup files and return registered experiments."""
         default_resource_registry.reset()
+        default_experiment_registry.reset()
         loader = TestLoader(collection.suite_root)
         for setup_ref in collection.all_setup_files:
             loader.prepare_setup(setup_ref.path)
-        return tuple(
-            definition.experiment
-            for definition in default_resource_registry.experiments()
-            if definition.experiment is not None
-        )
+        return default_experiment_registry.all()
 
     def run(
         self,
@@ -102,30 +100,36 @@ async def _run_experiment_variant(
     capture_output: bool,
 ) -> ExperimentVariantResult:
     default_resource_registry.reset()
+    default_experiment_registry.reset()
     loader = TestLoader(collection.suite_root)
     for setup_ref in collection.all_setup_files:
         loader.prepare_setup(setup_ref.path)
 
     run_id = uuid4()
-    experiment_resolver = ResourceResolver(default_resource_registry)
+    resolver = ResourceResolver(default_resource_registry)
+    run = None
     with bind(CURRENT_RUN_ID, run_id):
-        await apply_experiment_variant(
-            variant,
-            registry=default_resource_registry,
-            resolver=experiment_resolver,
-            run_id=run_id,
-        )
-        items = loader.load_from_collection(collection)
-        runner = Runner(
-            config=config,
-            reporters=[],
-            fail_fast=fail_fast,
-            capture_output=capture_output,
-            experiment_variant=variant,
-            experiment_setup_chain=collection.all_setup_files,
-        )
-        run = await runner.run(items, run_id=run_id)
-    await experiment_resolver.teardown()
+        try:
+            await variant.apply(
+                default_experiment_registry.all(),
+                resolver=resolver,
+                run_id=run_id,
+            )
+            items = loader.load_from_collection(collection)
+            runner = Runner(
+                config=config,
+                reporters=[],
+                fail_fast=fail_fast,
+                capture_output=capture_output,
+                experiment_variant=variant,
+                experiment_setup_chain=collection.all_setup_files,
+            )
+            run = await runner.run(items, resolver=resolver, run_id=run_id)
+        finally:
+            if run is None:
+                await resolver.teardown()
+    if run is None:
+        raise ValueError("Run was not created")
     return ExperimentVariantResult.build(variant=variant, run=run)
 
 

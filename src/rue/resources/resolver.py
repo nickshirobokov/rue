@@ -9,18 +9,15 @@ from contextvars import ContextVar
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
-from uuid import UUID
 
 from rue.context.runtime import (
     CURRENT_RESOURCE_CONSUMER,
     CURRENT_RESOURCE_CONSUMER_KIND,
     CURRENT_RESOURCE_PROVIDER,
     CURRENT_RESOURCE_RESOLVER,
-    CURRENT_RUN_ID,
     CURRENT_TEST,
     bind,
 )
-from rue.patching.monkeypatch import MonkeyPatch
 from rue.patching.runtime import PatchHandle
 from rue.resources.models import (
     LoadedResourceDef,
@@ -172,6 +169,19 @@ class ResourceResolver:
             if test_ctx is None
             else test_ctx.item.spec.module_path.resolve()
         )
+        return await self._resolve(
+            name,
+            request_path=request_path,
+            apply_injection_hook=apply_injection_hook,
+        )
+
+    async def _resolve(
+        self,
+        name: str,
+        *,
+        request_path: Path | None,
+        apply_injection_hook: bool = True,
+    ) -> Any:
         definition = self._registry.select(name, request_path).definition
         identity = definition.spec
         scope = identity.scope
@@ -213,6 +223,7 @@ class ResourceResolver:
                             name=name,
                             definition=definition,
                             cache_key=identity,
+                            request_path=request_path,
                         )
                     except Exception as error:
                         pending.set_exception(error)
@@ -264,32 +275,6 @@ class ResourceResolver:
                     apply_injection_hook=apply_injection_hook,
                 )
         return kwargs
-
-    async def apply_experiment(
-        self,
-        definition: LoadedResourceDef,
-        value: Any,
-        *,
-        run_id: UUID,
-    ) -> None:
-        """Apply one run-scoped experiment hook."""
-        if definition.experiment is None:
-            raise ValueError(f"{definition.spec.name!r} is not an experiment")
-        kwargs: dict[str, Any] = {"value": value}
-        for dependency in definition.spec.dependencies:
-            if dependency == "monkeypatch":
-                kwargs[dependency] = MonkeyPatch(scope=Scope.RUN)
-            else:
-                kwargs[dependency] = await self.resolve(dependency)
-
-        with (
-            bind(CURRENT_RUN_ID, run_id),
-            bind(CURRENT_RESOURCE_PROVIDER, definition),
-            bind(CURRENT_RESOURCE_RESOLVER, self),
-        ):
-            result = definition.fn(**kwargs)
-            if inspect.isawaitable(result):
-                await result
 
     def fork_for_test(self) -> "ResourceResolver":
         """Create a child resolver for isolated TEST-scope execution."""
@@ -464,27 +449,40 @@ class ResourceResolver:
             shadow_mode=True,
             sync_actor_id=snapshot.sync_actor_id,
         )
+        await resolver.hydrate_sync_snapshot(snapshot)
+        return resolver
+
+    async def hydrate_sync_snapshot(
+        self,
+        snapshot: ResolverSyncSnapshot,
+    ) -> None:
+        self._sync_graph = SyncGraph(actor_id=snapshot.sync_actor_id)
         request_path = (
             Path(snapshot.request_path) if snapshot.request_path else None
         )
 
         for identity in snapshot.resolution_order:
-            definition = registry.select(identity.name, request_path).definition
-            await resolver._resolve_uncached(
+            if identity in self._cache:
+                continue
+            definition = self._registry.select(
+                identity.name,
+                request_path,
+            ).definition
+            await self._resolve_uncached(
                 name=identity.name,
                 definition=definition,
                 cache_key=identity,
+                request_path=request_path,
             )
-        resolver._sync_graph = SyncGraph.from_update(
+        self._sync_graph = SyncGraph.from_update(
             snapshot.graph_update,
             actor_id=snapshot.sync_actor_id,
         )
-        payload = resolver._sync_graph.payload(
+        payload = self._sync_graph.payload(
             identity.snapshot_key for identity in snapshot.res_specs
         )
-        resolver._sync_graph.set_baseline(payload)
-        resolver._materialize_payload(payload)
-        return resolver
+        self._sync_graph.set_baseline(payload)
+        self._materialize_payload(payload)
 
     def flush_live_changes(
         self,
@@ -669,6 +667,7 @@ class ResourceResolver:
         name: str,
         definition: LoadedResourceDef,
         cache_key: ResourceSpec,
+        request_path: Path | None,
     ) -> Any:
         with (
             bind(CURRENT_RESOURCE_PROVIDER, definition),
@@ -679,7 +678,10 @@ class ResourceResolver:
                 bind(CURRENT_RESOURCE_CONSUMER_KIND, "resource"),
             ):
                 kwargs = {
-                    dependency: await self.resolve(dependency)
+                    dependency: await self._resolve(
+                        dependency,
+                        request_path=request_path,
+                    )
                     for dependency in cache_key.dependencies
                 }
 

@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from rue.config import Config
+from rue.resources import ResourceResolver, registry
 from rue.testing.runner import Runner
 from tests.unit.factories import materialize_tests
 
@@ -43,7 +44,10 @@ async def _run_module_with_tracing(
             config=Config.model_construct(otel=True, db_enabled=False),
             reporters=[trace_reporter],
         )
-        run = await runner.run(items=items)
+        run = await runner.run(
+            items=items,
+            resolver=ResourceResolver(registry),
+        )
         return mod_name, run, trace_reporter.artifacts
     finally:
         sys.modules.pop(mod_name, None)

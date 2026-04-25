@@ -8,54 +8,54 @@ import pytest
 
 from rue.config import Config
 from rue.context.runtime import CURRENT_RUN_ID, bind
+from rue.experiments import registry as experiment_registry
 from rue.experiments.models import ExperimentSpec, ExperimentVariant
 from rue.experiments.runner import ExperimentRunner
-from rue.experiments.runtime import apply_experiment_variant
-from rue.resources import ResourceResolver, registry
+from rue.resources import ResourceResolver, registry as resource_registry
 from rue.testing.discovery import TestSpecCollector
 
 
 @pytest.fixture(autouse=True)
 def clean_registry():
-    registry.reset()
+    resource_registry.reset()
+    experiment_registry.reset()
     yield
-    registry.reset()
+    resource_registry.reset()
+    experiment_registry.reset()
 
 
 def test_experiment_uses_function_name_and_ids():
-    @registry.experiment(["openai:gpt-5.4"], ids=["gpt"])
+    @experiment_registry.experiment(["openai:gpt-5.4"], ids=["gpt"])
     def model(value):
         return value
 
-    [definition] = registry.experiments()
+    [definition] = experiment_registry.all()
 
-    assert definition.experiment is not None
-    assert definition.experiment.name == "model"
-    assert definition.experiment.ids == ("gpt",)
-    assert definition.experiment.values == ("openai:gpt-5.4",)
-    assert definition.spec.name == "model"
-    assert definition.spec.dependencies == ()
-    assert definition.spec.sync is False
+    assert definition.name == "model"
+    assert definition.ids == ("gpt",)
+    assert definition.values == ("openai:gpt-5.4",)
+    assert definition.dependencies == ()
+    assert resource_registry.get("model") is None
 
 
 def test_experiment_rejects_empty_values():
     with pytest.raises(ValueError, match="at least one value"):
-        registry.experiment([])
+        experiment_registry.experiment([])
 
 
 def test_experiment_rejects_mismatched_ids():
     with pytest.raises(ValueError, match="ids"):
-        registry.experiment(["a", "b"], ids=["a"])
+        experiment_registry.experiment(["a", "b"], ids=["a"])
 
 
 def test_experiment_rejects_duplicate_names():
-    @registry.experiment(["a"])
+    @experiment_registry.experiment(["a"])
     def model(value):
         return value
 
     with pytest.raises(ValueError, match="Duplicate experiment"):
 
-        @registry.experiment(["b"])
+        @experiment_registry.experiment(["b"])
         def model(value):
             return value
 
@@ -63,7 +63,7 @@ def test_experiment_rejects_duplicate_names():
 def test_experiment_rejects_missing_value_parameter():
     with pytest.raises(ValueError, match="value parameter"):
 
-        @registry.experiment(["a"])
+        @experiment_registry.experiment(["a"])
         def model():
             return None
 
@@ -75,11 +75,13 @@ def test_experiment_variants_include_baseline_then_cartesian_product():
                 name="model",
                 values=("mini", "full"),
                 ids=("mini", "full"),
+                fn=lambda value: None,
             ),
             ExperimentSpec(
                 name="prompt",
                 values=("strict", "friendly"),
                 ids=("strict", "friendly"),
+                fn=lambda value: None,
             ),
         )
     )
@@ -98,21 +100,18 @@ async def test_experiment_monkeypatch_is_run_scoped():
     class Target:
         value = "baseline"
 
-    @registry.experiment(["patched"], ids=["patched"])
+    @experiment_registry.experiment(["patched"], ids=["patched"])
     def model(value, monkeypatch):
         monkeypatch.setattr(Target, "value", value)
 
-    [definition] = registry.experiments()
-    experiment = definition.experiment
-    assert experiment is not None
+    [experiment] = experiment_registry.all()
     variant = ExperimentVariant.build_all((experiment,))[1]
     run_id = uuid4()
-    resolver = ResourceResolver(registry)
+    resolver = ResourceResolver(resource_registry)
 
     with bind(CURRENT_RUN_ID, run_id):
-        await apply_experiment_variant(
-            variant,
-            registry=registry,
+        await variant.apply(
+            experiment_registry.all(),
             resolver=resolver,
             run_id=run_id,
         )
@@ -128,21 +127,18 @@ async def test_experiment_monkeypatch_does_not_accept_method_scope():
     class Target:
         value = "baseline"
 
-    @registry.experiment(["patched"], ids=["patched"])
+    @experiment_registry.experiment(["patched"], ids=["patched"])
     def model(value, monkeypatch):
         monkeypatch.setattr(Target, "value", value, scope="test")
 
-    [definition] = registry.experiments()
-    experiment = definition.experiment
-    assert experiment is not None
+    [experiment] = experiment_registry.all()
     variant = ExperimentVariant.build_all((experiment,))[1]
 
     with bind(CURRENT_RUN_ID, uuid4()):
         with pytest.raises(TypeError, match="scope"):
-            await apply_experiment_variant(
-                variant,
-                registry=registry,
-                resolver=ResourceResolver(registry),
+            await variant.apply(
+                experiment_registry.all(),
+                resolver=ResourceResolver(resource_registry),
                 run_id=uuid4(),
             )
 
@@ -168,11 +164,18 @@ def test_experiment_runner_runs_unchanged_tests_in_variant_processes(
         dedent(
             """
             import rue
+            from rue import ExecutionBackend
             from . import app_state
+
+            IMPORTED_MODEL = app_state.model
 
             @rue.test
             def test_model():
                 assert app_state.model == "one"
+
+            @rue.test.backend(ExecutionBackend.SUBPROCESS)
+            def test_subprocess_imported_model():
+                assert IMPORTED_MODEL == "one"
             """
         )
     )
@@ -198,4 +201,4 @@ def test_experiment_runner_runs_unchanged_tests_in_variant_processes(
         "model=one",
         "model=two",
     ]
-    assert [result.passed for result in results] == [0, 1, 0]
+    assert [result.passed for result in results] == [0, 2, 0]

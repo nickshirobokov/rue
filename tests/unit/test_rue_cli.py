@@ -193,8 +193,9 @@ def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
             captured["fail_fast"] = fail_fast
             captured["capture_output"] = capture_output
 
-        async def run(self, items, *, run_id=None):
+        async def run(self, items, *, resolver, run_id=None):
             captured["items"] = items
+            captured["resolver"] = resolver
             captured["run_id"] = run_id
             return Run()
 
@@ -272,8 +273,9 @@ def test_tests_without_subcommand_defaults_to_run(monkeypatch):
             captured["fail_fast"] = fail_fast
             captured["capture_output"] = capture_output
 
-        async def run(self, items, *, run_id=None):
+        async def run(self, items, *, resolver, run_id=None):
             captured["items"] = items
+            captured["resolver"] = resolver
             captured["run_id"] = run_id
             return Run()
 
@@ -356,8 +358,8 @@ def test_run_and_status_share_selection_parsing(
             def __init__(self, **kwargs) -> None:
                 captured["verbosity"] = kwargs["config"].verbosity
 
-            async def run(self, items, *, run_id=None):
-                del items, run_id
+            async def run(self, items, *, resolver, run_id=None):
+                del items, resolver, run_id
                 return Run()
 
         monkeypatch.setattr("rue.cli.tests.run.Runner", FakeRunner)
@@ -395,6 +397,7 @@ def test_experiments_run_shares_selection_and_forces_no_db(
         name="model",
         values=("mini",),
         ids=("mini",),
+        fn=lambda value: None,
     )
     result = ExperimentVariantResult(
         variant=ExperimentVariant.build_all((experiment,))[1],

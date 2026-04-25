@@ -2,35 +2,65 @@
 
 from __future__ import annotations
 
+import inspect
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from itertools import product
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from rue.context.runtime import (
+    CURRENT_RESOURCE_RESOLVER,
+    CURRENT_RUN_ID,
+    bind,
+)
+from rue.resources import MonkeyPatch, Scope
+
 
 if TYPE_CHECKING:
     from rue.resources.metrics.base import MetricResult
+    from rue.resources.resolver import ResourceResolver
     from rue.testing.models import Run
+
+
+_RECEIVER_PARAMETER_NAMES = {"self", "cls"}
 
 
 @dataclass(frozen=True, slots=True)
 class ExperimentSpec:
-    """Registered experiment dimension."""
+    """Registered experiment dimension and live hook."""
 
     name: str
     values: tuple[Any, ...] = field(repr=False, compare=False)
     ids: tuple[str, ...]
+    fn: Callable[..., Any] = field(repr=False, compare=False)
+    dependencies: tuple[str, ...] = field(default=(), compare=False)
     provider_path: str | None = None
     provider_dir: str | None = None
 
-    def value_id(self, index: int) -> str:
-        """Return the user-facing value id for an index."""
-        return self.ids[index]
+    async def apply(
+        self,
+        value_index: int,
+        *,
+        resolver: ResourceResolver,
+        run_id: UUID,
+    ) -> None:
+        """Apply this experiment hook to the current run process."""
+        kwargs: dict[str, Any] = {"value": self.values[value_index]}
+        with (
+            bind(CURRENT_RUN_ID, run_id),
+            bind(CURRENT_RESOURCE_RESOLVER, resolver),
+        ):
+            for dependency in self.dependencies:
+                if dependency == "monkeypatch":
+                    kwargs[dependency] = MonkeyPatch(scope=Scope.RUN)
+                else:
+                    kwargs[dependency] = await resolver.resolve(dependency)
 
-    def value_at(self, index: int) -> Any:
-        """Return the concrete value for an index."""
-        return self.values[index]
+            result = self.fn(**kwargs)
+            if inspect.isawaitable(result):
+                await result
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +85,7 @@ class ExperimentVariant:
                         (
                             experiment.name,
                             value_index,
-                            experiment.value_id(value_index),
+                            experiment.ids[value_index],
                         )
                         for experiment, value_index in zip(
                             experiments, combination, strict=True
@@ -64,6 +94,24 @@ class ExperimentVariant:
                 )
             )
         return tuple(variants)
+
+    async def apply(
+        self,
+        experiments: tuple[ExperimentSpec, ...],
+        *,
+        resolver: ResourceResolver,
+        run_id: UUID,
+    ) -> None:
+        """Apply this variant's selected experiment hooks."""
+        definitions = {
+            experiment.name: experiment for experiment in experiments
+        }
+        for name, value_index, _value_id in self.values:
+            await definitions[name].apply(
+                value_index,
+                resolver=resolver,
+                run_id=run_id,
+            )
 
     @property
     def is_baseline(self) -> bool:

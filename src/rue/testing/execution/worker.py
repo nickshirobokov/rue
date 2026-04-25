@@ -17,7 +17,7 @@ from rue.context.runtime import (
     bind,
 )
 from rue.experiments.models import ExperimentVariant
-from rue.experiments.runtime import apply_experiment_variant
+from rue.experiments.registry import registry as default_experiment_registry
 from rue.resources import ResourceResolver
 from rue.resources.models import ResolverSyncSnapshot
 from rue.resources.registry import registry as default_resource_registry
@@ -60,40 +60,41 @@ def run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
 
 async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
     loader = TestLoader(payload.suite_root)
-    experiment_resolver: ResourceResolver | None = None
-    with bind(CURRENT_RUN_ID, payload.run_id):
-        if payload.experiment_variant is not None:
-            for ref in payload.experiment_setup_chain:
-                loader.prepare_setup(ref.path)
-            experiment_resolver = ResourceResolver(default_resource_registry)
-            await apply_experiment_variant(
-                payload.experiment_variant,
-                registry=default_resource_registry,
-                resolver=experiment_resolver,
-                run_id=payload.run_id,
-            )
-        for ref in payload.setup_chain:
-            loader.prepare_setup(ref.path)
-
-        definition = loader.load_definition(
-            payload.spec,
-            setup_chain=payload.setup_chain,
-        )
-        test_ctx = TestContext(
-            item=definition,
-            execution_id=payload.execution_id,
-            run_id=payload.run_id,
-        )
-        with bind(CURRENT_TEST, test_ctx):
-            resolver = await ResourceResolver.hydrate_from_sync_snapshot(
-                payload.snapshot,
-                default_resource_registry,
-            )
-    tracer = TestTracer.build(
-        config=payload.config,
-        run_id=payload.run_id,
+    resolver = ResourceResolver(
+        default_resource_registry,
+        shadow_mode=True,
+        sync_actor_id=payload.snapshot.sync_actor_id,
     )
     try:
+        with bind(CURRENT_RUN_ID, payload.run_id):
+            if payload.experiment_variant is not None:
+                for ref in payload.experiment_setup_chain:
+                    loader.prepare_setup(ref.path)
+            for ref in payload.setup_chain:
+                loader.prepare_setup(ref.path)
+
+            if payload.experiment_variant is not None:
+                await payload.experiment_variant.apply(
+                    default_experiment_registry.all(),
+                    resolver=resolver,
+                    run_id=payload.run_id,
+                )
+            definition = loader.load_definition(
+                payload.spec,
+                setup_chain=payload.setup_chain,
+            )
+            test_ctx = TestContext(
+                item=definition,
+                execution_id=payload.execution_id,
+                run_id=payload.run_id,
+            )
+            with bind(CURRENT_TEST, test_ctx):
+                await resolver.hydrate_sync_snapshot(payload.snapshot)
+
+        tracer = TestTracer.build(
+            config=payload.config,
+            run_id=payload.run_id,
+        )
         with (
             bind(CURRENT_TEST, test_ctx),
             bind(CURRENT_RUN_ID, payload.run_id),
@@ -124,8 +125,6 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
         )
     finally:
         await resolver.teardown()
-        if experiment_resolver is not None:
-            await experiment_resolver.teardown()
     return RemoteExecutionResult(
         result=result,
         telemetry_artifacts=telemetry_artifacts,

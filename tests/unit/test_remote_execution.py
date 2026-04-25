@@ -17,18 +17,18 @@ import pytest
 
 import rue
 from rue.config import Config
+from rue.context.process_pool import CURRENT_PROCESS_POOL
 from rue.resources import ResourceResolver, registry, resource
 from rue.resources.models import Scope
 from rue.telemetry import OtelTraceArtifact
+from rue.testing.execution.base import ExecutionBackend
 from rue.testing.execution.factory import DefaultTestFactory
+from rue.testing.execution.single import SingleTest
 from rue.testing.execution.worker import (
     ExecutorPayload,
     RemoteExecutionResult,
     run_remote_test,
 )
-from rue.context.process_pool import CURRENT_PROCESS_POOL
-from rue.testing.execution.single import SingleTest
-from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import (
     BackendModifier,
     Case,
@@ -575,7 +575,10 @@ class TestRemoteEndToEnd:
 
         items = materialize_tests(module_path)
         runner = make_runner(null_reporter)
-        run = await runner.run(items=items)
+        run = await runner.run(
+            items=items,
+            resolver=ResourceResolver(registry),
+        )
 
         assert run.result.passed == 1
         assert run.result.failed == 0
@@ -632,7 +635,10 @@ class TestRemoteEndToEnd:
         )
 
         items = materialize_tests(module_path)
-        run = await make_runner(trace_reporter).run(items=items)
+        run = await make_runner(trace_reporter).run(
+            items=items,
+            resolver=ResourceResolver(registry),
+        )
 
         execution = run.result.executions[0]
         assert run.result.passed == 1
@@ -689,7 +695,10 @@ class TestRemoteEndToEnd:
 
         items = materialize_tests(module_path)
         runner = make_runner(null_reporter)
-        run = await runner.run(items=items)
+        run = await runner.run(
+            items=items,
+            resolver=ResourceResolver(registry),
+        )
 
         assert run.result.passed == 1, run.result.executions[0].result.error
         assert run.result.failed == 0
@@ -726,7 +735,10 @@ class TestRemoteEndToEnd:
 
         items = materialize_tests(module_path)
         runner = make_runner(null_reporter)
-        run = await runner.run(items=items)
+        run = await runner.run(
+            items=items,
+            resolver=ResourceResolver(registry),
+        )
 
         assert run.result.passed == 2, [
             execution.result.error for execution in run.result.executions
@@ -771,7 +783,10 @@ class TestRemoteEndToEnd:
 
         items = materialize_tests(module_path)
         runner = make_runner(null_reporter)
-        run = await runner.run(items=items)
+        run = await runner.run(
+            items=items,
+            resolver=ResourceResolver(registry),
+        )
 
         assert run.result.passed == 2, [
             execution.result.error for execution in run.result.executions
@@ -819,7 +834,10 @@ class TestRemoteEndToEnd:
 
         items = materialize_tests(module_path)
         runner = make_runner(null_reporter)
-        run = await runner.run(items=items)
+        run = await runner.run(
+            items=items,
+            resolver=ResourceResolver(registry),
+        )
 
         assert run.result.passed == 2, [
             execution.result.error for execution in run.result.executions

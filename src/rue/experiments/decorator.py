@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, ParamSpec, TypeVar
 
-from rue.resources import registry
+from rue.experiments.registry import registry
 
 
 P = ParamSpec("P")

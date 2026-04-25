@@ -4,6 +4,7 @@ from textwrap import dedent
 import pytest
 
 from rue.config import Config
+from rue.resources import ResourceResolver, registry
 from rue.testing.models import TestStatus
 from rue.testing.runner import Runner
 from tests.unit.conftest import NullReporter
@@ -52,7 +53,7 @@ async def test_iterated_subprocess_children_keep_distinct_process_updates(
             concurrency=4,
         ),
         reporters=[NullReporter()],
-    ).run(items=items)
+    ).run(items=items, resolver=ResourceResolver(registry))
 
     after_execution = next(
         execution
@@ -121,7 +122,7 @@ async def test_local_and_subprocess_updates_preserve_process_identity(
             concurrency=2,
         ),
         reporters=[NullReporter()],
-    ).run(items=items)
+    ).run(items=items, resolver=ResourceResolver(registry))
 
     after_execution = next(
         execution
@@ -201,7 +202,7 @@ async def test_local_and_subprocess_nested_updates_merge_without_replacing_root(
             concurrency=2,
         ),
         reporters=[NullReporter()],
-    ).run(items=items)
+    ).run(items=items, resolver=ResourceResolver(registry))
 
     after_execution = next(
         execution
@@ -271,7 +272,7 @@ async def test_local_and_subprocess_shared_sut_trace_state_stays_isolated(
             concurrency=2,
         ),
         reporters=[NullReporter()],
-    ).run(items=items)
+    ).run(items=items, resolver=ResourceResolver(registry))
 
     assert run.result.passed == 2, [
         (
@@ -334,7 +335,7 @@ async def test_main_backend_waits_for_local_and_subprocess_stage(
             concurrency=3,
         ),
         reporters=[NullReporter()],
-    ).run(items=items)
+    ).run(items=items, resolver=ResourceResolver(registry))
 
     assert run.result.passed == 4, [
         (

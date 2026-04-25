@@ -5,6 +5,7 @@ import threading
 import time
 
 from rue.config import Config
+from rue.resources import ResourceResolver, registry
 from rue.testing import ExecutionBackend, Runner
 from rue.testing.models import IterateModifier
 from tests.unit.factories import make_definition
@@ -25,7 +26,7 @@ def test_sync_test_runs_in_worker_thread(null_reporter):
         "test_check_thread", fn=test_check_thread, module_path="sample.py"
     )
 
-    asyncio.run(runner.run(items=[item]))
+    asyncio.run(runner.run(items=[item], resolver=ResourceResolver(registry)))
 
     assert observed_thread is not None
     assert observed_thread is not threading.main_thread()
@@ -49,7 +50,7 @@ def test_main_backend_runs_on_main_thread(null_reporter):
         backend=ExecutionBackend.MAIN,
     )
 
-    asyncio.run(runner.run(items=[item]))
+    asyncio.run(runner.run(items=[item], resolver=ResourceResolver(registry)))
 
     assert observed_thread is not None
     assert observed_thread is threading.main_thread()
@@ -73,7 +74,7 @@ def test_module_main_backend_runs_in_worker_thread(null_reporter):
         backend=ExecutionBackend.MODULE_MAIN,
     )
 
-    asyncio.run(runner.run(items=[item]))
+    asyncio.run(runner.run(items=[item], resolver=ResourceResolver(registry)))
 
     assert observed_thread is not None
     assert observed_thread is not threading.main_thread()
@@ -90,7 +91,9 @@ def test_sync_exception_propagates(null_reporter):
 
     item = make_definition("test_raise", fn=test_raise, module_path="sample.py")
 
-    run_result = asyncio.run(runner.run(items=[item]))
+    run_result = asyncio.run(
+        runner.run(items=[item], resolver=ResourceResolver(registry))
+    )
 
     assert run_result.result.failed == 0
     assert run_result.result.errors == 1
@@ -117,7 +120,7 @@ def test_main_backend_propagates_through_iterate(null_reporter):
         modifiers=[IterateModifier(count=3, min_passes=3)],
     )
 
-    asyncio.run(runner.run(items=[item]))
+    asyncio.run(runner.run(items=[item], resolver=ResourceResolver(registry)))
 
     assert len(threads) == 3
     assert all(t is threading.main_thread() for t in threads)
@@ -147,7 +150,7 @@ def test_module_main_backend_keeps_iterate_concurrent(null_reporter):
     )
 
     start = time.perf_counter()
-    asyncio.run(runner.run(items=[item]))
+    asyncio.run(runner.run(items=[item], resolver=ResourceResolver(registry)))
     duration = time.perf_counter() - start
 
     assert len(threads) == 3

@@ -4,7 +4,7 @@ from textwrap import dedent
 import pytest
 
 from rue.config import Config
-from rue.resources import registry
+from rue.resources import ResourceResolver, registry
 from rue.testing.models import TestStatus
 from rue.testing.runner import Runner
 from tests.unit.conftest import NullReporter
@@ -45,7 +45,10 @@ async def _run_module(module_path: Path):
             concurrency=6,
         ),
         reporters=[NullReporter()],
-    ).run(items=materialize_tests(module_path))
+    ).run(
+        items=materialize_tests(module_path),
+        resolver=ResourceResolver(registry),
+    )
 
 
 @pytest.mark.asyncio

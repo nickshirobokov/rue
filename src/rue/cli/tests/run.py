@@ -22,6 +22,10 @@ from rue.cli.tests.options import (
 )
 from rue.config import load_config
 from rue.reports.base import Reporter
+from rue.resources import (
+    ResourceResolver,
+    registry as default_resource_registry,
+)
 from rue.storage import SQLiteStore
 from rue.testing.discovery import TestLoader
 from rue.testing.runner import Runner
@@ -47,7 +51,10 @@ def run(
         int | None,
         Option(
             "--concurrency",
-            help="Number of concurrent tests (default: 1, 0 for unlimited up to 10)",
+            help=(
+                "Number of concurrent tests "
+                "(default: 1, 0 for unlimited up to 10)"
+            ),
         ),
     ] = None,
     timeout: Annotated[
@@ -126,7 +133,11 @@ def run(
     collection = collector.build_spec_collection(resolved_paths)
     items = TestLoader(collection.suite_root).load_from_collection(collection)
 
-    if run_id is not None and store is not None and store.get_run(run_id) is not None:
+    if (
+        run_id is not None
+        and store is not None
+        and store.get_run(run_id) is not None
+    ):
         Console().print(f"[red]run_id '{run_id}' already exists[/red]")
         raise SystemExit(2)
 
@@ -137,7 +148,13 @@ def run(
         fail_fast=fail_fast,
         capture_output=not show_output,
     )
-    run_result = asyncio.run(runner.run(items, run_id=run_id))
+    run_result = asyncio.run(
+        runner.run(
+            items,
+            resolver=ResourceResolver(default_resource_registry),
+            run_id=run_id,
+        )
+    )
     raise SystemExit(
         0
         if run_result.result.failed == 0 and run_result.result.errors == 0

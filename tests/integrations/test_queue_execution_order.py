@@ -1,10 +1,11 @@
+import time
 from pathlib import Path
 from textwrap import dedent
-import time
 
 import pytest
 
 from rue.config import Config
+from rue.resources import ResourceResolver, registry
 from rue.testing.discovery import TestLoader, TestSpecCollector
 from rue.testing.runner import Runner
 from tests.unit.conftest import NullReporter
@@ -138,7 +139,7 @@ async def test_runner_executes_mixed_backends_in_queue_order(
             concurrency=4,
         ),
         reporters=[reporter],
-    ).run(items=items)
+    ).run(items=items, resolver=ResourceResolver(registry))
 
     assert run.result.passed == len(expected_order), [
         (
@@ -344,7 +345,7 @@ async def test_runner_executes_multiple_modules_in_queue_order(
             concurrency=4,
         ),
         reporters=[reporter],
-    ).run(items=items)
+    ).run(items=items, resolver=ResourceResolver(registry))
 
     assert run.result.passed == len(expected_order), [
         (
@@ -443,7 +444,7 @@ async def test_runner_keeps_global_main_as_absolute_barrier_across_modules(
             concurrency=2,
         ),
         reporters=[reporter],
-    ).run(items=items)
+    ).run(items=items, resolver=ResourceResolver(registry))
 
     assert run.result.passed == 4
 
@@ -495,7 +496,7 @@ async def test_module_main_keeps_iterate_children_concurrent(
             concurrency=3,
         ),
         reporters=[NullReporter()],
-    ).run(items=items)
+    ).run(items=items, resolver=ResourceResolver(registry))
     duration = time.perf_counter() - start
 
     assert run.result.passed == 1

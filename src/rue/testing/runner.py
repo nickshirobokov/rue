@@ -13,10 +13,7 @@ from rue.context.process_pool import process_pool_scope
 from rue.context.runtime import bind
 from rue.experiments.models import ExperimentVariant
 from rue.reports.base import Reporter
-from rue.resources import (
-    ResourceResolver,
-    registry as default_resource_registry,
-)
+from rue.resources import ResourceResolver
 from rue.resources.metrics.base import MetricResult
 from rue.resources.sut.output import SUTOutputCapture
 from rue.storage import Store
@@ -112,6 +109,7 @@ class Runner:
         self,
         items: list[LoadedTestDef],
         *,
+        resolver: ResourceResolver,
         run_id: UUID | None = None,
     ) -> Run:
         """Run tests and return results.
@@ -119,6 +117,7 @@ class Runner:
         Args:
             items: Test definitions to execute. Discover them with
                 TestSpecCollector and TestLoader before calling.
+            resolver: Resource resolver for this run. The runner owns teardown.
             run_id: Optional UUID for this run.
 
         Returns:
@@ -134,9 +133,12 @@ class Runner:
             otel_runtime.configure()
 
         if not items:
-            await self._notify_no_tests_found()
-            self.current_run.end_time = datetime.now(UTC)
-            return self.current_run
+            try:
+                await self._notify_no_tests_found()
+                self.current_run.end_time = datetime.now(UTC)
+                return self.current_run
+            finally:
+                await resolver.teardown()
 
         if self.fail_fast:
             for item in items:
@@ -149,32 +151,33 @@ class Runner:
             SUTOutputCapture.sys_capture(swallow=self.capture_output),
             bind(CURRENT_METRIC_RESULTS, metric_results),
         ):
-            await self._notify_collection_complete(items, self.current_run)
-
-            resolver = ResourceResolver(default_resource_registry)
-
-            self.semaphore = asyncio.Semaphore(self._concurrency_limit())
-            self.stop_flag = False
-            self._failure_count = 0
-
-            execution = self._execute_run(
-                items=items,
-                resolver=resolver,
-                run=self.current_run,
-            )
-
-            run_task = asyncio.create_task(execution)
-
             try:
-                if self.config.timeout is not None:
-                    await asyncio.wait_for(
-                        run_task, timeout=self.config.timeout
-                    )
-                else:
-                    await run_task
-            except TimeoutError:
-                self.current_run.result.stopped_early = True
-                self.stop_flag = True
+                await self._notify_collection_complete(items, self.current_run)
+
+                self.semaphore = asyncio.Semaphore(self._concurrency_limit())
+                self.stop_flag = False
+                self._failure_count = 0
+
+                execution = self._execute_run(
+                    items=items,
+                    resolver=resolver,
+                    run=self.current_run,
+                )
+
+                run_task = asyncio.create_task(execution)
+
+                try:
+                    if self.config.timeout is not None:
+                        await asyncio.wait_for(
+                            run_task, timeout=self.config.timeout
+                        )
+                    else:
+                        await run_task
+                except TimeoutError:
+                    self.current_run.result.stopped_early = True
+                    self.stop_flag = True
+            finally:
+                await resolver.teardown()
 
         self.current_run.result.total_duration_ms = (
             time.perf_counter() - start
@@ -234,7 +237,6 @@ class Runner:
                     )
                     is not None
                 ]
-                await resolver.teardown()
 
     async def _run_step(
         self,

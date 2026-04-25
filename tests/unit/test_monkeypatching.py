@@ -9,7 +9,7 @@ from textwrap import dedent
 import pytest
 
 from rue.config import Config
-from rue.resources import registry
+from rue.resources import ResourceResolver, registry
 from rue.testing.runner import Runner
 from tests.unit.conftest import NullReporter
 from tests.unit.factories import materialize_tests
@@ -74,7 +74,10 @@ async def test_test_scoped_patches_are_isolated_between_concurrent_cases(
         )
     )
 
-    run = await make_runner().run(items=materialize_tests(module_path))
+    run = await make_runner().run(
+        items=materialize_tests(module_path),
+        resolver=ResourceResolver(registry),
+    )
 
     assert run.result.passed == 2, [
         execution.result.error for execution in run.result.executions
@@ -123,7 +126,10 @@ async def test_resource_monkeypatch_creates_test_scoped_patch(
         )
     )
 
-    run = await make_runner().run(items=materialize_tests(module_path))
+    run = await make_runner().run(
+        items=materialize_tests(module_path),
+        resolver=ResourceResolver(registry),
+    )
 
     assert run.result.passed == 3, [
         execution.result.error for execution in run.result.executions
@@ -166,7 +172,10 @@ async def test_delattr_hides_attribute_in_active_test_scope(
         )
     )
 
-    run = await make_runner().run(items=materialize_tests(module_path))
+    run = await make_runner().run(
+        items=materialize_tests(module_path),
+        resolver=ResourceResolver(registry),
+    )
 
     assert run.result.passed == 3, [
         execution.result.error for execution in run.result.executions
@@ -204,7 +213,10 @@ async def test_setitem_patches_are_isolated_between_concurrent_cases(
         )
     )
 
-    run = await make_runner().run(items=materialize_tests(module_path))
+    run = await make_runner().run(
+        items=materialize_tests(module_path),
+        resolver=ResourceResolver(registry),
+    )
 
     assert run.result.passed == 2, [
         execution.result.error for execution in run.result.executions
@@ -247,7 +259,10 @@ async def test_setitem_replaces_list_items_between_concurrent_cases(
         )
     )
 
-    run = await make_runner().run(items=materialize_tests(module_path))
+    run = await make_runner().run(
+        items=materialize_tests(module_path),
+        resolver=ResourceResolver(registry),
+    )
 
     assert run.result.passed == 2, [
         execution.result.error for execution in run.result.executions
@@ -284,7 +299,10 @@ async def test_setitem_inserts_list_items_and_restores_on_teardown(
         )
     )
 
-    run = await make_runner().run(items=materialize_tests(module_path))
+    run = await make_runner().run(
+        items=materialize_tests(module_path),
+        resolver=ResourceResolver(registry),
+    )
 
     assert run.result.passed == 2, [
         execution.result.error for execution in run.result.executions
@@ -328,7 +346,10 @@ async def test_delitem_hides_item_in_active_test_scope(
         )
     )
 
-    run = await make_runner().run(items=materialize_tests(module_path))
+    run = await make_runner().run(
+        items=materialize_tests(module_path),
+        resolver=ResourceResolver(registry),
+    )
 
     assert run.result.passed == 3, [
         execution.result.error for execution in run.result.executions
@@ -377,7 +398,10 @@ async def test_delitem_hides_list_item_in_active_test_scope(
         )
     )
 
-    run = await make_runner().run(items=materialize_tests(module_path))
+    run = await make_runner().run(
+        items=materialize_tests(module_path),
+        resolver=ResourceResolver(registry),
+    )
 
     assert run.result.passed == 3, [
         execution.result.error for execution in run.result.executions
@@ -429,7 +453,10 @@ async def test_resource_monkeypatch_creates_test_scoped_item_patches(
         )
     )
 
-    run = await make_runner().run(items=materialize_tests(module_path))
+    run = await make_runner().run(
+        items=materialize_tests(module_path),
+        resolver=ResourceResolver(registry),
+    )
 
     assert run.result.passed == 3, [
         execution.result.error for execution in run.result.executions
@@ -468,7 +495,10 @@ async def test_autouse_patch_applies_in_subprocess_worker(
     )
 
     try:
-        run = await make_runner().run(items=materialize_tests(module_path))
+        run = await make_runner().run(
+            items=materialize_tests(module_path),
+            resolver=ResourceResolver(registry),
+        )
     finally:
         pool.shutdown()
 

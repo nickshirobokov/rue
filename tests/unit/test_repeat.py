@@ -1,11 +1,11 @@
 import asyncio
-from pathlib import Path
 
 import pytest
 
 from rue.config import Config
+from rue.resources import ResourceResolver, registry
 from rue.testing import Runner, test as t_decorator
-from rue.testing.models import IterateModifier, LoadedTestDef
+from rue.testing.models import IterateModifier
 from tests.unit.factories import make_definition
 
 
@@ -60,7 +60,12 @@ def test_runner_iterate_passes_when_minimum_threshold_is_met(null_reporter):
         tags={"iterate"},
     )
 
-    run_result = asyncio.run(runner.run(items=[repeat_item]))
+    run_result = asyncio.run(
+        runner.run(
+            items=[repeat_item],
+            resolver=ResourceResolver(registry),
+        )
+    )
     execution = run_result.result.executions[0]
     passed = sum(
         1
@@ -93,7 +98,12 @@ def test_runner_iterate_fails_when_threshold_is_not_met(null_reporter):
         tags={"iterate"},
     )
 
-    run_result = asyncio.run(runner.run(items=[repeat_item]))
+    run_result = asyncio.run(
+        runner.run(
+            items=[repeat_item],
+            resolver=ResourceResolver(registry),
+        )
+    )
     execution = run_result.result.executions[0]
     passed = sum(
         1
