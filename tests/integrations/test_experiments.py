@@ -16,11 +16,16 @@ def clean_registry():
     registry.reset()
 
 
-def test_experiment_runner_executes_four_cartesian_variants(
+def test_experiment_runner_executes_four_variants_with_iterated_tests(
     tmp_path: Path,
 ):
     (tmp_path / "app_state.py").write_text(
-        'model = "baseline"\nprompt = "baseline"\n'
+        dedent(
+            """
+            model = "baseline"
+            prompt = "baseline"
+            """
+        )
     )
     (tmp_path / "confrue_experiments.py").write_text(
         dedent(
@@ -45,39 +50,95 @@ def test_experiment_runner_executes_four_cartesian_variants(
         dedent(
             """
             import rue
+            from rue import ExecutionBackend
             from . import app_state
 
 
-            @rue.test
-            def test_mini_strict():
-                assert (
-                    app_state.model,
-                    app_state.prompt,
-                ) == ("mini", "strict")
+            @rue.test.iterate.params(
+                "task,audience",
+                [
+                    ("refund", "support"),
+                    ("pricing", "sales"),
+                    ("bug", "engineering"),
+                ],
+                ids=[
+                    "support-refund",
+                    "sales-pricing",
+                    "engineering-bug",
+                ],
+            )
+            def test_local_variant_iteration(
+                task,
+                audience,
+            ):
+                model = str(app_state.model)
+                prompt = str(app_state.prompt)
+
+                assert model in ("mini", "full")
+                assert prompt in ("strict", "creative")
+                assert model != "baseline"
+                assert prompt != "baseline"
+                assert task in ("refund", "pricing", "bug")
+                assert audience in ("support", "sales", "engineering")
+
+
+            @rue.test.backend(ExecutionBackend.SUBPROCESS)
+            @rue.test.iterate.params(
+                "task,audience",
+                [
+                    ("refund", "support"),
+                    ("pricing", "sales"),
+                    ("bug", "engineering"),
+                ],
+                ids=[
+                    "support-refund",
+                    "sales-pricing",
+                    "engineering-bug",
+                ],
+            )
+            def test_subprocess_variant_iteration(
+                task,
+                audience,
+            ):
+                model = str(app_state.model)
+                prompt = str(app_state.prompt)
+
+                assert model in ("mini", "full")
+                assert prompt in ("strict", "creative")
+                assert model != "baseline"
+                assert prompt != "baseline"
+                assert prompt == "creative" or model == "full"
+                assert task in ("refund", "pricing", "bug")
+                assert audience in ("support", "sales", "engineering")
 
 
             @rue.test
-            def test_mini_creative():
-                assert (
-                    app_state.model,
-                    app_state.prompt,
-                ) == ("mini", "creative")
+            def test_full_model_variant_passes_direct_assertions():
+                model = str(app_state.model)
+                prompt = str(app_state.prompt)
+
+                assert model == "full"
+                assert prompt in ("strict", "creative")
+                assert f"direct:{model}:{prompt}" in (
+                    "direct:full:strict",
+                    "direct:full:creative",
+                )
 
 
             @rue.test
-            def test_full_strict():
-                assert (
-                    app_state.model,
-                    app_state.prompt,
-                ) == ("full", "strict")
+            def test_any_concrete_variant_can_read_experiment_state():
+                model = str(app_state.model)
+                prompt = str(app_state.prompt)
+                family = {"mini": "concrete", "full": "concrete"}[model]
 
-
-            @rue.test
-            def test_full_creative():
-                assert (
-                    app_state.model,
-                    app_state.prompt,
-                ) == ("full", "creative")
+                assert family == "concrete"
+                assert prompt in ("strict", "creative")
+                assert f"state:{model}:{prompt}" in (
+                    "state:mini:strict",
+                    "state:mini:creative",
+                    "state:full:strict",
+                    "state:full:creative",
+                )
             """
         )
     )
@@ -110,6 +171,8 @@ def test_experiment_runner_executes_four_cartesian_variants(
         "model=full, prompt=creative",
     ]
     assert [result.total for result in results] == [4, 4, 4, 4, 4]
-    assert [result.passed for result in results] == [0, 1, 1, 1, 1]
-    assert [result.failed for result in results] == [4, 3, 3, 3, 3]
-    assert [result.errors for result in results] == [0, 0, 0, 0, 0]
+    assert [result.passed for result in results] == [0, 2, 3, 4, 4], [
+        (result.variant.label, result.failures) for result in results
+    ]
+    assert [result.failed for result in results] == [3, 2, 1, 0, 0]
+    assert [result.errors for result in results] == [1, 0, 0, 0, 0]
