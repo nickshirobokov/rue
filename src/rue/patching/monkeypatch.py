@@ -24,6 +24,15 @@ _UNSET = object()
 class MonkeyPatch:
     """Context-aware patch API injected as Rue's built-in resource."""
 
+    def __init__(
+        self,
+        *,
+        default_scope: PatchScope | None = None,
+        allowed_scopes: tuple[PatchScope, ...] | None = None,
+    ) -> None:
+        self._scope = default_scope
+        self._allowed_scopes = allowed_scopes
+
     @overload
     def setattr(
         self,
@@ -91,7 +100,7 @@ class MonkeyPatch:
             attr_name = name
             patch_value = value
 
-        owner = PatchOwner.build(scope or self._default_scope())
+        owner = self._owner(scope)
         handle = patch_manager.setattr(
             patch_target,
             attr_name,
@@ -110,7 +119,7 @@ class MonkeyPatch:
         scope: PatchScope | None = None,
     ) -> None:
         """Delete an attribute while the selected Rue scope is active."""
-        owner = PatchOwner.build(scope or self._default_scope())
+        owner = self._owner(scope)
         handle = patch_manager.delattr(
             target,
             name,
@@ -178,7 +187,7 @@ class MonkeyPatch:
             name = key
             patch_value = value
 
-        owner = PatchOwner.build(scope or self._default_scope())
+        owner = self._owner(scope)
         handle = patch_manager.setitem(
             target,
             name,
@@ -239,7 +248,7 @@ class MonkeyPatch:
                 )
             name = key
 
-        owner = PatchOwner.build(scope or self._default_scope())
+        owner = self._owner(scope)
         handle = patch_manager.delitem(
             target,
             name,
@@ -259,8 +268,21 @@ class MonkeyPatch:
             )
         resolver.register_patch(handle)
 
-    @staticmethod
-    def _default_scope() -> PatchScope:
+    def _owner(self, scope: PatchScope | None) -> PatchOwner:
+        actual_scope = scope or self._default_scope()
+        if (
+            self._allowed_scopes is not None
+            and actual_scope not in self._allowed_scopes
+        ):
+            allowed = ", ".join(self._allowed_scopes)
+            raise ValueError(
+                f"This monkeypatch only supports these scopes: {allowed}."
+            )
+        return PatchOwner.build(actual_scope)
+
+    def _default_scope(self) -> PatchScope:
+        if self._scope is not None:
+            return self._scope
         if CURRENT_RESOURCE_PROVIDER.get() is not None:
             return "resource"
         return "test"

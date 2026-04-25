@@ -13,11 +13,12 @@ from uuid import UUID
 
 from rue.context.runtime import (
     CURRENT_RESOURCE_PROVIDER,
+    CURRENT_RUN_ID,
     CURRENT_TEST,
 )
 
 
-type PatchScope = Literal["test", "resource", "module", "session"]
+type PatchScope = Literal["test", "resource", "module", "run", "session"]
 type PatchTargetKind = Literal["attr", "item"]
 type PatchTargetKey = tuple[PatchTargetKind, int, Any]
 
@@ -78,10 +79,16 @@ class PatchOwner:
                     == self.module_path
                 )
             case "session":
+                run_id = (
+                    None if test_ctx is None else test_ctx.run_id
+                ) or CURRENT_RUN_ID.get()
+                return self.run_id is not None and run_id == self.run_id
+            case "run":
+                run_id = (
+                    None if test_ctx is None else test_ctx.run_id
+                ) or CURRENT_RUN_ID.get()
                 return (
-                    self.run_id is not None
-                    and test_ctx is not None
-                    and test_ctx.run_id == self.run_id
+                    self.run_id is not None and run_id == self.run_id
                 )
 
     @classmethod
@@ -112,12 +119,15 @@ class PatchOwner:
                     scope="module",
                     module_path=test_ctx.item.spec.module_path.resolve(),
                 )
-            case "session":
-                if test_ctx is None or test_ctx.run_id is None:
+            case "run" | "session":
+                run_id = (
+                    None if test_ctx is None else test_ctx.run_id
+                ) or CURRENT_RUN_ID.get()
+                if run_id is None:
                     raise RuntimeError(
-                        "Session-scoped patches require a Rue run context."
+                        "Run-scoped patches require a Rue run context."
                     )
-                return cls(scope="session", run_id=test_ctx.run_id)
+                return cls(scope="run", run_id=run_id)
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,15 +9,18 @@ from contextvars import ContextVar
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
+from uuid import UUID
 
 from rue.context.runtime import (
     CURRENT_RESOURCE_CONSUMER,
     CURRENT_RESOURCE_CONSUMER_KIND,
     CURRENT_RESOURCE_PROVIDER,
     CURRENT_RESOURCE_RESOLVER,
+    CURRENT_RUN_ID,
     CURRENT_TEST,
     bind,
 )
+from rue.patching.monkeypatch import MonkeyPatch
 from rue.patching.runtime import PatchHandle
 from rue.resources.models import (
     LoadedResourceDef,
@@ -110,7 +113,7 @@ class ResourceResolver:
                 )
             case "module":
                 resolver = self._owner_resolver_for_scope(Scope.MODULE)
-            case "session":
+            case "run" | "session":
                 resolver = self._owner_resolver_for_scope(Scope.PROCESS)
             case _:
                 resolver = self
@@ -268,6 +271,35 @@ class ResourceResolver:
                 )
         return kwargs
 
+    async def apply_experiment(
+        self,
+        definition: LoadedResourceDef,
+        value: Any,
+        *,
+        run_id: UUID,
+    ) -> None:
+        """Apply one run-scoped experiment hook."""
+        if definition.experiment is None:
+            raise ValueError(f"{definition.spec.name!r} is not an experiment")
+        kwargs: dict[str, Any] = {"value": value}
+        for dependency in definition.spec.dependencies:
+            if dependency == "monkeypatch":
+                kwargs[dependency] = MonkeyPatch(
+                    default_scope="run",
+                    allowed_scopes=("run",),
+                )
+            else:
+                kwargs[dependency] = await self.resolve(dependency)
+
+        with (
+            bind(CURRENT_RUN_ID, run_id),
+            bind(CURRENT_RESOURCE_PROVIDER, definition),
+            bind(CURRENT_RESOURCE_RESOLVER, self),
+        ):
+            result = definition.fn(**kwargs)
+            if inspect.isawaitable(result):
+                await result
+
     def fork_for_test(self) -> "ResourceResolver":
         """Create a child resolver for isolated TEST-scope execution."""
         child = ResourceResolver(self._registry, parent=self)
@@ -412,7 +444,10 @@ class ResourceResolver:
             should_undo = (
                 (owner.scope == "test" and scope is Scope.TEST)
                 or (owner.scope == "module" and scope is Scope.MODULE)
-                or (owner.scope == "session" and scope is Scope.PROCESS)
+                or (
+                    owner.scope in {"run", "session"}
+                    and scope is Scope.PROCESS
+                )
                 or (
                     owner.scope == "resource"
                     and owner.resource is not None

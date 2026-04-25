@@ -11,6 +11,7 @@ from rue.config import Config
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.process_pool import process_pool_scope
 from rue.context.runtime import bind
+from rue.experiments.models import ExperimentVariant
 from rue.reports.base import Reporter
 from rue.resources import (
     ResourceResolver,
@@ -21,13 +22,14 @@ from rue.resources.sut.output import SUTOutputCapture
 from rue.storage import Store
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.execution import DefaultTestFactory
+from rue.testing.execution.queue import RunnerStep, SessionQueue
 from rue.testing.models import (
     ExecutedTest,
     LoadedTestDef,
     Run,
     RunEnvironment,
 )
-from rue.testing.execution.queue import RunnerStep, SessionQueue
+from rue.testing.models.spec import SetupFileRef
 
 
 class Runner:
@@ -49,12 +51,16 @@ class Runner:
         store: Store | None = None,
         fail_fast: bool = False,
         capture_output: bool = True,
+        experiment_variant: ExperimentVariant | None = None,
+        experiment_setup_chain: tuple[SetupFileRef, ...] = (),
     ) -> None:
         self.config = config
         self.fail_fast = fail_fast
         self.capture_output = capture_output
         self.reporters = reporters
         self.store = store
+        self.experiment_variant = experiment_variant
+        self.experiment_setup_chain = experiment_setup_chain
         for reporter in self.reporters:
             reporter.configure(self.config)
 
@@ -200,6 +206,8 @@ class Runner:
                 is_stopped=lambda: self.stop_flag,
                 on_complete=self._on_execution_complete,
                 queue=self._queue,
+                experiment_variant=self.experiment_variant,
+                experiment_setup_chain=self.experiment_setup_chain,
             )
             for item in items:
                 self._factory.build(item)
@@ -234,7 +242,7 @@ class Runner:
         resolver: ResourceResolver,
         run: Run,
     ) -> None:
-        """Run one queue step: sequential main batch or parallel module queues."""
+        """Run one queue step."""
         if step.is_main:
             batch = step.main_batch
             if batch is None:

@@ -30,6 +30,9 @@ class TestContext:
 CURRENT_TEST: ContextVar[TestContext | None] = ContextVar(
     "current_test", default=None
 )
+CURRENT_RUN_ID: ContextVar[UUID | None] = ContextVar(
+    "current_run_id", default=None
+)
 CURRENT_TEST_TRACER: ContextVar[TestTracer | None] = ContextVar(
     "current_test_tracer", default=None
 )

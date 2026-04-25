@@ -1,10 +1,11 @@
 """Resource registry and registration APIs."""
 
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
 
+from rue.experiments.models import ExperimentSpec
 from rue.resources.models import (
     LoadedResourceDef,
     ResourceSpec,
@@ -28,6 +29,7 @@ class ResourceRegistry:
         self._builtin_process_definitions: dict[
             str, list[LoadedResourceDef]
         ] = {}
+        self._experiments: dict[str, LoadedResourceDef] = {}
 
     @staticmethod
     def _resource_origin(
@@ -119,6 +121,78 @@ class ResourceRegistry:
             return decorator(fn)
         return decorator
 
+    def experiment(
+        self,
+        values: Iterable[Any],
+        *,
+        ids: Sequence[str] | None = None,
+    ) -> Callable[[Callable[P, T]], Callable[P, T]]:
+        """Register a run-scoped experiment hook."""
+        values_tuple = tuple(values)
+        if not values_tuple:
+            raise ValueError("experiment() requires at least one value")
+
+        ids_tuple = (
+            tuple(str(item) for item in ids)
+            if ids is not None
+            else tuple(repr(value) for value in values_tuple)
+        )
+        if len(ids_tuple) != len(values_tuple):
+            raise ValueError("experiment() ids must match number of values")
+
+        def decorator(fn: Callable[P, T]) -> Callable[P, T]:
+            if (
+                inspect.isgeneratorfunction(fn)
+                or inspect.isasyncgenfunction(fn)
+            ):
+                raise ValueError("experiment hooks cannot be generators")
+            signature = inspect.signature(fn)
+            if "value" not in signature.parameters:
+                raise ValueError(
+                    "experiment hooks must accept a value parameter"
+                )
+            dependencies = [
+                parameter
+                for parameter in signature.parameters
+                if parameter not in {*_RECEIVER_PARAMETER_NAMES, "value"}
+            ]
+            origin_path, origin_dir = self._resource_origin(fn)
+            spec = ExperimentSpec(
+                name=fn.__name__,
+                values=values_tuple,
+                ids=ids_tuple,
+                provider_path=str(origin_path)
+                if origin_path is not None
+                else None,
+                provider_dir=str(origin_dir)
+                if origin_dir is not None
+                else None,
+            )
+            if spec.name in self._experiments:
+                raise ValueError(f"Duplicate experiment: {spec.name}")
+            self._experiments[spec.name] = LoadedResourceDef(
+                spec=ResourceSpec(
+                    name=spec.name,
+                    scope=Scope.PROCESS,
+                    provider_path=spec.provider_path,
+                    provider_dir=spec.provider_dir,
+                    dependencies=tuple(dependencies),
+                    sync=False,
+                ),
+                fn=fn,
+                is_async=inspect.iscoroutinefunction(fn),
+                is_generator=inspect.isgeneratorfunction(fn),
+                is_async_generator=inspect.isasyncgenfunction(fn),
+                experiment=spec,
+            )
+            return fn
+
+        return decorator
+
+    def experiments(self) -> tuple[LoadedResourceDef, ...]:
+        """Return registered experiment definitions in import order."""
+        return tuple(self._experiments.values())
+
     def get(self, name: str) -> LoadedResourceDef | None:
         """Return the flat definition registered under the given name."""
         return self._definitions.get(name)
@@ -146,6 +220,7 @@ class ResourceRegistry:
                 )
             }
         )
+        self._experiments.clear()
 
     def select(
         self,

@@ -18,6 +18,7 @@ from rue.context.runtime import (
     TestContext,
     bind,
 )
+from rue.experiments.models import ExperimentVariant
 from rue.resources import ResourceResolver
 from rue.resources.models import Scope
 from rue.testing.execution.base import ExecutableTest, ExecutionBackend
@@ -32,6 +33,7 @@ from rue.testing.models import (
     TestResult,
     TestStatus,
 )
+from rue.testing.models.spec import SetupFileRef
 from rue.testing.tracing import TestTracer
 
 
@@ -52,9 +54,12 @@ class SingleTest(ExecutableTest):
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
+    experiment_variant: ExperimentVariant | None = None
+    experiment_setup_chain: tuple[SetupFileRef, ...] = ()
     tracer: TestTracer = field(init=False)
 
     def __post_init__(self) -> None:
+        """Initialize derived execution collaborators."""
         if self.definition.spec.modifiers:
             raise ValueError("SingleTest should not have modifiers")
         self.tracer = TestTracer.build(
@@ -211,6 +216,8 @@ class SingleTest(ExecutableTest):
                         config=self.config,
                         run_id=self.run_id,
                         execution_id=execution_id,
+                        experiment_variant=self.experiment_variant,
+                        experiment_setup_chain=self.experiment_setup_chain,
                     )
 
                     future = get_process_pool().submit(

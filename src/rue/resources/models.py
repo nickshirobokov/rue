@@ -1,10 +1,16 @@
 """Resource model types."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+
+if TYPE_CHECKING:
+    from rue.experiments.models import ExperimentSpec
 
 
 class Scope(Enum):
@@ -63,6 +69,7 @@ class LoadedResourceDef:
     on_resolve: Callable[[Any], Any] | None = None
     on_injection: Callable[[Any], Any] | None = None
     on_teardown: Callable[[Any], Any] | None = None
+    experiment: ExperimentSpec | None = None
 
 
 @dataclass(frozen=True, slots=True)

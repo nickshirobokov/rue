@@ -12,6 +12,7 @@ from tomlkit.items import Table
 from typer import Typer
 
 from rue.cli.db import DatabaseCommands, db_app
+from rue.cli.experiments import experiments_app
 from rue.cli.tests import TestSpecCollector, tests_app
 from rue.config import load_config
 from rue.testing.discovery import KeywordMatcher
@@ -19,6 +20,7 @@ from rue.testing.discovery import KeywordMatcher
 
 app = Typer(name="rue", help="Rue AI Testing Framework", no_args_is_help=True)
 app.add_typer(db_app, name="db")
+app.add_typer(experiments_app, name="experiments")
 app.add_typer(tests_app, name="tests")
 
 _TomlTable = Table | OutOfOrderTableProxy

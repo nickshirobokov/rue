@@ -8,10 +8,15 @@ from typer.testing import CliRunner
 from rue.cli import app
 from rue.cli.tests.status import TestsStatusReport
 from rue.config import Config
+from rue.experiments.models import (
+    ExperimentSpec,
+    ExperimentVariant,
+    ExperimentVariantResult,
+)
 from rue.storage.sqlite import SQLiteStore
 from rue.testing import LoadedTestDef
-from rue.testing.models.spec import TestSpecCollection
 from rue.testing.models.run import Run, RunEnvironment, RunResult
+from rue.testing.models.spec import TestSpecCollection
 from tests.unit.factories import make_definition
 
 
@@ -62,6 +67,7 @@ def test_top_level_help_lists_tests_command():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "│ tests " in result.stdout
+    assert "│ experiments " in result.stdout
     assert "\n│ test  " not in result.stdout
 
 
@@ -78,6 +84,15 @@ def test_tests_run_help_exposes_run_options():
     assert "--run-id" in result.stdout
     assert "--no-db" in result.stdout
     assert "--otel" in result.stdout
+
+
+def test_experiments_run_help_exposes_experiment_options():
+    result = runner.invoke(app, ["experiments", "run", "--help"])
+    assert result.exit_code == 0
+    assert "--concurrency" in result.stdout
+    assert "--timeout" in result.stdout
+    assert "--run-id" not in result.stdout
+    assert "--db-path" not in result.stdout
 
 
 def test_tests_status_help_exposes_status_options():
@@ -369,6 +384,114 @@ def test_run_and_status_share_selection_parsing(
     assert captured["include_tags"] == ("smoke",)
     assert captured["exclude_tags"] == ("slow",)
     assert captured["keyword"] == "fast and not slow"
+
+
+def test_experiments_run_shares_selection_and_forces_no_db(
+    tmp_path: Path,
+    monkeypatch,
+):
+    captured: dict[str, object] = {}
+    experiment = ExperimentSpec(
+        name="model",
+        values=("mini",),
+        ids=("mini",),
+    )
+    result = ExperimentVariantResult(
+        variant=ExperimentVariant.build_all((experiment,))[1],
+        run_id=uuid4(),
+        passed=1,
+        failed=0,
+        errors=0,
+        skipped=0,
+        xfailed=0,
+        xpassed=0,
+        total=1,
+        total_duration_ms=10,
+        stopped_early=False,
+    )
+
+    def build_spec_collection(self, paths, **kwargs):
+        del kwargs
+        captured["paths"] = paths
+        captured["include_tags"] = tuple(self.include_tags)
+        captured["exclude_tags"] = tuple(self.exclude_tags)
+        captured["keyword"] = self.keyword
+        return TestSpecCollection(suite_root=Path.cwd())
+
+    class FakeExperimentRunner:
+        def __init__(self, *, config) -> None:
+            captured["config"] = config
+
+        def collect(self, collection):
+            captured["collection"] = collection
+            return (experiment,)
+
+        def run(self, collection, experiments=None):
+            captured["run_collection"] = collection
+            captured["experiments"] = experiments
+            return (result,)
+
+    monkeypatch.setattr(
+        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        build_spec_collection,
+    )
+    monkeypatch.setattr(
+        "rue.cli.experiments.run.ExperimentRunner",
+        FakeExperimentRunner,
+    )
+
+    cli_result = runner.invoke(
+        app,
+        [
+            "experiments",
+            "run",
+            str(tmp_path),
+            "-k",
+            "smoke",
+            "-t",
+            "fast",
+            "--skip-tag",
+            "slow",
+            "-v",
+        ],
+    )
+
+    assert cli_result.exit_code == 0
+    assert captured["paths"] == [str(tmp_path)]
+    assert captured["include_tags"] == ("fast",)
+    assert captured["exclude_tags"] == ("slow",)
+    assert captured["keyword"] == "smoke"
+    assert captured["config"].db_enabled is False
+    assert captured["config"].maxfail is None
+    assert captured["config"].reporters == []
+    assert captured["experiments"] == (experiment,)
+    assert "model=mini" in cli_result.stdout
+
+
+def test_experiments_run_no_experiments_does_not_run(monkeypatch):
+    class FakeExperimentRunner:
+        def __init__(self, *, config) -> None:
+            self.config = config
+
+        def collect(self, collection):
+            return ()
+
+        def run(self, collection, experiments=None):
+            raise AssertionError("ExperimentRunner.run should not be called")
+
+    monkeypatch.setattr(
+        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
+    )
+    monkeypatch.setattr(
+        "rue.cli.experiments.run.ExperimentRunner",
+        FakeExperimentRunner,
+    )
+
+    result = runner.invoke(app, ["experiments", "run"])
+
+    assert result.exit_code == 0
+    assert "No experiments found" in result.stdout
 
 
 def test_tests_status_does_not_create_missing_db(tmp_path, monkeypatch):
