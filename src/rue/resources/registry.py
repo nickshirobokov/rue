@@ -24,11 +24,9 @@ class ResourceRegistry:
 
     def __init__(self) -> None:
         self._definitions: dict[str, LoadedResourceDef] = {}
-        self._process_definitions: dict[str, list[LoadedResourceDef]] = {}
+        self._run_definitions: dict[str, list[LoadedResourceDef]] = {}
         self._builtin_definitions: dict[str, LoadedResourceDef] = {}
-        self._builtin_process_definitions: dict[
-            str, list[LoadedResourceDef]
-        ] = {}
+        self._builtin_run_definitions: dict[str, list[LoadedResourceDef]] = {}
         self._experiments: dict[str, LoadedResourceDef] = {}
 
     @staticmethod
@@ -51,12 +49,12 @@ class ResourceRegistry:
 
     def _register(self, definition: LoadedResourceDef) -> None:
         ident = definition.spec
-        if ident.scope == Scope.PROCESS:
-            process_defs = self._process_definitions.setdefault(ident.name, [])
-            process_defs.append(definition)
+        if ident.scope == Scope.RUN:
+            run_defs = self._run_definitions.setdefault(ident.name, [])
+            run_defs.append(definition)
 
             current = self._definitions.get(ident.name)
-            if current is None or current.spec.scope == Scope.PROCESS:
+            if current is None or current.spec.scope == Scope.RUN:
                 self._definitions[ident.name] = definition
             return
 
@@ -173,7 +171,7 @@ class ResourceRegistry:
             self._experiments[spec.name] = LoadedResourceDef(
                 spec=ResourceSpec(
                     name=spec.name,
-                    scope=Scope.PROCESS,
+                    scope=Scope.RUN,
                     provider_path=spec.provider_path,
                     provider_dir=spec.provider_dir,
                     dependencies=tuple(dependencies),
@@ -200,23 +198,23 @@ class ResourceRegistry:
     def mark_builtin(self, name: str) -> None:
         """Preserve the current resource under the given name across resets."""
         self._builtin_definitions[name] = self._require(name)
-        if name in self._process_definitions:
-            self._builtin_process_definitions[name] = list(
-                self._process_definitions[name]
+        if name in self._run_definitions:
+            self._builtin_run_definitions[name] = list(
+                self._run_definitions[name]
             )
             return
-        self._builtin_process_definitions.pop(name, None)
+        self._builtin_run_definitions.pop(name, None)
 
     def reset(self) -> None:
         """Reset to builtin registrations only."""
         self._definitions.clear()
         self._definitions.update(self._builtin_definitions)
-        self._process_definitions.clear()
-        self._process_definitions.update(
+        self._run_definitions.clear()
+        self._run_definitions.update(
             {
                 name: list(definitions)
                 for name, definitions in (
-                    self._builtin_process_definitions.items()
+                    self._builtin_run_definitions.items()
                 )
             }
         )
@@ -230,28 +228,28 @@ class ResourceRegistry:
         """Select the active definition for one DI lookup."""
         if (
             name not in self._definitions
-            and name not in self._process_definitions
+            and name not in self._run_definitions
         ):
             msg = f"Unknown resource: {name}"
             raise ValueError(msg)
 
         definition = self._definitions.get(name)
-        if definition is not None and definition.spec.scope != Scope.PROCESS:
+        if definition is not None and definition.spec.scope != Scope.RUN:
             return SelectedResource(definition=definition)
 
         selected: LoadedResourceDef | None = None
         selected_depth = -1
         if request_path is not None:
             request_dir = request_path.resolve().parent
-            for process_definition in self._process_definitions.get(name, []):
-                origin_dir = process_definition.spec.origin_dir
+            for run_definition in self._run_definitions.get(name, []):
+                origin_dir = run_definition.spec.origin_dir
                 if origin_dir is None:
                     continue
                 if not request_dir.is_relative_to(origin_dir):
                     continue
                 depth = len(origin_dir.parts)
                 if depth >= selected_depth:
-                    selected = process_definition
+                    selected = run_definition
                     selected_depth = depth
 
         if selected is not None:
@@ -272,7 +270,7 @@ class ResourceRegistry:
         }
         names.update(
             name
-            for name, definitions in self._process_definitions.items()
+            for name, definitions in self._run_definitions.items()
             if any(definition.spec.autouse for definition in definitions)
         )
         return tuple(

@@ -106,17 +106,11 @@ class ResourceResolver:
     def register_patch(self, handle: PatchHandle) -> None:
         """Attach a patch handle to the resolver that owns its lifetime."""
         owner = handle.owner
-        match owner.scope:
-            case "resource" if owner.resource is not None:
-                resolver = self._owner_resolver_for_scope(
-                    owner.resource.scope
-                )
-            case "module":
-                resolver = self._owner_resolver_for_scope(Scope.MODULE)
-            case "run" | "session":
-                resolver = self._owner_resolver_for_scope(Scope.PROCESS)
-            case _:
-                resolver = self
+        resolver = (
+            self
+            if owner.scope is Scope.TEST
+            else self._owner_resolver_for_scope(owner.scope)
+        )
         resolver._patch_handles.append(handle)
 
     def collect_dependency_closure(
@@ -129,7 +123,7 @@ class ResourceResolver:
 
         def sort_key(spec: ResourceSpec) -> tuple[int, str, str, str]:
             return (
-                {"process": 0, "module": 1, "test": 2}.get(
+                {"run": 0, "module": 1, "test": 2}.get(
                     spec.scope.value, 99
                 ),
                 spec.name,
@@ -284,10 +278,7 @@ class ResourceResolver:
         kwargs: dict[str, Any] = {"value": value}
         for dependency in definition.spec.dependencies:
             if dependency == "monkeypatch":
-                kwargs[dependency] = MonkeyPatch(
-                    default_scope="run",
-                    allowed_scopes=("run",),
-                )
+                kwargs[dependency] = MonkeyPatch(scope=Scope.RUN)
             else:
                 kwargs[dependency] = await self.resolve(dependency)
 
@@ -383,19 +374,13 @@ class ResourceResolver:
     async def teardown_scope(self, scope: Scope) -> None:
         """Teardown only resources matching the given scope."""
         if self._shadow_mode:
-            scoped_resources = tuple(
-                key for key in self._cache if key.scope is scope
-            )
             for key in tuple(self._cache):
                 if key.scope is scope:
                     del self._cache[key]
-            self._undo_patches_for_scope(scope, scoped_resources)
+            self._undo_patches_for_scope(scope)
             return
 
         owner = self._owner_resolver_for_scope(scope)
-        scoped_resources = tuple(
-            key for key in owner._cache if key.scope is scope
-        )
         matching: list[
             tuple[
                 ResourceSpec,
@@ -424,7 +409,7 @@ class ResourceResolver:
             for key in tuple(owner._cache):
                 if key.scope == scope:
                     del owner._cache[key]
-            owner._undo_patches_for_scope(scope, scoped_resources)
+            owner._undo_patches_for_scope(scope)
         owner._raise_teardown_errors(teardown_errors)
 
     def _undo_all_patches(self) -> None:
@@ -432,29 +417,10 @@ class ResourceResolver:
             handle.undo()
         self._patch_handles.clear()
 
-    def _undo_patches_for_scope(
-        self,
-        scope: Scope,
-        resources: Sequence[ResourceSpec],
-    ) -> None:
-        resources_set = set(resources)
+    def _undo_patches_for_scope(self, scope: Scope) -> None:
         keep: list[PatchHandle] = []
         for handle in self._patch_handles:
-            owner = handle.owner
-            should_undo = (
-                (owner.scope == "test" and scope is Scope.TEST)
-                or (owner.scope == "module" and scope is Scope.MODULE)
-                or (
-                    owner.scope in {"run", "session"}
-                    and scope is Scope.PROCESS
-                )
-                or (
-                    owner.scope == "resource"
-                    and owner.resource is not None
-                    and owner.resource in resources_set
-                )
-            )
-            if should_undo:
+            if handle.owner.scope is scope:
                 handle.undo()
             else:
                 keep.append(handle)

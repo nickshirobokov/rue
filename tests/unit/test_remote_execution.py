@@ -606,7 +606,7 @@ class TestRemoteEndToEnd:
                 def is_ok(actual: str, reference: str) -> bool:
                     return actual == reference
 
-                @rue.resource.sut(scope="process")
+                @rue.resource.sut(scope="run")
                 def remote_pipeline():
                     def run() -> str:
                         with otel_runtime.start_as_current_span("worker_step"):
@@ -709,7 +709,7 @@ class TestRemoteEndToEnd:
                 from rue.resources import resource
                 from rue.resources.models import Scope
 
-                @resource(scope=Scope.PROCESS)
+                @resource(scope=Scope.RUN)
                 def shared_state():
                     return {"events": []}
 
@@ -748,7 +748,7 @@ class TestRemoteEndToEnd:
                 from rue.resources import resource
                 from rue.resources.models import Scope
 
-                @resource(scope=Scope.PROCESS)
+                @resource(scope=Scope.RUN)
                 def events():
                     return []
 
@@ -801,7 +801,7 @@ class TestRemoteEndToEnd:
                         print(message)
                         return message
 
-                @rue.resource.sut(scope="process")
+                @rue.resource.sut(scope="run")
                 def greeter():
                     return rue.SUT(Greeter(), methods=["greet"])
 

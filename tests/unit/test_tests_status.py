@@ -248,7 +248,7 @@ def test_status_renderer_respects_verbosity_levels():
             "Metric": (
                 ResourceSpec(
                     name="latency",
-                    scope=Scope.PROCESS,
+                    scope=Scope.RUN,
                     provider_path="/tmp/project/confrue_metrics.py",
                 ),
             ),

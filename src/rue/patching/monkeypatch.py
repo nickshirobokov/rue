@@ -6,16 +6,11 @@ from collections.abc import MutableMapping, MutableSequence
 from pkgutil import resolve_name
 from typing import Any, overload
 
-from rue.context.runtime import (
-    CURRENT_RESOURCE_PROVIDER,
-    CURRENT_RESOURCE_RESOLVER,
-)
 from rue.patching.runtime import (
-    PatchHandle,
     PatchOwner,
-    PatchScope,
     patch_manager,
 )
+from rue.resources.models import Scope
 
 
 _UNSET = object()
@@ -27,11 +22,9 @@ class MonkeyPatch:
     def __init__(
         self,
         *,
-        default_scope: PatchScope | None = None,
-        allowed_scopes: tuple[PatchScope, ...] | None = None,
+        scope: Scope = Scope.TEST,
     ) -> None:
-        self._scope = default_scope
-        self._allowed_scopes = allowed_scopes
+        self.scope: Scope = scope
 
     @overload
     def setattr(
@@ -41,7 +34,6 @@ class MonkeyPatch:
         /,
         *,
         raising: bool = True,
-        scope: PatchScope | None = None,
     ) -> None: ...
 
     @overload
@@ -52,7 +44,6 @@ class MonkeyPatch:
         value: Any,
         *,
         raising: bool = True,
-        scope: PatchScope | None = None,
     ) -> None: ...
 
     def setattr(
@@ -62,7 +53,6 @@ class MonkeyPatch:
         value: Any = _UNSET,
         *,
         raising: bool = True,
-        scope: PatchScope | None = None,
     ) -> None:
         """Replace an attribute while the selected Rue scope is active."""
         if isinstance(target, str) and value is _UNSET:
@@ -100,7 +90,7 @@ class MonkeyPatch:
             attr_name = name
             patch_value = value
 
-        owner = self._owner(scope)
+        owner = PatchOwner.build(self.scope)
         handle = patch_manager.setattr(
             patch_target,
             attr_name,
@@ -108,7 +98,7 @@ class MonkeyPatch:
             owner=owner,
             raising=raising,
         )
-        self._register(handle)
+        handle.register_to_resolver()
 
     def delattr(
         self,
@@ -116,10 +106,9 @@ class MonkeyPatch:
         name: str,
         *,
         raising: bool = True,
-        scope: PatchScope | None = None,
     ) -> None:
         """Delete an attribute while the selected Rue scope is active."""
-        owner = self._owner(scope)
+        owner = PatchOwner.build(self.scope)
         handle = patch_manager.delattr(
             target,
             name,
@@ -127,7 +116,7 @@ class MonkeyPatch:
             raising=raising,
         )
         if handle is not None:
-            self._register(handle)
+            handle.register_to_resolver()
 
     @overload
     def setitem(
@@ -138,7 +127,6 @@ class MonkeyPatch:
         *,
         idx: None = None,
         replace: None = None,
-        scope: PatchScope | None = None,
     ) -> None: ...
 
     @overload
@@ -150,7 +138,6 @@ class MonkeyPatch:
         *,
         idx: int,
         replace: bool,
-        scope: PatchScope | None = None,
     ) -> None: ...
 
     def setitem(
@@ -161,7 +148,6 @@ class MonkeyPatch:
         *,
         idx: int | None = None,
         replace: bool | None = None,
-        scope: PatchScope | None = None,
     ) -> None:
         """Replace an item while the selected Rue scope is active."""
         if isinstance(target, MutableSequence):
@@ -187,7 +173,7 @@ class MonkeyPatch:
             name = key
             patch_value = value
 
-        owner = self._owner(scope)
+        owner = PatchOwner.build(self.scope)
         handle = patch_manager.setitem(
             target,
             name,
@@ -195,7 +181,7 @@ class MonkeyPatch:
             owner=owner,
             replace=replace,
         )
-        self._register(handle)
+        handle.register_to_resolver()
 
     @overload
     def delitem(
@@ -206,7 +192,6 @@ class MonkeyPatch:
         idx: None = None,
         replace: None = None,
         raising: bool = True,
-        scope: PatchScope | None = None,
     ) -> None: ...
 
     @overload
@@ -217,7 +202,6 @@ class MonkeyPatch:
         idx: int,
         replace: bool,
         raising: bool = True,
-        scope: PatchScope | None = None,
     ) -> None: ...
 
     def delitem(
@@ -228,7 +212,6 @@ class MonkeyPatch:
         idx: int | None = None,
         replace: bool | None = None,
         raising: bool = True,
-        scope: PatchScope | None = None,
     ) -> None:
         """Delete an item while the selected Rue scope is active."""
         if isinstance(target, MutableSequence):
@@ -248,7 +231,7 @@ class MonkeyPatch:
                 )
             name = key
 
-        owner = self._owner(scope)
+        owner = PatchOwner.build(self.scope)
         handle = patch_manager.delitem(
             target,
             name,
@@ -256,33 +239,4 @@ class MonkeyPatch:
             raising=raising,
         )
         if handle is not None:
-            self._register(handle)
-
-    @staticmethod
-    def _register(handle: PatchHandle) -> None:
-        resolver = CURRENT_RESOURCE_RESOLVER.get()
-        if resolver is None:
-            handle.undo()
-            raise RuntimeError(
-                "MonkeyPatch can only be used inside Rue execution."
-            )
-        resolver.register_patch(handle)
-
-    def _owner(self, scope: PatchScope | None) -> PatchOwner:
-        actual_scope = scope or self._default_scope()
-        if (
-            self._allowed_scopes is not None
-            and actual_scope not in self._allowed_scopes
-        ):
-            allowed = ", ".join(self._allowed_scopes)
-            raise ValueError(
-                f"This monkeypatch only supports these scopes: {allowed}."
-            )
-        return PatchOwner.build(actual_scope)
-
-    def _default_scope(self) -> PatchScope:
-        if self._scope is not None:
-            return self._scope
-        if CURRENT_RESOURCE_PROVIDER.get() is not None:
-            return "resource"
-        return "test"
+            handle.register_to_resolver()

@@ -130,7 +130,7 @@ async def test_iterated_patches_to_same_object_are_execution_isolated(
 
 
 @pytest.mark.asyncio
-async def test_resource_and_test_patches_to_same_object_are_isolated(
+async def test_resource_monkeypatch_and_test_patches_are_execution_isolated(
     tmp_path: Path,
 ):
     module_path = tmp_path / "test_resource_monkeypatch_isolation.py"
@@ -160,19 +160,19 @@ async def test_resource_and_test_patches_to_same_object_are_isolated(
                 )
 
 
-            @rue.resource(scope="process")
+            @rue.resource
             def sync_patch(monkeypatch):
                 patch_target(monkeypatch, "resource:sync")
                 return "resource:sync"
 
 
-            @rue.resource(scope="process")
+            @rue.resource
             def main_patch(monkeypatch):
                 patch_target(monkeypatch, "resource:main")
                 return "resource:main"
 
 
-            @rue.resource(scope="process")
+            @rue.resource
             def subprocess_patch(monkeypatch):
                 patch_target(monkeypatch, "resource:subprocess")
                 return "resource:subprocess"

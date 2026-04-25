@@ -65,7 +65,7 @@ def metric(
     | Callable[P, AsyncGenerator[MetricYield, Any]]
     | None = None,
     *,
-    scope: Scope | str = Scope.PROCESS,
+    scope: Scope | str = Scope.RUN,
 ) -> Any:
     """Register a metric resource and capture its final result.
 
@@ -84,9 +84,9 @@ def metric(
     fn : callable, optional
         The generator/async-generator function to register. If None, returns a
         decorator.
-    scope : Scope or str, default Scope.PROCESS
+    scope : Scope or str, default Scope.RUN
         The lifecycle scope of the metric resource. Can be "test", "module",
-        or "process".
+        or "run".
     """
     if fn is None:
 

@@ -95,7 +95,7 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         dependencies=[
             ResourceSpec(
                 name="overall_latency",
-                scope=Scope.PROCESS,
+                scope=Scope.RUN,
                 provider_path="/tmp/project/confrue_root.py",
                 provider_dir="/tmp/project",
             )
@@ -159,7 +159,7 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     assert loaded.result.metric_results[0].dependencies == [
         ResourceSpec(
             name="overall_latency",
-            scope=Scope.PROCESS,
+            scope=Scope.RUN,
             provider_path="/tmp/project/confrue_root.py",
             provider_dir="/tmp/project",
         )
@@ -230,7 +230,7 @@ def test_sqlite_store_assertions_and_predicates(
     )
 
     metric_metadata = MetricMetadata(
-        identity=ResourceSpec(name="count", scope=Scope.PROCESS)
+        identity=ResourceSpec(name="count", scope=Scope.RUN)
     )
     metric_assertion = AssertionResult(
         expression_repr=AssertionRepr(

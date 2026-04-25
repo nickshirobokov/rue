@@ -2,7 +2,7 @@
 
 This example models a small RAG-style pipeline: retrieve context for a user query,
 then compose an answer. You run the same suite with some tests in-process (async)
-and others in a subprocess worker, while a process-scoped SUT keeps one
+and others in a subprocess worker, while a run-scoped SUT keeps one
 `DocumentProcessingPipeline` instance per worker. After all tests in that process
 finish, the teardown sees every query that touched that instance—so you can
 assert the workflow ran end-to-end even when cases are split across local and
@@ -53,7 +53,7 @@ class DocumentProcessingPipeline:
         return f"{query} -> {' | '.join(chunks)}"
 
 
-@rue.resource.sut(scope="process")
+@rue.resource.sut(scope="run")
 def document_pipeline():
     sut = SUT(
         DocumentProcessingPipeline(),
@@ -64,7 +64,7 @@ def document_pipeline():
     assert sorted(sut.instance.seen_queries) == sorted(ALL_QUERIES)
 
 
-@rue.resource.metric(scope="process")
+@rue.resource.metric(scope="run")
 def overall_quality():
     metric = Metric()
     yield metric

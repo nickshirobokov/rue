@@ -4,7 +4,7 @@ from rue import ExecutionBackend
 from rue.resources import resource
 from rue.resources.models import Scope
 
-@resource(scope=Scope.PROCESS)
+@resource(scope=Scope.RUN)
 def shared_events():
     return []
 

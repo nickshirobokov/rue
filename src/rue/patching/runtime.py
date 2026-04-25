@@ -12,13 +12,13 @@ from typing import Any, Literal
 from uuid import UUID
 
 from rue.context.runtime import (
-    CURRENT_RESOURCE_PROVIDER,
+    CURRENT_RESOURCE_RESOLVER,
     CURRENT_RUN_ID,
     CURRENT_TEST,
 )
+from rue.resources.models import Scope
 
 
-type PatchScope = Literal["test", "resource", "module", "run", "session"]
 type PatchTargetKind = Literal["attr", "item"]
 type PatchTargetKey = tuple[PatchTargetKind, int, Any]
 
@@ -40,86 +40,57 @@ class PatchContext:
 class PatchOwner:
     """Owns visibility and cleanup for one patch record."""
 
-    scope: PatchScope
+    scope: Scope
     execution_id: UUID | None = None
     run_id: UUID | None = None
     module_path: Path | None = None
-    resource: Any = None
 
-    def is_active(self, context: PatchContext | None) -> bool:
+    def is_active(self, _context: PatchContext | None) -> bool:
         """Return whether this owner applies in the current runtime context."""
         test_ctx = CURRENT_TEST.get()
-        provider = CURRENT_RESOURCE_PROVIDER.get()
         match self.scope:
-            case "test":
+            case Scope.TEST:
                 return (
                     self.execution_id is not None
                     and test_ctx is not None
                     and test_ctx.execution_id == self.execution_id
                 )
-            case "resource":
-                return (
-                    self.resource is not None
-                    and (
-                        (
-                            provider is not None
-                            and provider.spec == self.resource
-                        )
-                        or (
-                            context is not None
-                            and self.resource in context.resources
-                        )
-                    )
-                )
-            case "module":
+            case Scope.MODULE:
                 return (
                     self.module_path is not None
                     and test_ctx is not None
                     and test_ctx.item.spec.module_path.resolve()
                     == self.module_path
                 )
-            case "session":
+            case Scope.RUN:
                 run_id = (
                     None if test_ctx is None else test_ctx.run_id
                 ) or CURRENT_RUN_ID.get()
                 return self.run_id is not None and run_id == self.run_id
-            case "run":
-                run_id = (
-                    None if test_ctx is None else test_ctx.run_id
-                ) or CURRENT_RUN_ID.get()
-                return (
-                    self.run_id is not None and run_id == self.run_id
-                )
 
     @classmethod
-    def build(cls, scope: PatchScope) -> PatchOwner:
+    def build(cls, scope: Scope) -> PatchOwner:
         """Build an owner from the current Rue runtime context."""
         test_ctx = CURRENT_TEST.get()
-        provider = CURRENT_RESOURCE_PROVIDER.get()
         match scope:
-            case "test":
+            case Scope.TEST:
                 if test_ctx is None:
                     raise RuntimeError(
                         "Test-scoped patches require a Rue test context."
                     )
-                return cls(scope="test", execution_id=test_ctx.execution_id)
-            case "resource":
-                if provider is None:
-                    raise RuntimeError(
-                        "Resource-scoped patches require a Rue resource "
-                        "context."
-                    )
-                return cls(scope="resource", resource=provider.spec)
-            case "module":
+                return cls(
+                    scope=Scope.TEST, execution_id=test_ctx.execution_id
+                )
+            case Scope.MODULE:
                 if test_ctx is None:
                     raise RuntimeError(
                         "Module-scoped patches require a Rue test context."
                     )
                 return cls(
-                    scope="module",
+                    scope=Scope.MODULE,
                     module_path=test_ctx.item.spec.module_path.resolve(),
                 )
-            case "run" | "session":
+            case Scope.RUN:
                 run_id = (
                     None if test_ctx is None else test_ctx.run_id
                 ) or CURRENT_RUN_ID.get()
@@ -127,7 +98,7 @@ class PatchOwner:
                     raise RuntimeError(
                         "Run-scoped patches require a Rue run context."
                     )
-                return cls(scope="run", run_id=run_id)
+                return cls(scope=Scope.RUN, run_id=run_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +113,16 @@ class PatchHandle:
     def undo(self) -> None:
         """Remove this patch record from its target dispatcher."""
         self.manager.remove(self)
+
+    def register_to_resolver(self) -> None:
+        """Attach this handle to the current resolver or undo and raise."""
+        resolver = CURRENT_RESOURCE_RESOLVER.get()
+        if resolver is None:
+            self.undo()
+            raise RuntimeError(
+                "MonkeyPatch can only be used inside Rue execution."
+            )
+        resolver.register_patch(self)
 
 
 @dataclass(slots=True)

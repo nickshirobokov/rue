@@ -82,7 +82,7 @@ async def test_test_scoped_patches_are_isolated_between_concurrent_cases(
 
 
 @pytest.mark.asyncio
-async def test_resource_scoped_patch_follows_dependent_tests(
+async def test_resource_monkeypatch_creates_test_scoped_patch(
     tmp_path: Path,
 ):
     module_path = tmp_path / "test_resource_patch.py"
@@ -385,7 +385,7 @@ async def test_delitem_hides_list_item_in_active_test_scope(
 
 
 @pytest.mark.asyncio
-async def test_resource_scoped_item_patches_follow_dependent_tests(
+async def test_resource_monkeypatch_creates_test_scoped_item_patches(
     tmp_path: Path,
 ):
     module_path = tmp_path / "test_resource_item_patch.py"
@@ -456,7 +456,7 @@ async def test_autouse_patch_applies_in_subprocess_worker(
             def call():
                 return "original"
 
-            @rue.resource(scope="process", autouse=True)
+            @rue.resource(scope="run", autouse=True)
             def patch_call(monkeypatch):
                 monkeypatch.setattr(__name__ + ":call", lambda: "patched")
 

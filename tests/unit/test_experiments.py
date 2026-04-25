@@ -124,7 +124,7 @@ async def test_experiment_monkeypatch_is_run_scoped():
 
 
 @pytest.mark.asyncio
-async def test_experiment_monkeypatch_rejects_non_run_scope():
+async def test_experiment_monkeypatch_does_not_accept_method_scope():
     class Target:
         value = "baseline"
 
@@ -138,7 +138,7 @@ async def test_experiment_monkeypatch_rejects_non_run_scope():
     variant = ExperimentVariant.build_all((experiment,))[1]
 
     with bind(CURRENT_RUN_ID, uuid4()):
-        with pytest.raises(ValueError, match="scopes"):
+        with pytest.raises(TypeError, match="scope"):
             await apply_experiment_variant(
                 variant,
                 registry=registry,

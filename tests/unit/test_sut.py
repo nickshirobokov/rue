@@ -502,7 +502,7 @@ async def test_sample(traced_pipeline):
 
         assert run.result.passed == 1
 
-    @pytest.mark.parametrize("scope", ["module", "process"])
+    @pytest.mark.parametrize("scope", ["module", "run"])
     @pytest.mark.parametrize("concurrency", [1, 2])
     @pytest.mark.asyncio
     async def test_shared_scope_sut_trace_state_stays_isolated(

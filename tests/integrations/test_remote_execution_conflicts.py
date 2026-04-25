@@ -24,7 +24,7 @@ async def test_iterated_subprocess_children_keep_distinct_process_updates(
             from rue.resources import resource
             from rue.resources.models import Scope
 
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared_events():
                 return []
 
@@ -83,11 +83,11 @@ async def test_local_and_subprocess_updates_preserve_process_identity(
             from rue.resources import resource
             from rue.resources.models import Scope
 
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared_events():
                 return []
 
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared_meta():
                 return {}
 
@@ -162,7 +162,7 @@ async def test_local_and_subprocess_nested_updates_merge_without_replacing_root(
                     self.branch = Branch()
                     self.meta = {}
 
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared_state():
                 return SharedState()
 
@@ -238,7 +238,7 @@ async def test_local_and_subprocess_shared_sut_trace_state_stays_isolated(
                     with otel_runtime.start_as_current_span(f"{label}_step"):
                         return label
 
-            @rue.resource.sut(scope=Scope.PROCESS)
+            @rue.resource.sut(scope=Scope.RUN)
             def shared_pipeline():
                 return rue.SUT(SharedPipeline(), methods=["run"])
 
@@ -298,7 +298,7 @@ async def test_main_backend_waits_for_local_and_subprocess_stage(
             from rue.resources import resource
             from rue.resources.models import Scope
 
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def events():
                 return []
 

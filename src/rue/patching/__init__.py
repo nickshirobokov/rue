@@ -5,9 +5,9 @@ from rue.patching.runtime import (
     PatchContext,
     PatchHandle,
     PatchOwner,
-    PatchScope,
     patch_manager,
 )
+from rue.resources.models import Scope
 
 
 __all__ = [
@@ -15,6 +15,6 @@ __all__ = [
     "PatchContext",
     "PatchHandle",
     "PatchOwner",
-    "PatchScope",
+    "Scope",
     "patch_manager",
 ]

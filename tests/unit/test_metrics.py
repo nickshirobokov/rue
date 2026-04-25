@@ -26,7 +26,7 @@ from tests.unit.factories import make_definition
 def _metric(name: str = "") -> Metric:
     return Metric(
         metadata=MetricMetadata(
-            identity=ResourceSpec(name=name, scope=Scope.PROCESS)
+            identity=ResourceSpec(name=name, scope=Scope.RUN)
         )
     )
 
@@ -114,7 +114,7 @@ def test_metric_result_is_collected_when_collector_is_active():
     with bind(CURRENT_METRIC_RESULTS, results):
         MetricResult(
             metadata=MetricMetadata(
-                identity=ResourceSpec(name="x", scope=Scope.PROCESS)
+                identity=ResourceSpec(name="x", scope=Scope.RUN)
             ),
             assertion_results=[],
             value=1,

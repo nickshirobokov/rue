@@ -10,6 +10,6 @@ def register_builtin_resources(registry: ResourceRegistry) -> None:
 
     @registry.resource(scope=Scope.TEST, sync=False)
     def monkeypatch() -> MonkeyPatch:
-        return MonkeyPatch()
+        return MonkeyPatch(scope=Scope.TEST)
 
     registry.mark_builtin("monkeypatch")

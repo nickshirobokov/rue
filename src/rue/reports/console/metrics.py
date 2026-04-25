@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 
 _SCOPE_ORDER = {
-    Scope.PROCESS: 0,
+    Scope.RUN: 0,
     Scope.MODULE: 1,
     Scope.TEST: 2,
 }

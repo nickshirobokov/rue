@@ -1574,7 +1574,7 @@ class TestResourceTeardown:
         create_count = 0
         teardown_count = 0
 
-        @resource(scope="process")
+        @resource(scope="run")
         async def session_res():
             nonlocal create_count, teardown_count
             create_count += 1

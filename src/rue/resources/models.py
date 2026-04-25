@@ -18,7 +18,7 @@ class Scope(Enum):
 
     TEST = "test"  # Fresh instance per test
     MODULE = "module"  # Shared across tests in same file
-    PROCESS = "process"  # Shared across entire test run
+    RUN = "run"  # Shared across entire test run
 
 
 @dataclass(frozen=True, slots=True)

@@ -112,7 +112,7 @@ def render_to_text(renderable) -> str:
 def make_metric_result(
     name: str,
     *,
-    scope: Scope = Scope.PROCESS,
+    scope: Scope = Scope.RUN,
     value=1.0,
     assertion_results: list[AssertionResult] | None = None,
     tests: set[str] | None = None,
@@ -1011,7 +1011,7 @@ def test_metrics_overview_assertion_summary_substitutes_resolved_value_with_dim_
         passed=True,
     )
     group = MetricGroup(
-        key=ResourceSpec(name="accuracy", scope=Scope.PROCESS),
+        key=ResourceSpec(name="accuracy", scope=Scope.RUN),
         metrics=[],
     )
     group.metrics = [

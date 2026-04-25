@@ -162,7 +162,7 @@ class TestResourceDecorator:
         ("scope_value", "expected_scope", "name"),
         [
             ("module", Scope.MODULE, "suite_resource"),
-            (Scope.PROCESS, Scope.PROCESS, "session_resource"),
+            (Scope.RUN, Scope.RUN, "session_resource"),
         ],
     )
     def test_scope_normalization(self, scope_value, expected_scope, name):
@@ -176,7 +176,7 @@ class TestResourceDecorator:
 
             @resource(scope=scope_value)
             def session_resource():
-                return "process"
+                return "run"
 
         defn = registry.get(name)
         assert defn is not None
@@ -216,7 +216,7 @@ class TestResourceRegistry:
         _register_resource_source(
             root / "confrue_root.py",
             """
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
                 return "root"
             """,
@@ -225,7 +225,7 @@ class TestResourceRegistry:
         _register_resource_source(
             child / "confrue_child.py",
             """
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
                 return "child"
             """,
@@ -234,7 +234,7 @@ class TestResourceRegistry:
 
         definition = custom_registry.get("shared")
         assert definition is not None
-        assert definition.spec.scope == Scope.PROCESS
+        assert definition.spec.scope == Scope.RUN
         assert definition.spec.origin_dir == child.resolve()
 
     def test_select_picks_nearest_ancestor_process_definition(self, tmp_path):
@@ -248,7 +248,7 @@ class TestResourceRegistry:
         _register_resource_source(
             root / "confrue_root.py",
             """
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
                 return "root"
             """,
@@ -257,7 +257,7 @@ class TestResourceRegistry:
         _register_resource_source(
             child / "confrue_child.py",
             """
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
                 return "child"
             """,
@@ -285,9 +285,9 @@ class TestResourceRegistry:
         _register_resource_source(
             root / "confrue_root.py",
             """
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
-                return "process"
+                return "run"
             """,
             resource_decorator=custom_registry.resource,
         )
@@ -309,7 +309,7 @@ class TestResourceRegistry:
         def builtin_resource():
             return "builtin"
 
-        @custom_registry.resource(scope=Scope.PROCESS)
+        @custom_registry.resource(scope=Scope.RUN)
         def builtin_session():
             return "builtin-session"
 
@@ -320,7 +320,7 @@ class TestResourceRegistry:
         def extra_resource():
             return "extra"
 
-        @custom_registry.resource(scope=Scope.PROCESS)
+        @custom_registry.resource(scope=Scope.RUN)
         def builtin_session():
             return "override"
 
@@ -567,7 +567,7 @@ class TestForkForTest:
         ("scope", "name"),
         [
             (Scope.MODULE, "shared_module"),
-            (Scope.PROCESS, "shared_process"),
+            (Scope.RUN, "shared_process"),
         ],
     )
     @pytest.mark.asyncio
@@ -613,7 +613,7 @@ class TestForkForTest:
 
 
 class TestHierarchicalProcessResources:
-    """Tests for conftest-style PROCESS resource lookup."""
+    """Tests for conftest-style RUN resource lookup."""
 
     @pytest.mark.asyncio
     async def test_nearest_ancestor_process_resource_wins(self, tmp_path):
@@ -625,7 +625,7 @@ class TestHierarchicalProcessResources:
         _register_resource_source(
             root / "confrue_root.py",
             """
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
                 return "root"
             """,
@@ -633,7 +633,7 @@ class TestHierarchicalProcessResources:
         _register_resource_source(
             child / "confrue_child.py",
             """
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
                 return "child"
             """,
@@ -664,7 +664,7 @@ class TestHierarchicalProcessResources:
         _register_resource_source(
             root / "confrue_root.py",
             """
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
                 return "root"
             """,
@@ -672,7 +672,7 @@ class TestHierarchicalProcessResources:
         _register_resource_source(
             branch / "confrue_branch.py",
             """
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
                 return "branch"
             """,
@@ -698,11 +698,11 @@ class TestHierarchicalProcessResources:
         _register_resource_source(
             root / "confrue_root.py",
             """
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
                 return "root"
 
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def consumer(shared):
                 return f"consumer:{shared}"
             """,
@@ -710,7 +710,7 @@ class TestHierarchicalProcessResources:
         _register_resource_source(
             child / "confrue_child.py",
             """
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
                 return "child"
             """,
@@ -736,7 +736,7 @@ class TestHierarchicalProcessResources:
         _register_resource_source(
             root / "confrue_root.py",
             """
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
                 return "root"
             """,
@@ -744,7 +744,7 @@ class TestHierarchicalProcessResources:
         _register_resource_source(
             child / "confrue_child.py",
             """
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
                 return "child"
             """,
@@ -770,7 +770,7 @@ class TestHierarchicalProcessResources:
             """
             import builtins
 
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
                 builtins.session_events.append("root_create")
                 yield "root"
@@ -782,7 +782,7 @@ class TestHierarchicalProcessResources:
             """
             import builtins
 
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared():
                 builtins.session_events.append("child_create")
                 yield "child"
@@ -813,7 +813,7 @@ class TestHierarchicalProcessResources:
         cache_keys = [
             key
             for key in resolver._cache
-            if key.scope == Scope.PROCESS and key.name == "shared"
+            if key.scope == Scope.RUN and key.name == "shared"
         ]
         assert len(cache_keys) == 2
         assert {key.provider_dir for key in cache_keys} == {

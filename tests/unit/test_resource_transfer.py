@@ -135,9 +135,9 @@ class TestExportSyncSnapshot:
         def per_test():
             return {"kind": "test"}
 
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def shared():
-            return {"kind": "process"}
+            return {"kind": "run"}
 
         resolver = ResourceResolver(registry)
         await resolver.resolve("shared")
@@ -157,7 +157,7 @@ class TestExportSyncSnapshot:
         }
 
     async def test_records_ignored_runtime_fields(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def state():
             return SlotsState()
 
@@ -180,7 +180,7 @@ class TestExportSyncSnapshot:
         ]
 
     async def test_framework_like_state_uses_declared_surface(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def state():
             return FrameworkLike("demo", 3)
 
@@ -199,7 +199,7 @@ class TestExportSyncSnapshot:
         }
 
     async def test_parent_slots_need_semantic_surface_to_escape_ignores(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def state():
             return InheritedHousekeepingState()
 
@@ -219,7 +219,7 @@ class TestExportSyncSnapshot:
             name: str
             count: int
 
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def state():
             return Model(name="demo", count=3)
 
@@ -248,11 +248,11 @@ class TestExportSyncSnapshot:
         assert live.count == 8
 
     async def test_preserves_shared_reference_nodes(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def shared():
             return {"value": 1}
 
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def alias(shared):
             return shared
 
@@ -271,7 +271,7 @@ class TestExportSyncSnapshot:
         )
 
     async def test_request_path_and_actor_are_stored(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def simple():
             return 1
 
@@ -291,7 +291,7 @@ class TestExportSyncSnapshot:
         class Mode(Enum):
             FAST = "fast"
 
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def state():
             return {
                 "uuid": UUID("12345678-1234-5678-1234-567812345678"),
@@ -343,7 +343,7 @@ class TestHydrateFromSyncSnapshot:
     async def test_worker_replays_shadow_factories(self):
         resolve_count = 0
 
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def config():
             nonlocal resolve_count
             resolve_count += 1
@@ -363,7 +363,7 @@ class TestHydrateFromSyncSnapshot:
         assert await worker.resolve("config") == {"key": "value"}
 
     async def test_worker_applies_parent_state_over_shadow_defaults(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def shared():
             return {"count": 0}
 
@@ -385,7 +385,7 @@ class TestHydrateFromSyncSnapshot:
                 self.ctx = ContextVar("holder_ctx", default=0)
                 self.ctx.set(7)
 
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def holder():
             return Holder()
 
@@ -441,7 +441,7 @@ class TestSyncRoundTrip:
         assert state["events"] == ["worker"]
 
     async def test_concurrent_list_appends_are_preserved(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def shared():
             return {"values": ["base"]}
 
@@ -463,7 +463,7 @@ class TestSyncRoundTrip:
         assert shared_state["values"] == ["base", "parent", "worker"]
 
     async def test_concurrent_dict_key_updates_merge(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def shared():
             return {"base": True}
 
@@ -484,7 +484,7 @@ class TestSyncRoundTrip:
         assert shared_state == {"base": True, "left": 1, "right": 2}
 
     async def test_concurrent_object_attr_updates_merge(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def shared():
             return AttrState()
 
@@ -506,7 +506,7 @@ class TestSyncRoundTrip:
         assert shared_state.right == "worker-right"
 
     async def test_replaced_object_attr_preserves_untouched_parent_state(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def shared():
             return BranchHolder()
 
@@ -530,11 +530,11 @@ class TestSyncRoundTrip:
         assert shared_state.branch.right == "worker-right"
 
     async def test_aliased_roots_stay_aliased_after_mergeback(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def shared():
             return {"events": []}
 
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def alias(shared):
             return shared
 
@@ -556,7 +556,7 @@ class TestSyncRoundTrip:
         assert live_shared["events"] == ["worker"]
 
     async def test_test_generator_teardown_mutates_parent_after_merge(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def events():
             return []
 
@@ -585,7 +585,7 @@ class TestSyncRoundTrip:
         assert await parent.resolve("events") == ["teardown"]
 
     async def test_slots_private_fields_and_runtime_ignores_round_trip(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def state():
             return SlotsState()
 
@@ -610,7 +610,7 @@ class TestSyncRoundTrip:
         assert isinstance(live.lock, type(threading.Lock()))
 
     async def test_remote_merge_keeps_live_identity(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def holder():
             return {"items": [Box(1), Box(2)]}
 
@@ -632,7 +632,7 @@ class TestSyncRoundTrip:
         assert [box.value for box in state["items"]] == [1, 2, 3]
 
     async def test_nested_remote_merge_keeps_parent_identities(self):
-        @resource(scope=Scope.PROCESS)
+        @resource(scope=Scope.RUN)
         def holder():
             return NestedHolder()
 
