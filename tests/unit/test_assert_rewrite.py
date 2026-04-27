@@ -10,9 +10,9 @@ from rue.context.collectors import (
     CURRENT_METRIC_RESULTS,
 )
 from rue.context.runtime import CURRENT_TEST, TestContext, bind
-from rue.resources import ResourceSpec, ResourceResolver, Scope, registry
+from rue.resources import ResourceResolver, ResourceSpec, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
-from tests.unit.factories import materialize_tests
+from tests.unit.factories import make_run_context, materialize_tests
 
 
 def test_rewritten_assert_collects_predicate_results(tmp_path):
@@ -40,6 +40,7 @@ def test_sample():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
+        make_run_context()
         ctx = TestContext(item=item)
         with (
             bind(CURRENT_TEST, ctx),
@@ -80,6 +81,7 @@ def test_fail():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
+        make_run_context()
         ctx = TestContext(item=item)
         with (
             bind(CURRENT_TEST, ctx),
@@ -118,6 +120,7 @@ def test_metric_capture_multi():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
+        make_run_context()
         ctx = TestContext(item=item)
         m = Metric(
             metadata=MetricMetadata(

@@ -3,12 +3,11 @@ from textwrap import dedent
 
 import pytest
 
-from rue.config import Config
 from rue.resources import ResourceResolver, registry
 from rue.testing.models import TestStatus
 from rue.testing.runner import Runner
 from tests.unit.conftest import NullReporter
-from tests.unit.factories import materialize_tests
+from tests.unit.factories import make_run_context, materialize_tests
 
 
 @pytest.fixture(autouse=True)
@@ -38,12 +37,12 @@ def _failed_executions(run):
 
 
 async def _run_module(module_path: Path):
-    return await Runner(
-        config=Config.model_construct(
+    make_run_context(
             otel=False,
             db_enabled=False,
             concurrency=6,
-        ),
+        )
+    return await Runner(
         reporters=[NullReporter()],
     ).run(
         items=materialize_tests(module_path),

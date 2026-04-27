@@ -106,7 +106,6 @@ class LoadedTestDef:
         params: dict[str, Any],
         execution_id: UUID,
         run_sync_in_thread: bool,
-        run_id: UUID | None = None,
         is_stopped: Callable[[], bool] | None = None,
     ) -> tuple[
         float,
@@ -117,7 +116,7 @@ class LoadedTestDef:
         assertion_results: list[AssertionResult] = []
         error: BaseException | None = None
         imperative_outcome: TestStatus | None = None
-        ctx = TestContext(item=self, execution_id=execution_id, run_id=run_id)
+        ctx = TestContext(item=self, execution_id=execution_id)
 
         start = time.perf_counter()
         with (
@@ -152,7 +151,6 @@ class LoadedTestDef:
                     with patch_manager.bind_context(
                         PatchContext(
                             execution_id=execution_id,
-                            run_id=run_id,
                             module_path=self.spec.module_path.resolve(),
                             resources=frozenset(resources),
                         )

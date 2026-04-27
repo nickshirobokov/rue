@@ -6,11 +6,14 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from rue.config import Config
+from rue.context.runtime import CURRENT_RUN_CONTEXT
 from rue.testing.discovery import TestLoader, TestSpecCollector
 from rue.testing.execution.base import ExecutionBackend
-from rue.testing.models import BackendModifier, LoadedTestDef
+from rue.testing.models import BackendModifier, LoadedTestDef, RunContext
 from rue.testing.models.modifiers import Modifier
 from rue.testing.models.spec import SetupFileRef, TestLocator, TestSpec
+
 
 _COLLECTION_INDEX = count()
 
@@ -80,3 +83,20 @@ def materialize_tests(
 ) -> list[LoadedTestDef]:
     collection = TestSpecCollector((), (), None).build_spec_collection((path,))
     return TestLoader(collection.suite_root).load_from_collection(collection)
+
+
+def make_run_context(
+    config: Config | None = None,
+    *,
+    run_id: UUID | None = None,
+    **config_kwargs: Any,
+) -> RunContext:
+    if config is None:
+        config = Config.model_construct(**config_kwargs)
+    context = (
+        RunContext(config=config)
+        if run_id is None
+        else RunContext(config=config, run_id=run_id)
+    )
+    CURRENT_RUN_CONTEXT.set(context)
+    return context

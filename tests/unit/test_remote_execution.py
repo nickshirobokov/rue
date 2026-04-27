@@ -11,7 +11,7 @@ from pathlib import Path
 from textwrap import dedent
 from typing import Any
 from unittest.mock import MagicMock
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 
@@ -43,7 +43,11 @@ from rue.testing.models import (
 )
 from rue.testing.runner import Runner
 from tests.unit.conftest import NullReporter, TraceCollectorReporter
-from tests.unit.factories import make_definition, materialize_tests
+from tests.unit.factories import (
+    make_definition,
+    make_run_context,
+    materialize_tests,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -70,7 +74,7 @@ class FakePool:
         future.set_result(self._result)
         return future
 
-    def get(self) -> "FakePool":
+    def get(self) -> FakePool:
         return self
 
 
@@ -100,8 +104,8 @@ class BlockingPool(FakePool):
 
 
 def make_runner(reporter) -> Runner:
+    make_run_context(db_enabled=False)
     return Runner(
-        config=Config.model_construct(db_enabled=False),
         reporters=[reporter],
     )
 
@@ -197,13 +201,15 @@ class TestFactoryDispatch:
         )
 
     def test_local_by_default(self):
-        factory = DefaultTestFactory(config=Config(), run_id=uuid4())
+        make_run_context(Config())
+        factory = DefaultTestFactory()
         built = factory.build(self._definition())
         assert isinstance(built, SingleTest)
         assert built.backend is ExecutionBackend.ASYNCIO
 
     def test_remote_when_backend_modifier_present(self):
-        factory = DefaultTestFactory(config=Config(), run_id=uuid4())
+        make_run_context(Config())
+        factory = DefaultTestFactory()
 
         built = factory.build(
             self._definition(backend=ExecutionBackend.SUBPROCESS)
@@ -216,7 +222,8 @@ class TestFactoryDispatch:
             ExecutionBackend("nope")
 
     def test_backend_propagates_through_iterate(self):
-        factory = DefaultTestFactory(config=Config(), run_id=uuid4())
+        make_run_context(Config())
+        factory = DefaultTestFactory()
 
         built = factory.build(
             self._definition(
@@ -229,7 +236,8 @@ class TestFactoryDispatch:
         assert all(isinstance(c, SingleTest) for c in built.children)
 
     def test_assigns_node_keys_across_modifier_tree(self):
-        factory = DefaultTestFactory(config=Config(), run_id=uuid4())
+        make_run_context(Config())
+        factory = DefaultTestFactory()
 
         iterate = factory.build(
             self._definition(
@@ -311,6 +319,7 @@ class TestSingleTestSubprocess:
             backend=ExecutionBackend.SUBPROCESS,
         )
         with pytest.raises(ValueError, match="SingleTest should not have modifiers"):
+            make_run_context()
             SingleTest(
                 definition=definition,
                 params={},
@@ -339,13 +348,15 @@ class TestSingleTestSubprocess:
             telemetry_artifacts=(),
             sync_update=b"",
         )
+        make_run_context(
+            otel=False,
+            run_id=UUID(int=1),
+        )
         remote = SingleTest(
             definition=definition,
             params={},
             node_key=definition.spec.full_name,
             backend=ExecutionBackend.SUBPROCESS,
-            config=Config.model_construct(otel=False),
-            run_id=UUID(int=1),
         )
 
         with bind_pool(FakePool(expected)) as pool:
@@ -363,8 +374,8 @@ class TestSingleTestSubprocess:
         assert payload.spec is definition.spec
         assert payload.suite_root == tmp_path
         assert payload.setup_chain == ()
-        assert payload.config.otel is False
-        assert payload.run_id == UUID(int=1)
+        assert payload.context.config.otel is False
+        assert payload.context.run_id == UUID(int=1)
         assert payload.execution_id == execution.execution_id
         assert [s.name for s in payload.snapshot.resolution_order] == [
             "shared_value"
@@ -390,7 +401,7 @@ class TestSingleTestSubprocess:
                         ),
                         telemetry_artifacts=(
                             OtelTraceArtifact(
-                                run_id=payload.run_id,
+                                run_id=payload.context.run_id,
                                 execution_id=payload.execution_id,
                                 trace_id="abc",
                                 spans=[],
@@ -401,13 +412,15 @@ class TestSingleTestSubprocess:
                 )
                 return future
 
+        make_run_context(
+            otel=True,
+            run_id=UUID(int=1),
+        )
         remote = SingleTest(
             definition=definition,
             params={},
             node_key=definition.spec.full_name,
             backend=ExecutionBackend.SUBPROCESS,
-            config=Config.model_construct(otel=True),
-            run_id=UUID(int=1),
         )
 
         with bind_pool(ArtifactPool(RemoteExecutionResult(
@@ -427,6 +440,7 @@ class TestSingleTestSubprocess:
     @pytest.mark.asyncio
     async def test_skips_when_stopped(self):
         definition = make_definition("sample")
+        make_run_context()
         remote = SingleTest(
             definition=definition,
             params={},
@@ -456,6 +470,7 @@ class TestSingleTestSubprocess:
             skip_reason="no thanks",
         )
 
+        make_run_context()
         remote = SingleTest(
             definition=definition,
             params={},
@@ -486,6 +501,7 @@ class TestSingleTestSubprocess:
             on_complete(execution)
 
         definition = make_definition("sample")
+        make_run_context()
         remote = SingleTest(
             definition=definition,
             params={},
@@ -515,6 +531,7 @@ class TestSingleTestSubprocess:
             sync_update=b"",
         )
         semaphore = asyncio.Semaphore(1)
+        make_run_context()
         tests = [
             SingleTest(
                 definition=make_definition(

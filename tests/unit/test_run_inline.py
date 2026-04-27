@@ -4,16 +4,15 @@ import asyncio
 import threading
 import time
 
-from rue.config import Config
 from rue.resources import ResourceResolver, registry
 from rue.testing import ExecutionBackend, Runner
 from rue.testing.models import IterateModifier
-from tests.unit.factories import make_definition
+from tests.unit.factories import make_definition, make_run_context
 
 
 def test_sync_test_runs_in_worker_thread(null_reporter):
+    make_run_context(db_enabled=False)
     runner = Runner(
-        config=Config.model_construct(db_enabled=False),
         reporters=[null_reporter],
     )
     observed_thread = None
@@ -33,8 +32,8 @@ def test_sync_test_runs_in_worker_thread(null_reporter):
 
 
 def test_main_backend_runs_on_main_thread(null_reporter):
+    make_run_context(db_enabled=False)
     runner = Runner(
-        config=Config.model_construct(db_enabled=False),
         reporters=[null_reporter],
     )
     observed_thread = None
@@ -57,8 +56,8 @@ def test_main_backend_runs_on_main_thread(null_reporter):
 
 
 def test_module_main_backend_runs_in_worker_thread(null_reporter):
+    make_run_context(db_enabled=False)
     runner = Runner(
-        config=Config.model_construct(db_enabled=False),
         reporters=[null_reporter],
     )
     observed_thread = None
@@ -81,8 +80,8 @@ def test_module_main_backend_runs_in_worker_thread(null_reporter):
 
 
 def test_sync_exception_propagates(null_reporter):
+    make_run_context(db_enabled=False)
     runner = Runner(
-        config=Config.model_construct(db_enabled=False),
         reporters=[null_reporter],
     )
 
@@ -103,8 +102,8 @@ def test_sync_exception_propagates(null_reporter):
 
 
 def test_main_backend_propagates_through_iterate(null_reporter):
+    make_run_context(db_enabled=False)
     runner = Runner(
-        config=Config.model_construct(db_enabled=False),
         reporters=[null_reporter],
     )
     threads: list[threading.Thread] = []
@@ -127,12 +126,12 @@ def test_main_backend_propagates_through_iterate(null_reporter):
 
 
 def test_module_main_backend_keeps_iterate_concurrent(null_reporter):
-    runner = Runner(
-        config=Config.model_construct(
+    make_run_context(
             otel=False,
             db_enabled=False,
             concurrency=3,
-        ),
+        )
+    runner = Runner(
         reporters=[null_reporter],
     )
     threads: list[threading.Thread] = []

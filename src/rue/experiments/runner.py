@@ -5,10 +5,9 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
-from uuid import uuid4
 
 from rue.config import Config
-from rue.context.runtime import CURRENT_RUN_ID, bind
+from rue.context.runtime import CURRENT_RUN_CONTEXT, bind
 from rue.experiments.models import (
     ExperimentSpec,
     ExperimentVariant,
@@ -18,7 +17,7 @@ from rue.experiments.registry import registry as default_experiment_registry
 from rue.resources import ResourceResolver
 from rue.resources.registry import registry as default_resource_registry
 from rue.testing.discovery import TestLoader
-from rue.testing.models import Run
+from rue.testing.models import RunContext
 from rue.testing.models.spec import TestSpecCollection
 from rue.testing.runner import Runner
 
@@ -105,26 +104,26 @@ async def _run_experiment_variant(
     for setup_ref in collection.all_setup_files:
         loader.prepare_setup(setup_ref.path)
 
-    run_id = uuid4()
+    context = RunContext(
+        config=config,
+        experiment_variant=variant,
+        experiment_setup_chain=collection.all_setup_files,
+    )
     resolver = ResourceResolver(default_resource_registry)
     run = None
-    with bind(CURRENT_RUN_ID, run_id):
+    with bind(CURRENT_RUN_CONTEXT, context):
         try:
             await variant.apply(
                 default_experiment_registry.all(),
                 resolver=resolver,
-                run_id=run_id,
             )
             items = loader.load_from_collection(collection)
             runner = Runner(
-                config=config,
                 reporters=[],
                 fail_fast=fail_fast,
                 capture_output=capture_output,
-                experiment_variant=variant,
-                experiment_setup_chain=collection.all_setup_files,
             )
-            run = await runner.run(items, resolver=resolver, run_id=run_id)
+            run = await runner.run(items, resolver=resolver)
         finally:
             if run is None:
                 await resolver.teardown()

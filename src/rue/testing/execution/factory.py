@@ -6,10 +6,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
-from uuid import UUID
 
-from rue.config import Config
-from rue.experiments.models import ExperimentVariant
 from rue.testing.execution.base import ExecutableTest, ExecutionBackend
 from rue.testing.execution.composite import CompositeTest
 from rue.testing.execution.queue import SessionQueue
@@ -22,21 +19,16 @@ from rue.testing.models import (
     LoadedTestDef,
     ParamsIterateModifier,
 )
-from rue.testing.models.spec import SetupFileRef
 
 
 @dataclass
 class DefaultTestFactory:
     """Creates test instances with shared collaborators."""
 
-    config: Config
-    run_id: UUID
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
     queue: SessionQueue | None = None
-    experiment_variant: ExperimentVariant | None = None
-    experiment_setup_chain: tuple[SetupFileRef, ...] = ()
     _next_sync_actor_id: int = field(default=1, init=False, repr=False)
 
     def build(
@@ -72,14 +64,10 @@ class DefaultTestFactory:
                         params=params,
                         node_key=node_key,
                         backend=backend,
-                        config=self.config,
-                        run_id=self.run_id,
                         sync_actor_id=sync_actor_id,
                         semaphore=self.semaphore,
                         is_stopped=self.is_stopped,
                         on_complete=self.on_complete,
-                        experiment_variant=self.experiment_variant,
-                        experiment_setup_chain=self.experiment_setup_chain,
                     )
                 case _:
                     raise NotImplementedError(f"Unknown backend: {backend}")

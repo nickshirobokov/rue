@@ -2,13 +2,12 @@
 
 import pytest
 
-from rue.config import Config
 from rue.resources import ResourceResolver, registry
 from rue.testing import TestStatus, fail, skip, xfail
 from rue.testing.models import LoadedTestDef
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
 from rue.testing.runner import Runner
-from tests.unit.factories import make_definition
+from tests.unit.factories import make_definition, make_run_context
 
 
 def make_item(
@@ -18,8 +17,8 @@ def make_item(
 
 
 def make_runner(null_reporter) -> Runner:
+    make_run_context(db_enabled=False)
     return Runner(
-        config=Config.model_construct(db_enabled=False),
         reporters=[null_reporter],
     )
 

@@ -8,9 +8,18 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from rue.cli.tests.status.models import StatusIssue, StatusNode, TestsStatusReport
+from rue.cli.tests.status.models import (
+    StatusIssue,
+    StatusNode,
+    TestsStatusReport,
+)
 from rue.config import Config
-from rue.context.runtime import CURRENT_TEST, TestContext, bind
+from rue.context.runtime import (
+    CURRENT_RUN_CONTEXT,
+    CURRENT_TEST,
+    TestContext,
+    bind,
+)
 from rue.resources import ResourceResolver, ResourceSpec
 from rue.resources.registry import registry as default_resource_registry
 from rue.storage.sqlite import SQLiteStore
@@ -19,7 +28,7 @@ from rue.testing.discovery import TestLoader
 from rue.testing.execution.base import ExecutableTest
 from rue.testing.execution.factory import DefaultTestFactory
 from rue.testing.execution.single import SingleTest
-from rue.testing.models import Run, TestSpecCollection, TestStatus
+from rue.testing.models import Run, RunContext, TestSpecCollection, TestStatus
 
 
 class TestsStatusBuilder:
@@ -39,49 +48,53 @@ class TestsStatusBuilder:
         items = TestLoader(collection.suite_root).load_from_collection_unsafe(
             collection
         )
-        factory = DefaultTestFactory(config=self.config, run_id=uuid4())
-        tests = [factory.build(item, enqueue=False) for item in items]
+        context = RunContext(config=self.config)
+        with bind(CURRENT_RUN_CONTEXT, context):
+            factory = DefaultTestFactory()
+            tests = [factory.build(item, enqueue=False) for item in items]
 
-        for test in tests:
-            self._record_issues(test)
+            for test in tests:
+                self._record_issues(test)
 
-        if store is None:
-            run_window: tuple[Run, ...] = ()
-            history_by_key = {
-                node.node_key: ()
-                for test in tests
-                for node in test.walk()
-            }
-        else:
-            run_window = tuple(store.list_runs(limit=MAX_STORED_RUNS))
-            history_by_key = store.get_test_history_for_tests(
-                tests,
-                limit=MAX_STORED_RUNS,
-            )
-
-        leaves = [
-            leaf
-            for test in tests
-            for leaf in test.leaves()
-            if isinstance(leaf, SingleTest)
-        ]
-        connected_by_key = self._collect_static_dependencies(leaves)
-        resources_by_key = asyncio.run(self._preflight(leaves, connected_by_key))
-
-        module_nodes: dict[Path, list[StatusNode]] = defaultdict(list)
-        for test in tests:
-            module_nodes[test.definition.spec.module_path].append(
-                self._finalize_node(
-                    test,
-                    history_by_key,
-                    resources_by_key,
+            if store is None:
+                run_window: tuple[Run, ...] = ()
+                history_by_key = {
+                    node.node_key: ()
+                    for test in tests
+                    for node in test.walk()
+                }
+            else:
+                run_window = tuple(store.list_runs(limit=MAX_STORED_RUNS))
+                history_by_key = store.get_test_history_for_tests(
+                    tests,
+                    limit=MAX_STORED_RUNS,
                 )
+
+            leaves = [
+                leaf
+                for test in tests
+                for leaf in test.leaves()
+                if isinstance(leaf, SingleTest)
+            ]
+            connected_by_key = self._collect_static_dependencies(leaves)
+            resources_by_key = asyncio.run(
+                self._preflight(leaves, connected_by_key)
             )
 
-        return TestsStatusReport(
-            run_window=run_window,
-            module_nodes=dict(module_nodes),
-        )
+            module_nodes: dict[Path, list[StatusNode]] = defaultdict(list)
+            for test in tests:
+                module_nodes[test.definition.spec.module_path].append(
+                    self._finalize_node(
+                        test,
+                        history_by_key,
+                        resources_by_key,
+                    )
+                )
+
+            return TestsStatusReport(
+                run_window=run_window,
+                module_nodes=dict(module_nodes),
+            )
 
     def _record_issues(self, root: ExecutableTest) -> None:
         for test in root.walk():
@@ -138,7 +151,10 @@ class TestsStatusBuilder:
                 continue
 
             resolver = ResourceResolver(default_resource_registry)
-            ctx = TestContext(item=leaf.definition, execution_id=uuid4())
+            ctx = TestContext(
+                item=leaf.definition,
+                execution_id=uuid4(),
+            )
             try:
                 with bind(CURRENT_TEST, ctx):
                     await resolver.partially_resolve(

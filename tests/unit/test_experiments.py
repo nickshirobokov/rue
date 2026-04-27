@@ -7,12 +7,13 @@ from uuid import uuid4
 import pytest
 
 from rue.config import Config
-from rue.context.runtime import CURRENT_RUN_ID, bind
+from rue.context.runtime import CURRENT_RUN_CONTEXT, bind
 from rue.experiments import registry as experiment_registry
 from rue.experiments.models import ExperimentSpec, ExperimentVariant
 from rue.experiments.runner import ExperimentRunner
 from rue.resources import ResourceResolver, registry as resource_registry
 from rue.testing.discovery import TestSpecCollector
+from rue.testing.models import RunContext
 
 
 @pytest.fixture(autouse=True)
@@ -106,14 +107,16 @@ async def test_experiment_monkeypatch_is_run_scoped():
 
     [experiment] = experiment_registry.all()
     variant = ExperimentVariant.build_all((experiment,))[1]
-    run_id = uuid4()
+    context = RunContext(
+        config=Config.model_construct(db_enabled=False),
+        run_id=uuid4(),
+    )
     resolver = ResourceResolver(resource_registry)
 
-    with bind(CURRENT_RUN_ID, run_id):
+    with bind(CURRENT_RUN_CONTEXT, context):
         await variant.apply(
             experiment_registry.all(),
             resolver=resolver,
-            run_id=run_id,
         )
         assert Target.value == "patched"
 
@@ -133,13 +136,13 @@ async def test_experiment_monkeypatch_does_not_accept_method_scope():
 
     [experiment] = experiment_registry.all()
     variant = ExperimentVariant.build_all((experiment,))[1]
+    context = RunContext(config=Config.model_construct(db_enabled=False))
 
-    with bind(CURRENT_RUN_ID, uuid4()):
+    with bind(CURRENT_RUN_CONTEXT, context):
         with pytest.raises(TypeError, match="scope"):
             await variant.apply(
                 experiment_registry.all(),
                 resolver=ResourceResolver(resource_registry),
-                run_id=uuid4(),
             )
 
 

@@ -5,14 +5,13 @@ from uuid import uuid4
 
 import pytest
 
-from rue.config import Config
 from rue.context.collectors import CURRENT_PREDICATE_RESULTS
 from rue.context.runtime import bind
 from rue.predicates import PredicateResult, predicate
 from rue.resources import ResourceResolver, registry
 from rue.storage import SQLiteStore
 from rue.testing.runner import Runner
-from tests.unit.factories import materialize_tests
+from tests.unit.factories import make_run_context, materialize_tests
 
 
 @predicate
@@ -81,12 +80,12 @@ async def _run_module_with_tracing(
         monkeypatch.chdir(tmp_path)
         items = materialize_tests(mod_path)
         store = SQLiteStore(db_path) if db_enabled else None
-        runner = Runner(
-            config=Config.model_construct(
+        make_run_context(
                 otel=True,
                 db_enabled=db_enabled,
                 db_path=db_path,
-            ),
+            )
+        runner = Runner(
             reporters=[trace_reporter],
             store=store,
         )

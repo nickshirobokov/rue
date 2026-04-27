@@ -4,18 +4,15 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 
 if TYPE_CHECKING:
     from rue.resources.models import LoadedResourceDef
     from rue.resources.resolver import ResourceResolver
-    from rue.testing.models import LoadedTestDef
+    from rue.testing.models import LoadedTestDef, RunContext
     from rue.testing.tracing import TestTracer
-
-
-T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,14 +21,13 @@ class TestContext:
 
     item: LoadedTestDef
     execution_id: UUID | None = None
-    run_id: UUID | None = None
 
 
 CURRENT_TEST: ContextVar[TestContext | None] = ContextVar(
     "current_test", default=None
 )
-CURRENT_RUN_ID: ContextVar[UUID | None] = ContextVar(
-    "current_run_id", default=None
+CURRENT_RUN_CONTEXT: ContextVar[RunContext | None] = ContextVar(
+    "current_run_context", default=None
 )
 CURRENT_TEST_TRACER: ContextVar[TestTracer | None] = ContextVar(
     "current_test_tracer", default=None
@@ -54,7 +50,7 @@ CURRENT_RESOURCE_RESOLVER: ContextVar[ResourceResolver | None] = ContextVar(
 
 
 @contextmanager
-def bind(var: ContextVar[T], value: T) -> Iterator[None]:
+def bind[T](var: ContextVar[T], value: T) -> Iterator[None]:
     token = var.set(value)
     try:
         yield

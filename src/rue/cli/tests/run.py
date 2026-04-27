@@ -21,6 +21,7 @@ from rue.cli.tests.options import (
     resolve_selection,
 )
 from rue.config import load_config
+from rue.context.runtime import CURRENT_RUN_CONTEXT, bind
 from rue.reports.base import Reporter
 from rue.resources import (
     ResourceResolver,
@@ -28,6 +29,7 @@ from rue.resources import (
 )
 from rue.storage import SQLiteStore
 from rue.testing.discovery import TestLoader
+from rue.testing.models import RunContext
 from rue.testing.runner import Runner
 
 
@@ -141,20 +143,24 @@ def run(
         Console().print(f"[red]run_id '{run_id}' already exists[/red]")
         raise SystemExit(2)
 
-    runner = Runner(
-        config=runner_config,
-        reporters=reporters,
-        store=store,
-        fail_fast=fail_fast,
-        capture_output=not show_output,
+    context = (
+        RunContext(config=runner_config)
+        if run_id is None
+        else RunContext(config=runner_config, run_id=run_id)
     )
-    run_result = asyncio.run(
-        runner.run(
-            items,
-            resolver=ResourceResolver(default_resource_registry),
-            run_id=run_id,
+    with bind(CURRENT_RUN_CONTEXT, context):
+        runner = Runner(
+            reporters=reporters,
+            store=store,
+            fail_fast=fail_fast,
+            capture_output=not show_output,
         )
-    )
+        run_result = asyncio.run(
+            runner.run(
+                items,
+                resolver=ResourceResolver(default_resource_registry),
+            )
+        )
     raise SystemExit(
         0
         if run_result.result.failed == 0 and run_result.result.errors == 0

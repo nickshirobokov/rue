@@ -10,11 +10,7 @@ from itertools import product
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from rue.context.runtime import (
-    CURRENT_RESOURCE_RESOLVER,
-    CURRENT_RUN_ID,
-    bind,
-)
+from rue.context.runtime import CURRENT_RESOURCE_RESOLVER, bind
 from rue.resources import MonkeyPatch, Scope
 
 
@@ -44,14 +40,10 @@ class ExperimentSpec:
         value_index: int,
         *,
         resolver: ResourceResolver,
-        run_id: UUID,
     ) -> None:
         """Apply this experiment hook to the current run process."""
         kwargs: dict[str, Any] = {"value": self.values[value_index]}
-        with (
-            bind(CURRENT_RUN_ID, run_id),
-            bind(CURRENT_RESOURCE_RESOLVER, resolver),
-        ):
+        with bind(CURRENT_RESOURCE_RESOLVER, resolver):
             for dependency in self.dependencies:
                 if dependency == "monkeypatch":
                     kwargs[dependency] = MonkeyPatch(scope=Scope.RUN)
@@ -100,7 +92,6 @@ class ExperimentVariant:
         experiments: tuple[ExperimentSpec, ...],
         *,
         resolver: ResourceResolver,
-        run_id: UUID,
     ) -> None:
         """Apply this variant's selected experiment hooks."""
         definitions = {
@@ -110,7 +101,6 @@ class ExperimentVariant:
             await definitions[name].apply(
                 value_index,
                 resolver=resolver,
-                run_id=run_id,
             )
 
     @property

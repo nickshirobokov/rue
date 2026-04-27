@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 from rue.cli import app
 from rue.cli.tests.status import TestsStatusReport
 from rue.config import Config
+from rue.context.runtime import CURRENT_RUN_CONTEXT
 from rue.experiments.models import (
     ExperimentSpec,
     ExperimentVariant,
@@ -147,7 +148,8 @@ def test_run_tests_returns_2_when_run_id_already_exists(
         planned = True
         return TestSpecCollection(suite_root=Path.cwd())
 
-    async def _fail_run(self, items=None, path=None, run_id=None):
+    async def _fail_run(self, items=None, path=None):
+        del self, items, path
         msg = "Runner.run should not be called when duplicate run_id exists"
         raise AssertionError(msg)
 
@@ -181,22 +183,22 @@ def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
         def __init__(
             self,
             *,
-            config,
             reporters,
             store=None,
             fail_fast=False,
             capture_output=True,
         ) -> None:
-            captured["config"] = config
+            context = CURRENT_RUN_CONTEXT.get()
+            captured["context"] = context
+            captured["config"] = context.config
             captured["reporters"] = reporters
             captured["store"] = store
             captured["fail_fast"] = fail_fast
             captured["capture_output"] = capture_output
 
-        async def run(self, items, *, resolver, run_id=None):
+        async def run(self, items, *, resolver):
             captured["items"] = items
             captured["resolver"] = resolver
-            captured["run_id"] = run_id
             return Run()
 
     monkeypatch.setattr(
@@ -261,22 +263,22 @@ def test_tests_without_subcommand_defaults_to_run(monkeypatch):
         def __init__(
             self,
             *,
-            config,
             reporters,
             store=None,
             fail_fast=False,
             capture_output=True,
         ) -> None:
-            captured["config"] = config
+            context = CURRENT_RUN_CONTEXT.get()
+            captured["context"] = context
+            captured["config"] = context.config
             captured["reporters"] = reporters
             captured["store"] = store
             captured["fail_fast"] = fail_fast
             captured["capture_output"] = capture_output
 
-        async def run(self, items, *, resolver, run_id=None):
+        async def run(self, items, *, resolver):
             captured["items"] = items
             captured["resolver"] = resolver
-            captured["run_id"] = run_id
             return Run()
 
     def build_spec_collection(self, paths, **kwargs):
@@ -356,10 +358,11 @@ def test_run_and_status_share_selection_parsing(
 
         class FakeRunner:
             def __init__(self, **kwargs) -> None:
-                captured["verbosity"] = kwargs["config"].verbosity
+                del kwargs
+                captured["verbosity"] = CURRENT_RUN_CONTEXT.get().config.verbosity
 
-            async def run(self, items, *, resolver, run_id=None):
-                del items, resolver, run_id
+            async def run(self, items, *, resolver):
+                del items, resolver
                 return Run()
 
         monkeypatch.setattr("rue.cli.tests.run.Runner", FakeRunner)

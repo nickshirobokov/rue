@@ -4,12 +4,11 @@ from textwrap import dedent
 
 import pytest
 
-from rue.config import Config
 from rue.resources import ResourceResolver, registry
 from rue.testing.discovery import TestLoader, TestSpecCollector
 from rue.testing.runner import Runner
 from tests.unit.conftest import NullReporter
-from tests.unit.factories import materialize_tests
+from tests.unit.factories import make_run_context, materialize_tests
 
 
 class QueueOrderReporter(NullReporter):
@@ -132,12 +131,12 @@ async def test_runner_executes_mixed_backends_in_queue_order(
     items = materialize_tests(module_path)
     reporter = QueueOrderReporter()
 
-    run = await Runner(
-        config=Config.model_construct(
+    make_run_context(
             otel=False,
             db_enabled=False,
             concurrency=4,
-        ),
+        )
+    run = await Runner(
         reporters=[reporter],
     ).run(items=items, resolver=ResourceResolver(registry))
 
@@ -338,12 +337,12 @@ async def test_runner_executes_multiple_modules_in_queue_order(
     items = _materialize_paths(module_a1_path, module_a2_path)
     reporter = QueueOrderReporter()
 
-    run = await Runner(
-        config=Config.model_construct(
+    make_run_context(
             otel=False,
             db_enabled=False,
             concurrency=4,
-        ),
+        )
+    run = await Runner(
         reporters=[reporter],
     ).run(items=items, resolver=ResourceResolver(registry))
 
@@ -437,12 +436,12 @@ async def test_runner_keeps_global_main_as_absolute_barrier_across_modules(
     items = _materialize_paths(module_a1_path, module_a2_path)
     reporter = QueueOrderReporter()
 
-    run = await Runner(
-        config=Config.model_construct(
+    make_run_context(
             otel=False,
             db_enabled=False,
             concurrency=2,
-        ),
+        )
+    run = await Runner(
         reporters=[reporter],
     ).run(items=items, resolver=ResourceResolver(registry))
 
@@ -489,12 +488,12 @@ async def test_module_main_keeps_iterate_children_concurrent(
     items = materialize_tests(module_path)
 
     start = time.perf_counter()
-    run = await Runner(
-        config=Config.model_construct(
+    make_run_context(
             otel=False,
             db_enabled=False,
             concurrency=3,
-        ),
+        )
+    run = await Runner(
         reporters=[NullReporter()],
     ).run(items=items, resolver=ResourceResolver(registry))
     duration = time.perf_counter() - start

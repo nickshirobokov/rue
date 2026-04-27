@@ -10,13 +10,12 @@ import pytest
 from pydantic_core import ValidationError
 
 from rue import SUT
-from rue.config import Config
 from rue.resources import ResourceResolver, registry as resources_registry
 from rue.resources.sut import sut
 from rue.resources.sut.output import SUTOutputCapture
 from rue.testing.models import Case
 from rue.testing.runner import Runner
-from tests.unit.factories import materialize_tests
+from tests.unit.factories import make_run_context, materialize_tests
 
 
 @pytest.fixture(autouse=True)
@@ -53,8 +52,8 @@ async def _run_module_with_tracing(
     try:
         monkeypatch.chdir(tmp_path)
         items = materialize_tests(mod_path)
+        make_run_context(otel=True, db_enabled=False)
         runner = Runner(
-            config=Config.model_construct(otel=True, db_enabled=False),
             reporters=[trace_reporter],
         )
         run = await runner.run(

@@ -1,6 +1,5 @@
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 from uuid import uuid4
 
 from rue.assertions.base import AssertionRepr, AssertionResult
@@ -14,7 +13,6 @@ from rue.resources.metrics.base import (
 from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.store import MAX_STORED_RUNS
 from rue.testing.execution.factory import DefaultTestFactory
-from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.modifiers import (
     IterateModifier,
@@ -23,7 +21,7 @@ from rue.testing.models.modifiers import (
 )
 from rue.testing.models.result import TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
-from tests.unit.factories import make_definition
+from tests.unit.factories import make_definition, make_run_context
 
 
 def make_environment(**updates) -> RunEnvironment:
@@ -428,7 +426,8 @@ def test_sqlite_store_falls_back_to_legacy_histories_for_tests(
             ("test_history", "one"),
         )
 
-    built = DefaultTestFactory(config=Config(), run_id=uuid4()).build(
+    make_run_context(Config())
+    built = DefaultTestFactory().build(
         make_definition(
             "test_history",
             module_path="tests/test_sample.py",

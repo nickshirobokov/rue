@@ -13,11 +13,14 @@ from datetime import UTC, datetime
 from importlib.metadata import distributions
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
+from rue.config import Config
+from rue.experiments.models import ExperimentVariant
 from rue.resources.metrics.base import MetricResult
 from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.result import TestStatus
+from rue.testing.models.spec import SetupFileRef
 
 
 class RunEnvironment(BaseModel):
@@ -129,6 +132,20 @@ class RunResult:
     def total(self) -> int:
         """Total test count."""
         return len(self.executions)
+
+
+class RunContext(BaseModel):
+    """Read-only data resolved before executing one run."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    config: Config = Field(default_factory=Config)
+    run_id: UUID = Field(default_factory=uuid4)
+    environment: RunEnvironment = Field(
+        default_factory=RunEnvironment.build_from_current
+    )
+    experiment_variant: ExperimentVariant | None = None
+    experiment_setup_chain: tuple[SetupFileRef, ...] = ()
 
 
 @dataclass

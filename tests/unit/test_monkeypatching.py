@@ -8,11 +8,10 @@ from textwrap import dedent
 
 import pytest
 
-from rue.config import Config
 from rue.resources import ResourceResolver, registry
 from rue.testing.runner import Runner
 from tests.unit.conftest import NullReporter
-from tests.unit.factories import materialize_tests
+from tests.unit.factories import make_run_context, materialize_tests
 
 
 @pytest.fixture(autouse=True)
@@ -23,8 +22,8 @@ def clean_registry():
 
 
 def make_runner() -> Runner:
+    make_run_context(db_enabled=False, concurrency=4)
     return Runner(
-        config=Config.model_construct(db_enabled=False, concurrency=4),
         reporters=[NullReporter()],
     )
 

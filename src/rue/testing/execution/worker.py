@@ -8,22 +8,20 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from rue.config import Config
 from rue.context.runtime import (
-    CURRENT_RUN_ID,
+    CURRENT_RUN_CONTEXT,
     CURRENT_TEST,
     CURRENT_TEST_TRACER,
     TestContext,
     bind,
 )
-from rue.experiments.models import ExperimentVariant
 from rue.experiments.registry import registry as default_experiment_registry
 from rue.resources import ResourceResolver
 from rue.resources.models import ResolverSyncSnapshot
 from rue.resources.registry import registry as default_resource_registry
 from rue.telemetry.base import TelemetryArtifact
 from rue.testing.discovery.loader import TestLoader
-from rue.testing.models import TestResult
+from rue.testing.models import RunContext, TestResult
 from rue.testing.models.spec import SetupFileRef, TestSpec
 from rue.testing.tracing import TestTracer
 
@@ -37,11 +35,8 @@ class ExecutorPayload:
     setup_chain: tuple[SetupFileRef, ...]
     params: dict[str, Any]
     snapshot: ResolverSyncSnapshot
-    config: Config
-    run_id: UUID
+    context: RunContext
     execution_id: UUID
-    experiment_variant: ExperimentVariant | None = None
-    experiment_setup_chain: tuple[SetupFileRef, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,18 +61,17 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
         sync_actor_id=payload.snapshot.sync_actor_id,
     )
     try:
-        with bind(CURRENT_RUN_ID, payload.run_id):
-            if payload.experiment_variant is not None:
-                for ref in payload.experiment_setup_chain:
+        with bind(CURRENT_RUN_CONTEXT, payload.context):
+            if payload.context.experiment_variant is not None:
+                for ref in payload.context.experiment_setup_chain:
                     loader.prepare_setup(ref.path)
             for ref in payload.setup_chain:
                 loader.prepare_setup(ref.path)
 
-            if payload.experiment_variant is not None:
-                await payload.experiment_variant.apply(
+            if payload.context.experiment_variant is not None:
+                await payload.context.experiment_variant.apply(
                     default_experiment_registry.all(),
                     resolver=resolver,
-                    run_id=payload.run_id,
                 )
             definition = loader.load_definition(
                 payload.spec,
@@ -86,18 +80,17 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
             test_ctx = TestContext(
                 item=definition,
                 execution_id=payload.execution_id,
-                run_id=payload.run_id,
             )
             with bind(CURRENT_TEST, test_ctx):
                 await resolver.hydrate_sync_snapshot(payload.snapshot)
 
         tracer = TestTracer.build(
-            config=payload.config,
-            run_id=payload.run_id,
+            config=payload.context.config,
+            run_id=payload.context.run_id,
         )
         with (
             bind(CURRENT_TEST, test_ctx),
-            bind(CURRENT_RUN_ID, payload.run_id),
+            bind(CURRENT_RUN_CONTEXT, payload.context),
             bind(CURRENT_TEST_TRACER, tracer),
         ):
             tracer.start(definition, execution_id=payload.execution_id)
@@ -107,7 +100,6 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
                     params=payload.params,
                     execution_id=payload.execution_id,
                     run_sync_in_thread=False,
-                    run_id=payload.run_id,
                 )
             )
             result = TestResult.build(

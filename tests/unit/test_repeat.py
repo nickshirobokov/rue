@@ -2,16 +2,15 @@ import asyncio
 
 import pytest
 
-from rue.config import Config
 from rue.resources import ResourceResolver, registry
 from rue.testing import Runner, test as t_decorator
 from rue.testing.models import IterateModifier
-from tests.unit.factories import make_definition
+from tests.unit.factories import make_definition, make_run_context
 
 
 def make_runner(null_reporter) -> Runner:
+    make_run_context(db_enabled=False)
     return Runner(
-        config=Config.model_construct(db_enabled=False),
         reporters=[null_reporter],
     )
 

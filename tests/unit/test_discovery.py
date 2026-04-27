@@ -6,7 +6,6 @@ from uuid import UUID
 
 import pytest
 
-from rue.config import Config
 from rue.resources import ResourceResolver, Scope, registry
 from rue.testing.discovery import KeywordMatcher, TestLoader, TestSpecCollector
 from rue.testing.execution.base import ExecutionBackend
@@ -18,6 +17,7 @@ from rue.testing.models import (
     TestSpec,
 )
 from rue.testing.runner import Runner
+from tests.unit.factories import make_run_context
 
 
 @pytest.fixture(autouse=True)
@@ -40,8 +40,8 @@ def materialize(path):
 
 
 def make_runner(null_reporter) -> Runner:
+    make_run_context(db_enabled=False)
     return Runner(
-        config=Config.model_construct(db_enabled=False),
         reporters=[null_reporter],
     )
 

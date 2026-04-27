@@ -13,7 +13,7 @@ from uuid import UUID
 
 from rue.context.runtime import (
     CURRENT_RESOURCE_RESOLVER,
-    CURRENT_RUN_ID,
+    CURRENT_RUN_CONTEXT,
     CURRENT_TEST,
 )
 from rue.resources.models import Scope
@@ -31,7 +31,6 @@ class PatchContext:
     """Context used by dispatchers while one test body is running."""
 
     execution_id: UUID | None
-    run_id: UUID | None
     module_path: Path
     resources: frozenset[Any]
 
@@ -63,9 +62,8 @@ class PatchOwner:
                     == self.module_path
                 )
             case Scope.RUN:
-                run_id = (
-                    None if test_ctx is None else test_ctx.run_id
-                ) or CURRENT_RUN_ID.get()
+                run_context = CURRENT_RUN_CONTEXT.get()
+                run_id = None if run_context is None else run_context.run_id
                 return self.run_id is not None and run_id == self.run_id
 
     @classmethod
@@ -91,9 +89,8 @@ class PatchOwner:
                     module_path=test_ctx.item.spec.module_path.resolve(),
                 )
             case Scope.RUN:
-                run_id = (
-                    None if test_ctx is None else test_ctx.run_id
-                ) or CURRENT_RUN_ID.get()
+                run_context = CURRENT_RUN_CONTEXT.get()
+                run_id = None if run_context is None else run_context.run_id
                 if run_id is None:
                     raise RuntimeError(
                         "Run-scoped patches require a Rue run context."

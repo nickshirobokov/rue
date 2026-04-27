@@ -3,7 +3,7 @@ import pytest
 from rue.resources import ResourceResolver, registry
 from rue.testing.execution.single import SingleTest
 from rue.testing.models import IterateModifier, LoadedTestDef, TestStatus
-from tests.unit.factories import make_definition
+from tests.unit.factories import make_definition, make_run_context
 
 
 def make_item(fn=None, *, modifiers=None) -> LoadedTestDef:
@@ -23,6 +23,7 @@ async def test_single_test_executes_without_runner():
         called.append("called")
 
     definition = make_item(test_body)
+    make_run_context()
     test = SingleTest(
         definition=definition,
         params={},
@@ -38,6 +39,7 @@ async def test_single_test_executes_without_runner():
 def test_single_test_rejects_modifiers():
     definition = make_item(modifiers=[IterateModifier(count=2, min_passes=2)])
     with pytest.raises(ValueError, match="SingleTest should not have modifiers"):
+        make_run_context()
         SingleTest(
             definition=definition,
             params={},

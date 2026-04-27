@@ -5,13 +5,10 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import UTC, datetime
-from uuid import UUID
 
-from rue.config import Config
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.process_pool import process_pool_scope
-from rue.context.runtime import bind
-from rue.experiments.models import ExperimentVariant
+from rue.context.runtime import CURRENT_RUN_CONTEXT, bind
 from rue.reports.base import Reporter
 from rue.resources import ResourceResolver
 from rue.resources.metrics.base import MetricResult
@@ -24,16 +21,13 @@ from rue.testing.models import (
     ExecutedTest,
     LoadedTestDef,
     Run,
-    RunEnvironment,
 )
-from rue.testing.models.spec import SetupFileRef
 
 
 class Runner:
     """Executes discovered tests with resource injection.
 
     Args:
-        config: Runner configuration values.
         reporters: Reporter instances for lifecycle notifications.
         store: Optional persistence backend for completed runs.
     """
@@ -43,23 +37,20 @@ class Runner:
     def __init__(
         self,
         *,
-        config: Config,
         reporters: list[Reporter],
         store: Store | None = None,
         fail_fast: bool = False,
         capture_output: bool = True,
-        experiment_variant: ExperimentVariant | None = None,
-        experiment_setup_chain: tuple[SetupFileRef, ...] = (),
     ) -> None:
-        self.config = config
         self.fail_fast = fail_fast
         self.capture_output = capture_output
         self.reporters = reporters
         self.store = store
-        self.experiment_variant = experiment_variant
-        self.experiment_setup_chain = experiment_setup_chain
+        context = CURRENT_RUN_CONTEXT.get()
+        if context is None:
+            raise RuntimeError("Runner requires an active run context.")
         for reporter in self.reporters:
-            reporter.configure(self.config)
+            reporter.configure(context.config)
 
         self.semaphore: asyncio.Semaphore | None = None
         self.stop_flag: bool = False
@@ -70,9 +61,13 @@ class Runner:
         self.current_run: Run | None = None
 
     def _concurrency_limit(self) -> int:
+        context = CURRENT_RUN_CONTEXT.get()
+        if context is None:
+            raise RuntimeError("Runner requires an active run context.")
+        config = context.config
         return (
-            self.config.concurrency
-            if self.config.concurrency > 0
+            config.concurrency
+            if config.concurrency > 0
             else self.DEFAULT_MAX_CONCURRENCY
         )
 
@@ -110,7 +105,6 @@ class Runner:
         items: list[LoadedTestDef],
         *,
         resolver: ResourceResolver,
-        run_id: UUID | None = None,
     ) -> Run:
         """Run tests and return results.
 
@@ -118,18 +112,20 @@ class Runner:
             items: Test definitions to execute. Discover them with
                 TestSpecCollector and TestLoader before calling.
             resolver: Resource resolver for this run. The runner owns teardown.
-            run_id: Optional UUID for this run.
 
         Returns:
             Run with environment, results, and test executions.
         """
-        environment = RunEnvironment.build_from_current()
-        if run_id is None:
-            self.current_run = Run(environment=environment)
-        else:
-            self.current_run = Run(environment=environment, run_id=run_id)
+        context = CURRENT_RUN_CONTEXT.get()
+        if context is None:
+            raise RuntimeError("Runner requires an active run context.")
+        config = context.config
+        self.current_run = Run(
+            run_id=context.run_id,
+            environment=context.environment,
+        )
 
-        if self.config.otel:
+        if config.otel:
             otel_runtime.configure()
 
         if not items:
@@ -167,9 +163,9 @@ class Runner:
                 run_task = asyncio.create_task(execution)
 
                 try:
-                    if self.config.timeout is not None:
+                    if config.timeout is not None:
                         await asyncio.wait_for(
-                            run_task, timeout=self.config.timeout
+                            run_task, timeout=config.timeout
                         )
                     else:
                         await run_task
@@ -203,28 +199,26 @@ class Runner:
         with process_pool_scope(self._concurrency_limit()):
             self._queue = SessionQueue()
             self._factory = DefaultTestFactory(
-                config=self.config,
-                run_id=run.run_id,
                 semaphore=self.semaphore,
                 is_stopped=lambda: self.stop_flag,
                 on_complete=self._on_execution_complete,
                 queue=self._queue,
-                experiment_variant=self.experiment_variant,
-                experiment_setup_chain=self.experiment_setup_chain,
             )
             for item in items:
                 self._factory.build(item)
             await self._notify_tests_ready(self._queue.tests)
             self._completed_executions = {}
+            context = CURRENT_RUN_CONTEXT.get()
+            if context is None:
+                raise RuntimeError("Runner requires an active run context.")
+            config = context.config
             try:
                 for step in self._queue.steps:
                     if self.stop_flag:
                         break
                     await self._run_step(step, resolver, run)
-                    if run.result.stopped_early and self.config.maxfail:
-                        await self._notify_run_stopped_early(
-                            self.config.maxfail
-                        )
+                    if run.result.stopped_early and config.maxfail:
+                        await self._notify_run_stopped_early(config.maxfail)
                         break
             finally:
                 run.result.executions = [
@@ -308,6 +302,10 @@ class Runner:
         if not execution.result.status.is_failure:
             return
         self._failure_count += 1
-        if self.config.maxfail and self._failure_count >= self.config.maxfail:
+        context = CURRENT_RUN_CONTEXT.get()
+        if context is None:
+            raise RuntimeError("Runner requires an active run context.")
+        maxfail = context.config.maxfail
+        if maxfail and self._failure_count >= maxfail:
             self.stop_flag = True
             run.result.stopped_early = True

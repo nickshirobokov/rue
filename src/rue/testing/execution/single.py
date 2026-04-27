@@ -10,15 +10,14 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid4
 
-from rue.config import Config
 from rue.context.process_pool import get_process_pool
 from rue.context.runtime import (
+    CURRENT_RUN_CONTEXT,
     CURRENT_TEST,
     CURRENT_TEST_TRACER,
     TestContext,
     bind,
 )
-from rue.experiments.models import ExperimentVariant
 from rue.resources import ResourceResolver
 from rue.resources.models import Scope
 from rue.testing.execution.base import ExecutableTest, ExecutionBackend
@@ -33,7 +32,6 @@ from rue.testing.models import (
     TestResult,
     TestStatus,
 )
-from rue.testing.models.spec import SetupFileRef
 from rue.testing.tracing import TestTracer
 
 
@@ -45,8 +43,6 @@ class SingleTest(ExecutableTest):
     params: dict[str, Any]
     node_key: str
     backend: ExecutionBackend = ExecutionBackend.ASYNCIO
-    config: Config = field(default_factory=Config)
-    run_id: UUID = field(default_factory=uuid4)
     sync_actor_id: int = 1
     children: list[ExecutableTest] = field(
         default_factory=list, init=False, repr=False
@@ -54,17 +50,18 @@ class SingleTest(ExecutableTest):
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
-    experiment_variant: ExperimentVariant | None = None
-    experiment_setup_chain: tuple[SetupFileRef, ...] = ()
     tracer: TestTracer = field(init=False)
 
     def __post_init__(self) -> None:
         """Initialize derived execution collaborators."""
         if self.definition.spec.modifiers:
             raise ValueError("SingleTest should not have modifiers")
+        context = CURRENT_RUN_CONTEXT.get()
+        if context is None:
+            raise RuntimeError("SingleTest requires an active run context.")
         self.tracer = TestTracer.build(
-            config=self.config,
-            run_id=self.run_id,
+            config=context.config,
+            run_id=context.run_id,
         )
 
     async def _execute(self, resolver: ResourceResolver) -> ExecutedTest:
@@ -114,11 +111,7 @@ class SingleTest(ExecutableTest):
         semaphore = (
             self.semaphore if self.semaphore else contextlib.nullcontext()
         )
-        ctx = TestContext(
-            item=self.definition,
-            execution_id=execution_id,
-            run_id=self.run_id,
-        )
+        ctx = TestContext(item=self.definition, execution_id=execution_id)
 
         with bind(CURRENT_TEST_TRACER, self.tracer):
             self.tracer.start(self.definition, execution_id=execution_id)
@@ -130,7 +123,6 @@ class SingleTest(ExecutableTest):
                         execution_id=execution_id,
                         run_sync_in_thread=self.backend
                         is not ExecutionBackend.MAIN,
-                        run_id=self.run_id,
                         is_stopped=self.is_stopped,
                     )
                 )
@@ -174,12 +166,11 @@ class SingleTest(ExecutableTest):
         *,
         execution_id: UUID,
     ) -> ExecutedTest:
-        ctx = TestContext(
-            item=self.definition,
-            execution_id=execution_id,
-            run_id=self.run_id,
-        )
+        ctx = TestContext(item=self.definition, execution_id=execution_id)
         remote_result: RemoteExecutionResult
+        context = CURRENT_RUN_CONTEXT.get()
+        if context is None:
+            raise RuntimeError("SingleTest requires an active run context.")
 
         try:
             semaphore = (
@@ -213,11 +204,8 @@ class SingleTest(ExecutableTest):
                         setup_chain=self.definition.setup_chain,
                         params=dict(self.params),
                         snapshot=snapshot,
-                        config=self.config,
-                        run_id=self.run_id,
+                        context=context,
                         execution_id=execution_id,
-                        experiment_variant=self.experiment_variant,
-                        experiment_setup_chain=self.experiment_setup_chain,
                     )
 
                     future = get_process_pool().submit(
