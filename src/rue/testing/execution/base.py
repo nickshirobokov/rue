@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
 from enum import StrEnum
-import time
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from rue.resources.resolver import ResourceResolver
 from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.result import TestResult, TestStatus
+
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -33,17 +34,19 @@ class ExecutableTest(ABC):
     definition: LoadedTestDef
     backend: ExecutionBackend
     node_key: str
-    children: list["ExecutableTest"]
+    children: list[ExecutableTest]
     on_complete: Callable[[ExecutedTest], Awaitable[None]] | None = None
 
-    def walk(self) -> list["ExecutableTest"]:
+    def walk(self) -> list[ExecutableTest]:
+        """Return this execution node and every descendant."""
         nodes: list[ExecutableTest] = [self]
         for child in self.children:
             for node in child.walk():
                 nodes.append(node)
         return nodes
 
-    def leaves(self) -> list["ExecutableTest"]:
+    def leaves(self) -> list[ExecutableTest]:
+        """Return executable leaves below this node."""
         if not self.children:
             return [self]
 
@@ -53,7 +56,10 @@ class ExecutableTest(ABC):
                 leaves.append(leaf)
         return leaves
 
-    async def execute(self, resolver: ResourceResolver) -> ExecutedTest:
+    async def execute(
+        self,
+        resolver: ResourceResolver,
+    ) -> ExecutedTest:
         """Execute the test and return result."""
         if self.definition.spec.definition_error:
             execution = ExecutedTest(
@@ -70,7 +76,7 @@ class ExecutableTest(ABC):
             start = time.perf_counter()
             try:
                 execution = await self._execute(resolver)
-            except Exception as error:  # noqa: BLE001
+            except Exception as error:
                 execution = ExecutedTest(
                     definition=self.definition,
                     node_key=self.node_key,
@@ -88,5 +94,8 @@ class ExecutableTest(ABC):
         return execution
 
     @abstractmethod
-    async def _execute(self, resolver: ResourceResolver) -> ExecutedTest:
+    async def _execute(
+        self,
+        resolver: ResourceResolver,
+    ) -> ExecutedTest:
         """Execute the concrete test body and return result."""

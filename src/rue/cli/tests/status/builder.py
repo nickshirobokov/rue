@@ -14,7 +14,7 @@ from rue.cli.tests.status.models import (
 )
 from rue.config import Config
 from rue.context.runtime import RunContext
-from rue.resources import ResourceResolver, ResourceSpec
+from rue.resources import ResourceGraph, ResourceResolver, ResourceSpec
 from rue.resources.registry import registry as default_resource_registry
 from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.store import MAX_STORED_RUNS
@@ -26,6 +26,8 @@ from rue.testing.models import Run, TestSpecCollection, TestStatus
 
 
 class TestsStatusBuilder:
+    """Build status reports from discovered tests and recent run history."""
+
     def __init__(self, config: Config) -> None:
         self.config = config
         self._issues_by_key: dict[str, list[StatusIssue]] = defaultdict(list)
@@ -36,6 +38,7 @@ class TestsStatusBuilder:
         *,
         store: SQLiteStore | None,
     ) -> TestsStatusReport:
+        """Return the current test status report for a collection."""
         default_resource_registry.reset()
         self._issues_by_key = defaultdict(list)
 
@@ -70,9 +73,11 @@ class TestsStatusBuilder:
                 for leaf in test.leaves()
                 if isinstance(leaf, SingleTest)
             ]
-            connected_by_key = self._collect_static_dependencies(leaves)
+            connected_by_key, graphs_by_key = self._collect_static_dependencies(
+                leaves
+            )
             resources_by_key = asyncio.run(
-                self._preflight(leaves, connected_by_key)
+                self._preflight(leaves, connected_by_key, graphs_by_key)
             )
 
             module_nodes: dict[Path, list[StatusNode]] = defaultdict(list)
@@ -111,30 +116,41 @@ class TestsStatusBuilder:
     def _collect_static_dependencies(
         self,
         leaves: list[SingleTest],
-    ) -> dict[str, tuple[ResourceSpec, ...]]:
-        resolver = ResourceResolver(default_resource_registry)
+    ) -> tuple[
+        dict[str, tuple[ResourceSpec, ...]],
+        dict[str, ResourceGraph],
+    ]:
         connected_by_key: dict[str, tuple[ResourceSpec, ...]] = {}
+        graphs_by_key: dict[str, ResourceGraph] = {}
         for leaf in leaves:
             try:
-                connected_by_key[leaf.node_key] = (
-                    resolver.collect_dependency_closure(
-                        tuple(
-                            param
-                            for param in leaf.definition.spec.params
-                            if param not in leaf.params
-                        ),
-                        consumer_spec=leaf.definition.spec,
-                    )
+                graph = default_resource_registry.compile_graph(
+                    {
+                        leaf.node_key: (
+                            leaf.definition.spec,
+                            tuple(
+                                param
+                                for param in leaf.definition.spec.params
+                                if param not in leaf.params
+                            ),
+                        )
+                    },
+                    autouse_keys=frozenset({leaf.node_key}),
                 )
+                graphs_by_key[leaf.node_key] = graph
+                connected_by_key[leaf.node_key] = graph.order_by_key[
+                    leaf.node_key
+                ]
             except Exception as error:
                 self._add_issue(leaf.node_key, "resolve", str(error))
                 connected_by_key[leaf.node_key] = ()
-        return connected_by_key
+        return connected_by_key, graphs_by_key
 
     async def _preflight(
         self,
         leaves: list[SingleTest],
         connected_by_key: dict[str, tuple[ResourceSpec, ...]],
+        graphs_by_key: dict[str, ResourceGraph],
     ) -> dict[str, dict[str, tuple[ResourceSpec, ...]]]:
         resources_by_key: dict[str, dict[str, tuple[ResourceSpec, ...]]] = {}
 
@@ -143,15 +159,15 @@ class TestsStatusBuilder:
             if self._has_blocking_issue(leaf.node_key):
                 resources_by_key[leaf.node_key] = {}
                 continue
+            if leaf.node_key not in graphs_by_key:
+                resources_by_key[leaf.node_key] = {}
+                continue
 
             resolver = ResourceResolver(default_resource_registry)
             try:
-                await resolver.partially_resolve(
-                    tuple(
-                        param
-                        for param in leaf.definition.spec.params
-                        if param not in leaf.params
-                    ),
+                default_resource_registry.graph = graphs_by_key[leaf.node_key]
+                await resolver.resolve_consumer(
+                    leaf.node_key,
                     leaf.params,
                     consumer_spec=leaf.definition.spec,
                 )
@@ -213,7 +229,9 @@ class TestsStatusBuilder:
             )
             for child in test.children
         )
-        leaf_count = sum(child.leaf_count for child in children) if children else 1
+        leaf_count = (
+            sum(child.leaf_count for child in children) if children else 1
+        )
         return StatusNode(
             definition=test.definition,
             backend=test.backend,

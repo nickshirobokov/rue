@@ -183,7 +183,13 @@ def test_dummy():
         ctx = TestContext(item=item, execution_id=uuid4())
         metric_results: list[MetricResult] = []
         with ctx, bind(CURRENT_METRIC_RESULTS, metric_results):
-            await resolver.resolve("my_metric", consumer_spec=item.spec)
+            graph = registry.compile_graph(
+                {"test": (item.spec, ("my_metric",))}
+            )
+            await resolver.resolve_resource(
+                graph.injections_by_key["test"]["my_metric"],
+                consumer_spec=item.spec,
+            )
             await resolver.teardown()
 
         assert len(metric_results) == 1

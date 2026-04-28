@@ -5,7 +5,7 @@ from collections.abc import Callable
 from typing import cast
 
 from rue.resources.models import Scope
-from rue.resources.registry import registry as default_registry, resource
+from rue.resources.registry import resource
 
 
 type ResourceFactory = Callable[..., object]
@@ -19,10 +19,11 @@ def decorate_pytest_fixture_as_resource(
     params: object | None = None,
     **kwargs: object,
 ) -> ResourceFactory | ResourceDecorator:
+    """Map a supported pytest fixture declaration to a Rue resource."""
     _ = kwargs
 
     def decorator(fn: ResourceFactory) -> ResourceFactory:
-        if params is not None or default_registry.get(fn.__name__) is not None:
+        if params is not None:
             return fn
         match scope:
             case Scope():
@@ -43,7 +44,7 @@ def decorate_pytest_fixture_as_resource(
 
 
 class RewritePytestFixtureDecoratorsTransformer(ast.NodeTransformer):
-    """Rewrite supported ``pytest.fixture`` forms to ``__rue_fixture_resource__``."""
+    """Rewrite supported fixture forms to ``__rue_fixture_resource__``."""
 
     def __init__(self) -> None:
         self._pytest_aliases: set[str] = set()
@@ -52,10 +53,12 @@ class RewritePytestFixtureDecoratorsTransformer(ast.NodeTransformer):
         self._function_depth = 0
 
     def visit_Module(self, node: ast.Module) -> ast.Module:
+        """Collect fixture aliases and rewrite supported decorators."""
         self._collect_aliases(node)
         return cast("ast.Module", self.generic_visit(node))
 
     def visit_ClassDef(self, node: ast.ClassDef) -> ast.ClassDef:
+        """Track class scope so class-local fixtures are left untouched."""
         self._class_depth += 1
         try:
             return cast("ast.ClassDef", self.generic_visit(node))
@@ -63,11 +66,13 @@ class RewritePytestFixtureDecoratorsTransformer(ast.NodeTransformer):
             self._class_depth -= 1
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        """Rewrite supported decorators on top-level sync functions."""
         return cast("ast.FunctionDef", self._visit_function(node))
 
     def visit_AsyncFunctionDef(
         self, node: ast.AsyncFunctionDef
     ) -> ast.AsyncFunctionDef:
+        """Rewrite supported decorators on top-level async functions."""
         return cast("ast.AsyncFunctionDef", self._visit_function(node))
 
     def _visit_function(
@@ -152,6 +157,7 @@ class InjectFixtureResourceDependenciesTransformer(ast.NodeTransformer):
     """
 
     def visit_Module(self, node: ast.Module) -> ast.Module:
+        """Inject the runtime decorator import when a module needs it."""
         uses = False
         for n in ast.walk(node):
             if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):

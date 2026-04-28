@@ -55,6 +55,28 @@ def _consumer_spec(
     return _make_item(name=name, module_path=module_path).spec
 
 
+async def _resolve(
+    resolver: ResourceResolver,
+    name: str,
+    *,
+    consumer_spec=None,
+    apply_injection_hook: bool = True,
+):
+    consumer = consumer_spec or _consumer_spec()
+    graph = resolver.registry.compile_graph({"test": (consumer, (name,))})
+    return await resolver.resolve_resource(
+        graph.injections_by_key["test"][name],
+        consumer_spec=consumer,
+        apply_injection_hook=apply_injection_hook,
+    )
+
+
+def _resource_spec(name: str, *, consumer_spec=None) -> ResourceSpec:
+    consumer = consumer_spec or _consumer_spec()
+    graph = registry.compile_graph({"test": (consumer, (name,))})
+    return graph.injections_by_key["test"][name]
+
+
 def _ctx(
     name: str = "test_fn",
     *,
@@ -117,7 +139,8 @@ async def test_metric_on_injection_records_case_id_before_suffix():
 
     resolver = ResourceResolver(registry)
     with ctx:
-        result = await resolver.resolve(
+        result = await _resolve(
+            resolver,
             "test_case_metric",
             consumer_spec=ctx.item.spec,
         )
@@ -142,7 +165,8 @@ async def test_metric_on_injection_records_suffix_when_case_id_missing():
 
     resolver = ResourceResolver(registry)
     with ctx:
-        result = await resolver.resolve(
+        result = await _resolve(
+            resolver,
             "test_case_suffix_metric",
             consumer_spec=ctx.item.spec,
         )
@@ -169,9 +193,12 @@ def test_metric_empty_edge_cases_do_not_crash():
         ci90 = m.ci_90
         ci95 = m.ci_95
         ci99 = m.ci_99
-        assert math.isnan(ci90[0]) and math.isnan(ci90[1])
-        assert math.isnan(ci95[0]) and math.isnan(ci95[1])
-        assert math.isnan(ci99[0]) and math.isnan(ci99[1])
+        assert math.isnan(ci90[0])
+        assert math.isnan(ci90[1])
+        assert math.isnan(ci95[0])
+        assert math.isnan(ci95[1])
+        assert math.isnan(ci99[0])
+        assert math.isnan(ci99[1])
 
 
 def test_metric_result_is_collected_when_collector_is_active():
@@ -219,7 +246,8 @@ async def test_metric_decorator_no_args():
         return 0
 
     resolver = ResourceResolver(registry)
-    m = await resolver.resolve(
+    m = await _resolve(
+        resolver,
         "default_metric",
         consumer_spec=_consumer_spec(),
     )
@@ -237,24 +265,24 @@ async def test_metric_on_injection_hook_with_context():
         return 0
 
     resolver = ResourceResolver(registry)
-    resource_consumer = registry.get("test_ctx_metric")
-    assert resource_consumer is not None
+    resource_consumer = _resource_spec("test_ctx_metric")
     ctx = _ctx("my_merit")
     with ctx:
-        m = await resolver.resolve(
+        m = await _resolve(
+            resolver,
             "test_ctx_metric",
-            consumer_spec=resource_consumer.spec,
+            consumer_spec=resource_consumer,
         )
-        assert m.metadata.consumers == [resource_consumer.spec]
+        assert m.metadata.consumers == [resource_consumer]
         assert ctx.item.spec not in m.metadata.consumers
         m.add_record(1)
 
-    assert m.metadata.consumers == [resource_consumer.spec]
+    assert m.metadata.consumers == [resource_consumer]
     assert m.metadata.identity.scope == Scope.TEST
 
 
 @pytest.mark.asyncio
-async def test_metric_decorator_emits_metric_result_on_teardown_with_assertions_and_return_value():
+async def test_metric_decorator_emits_result_with_assertions_and_return():
     registry.reset()
 
     @metric(scope=Scope.TEST)
@@ -286,7 +314,8 @@ async def test_metric_decorator_emits_metric_result_on_teardown_with_assertions_
     with _ctx(), bind(
         CURRENT_METRIC_RESULTS, metric_results
     ):
-        m = await resolver.resolve(
+        m = await _resolve(
+            resolver,
             "scored_metric",
             consumer_spec=_consumer_spec(),
         )
@@ -316,7 +345,8 @@ async def test_metric_test_injection_records_test_consumer_spec():
     resolver = ResourceResolver(registry)
     ctx = _ctx("test_metric")
     with ctx:
-        m = await resolver.resolve(
+        m = await _resolve(
+            resolver,
             "sampled_metric",
             consumer_spec=ctx.item.spec,
         )
@@ -339,14 +369,16 @@ async def test_metric_resolve_without_injection_hook_skips_consumer_metadata():
     resolver = ResourceResolver(registry)
     ctx = _ctx("test_metric")
     with ctx:
-        m = await resolver.resolve(
+        m = await _resolve(
+            resolver,
             "sampled_metric",
             consumer_spec=ctx.item.spec,
             apply_injection_hook=False,
         )
         assert m.metadata.consumers == []
 
-        m = await resolver.resolve(
+        m = await _resolve(
+            resolver,
             "sampled_metric",
             consumer_spec=ctx.item.spec,
         )
@@ -372,7 +404,8 @@ async def test_metric_records_module_and_provider_identity():
     )
     with bind(CURRENT_METRIC_RESULTS, metric_results):
         with ctx:
-            m = await resolver.resolve(
+            m = await _resolve(
+                resolver,
                 "module_metric",
                 consumer_spec=ctx.item.spec,
             )
@@ -410,7 +443,7 @@ async def test_metric_decorator_records_metric_dependencies():
     with _ctx(), bind(
         CURRENT_METRIC_RESULTS, metric_results
     ):
-        await resolver.resolve("accuracy", consumer_spec=_consumer_spec())
+        await _resolve(resolver, "accuracy", consumer_spec=_consumer_spec())
         await resolver.teardown()
 
     by_name = {
@@ -418,11 +451,12 @@ async def test_metric_decorator_records_metric_dependencies():
         for result in metric_results
     }
     assert "accuracy" in by_name
+    clock_spec = _resource_spec("clock")
     assert by_name["accuracy"].dependencies == [
         by_name["overall_quality"].metadata.identity,
-        registry.select("clock", None).definition.spec,
+        clock_spec,
     ]
     assert by_name["accuracy"].metadata.direct_providers == [
         by_name["overall_quality"].metadata.identity,
-        registry.select("clock", None).definition.spec,
+        clock_spec,
     ]

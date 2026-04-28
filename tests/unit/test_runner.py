@@ -402,30 +402,34 @@ class TestResourceInjection:
         assert captured == ["injected_value"]
 
     @pytest.mark.asyncio
-    async def test_removed_otel_trace_resource_errors(self, null_reporter):
+    async def test_removed_otel_trace_resource_aborts_run(
+        self, null_reporter
+    ):
         def test_needs_trace(otel_trace):
             pass
 
         item = make_item(test_needs_trace, params=["otel_trace"])
         runner = make_runner(reporters=[null_reporter])
-        result = await runner.run(resolver=ResourceResolver(registry), items=[item])
 
-        assert result.result.errors == 1
-        assert "Unknown resource: otel_trace" in str(
-            result.result.executions[0].result.error
-        )
+        with pytest.raises(ValueError, match="Unknown resource: otel_trace"):
+            await runner.run(
+                resolver=ResourceResolver(registry),
+                items=[item],
+            )
 
     @pytest.mark.asyncio
-    async def test_ignores_unknown_params(self, null_reporter):
+    async def test_unknown_params_abort_run(self, null_reporter):
         def test_unknown(unknown_param):
             pass
 
         item = make_item(test_unknown, params=["unknown_param"])
         runner = make_runner(reporters=[null_reporter])
-        result = await runner.run(resolver=ResourceResolver(registry), items=[item])
 
-        # Should error because unknown_param is not provided
-        assert result.result.errors == 1
+        with pytest.raises(ValueError, match="Unknown resource: unknown_param"):
+            await runner.run(
+                resolver=ResourceResolver(registry),
+                items=[item],
+            )
 
     @pytest.mark.parametrize("capture_output", [True, False])
     @pytest.mark.asyncio
@@ -1639,25 +1643,24 @@ class TestResourceTeardown:
 
 
 class TestResourceResolutionErrors:
-    """Tests to ensure resource resolution errors are properly surfaced through the runner."""
+    """Tests to ensure resource errors use the right execution boundary."""
 
     @pytest.mark.asyncio
-    async def test_unknown_resource_param_causes_error(self, null_reporter):
-        """Test that an unknown resource parameter results in an error."""
-
+    async def test_unknown_resource_param_aborts_run(self, null_reporter):
         def test_with_unknown(unknown_resource):
             pass
 
         item = make_item(test_with_unknown, params=["unknown_resource"])
         runner = make_runner(reporters=[null_reporter])
-        result = await runner.run(resolver=ResourceResolver(registry), items=[item])
 
-        assert result.result.errors == 1
-        error = result.result.executions[0].result.error
-        assert error is not None
-        assert "Unknown resource" in str(error) or "unknown_resource" in str(
-            error
-        )
+        with pytest.raises(
+            ValueError,
+            match="Unknown resource: unknown_resource",
+        ):
+            await runner.run(
+                resolver=ResourceResolver(registry),
+                items=[item],
+            )
 
     @pytest.mark.asyncio
     async def test_resource_teardown_error_does_not_mask_test_error(

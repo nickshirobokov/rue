@@ -15,7 +15,7 @@ from rue.resources.metrics.base import MetricResult
 from rue.resources.sut.output import SUTOutputCapture
 from rue.storage import Store
 from rue.telemetry.otel.runtime import otel_runtime
-from rue.testing.execution import DefaultTestFactory
+from rue.testing.execution import DefaultTestFactory, SingleTest
 from rue.testing.execution.queue import RunnerStep, SessionQueue
 from rue.testing.models import (
     ExecutedTest,
@@ -194,6 +194,28 @@ class Runner:
             )
             for item in items:
                 self._factory.build(item)
+            leaves = [
+                leaf
+                for test in self._queue.tests
+                for leaf in test.leaves()
+                if isinstance(leaf, SingleTest)
+            ]
+            consumers = {
+                leaf.node_key: (
+                    leaf.definition.spec,
+                    tuple(
+                        param
+                        for param in leaf.definition.spec.params
+                        if param not in leaf.params
+                    ),
+                )
+                for leaf in leaves
+            }
+            autouse_keys = frozenset(consumers)
+            resolver.registry.compile_graph(
+                consumers,
+                autouse_keys=autouse_keys,
+            )
             await self._notify_tests_ready(self._queue.tests)
             self._completed_executions = {}
             context = CURRENT_RUN_CONTEXT.get()

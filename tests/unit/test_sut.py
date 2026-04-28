@@ -69,8 +69,12 @@ async def _run_module_with_tracing(
 async def _resolve(name: str) -> object:
     resolver = ResourceResolver(resources_registry)
     item = make_definition("test_sut")
+    graph = resources_registry.compile_graph({"test": (item.spec, (name,))})
     with TestContext(item=item, execution_id=uuid4()):
-        return await resolver.resolve(name, consumer_spec=item.spec)
+        return await resolver.resolve_resource(
+            graph.injections_by_key["test"][name],
+            consumer_spec=item.spec,
+        )
 
 
 class TestSutObject:

@@ -29,6 +29,7 @@ async def test_single_test_executes_without_runner():
         params={},
         node_key=definition.spec.full_name,
     )
+    registry.compile_graph({test.node_key: (definition.spec, ())})
 
     execution = await test.execute(ResourceResolver(registry))
 

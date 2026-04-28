@@ -32,3 +32,13 @@ class Spec(ABC):
     """Base model for objects that consume or provide Rue resources."""
 
     locator: Locator
+
+    @property
+    def name(self) -> str:
+        """Return the callable name represented by this spec."""
+        return self.locator.function_name
+
+    @property
+    def module_path(self) -> Path | None:
+        """Return the source module path represented by this spec."""
+        return self.locator.module_path

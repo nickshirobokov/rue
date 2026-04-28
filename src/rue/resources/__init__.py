@@ -5,6 +5,7 @@ from rue.resources.builtins import register_builtin_resources
 from rue.resources.models import (
     LoadedResourceDef,
     ResolverSyncSnapshot,
+    ResourceGraph,
     ResourceSpec,
     Scope,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "LoadedResourceDef",
     "MonkeyPatch",
     "ResolverSyncSnapshot",
+    "ResourceGraph",
     "ResourceRegistry",
     "ResourceResolver",
     "ResourceSpec",

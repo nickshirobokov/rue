@@ -1,3 +1,5 @@
+"""Metric resource decorator."""
+
 from __future__ import annotations
 
 import functools
@@ -5,7 +7,7 @@ import inspect
 import math
 from collections.abc import AsyncGenerator, Callable, Generator
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, ParamSpec, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
@@ -22,29 +24,10 @@ if TYPE_CHECKING:
     from rue.assertions.base import AssertionResult
 
 
-P = ParamSpec("P")
 type MetricYield = Metric | CalculatedValue
 
 
-def _finalize_metric_result(
-    metric_instance: Metric,
-    assertions_results: list[AssertionResult],
-    value: CalculatedValue,
-) -> None:
-    metadata = replace(
-        metric_instance.metadata,
-        consumers=list(metric_instance.metadata.consumers),
-        direct_providers=list(metric_instance.metadata.direct_providers),
-    )
-    MetricResult(
-        metadata=metadata,
-        dependencies=metadata.direct_providers,
-        assertion_results=assertions_results,
-        value=value,
-    )
-
-
-def metric(
+def metric[**P](
     fn: Callable[P, Generator[MetricYield, Any, Any]]
     | Callable[P, AsyncGenerator[MetricYield, Any]]
     | None = None,
@@ -103,9 +86,7 @@ def metric(
             m.metadata.consumers.append(consumer)
         if isinstance(transaction.provider_spec, ResourceSpec):
             m.metadata.identity = transaction.provider_spec
-            for provider in transaction.resolver.direct_dependencies_for(
-                transaction.provider_spec
-            ):
+            for provider in transaction.direct_dependencies:
                 if provider not in m.metadata.direct_providers:
                     m.metadata.direct_providers.append(provider)
         return m
@@ -134,10 +115,11 @@ def metric(
                         value: CalculatedValue = (
                             math.nan if final_value is None else final_value
                         )
-                        _finalize_metric_result(
-                            metric_instance,
-                            assertions_results,
-                            value,
+                        MetricResult(
+                            metadata=metric_instance.metadata,
+                            dependencies=metric_instance.metadata.direct_providers,
+                            assertion_results=assertions_results,
+                            value=value,
                         )
                         break
 
@@ -175,10 +157,11 @@ def metric(
                         value: CalculatedValue = (
                             math.nan if final_value is None else final_value
                         )
-                        _finalize_metric_result(
-                            metric_instance,
-                            assertions_results,
-                            value,
+                        MetricResult(
+                            metadata=metric_instance.metadata,
+                            dependencies=metric_instance.metadata.direct_providers,
+                            assertion_results=assertions_results,
+                            value=value,
                         )
                         break
 
@@ -190,8 +173,9 @@ def metric(
             origin_fn=fn,
         )
 
-    msg = f"""
-        {fn.__name__} is not a generator or async generator and can't be wrapped as a Rue metric.
-        To fix: yield a Metric instance and optionally yield a final calculated value.
-        """
+    msg = (
+        f"{fn.__name__} is not a generator or async generator and can't be "
+        "wrapped as a Rue metric. To fix: yield a Metric instance and "
+        "optionally yield a final calculated value."
+    )
     raise ValueError(msg)

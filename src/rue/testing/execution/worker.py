@@ -34,6 +34,7 @@ class ExecutorPayload:
     setup_chain: tuple[SetupFileRef, ...]
     params: dict[str, Any]
     snapshot: ResolverSyncSnapshot
+    resource_key: str
     context: RunContext
     execution_id: UUID
 
@@ -99,6 +100,7 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
                 await definition.run_loaded_test(
                     params=payload.params,
                     resolver=resolver,
+                    resource_key=payload.resource_key,
                     run_sync_in_thread=False,
                 )
             )

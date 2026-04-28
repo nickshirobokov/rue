@@ -44,6 +44,35 @@ def _consumer_spec(
     return _make_item(name=name, module_path=module_path).spec
 
 
+def _resource_graph(
+    resource_registry: ResourceRegistry,
+    resource_names: tuple[str, ...],
+    *,
+    consumer_spec=None,
+    key: str = "test",
+):
+    consumer = consumer_spec or _consumer_spec()
+    return resource_registry.compile_graph({key: (consumer, resource_names)})
+
+
+async def _resolve(
+    resolver: ResourceResolver,
+    name: str,
+    *,
+    consumer_spec=None,
+):
+    consumer = consumer_spec or _consumer_spec()
+    graph = _resource_graph(
+        resolver.registry,
+        (name,),
+        consumer_spec=consumer,
+    )
+    return await resolver.resolve_resource(
+        graph.injections_by_key["test"][name],
+        consumer_spec=consumer,
+    )
+
+
 def _register_resource_source(
     path: Path,
     source: str,
@@ -52,6 +81,15 @@ def _register_resource_source(
 ) -> None:
     namespace = {"resource": resource_decorator, "Scope": Scope}
     exec(compile(dedent(source), str(path.resolve()), "exec"), namespace)
+
+
+def _only_definition(
+    resource_registry,
+    name: str,
+    scope: Scope = Scope.TEST,
+):
+    by_path = resource_registry._definitions[name][scope]
+    return next(reversed(by_path.values()))
 
 
 @pytest.fixture(autouse=True)
@@ -106,9 +144,8 @@ class TestResourceDecorator:
             async def async_resource():
                 return "async_value"
 
-        defn = registry.get(name)
-        assert defn is not None
-        assert defn.spec.locator.function_name == name
+        defn = _only_definition(registry, name)
+        assert defn.spec.name == name
         assert defn.spec.scope == Scope.TEST
         assert defn.is_async == expected_flags["is_async"]
         assert defn.is_generator == expected_flags["is_generator"]
@@ -155,8 +192,7 @@ class TestResourceDecorator:
             async def async_gen_resource():
                 yield "async_gen_value"
 
-        defn = registry.get(name)
-        assert defn is not None
+        defn = _only_definition(registry, name)
         assert defn.is_async == expected_flags["is_async"]
         assert defn.is_generator == expected_flags["is_generator"]
         assert defn.is_async_generator == expected_flags["is_async_generator"]
@@ -181,8 +217,7 @@ class TestResourceDecorator:
             def session_resource():
                 return "run"
 
-        defn = registry.get(name)
-        assert defn is not None
+        defn = _only_definition(registry, name, expected_scope)
         assert defn.spec.scope == expected_scope
 
     def test_detects_dependencies(self):
@@ -194,8 +229,7 @@ class TestResourceDecorator:
         def dependent(base, other):
             return base + other
 
-        defn = registry.get("dependent")
-        assert defn is not None
+        defn = _only_definition(registry, "dependent")
         assert defn.spec.dependencies == ("base", "other")
 
     def test_ignores_self_and_cls_in_dependencies(self):
@@ -203,13 +237,135 @@ class TestResourceDecorator:
         def dependent(self, cls, base, other):
             return base + other
 
-        defn = registry.get("dependent")
-        assert defn is not None
+        defn = _only_definition(registry, "dependent")
         assert defn.spec.dependencies == ("base", "other")
 
 
 class TestResourceRegistry:
-    def test_registers_definitions_and_process_index(self, tmp_path):
+    def test_compile_graph_single_resource(self):
+        @resource
+        def leaf():
+            return "leaf"
+
+        graph = _resource_graph(registry, ("leaf",))
+
+        root_names = [identity.name for identity in graph.roots_by_key["test"]]
+        node_names = [identity.name for identity in graph.order_by_key["test"]]
+        assert root_names == ["leaf"]
+        assert node_names == ["leaf"]
+        assert graph.dependencies_by_spec[graph.roots_by_key["test"][0]] == ()
+
+    def test_compile_graph_transitive_dependency_first(self):
+        @resource
+        def leaf():
+            return "leaf"
+
+        @resource
+        def middle(leaf):
+            return leaf
+
+        @resource
+        def root(middle):
+            return middle
+
+        graph = _resource_graph(registry, ("root",))
+        nodes = graph.order_by_key["test"]
+
+        node_names = [identity.name for identity in nodes]
+        assert node_names == ["leaf", "middle", "root"]
+        assert graph.dependencies_by_spec[nodes[2]] == (nodes[1],)
+        assert graph.dependencies_by_spec[nodes[1]] == (nodes[0],)
+
+    def test_compile_graph_shares_dependency_spec(self):
+        @resource
+        def shared():
+            return "shared"
+
+        @resource
+        def left(shared):
+            return shared
+
+        @resource
+        def right(shared):
+            return shared
+
+        @resource
+        def root(left, right):
+            return left, right
+
+        graph = _resource_graph(registry, ("root",))
+        root_spec = graph.roots_by_key["test"][0]
+        left_spec, right_spec = graph.dependencies_by_spec[root_spec]
+
+        assert (
+            graph.dependencies_by_spec[left_spec][0]
+            == graph.dependencies_by_spec[right_spec][0]
+        )
+        node_names = [identity.name for identity in graph.order_by_key["test"]]
+        assert node_names == ["shared", "left", "right", "root"]
+
+    def test_compile_graph_preserves_root_order(self):
+        @resource
+        def left():
+            return "left"
+
+        @resource
+        def right():
+            return "right"
+
+        graph = _resource_graph(registry, ("right", "left"))
+
+        root_names = [identity.name for identity in graph.roots_by_key["test"]]
+        assert root_names == ["right", "left"]
+
+    def test_compile_graph_keeps_same_name_run_roots(
+        self, tmp_path
+    ):
+        custom_registry = ResourceRegistry()
+        root = tmp_path / "project"
+        child = root / "tests" / "child"
+        sibling = root / "tests" / "sibling"
+        child.mkdir(parents=True)
+        sibling.mkdir(parents=True)
+
+        _register_resource_source(
+            root / "confrue_root.py",
+            """
+            @resource(scope=Scope.RUN)
+            def shared():
+                return "root"
+            """,
+            resource_decorator=custom_registry.resource,
+        )
+        _register_resource_source(
+            child / "confrue_child.py",
+            """
+            @resource(scope=Scope.RUN)
+            def shared():
+                return "child"
+            """,
+            resource_decorator=custom_registry.resource,
+        )
+
+        graph = custom_registry.compile_graph(
+            {
+                "child": (
+                    _consumer_spec(module_path=child / "rue_child.py"),
+                    ("shared",),
+                ),
+                "sibling": (
+                    _consumer_spec(module_path=sibling / "rue_sibling.py"),
+                    ("shared",),
+                ),
+            }
+        )
+
+        assert {
+            graph.roots_by_key[key][0].module_path.parent
+            for key in ("child", "sibling")
+        } == {child.resolve(), root.resolve()}
+
+    def test_run_scope_keeps_directory_overrides(self, tmp_path):
         custom_registry = ResourceRegistry()
         root = tmp_path / "project"
         child = root / "tests" / "child"
@@ -235,10 +391,33 @@ class TestResourceRegistry:
             resource_decorator=custom_registry.resource,
         )
 
-        definition = custom_registry.get("shared")
-        assert definition is not None
-        assert definition.spec.scope == Scope.RUN
-        assert definition.spec.locator.module_path.parent == child.resolve()
+        root_selected = _only_definition(
+            custom_registry,
+            "shared",
+            Scope.RUN,
+        )
+        root_graph = _resource_graph(
+            custom_registry,
+            ("shared",),
+            consumer_spec=_consumer_spec(module_path=root / "rue_root.py"),
+        )
+        child_selected = _only_definition(
+            custom_registry,
+            "shared",
+            Scope.RUN,
+        )
+        child_graph = _resource_graph(
+            custom_registry,
+            ("shared",),
+            consumer_spec=_consumer_spec(module_path=child / "rue_child.py"),
+        )
+
+        assert {
+            root_graph.injections_by_key["test"]["shared"].module_path.parent,
+            child_graph.injections_by_key["test"]["shared"].module_path.parent,
+        } == {root.resolve(), child.resolve()}
+        assert root_selected.spec.scope == Scope.RUN
+        assert child_selected.spec.scope == Scope.RUN
 
     def test_select_picks_nearest_ancestor_process_definition(self, tmp_path):
         custom_registry = ResourceRegistry()
@@ -267,20 +446,29 @@ class TestResourceRegistry:
             resource_decorator=custom_registry.resource,
         )
 
-        child_selected = custom_registry.select(
-            "shared", child / "rue_child.py"
+        child_graph = _resource_graph(
+            custom_registry,
+            ("shared",),
+            consumer_spec=_consumer_spec(module_path=child / "rue_child.py"),
         )
-        sibling_selected = custom_registry.select(
-            "shared",
-            sibling / "rue_sibling.py",
+        sibling_graph = _resource_graph(
+            custom_registry,
+            ("shared",),
+            consumer_spec=_consumer_spec(
+                module_path=sibling / "rue_sibling.py"
+            ),
         )
 
         assert (
-            child_selected.definition.spec.locator.module_path.parent
+            child_graph.injections_by_key["test"][
+                "shared"
+            ].module_path.parent
             == child.resolve()
         )
         assert (
-            sibling_selected.definition.spec.locator.module_path.parent
+            sibling_graph.injections_by_key["test"][
+                "shared"
+            ].module_path.parent
             == root.resolve()
         )
 
@@ -305,44 +493,62 @@ class TestResourceRegistry:
         def shared():
             return "module"
 
-        selected = custom_registry.select("shared", root / "rue_test.py")
+        graph = _resource_graph(
+            custom_registry,
+            ("shared",),
+            consumer_spec=_consumer_spec(module_path=root / "rue_test.py"),
+        )
+        selected = custom_registry.definition(
+            graph.injections_by_key["test"]["shared"]
+        )
 
-        assert selected.definition.spec.scope == Scope.MODULE
-        assert selected.definition.spec.locator.function_name == "shared"
-        assert selected.definition.spec.locator.module_path is not None
+        assert selected.spec.scope == Scope.MODULE
+        assert selected.spec.name == "shared"
+        assert selected.spec.module_path is not None
 
     def test_reset_restores_builtin_resources(self):
         custom_registry = ResourceRegistry()
 
-        @custom_registry.resource
+        @custom_registry.resource(builtin=True)
         def builtin_resource():
             return "builtin"
 
-        @custom_registry.resource(scope=Scope.RUN)
+        @custom_registry.resource(scope=Scope.RUN, builtin=True)
         def builtin_session():
             return "builtin-session"
-
-        custom_registry.mark_builtin("builtin_resource")
-        custom_registry.mark_builtin("builtin_session")
 
         @custom_registry.resource
         def extra_resource():
             return "extra"
 
-        @custom_registry.resource(scope=Scope.RUN)
-        def builtin_session():
+        def builtin_session_override():
             return "override"
+
+        builtin_session_override.__name__ = "builtin_session"
+        custom_registry.resource(
+            builtin_session_override,
+            scope=Scope.RUN,
+        )
 
         custom_registry.reset()
 
-        builtin_resource_def = custom_registry.get("builtin_resource")
-        builtin_session_def = custom_registry.get("builtin_session")
-        extra_resource_def = custom_registry.get("extra_resource")
+        builtin_resource_def = _only_definition(
+            custom_registry,
+            "builtin_resource",
+        )
+        builtin_session_def = _only_definition(
+            custom_registry,
+            "builtin_session",
+            Scope.RUN,
+        )
 
         assert builtin_resource_def is not None
         assert builtin_session_def is not None
-        assert extra_resource_def is None
         assert builtin_session_def.fn() == "builtin-session"
+        with pytest.raises(ValueError, match="Unknown resource"):
+            custom_registry.compile_graph(
+                {"test": (_consumer_spec(), ("extra_resource",))}
+            )
 
 
 class TestResourceResolver:
@@ -351,6 +557,23 @@ class TestResourceResolver:
     def test_requires_explicit_registry(self):
         with pytest.raises(TypeError):
             ResourceResolver()  # type: ignore[call-arg]
+
+    @pytest.mark.asyncio
+    async def test_resolve_requires_compiled_graph(self):
+        @resource
+        def simple():
+            return 42
+
+        resolver = ResourceResolver(registry)
+        identity = _only_definition(registry, "simple").spec
+        with pytest.raises(
+            RuntimeError,
+            match="Resource graph is not compiled",
+        ):
+            await resolver.resolve_resource(
+                identity,
+                consumer_spec=_consumer_spec(),
+            )
 
     @pytest.mark.parametrize(
         ("name", "kind", "expected"),
@@ -379,7 +602,10 @@ class TestResourceResolver:
                 return "async_result"
 
         resolver = ResourceResolver(registry)
-        assert await resolver.resolve(name, consumer_spec=_consumer_spec()) == expected
+        assert (
+            await _resolve(resolver, name, consumer_spec=_consumer_spec())
+            == expected
+        )
 
     @pytest.mark.asyncio
     async def test_caches_test_scope(self):
@@ -392,8 +618,8 @@ class TestResourceResolver:
             return call_count
 
         resolver = ResourceResolver(registry)
-        v1 = await resolver.resolve("counted", consumer_spec=_consumer_spec())
-        v2 = await resolver.resolve("counted", consumer_spec=_consumer_spec())
+        v1 = await _resolve(resolver, "counted", consumer_spec=_consumer_spec())
+        v2 = await _resolve(resolver, "counted", consumer_spec=_consumer_spec())
         assert v1 == v2 == 1
         assert call_count == 1
 
@@ -408,7 +634,11 @@ class TestResourceResolver:
             return base_val * 2
 
         resolver = ResourceResolver(registry)
-        value = await resolver.resolve("derived", consumer_spec=_consumer_spec())
+        value = await _resolve(
+            resolver,
+            "derived",
+            consumer_spec=_consumer_spec(),
+        )
         assert value == 20
 
     @pytest.mark.asyncio
@@ -424,10 +654,8 @@ class TestResourceResolver:
             transaction = CURRENT_RESOURCE_TRANSACTION.get()
             observed.append(
                 [
-                    identity.locator.function_name
-                    for identity in transaction.resolver.direct_dependencies_for(
-                        transaction.provider_spec
-                    )
+                    identity.name
+                    for identity in transaction.direct_dependencies
                 ]
             )
             return leaf
@@ -437,23 +665,24 @@ class TestResourceResolver:
             transaction = CURRENT_RESOURCE_TRANSACTION.get()
             observed.append(
                 [
-                    identity.locator.function_name
-                    for identity in transaction.resolver.direct_dependencies_for(
-                        transaction.provider_spec
-                    )
+                    identity.name
+                    for identity in transaction.direct_dependencies
                 ]
             )
             return middle
 
         resolver = ResourceResolver(registry)
-        assert await resolver.resolve("root", consumer_spec=_consumer_spec()) == "leaf"
+        assert (
+            await _resolve(resolver, "root", consumer_spec=_consumer_spec())
+            == "leaf"
+        )
         assert observed == [["leaf"], ["middle"]]
 
     @pytest.mark.asyncio
     async def test_unknown_resource_raises(self):
         resolver = ResourceResolver(registry)
         with pytest.raises(ValueError, match="Unknown resource: unknown"):
-            await resolver.resolve("unknown", consumer_spec=_consumer_spec())
+            await _resolve(resolver, "unknown", consumer_spec=_consumer_spec())
 
 
 class TestResourceTeardown:
@@ -492,7 +721,10 @@ class TestResourceTeardown:
                 teardown_called = True
 
         resolver = ResourceResolver(registry)
-        assert await resolver.resolve(name, consumer_spec=_consumer_spec()) == expected
+        assert (
+            await _resolve(resolver, name, consumer_spec=_consumer_spec())
+            == expected
+        )
 
         await resolver.teardown()
         assert teardown_called
@@ -515,8 +747,8 @@ class TestResourceTeardown:
             suite_torn = True
 
         resolver = ResourceResolver(registry)
-        await resolver.resolve("case_res", consumer_spec=_consumer_spec())
-        await resolver.resolve("suite_res", consumer_spec=_consumer_spec())
+        await _resolve(resolver, "case_res", consumer_spec=_consumer_spec())
+        await _resolve(resolver, "suite_res", consumer_spec=_consumer_spec())
 
         await resolver.teardown_scope(Scope.TEST)
         assert case_torn
@@ -536,12 +768,20 @@ class TestResourceTeardown:
             return call_count
 
         resolver = ResourceResolver(registry)
-        v1 = await resolver.resolve("counted_case", consumer_spec=_consumer_spec())
+        v1 = await _resolve(
+            resolver,
+            "counted_case",
+            consumer_spec=_consumer_spec(),
+        )
         assert v1 == 1
 
         await resolver.teardown_scope(Scope.TEST)
 
-        v2 = await resolver.resolve("counted_case", consumer_spec=_consumer_spec())
+        v2 = await _resolve(
+            resolver,
+            "counted_case",
+            consumer_spec=_consumer_spec(),
+        )
         assert v2 == 2
 
 
@@ -559,11 +799,19 @@ class TestForkForTest:
             return call_count
 
         parent = ResourceResolver(registry)
-        parent_val = await parent.resolve("case_val", consumer_spec=_consumer_spec())
+        parent_val = await _resolve(
+            parent,
+            "case_val",
+            consumer_spec=_consumer_spec(),
+        )
         assert parent_val == 1
 
         child = parent.fork_for_test()
-        child_val = await child.resolve("case_val", consumer_spec=_consumer_spec())
+        child_val = await _resolve(
+            child,
+            "case_val",
+            consumer_spec=_consumer_spec(),
+        )
         assert child_val == 2  # New instance for child
 
     @pytest.mark.parametrize(
@@ -605,7 +853,10 @@ class TestForkForTest:
         parent = ResourceResolver(registry)
         children = [parent.fork_for_test() for _ in range(8)]
         values = await asyncio.gather(
-            *[child.resolve(name, consumer_spec=_consumer_spec()) for child in children]
+            *[
+                _resolve(child, name, consumer_spec=_consumer_spec())
+                for child in children
+            ]
         )
 
         assert values == [f"{scope.value}_1"] * len(children)
@@ -645,7 +896,8 @@ class TestHierarchicalProcessResources:
         resolver = ResourceResolver(registry)
 
         assert (
-            await resolver.resolve(
+            await _resolve(
+                resolver,
                 "shared",
                 consumer_spec=_consumer_spec(
                     module_path=root / "tests" / "rue_root.py"
@@ -655,7 +907,8 @@ class TestHierarchicalProcessResources:
         )
 
         assert (
-            await resolver.resolve(
+            await _resolve(
+                resolver,
                 "shared",
                 consumer_spec=_consumer_spec(
                     module_path=child / "rue_child.py"
@@ -691,7 +944,8 @@ class TestHierarchicalProcessResources:
 
         resolver = ResourceResolver(registry)
         assert (
-            await resolver.resolve(
+            await _resolve(
+                resolver,
                 "shared",
                 consumer_spec=_consumer_spec(
                     module_path=sibling / "rue_sibling.py"
@@ -701,7 +955,7 @@ class TestHierarchicalProcessResources:
         )
 
     @pytest.mark.asyncio
-    async def test_parent_process_dependency_uses_requesting_test_chain(
+    async def test_run_dependency_uses_resource_provider_context(
         self,
         tmp_path,
     ):
@@ -733,13 +987,14 @@ class TestHierarchicalProcessResources:
 
         resolver = ResourceResolver(registry)
         assert (
-            await resolver.resolve(
+            await _resolve(
+                resolver,
                 "consumer",
                 consumer_spec=_consumer_spec(
                     module_path=child / "rue_child.py"
                 ),
             )
-            == "consumer:child"
+            == "consumer:root"
         )
 
     @pytest.mark.asyncio
@@ -771,7 +1026,7 @@ class TestHierarchicalProcessResources:
 
         resolver = ResourceResolver(registry)
         assert (
-            await resolver.resolve("shared", consumer_spec=_consumer_spec())
+            await _resolve(resolver, "shared", consumer_spec=_consumer_spec())
             == "child"
         )
 
@@ -815,7 +1070,8 @@ class TestHierarchicalProcessResources:
         resolver = ResourceResolver(registry)
 
         assert (
-            await resolver.resolve(
+            await _resolve(
+                resolver,
                 "shared",
                 consumer_spec=_consumer_spec(
                     module_path=root / "tests" / "rue_root.py"
@@ -825,7 +1081,8 @@ class TestHierarchicalProcessResources:
         )
 
         assert (
-            await resolver.resolve(
+            await _resolve(
+                resolver,
                 "shared",
                 consumer_spec=_consumer_spec(
                     module_path=child / "rue_child.py"
@@ -835,7 +1092,8 @@ class TestHierarchicalProcessResources:
         )
 
         assert (
-            await resolver.resolve(
+            await _resolve(
+                resolver,
                 "shared",
                 consumer_spec=_consumer_spec(
                     module_path=root / "tests" / "rue_root.py"
@@ -875,7 +1133,11 @@ class TestResourceHooks:
             return 10
 
         resolver = ResourceResolver(registry)
-        value = await resolver.resolve("doubled", consumer_spec=_consumer_spec())
+        value = await _resolve(
+            resolver,
+            "doubled",
+            consumer_spec=_consumer_spec(),
+        )
 
         assert value == 20
 
@@ -892,8 +1154,8 @@ class TestResourceHooks:
             return 42
 
         resolver = ResourceResolver(registry)
-        await resolver.resolve("simple", consumer_spec=_consumer_spec())
-        await resolver.resolve("simple", consumer_spec=_consumer_spec())
+        await _resolve(resolver, "simple", consumer_spec=_consumer_spec())
+        await _resolve(resolver, "simple", consumer_spec=_consumer_spec())
 
         assert resolve_calls == [42]
 
@@ -910,7 +1172,7 @@ class TestResourceHooks:
             call_order.append(("generator_teardown",))
 
         resolver = ResourceResolver(registry)
-        await resolver.resolve("gen_res", consumer_spec=_consumer_spec())
+        await _resolve(resolver, "gen_res", consumer_spec=_consumer_spec())
         await resolver.teardown()
 
         assert call_order == [("generator_teardown",), ("hook", "value")]
@@ -928,7 +1190,7 @@ class TestResourceHooks:
             yield "case_value"
 
         resolver = ResourceResolver(registry)
-        await resolver.resolve("case_gen", consumer_spec=_consumer_spec())
+        await _resolve(resolver, "case_gen", consumer_spec=_consumer_spec())
 
         assert not teardown_hook_called
         await resolver.teardown_scope(Scope.TEST)
@@ -948,12 +1210,19 @@ class TestResourceHooks:
             nonlocal teardown_value
             teardown_value = value
 
-        @resource(on_injection=on_injection_hook, on_teardown=on_teardown_hook)
+        @resource(
+            on_injection=on_injection_hook,
+            on_teardown=on_teardown_hook,
+        )
         async def async_gen():
             yield "async_value"
 
         resolver = ResourceResolver(registry)
-        value = await resolver.resolve("async_gen", consumer_spec=_consumer_spec())
+        value = await _resolve(
+            resolver,
+            "async_gen",
+            consumer_spec=_consumer_spec(),
+        )
 
         assert value == "async_value"
         assert injection_value == "async_value"
@@ -978,7 +1247,8 @@ class TestResourceHooks:
             return 42
 
         resolver = ResourceResolver(registry)
-        await resolver.resolve(
+        await _resolve(
+            resolver,
             "simple",
             consumer_spec=_consumer_spec(name="my_test"),
         )
@@ -1008,7 +1278,7 @@ class TestResourceHooks:
             return f"top({middle})"
 
         resolver = ResourceResolver(registry)
-        await resolver.resolve("top", consumer_spec=_consumer_spec())
+        await _resolve(resolver, "top", consumer_spec=_consumer_spec())
 
         assert history == [
             ("middle", "leaf"),
@@ -1029,8 +1299,8 @@ class TestResourceHooks:
             return "val"
 
         resolver = ResourceResolver(registry)
-        await resolver.resolve("cached_res", consumer_spec=_consumer_spec())
-        await resolver.resolve("cached_res", consumer_spec=_consumer_spec())
+        await _resolve(resolver, "cached_res", consumer_spec=_consumer_spec())
+        await _resolve(resolver, "cached_res", consumer_spec=_consumer_spec())
 
         # Hook called twice, once for each injection
         assert call_count == 2
@@ -1039,15 +1309,15 @@ class TestResourceHooks:
 class TestResourceResolutionErrors:
     """Tests to ensure resource resolution errors are properly surfaced."""
 
-    def test_collect_dependency_closure_raises_for_unknown_resource(self):
-        resolver = ResourceResolver(registry)
-
+    def test_compile_graph_raises_for_unknown_resource(self):
         with pytest.raises(ValueError, match="Unknown resource: unknown"):
-            resolver.collect_dependency_closure(
-                ("unknown",),
-                consumer_spec=_consumer_spec(
-                    module_path=Path("tests/test_sample.py")
-                ),
+            registry.compile_graph(
+                {
+                    "test": (
+                        _consumer_spec(module_path=Path("tests/test_sample.py")),
+                        ("unknown",),
+                    )
+                }
             )
 
     @pytest.mark.asyncio
@@ -1060,13 +1330,14 @@ class TestResourceResolutionErrors:
         async def shared_right(shared_left):
             return shared_left
 
-        resolver = ResourceResolver(registry)
         with pytest.raises(
             RuntimeError, match="Circular resource dependency detected"
         ):
-            await asyncio.wait_for(resolver.resolve("shared_left", consumer_spec=_consumer_spec()), timeout=0.2)
+            registry.compile_graph(
+                {"test": (_consumer_spec(), ("shared_left",))}
+            )
 
-    def test_collect_dependency_closure_raises_for_circular_dependency(self):
+    def test_compile_graph_raises_for_circular_dependency(self):
         @resource(scope="module")
         def shared_left(shared_right):
             return shared_right
@@ -1075,15 +1346,16 @@ class TestResourceResolutionErrors:
         def shared_right(shared_left):
             return shared_left
 
-        resolver = ResourceResolver(registry)
         with pytest.raises(
             RuntimeError, match="Circular resource dependency detected"
         ):
-            resolver.collect_dependency_closure(
-                ("shared_left",),
-                consumer_spec=_consumer_spec(
-                    module_path=Path("tests/test_sample.py")
-                ),
+            registry.compile_graph(
+                {
+                    "test": (
+                        _consumer_spec(module_path=Path("tests/test_sample.py")),
+                        ("shared_left",),
+                    )
+                }
             )
 
     @pytest.mark.asyncio
@@ -1099,7 +1371,11 @@ class TestResourceResolutionErrors:
 
         resolver = ResourceResolver(registry)
         with pytest.raises(RuntimeError, match="on_injection hook failed"):
-            await resolver.resolve("resource_with_injection", consumer_spec=_consumer_spec())
+            await _resolve(
+                resolver,
+                "resource_with_injection",
+                consumer_spec=_consumer_spec(),
+            )
 
     @pytest.mark.asyncio
     async def test_teardown_errors_are_aggregated(self):
@@ -1113,7 +1389,12 @@ class TestResourceResolutionErrors:
 
         resolver = ResourceResolver(registry)
         assert (
-            await resolver.resolve("resource_with_teardown_errors", consumer_spec=_consumer_spec()) == "value"
+            await _resolve(
+                resolver,
+                "resource_with_teardown_errors",
+                consumer_spec=_consumer_spec(),
+            )
+            == "value"
         )
 
         with pytest.raises(ExceptionGroup) as exc_info:

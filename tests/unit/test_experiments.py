@@ -14,6 +14,7 @@ from rue.experiments.runner import ExperimentRunner
 from rue.models import Locator
 from rue.resources import ResourceResolver, registry as resource_registry
 from rue.testing.discovery import TestSpecCollector
+from tests.unit.factories import make_definition
 
 
 @pytest.fixture(autouse=True)
@@ -36,7 +37,10 @@ def test_experiment_uses_function_name_and_ids():
     assert definition.ids == ("gpt",)
     assert definition.values == ("openai:gpt-5.4",)
     assert definition.dependencies == ()
-    assert resource_registry.get("model") is None
+    with pytest.raises(ValueError, match="Unknown resource"):
+        resource_registry.compile_graph(
+            {"test": (make_definition("test_model").spec, ("model",))}
+        )
 
 
 def test_experiment_rejects_empty_values():

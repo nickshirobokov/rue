@@ -52,7 +52,8 @@ class LoadedTestDef:
         suite_root: Path,
         setup_chain: tuple[SetupFileRef, ...],
         load_error: str,
-    ) -> "LoadedTestDef":
+    ) -> LoadedTestDef:
+        """Create a placeholder definition for a test that failed to load."""
         return cls(
             spec=spec,
             fn=lambda: None,
@@ -67,6 +68,7 @@ class LoadedTestDef:
         *,
         run_sync_in_thread: bool,
     ) -> None:
+        """Call the loaded test function with resolved resource kwargs."""
         instance = None
 
         if self.spec.locator.class_name:
@@ -96,6 +98,7 @@ class LoadedTestDef:
         *,
         params: dict[str, Any],
         resolver: ResourceResolver,
+        resource_key: str,
         run_sync_in_thread: bool,
         is_stopped: Callable[[], bool] | None = None,
     ) -> tuple[
@@ -104,6 +107,7 @@ class LoadedTestDef:
         BaseException | None,
         list[AssertionResult],
     ]:
+        """Resolve resources, run this test, and return execution metadata."""
         assertion_results: list[AssertionResult] = []
         error: BaseException | None = None
         imperative_outcome: TestStatus | None = None
@@ -113,14 +117,9 @@ class LoadedTestDef:
         start = time.perf_counter()
         with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
             try:
-                autouse_names = await resolver.resolve_autouse(
-                    self.spec,
-                )
-                unresolved_params = tuple(
-                    param for param in self.spec.params if param not in params
-                )
-                kwargs = await resolver.partially_resolve(
-                    unresolved_params,
+                resource_graph = resolver.registry.graph
+                kwargs = await resolver.resolve_consumer(
+                    resource_key,
                     params,
                     consumer_spec=self.spec,
                 )
@@ -128,20 +127,13 @@ class LoadedTestDef:
                     imperative_outcome = TestStatus.SKIPPED
                     error = Exception("Run stopped early")
                 else:
-                    resource_names = (*autouse_names, *unresolved_params)
-                    resources = (
-                        resolver.collect_dependency_closure(
-                            resource_names,
-                            consumer_spec=self.spec,
-                        )
-                        if resource_names
-                        else ()
-                    )
                     with patch_manager.bind_context(
                         PatchContext(
                             execution_id=execution_id,
                             module_path=self.spec.locator.module_path.resolve(),
-                            resources=frozenset(resources),
+                            resources=frozenset(
+                                resource_graph.order_by_key[resource_key]
+                            ),
                         )
                     ):
                         await self.call_test_fn(
@@ -157,7 +149,7 @@ class LoadedTestDef:
             except XFailTest as raised:
                 imperative_outcome = TestStatus.XFAILED
                 error = raised
-            except Exception as raised:  # noqa: BLE001
+            except Exception as raised:
                 error = raised
 
         return (

@@ -24,6 +24,7 @@ from rue.models import Spec
 
 
 if TYPE_CHECKING:
+    from rue.resources.models import ResourceSpec
     from rue.resources.resolver import ResourceResolver
     from rue.testing.models.loaded import LoadedTestDef
     from rue.testing.tracing import TestTracer
@@ -66,6 +67,7 @@ class ResourceTransactionContext:
     consumer_spec: Spec
     provider_spec: Spec
     resolver: ResourceResolver
+    direct_dependencies: tuple[ResourceSpec, ...] = ()
     _tokens: list[Token[ResourceTransactionContext]] = field(
         default_factory=list,
         init=False,

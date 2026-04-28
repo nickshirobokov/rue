@@ -191,7 +191,7 @@ class MetricsRenderer:
         self._groups = self._build_groups(metric_results)
         self._group_lookup = {g.key: g for g in self._groups}
         _ = executions
-        self._parents, self._children = self._build_graph()
+        self._parents, self._children = self._build_relationships()
 
         renderables: list[RenderableType] = [
             Rule(Text("METRICS", style="bold cyan"), characters="=")
@@ -247,7 +247,7 @@ class MetricsRenderer:
                 group.display_name = name
         return groups
 
-    def _build_graph(
+    def _build_relationships(
         self,
     ) -> tuple[
         dict[ResourceSpec, set[ResourceSpec]],

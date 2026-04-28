@@ -9,11 +9,9 @@ from rue.resources.registry import ResourceRegistry
 def register_builtin_resources(registry: ResourceRegistry) -> None:
     """Register framework-provided resources into the given registry."""
 
-    @registry.resource(scope=Scope.TEST, sync=False)
+    @registry.resource(scope=Scope.TEST, sync=False, builtin=True)
     def monkeypatch() -> MonkeyPatch:
         return MonkeyPatch(
             resolver=CURRENT_RESOURCE_TRANSACTION.get().resolver,
             scope=Scope.TEST,
         )
-
-    registry.mark_builtin("monkeypatch")

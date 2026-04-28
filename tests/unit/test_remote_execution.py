@@ -110,6 +110,23 @@ def make_runner(reporter) -> Runner:
     )
 
 
+def _resource_graph(*tests: SingleTest):
+    return registry.compile_graph(
+        {
+            test.node_key: (
+                test.definition.spec,
+                tuple(
+                    param
+                    for param in test.definition.spec.params
+                    if param not in test.params
+                ),
+            )
+            for test in tests
+        },
+        autouse_keys=frozenset(test.node_key for test in tests),
+    )
+
+
 @contextmanager
 def bind_pool(pool: FakePool):
     token = CURRENT_PROCESS_POOL.set(pool)  # type: ignore[arg-type]
@@ -360,6 +377,7 @@ class TestSingleTestSubprocess:
         )
 
         with bind_pool(FakePool(expected)) as pool:
+            _resource_graph(remote)
             execution = await remote.execute(ResourceResolver(registry))
 
         assert execution.definition is definition
@@ -377,8 +395,9 @@ class TestSingleTestSubprocess:
         assert payload.context.config.otel is False
         assert payload.context.run_id == UUID(int=1)
         assert payload.execution_id == execution.execution_id
+        assert payload.resource_key == remote.node_key
         assert [
-            s.locator.function_name for s in payload.snapshot.resolution_order
+            s.locator.function_name for s in payload.snapshot.resource_order
         ] == [
             "shared_value"
         ]
@@ -430,6 +449,7 @@ class TestSingleTestSubprocess:
             telemetry_artifacts=(),
             sync_update=b"",
         ))) as pool:
+            _resource_graph(remote)
             execution = await remote.execute(ResourceResolver(registry))
 
         assert len(pool.submitted) == 1
@@ -460,6 +480,7 @@ class TestSingleTestSubprocess:
                 )
             )
         ) as pool:
+            _resource_graph(remote)
             execution = await remote.execute(ResourceResolver(registry))
 
         assert execution.status == TestStatus.SKIPPED
@@ -489,6 +510,7 @@ class TestSingleTestSubprocess:
                 )
             )
         ) as pool:
+            _resource_graph(remote)
             execution = await remote.execute(ResourceResolver(registry))
 
         assert execution.status == TestStatus.SKIPPED
@@ -521,6 +543,7 @@ class TestSingleTestSubprocess:
                 )
             )
         ):
+            _resource_graph(remote)
             execution = await remote.execute(ResourceResolver(registry))
 
         on_complete.assert_called_once_with(execution)
@@ -549,9 +572,13 @@ class TestSingleTestSubprocess:
         ]
 
         pool = BlockingPool(expected, delay=0.05)
+        _resource_graph(*tests)
         with bind_pool(pool):
             await asyncio.gather(
-                *[test.execute(ResourceResolver(registry)) for test in tests]
+                *[
+                    test.execute(ResourceResolver(registry))
+                    for test in tests
+                ]
             )
 
         assert pool.max_active == 1

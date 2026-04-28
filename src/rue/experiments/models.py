@@ -37,20 +37,22 @@ class ExperimentSpec(Spec):
         value_index: int,
         *,
         resolver: ResourceResolver,
+        resource_key: str,
     ) -> None:
         """Apply this experiment hook to the current run process."""
         kwargs: dict[str, Any] = {"value": self.values[value_index]}
-        for dependency in self.dependencies:
-            if dependency == "monkeypatch":
-                kwargs[dependency] = MonkeyPatch(
-                    resolver=resolver,
-                    scope=Scope.RUN,
-                )
-            else:
-                kwargs[dependency] = await resolver.resolve(
-                    dependency,
-                    consumer_spec=self,
-                )
+        kwargs.update(
+            await resolver.resolve_consumer(
+                resource_key,
+                {},
+                consumer_spec=self,
+            )
+        )
+        if "monkeypatch" in self.dependencies:
+            kwargs["monkeypatch"] = MonkeyPatch(
+                resolver=resolver,
+                scope=Scope.RUN,
+            )
 
         with resolver.open_transaction(
             consumer_spec=self,
@@ -104,10 +106,24 @@ class ExperimentVariant:
             experiment.locator.function_name: experiment
             for experiment in experiments
         }
+        resolver.registry.compile_graph(
+            {
+                f"experiment:{name}": (
+                    definitions[name],
+                    tuple(
+                        dependency
+                        for dependency in definitions[name].dependencies
+                        if dependency != "monkeypatch"
+                    ),
+                )
+                for name, _value_index, _value_id in self.values
+            }
+        )
         for name, value_index, _value_id in self.values:
             await definitions[name].apply(
                 value_index,
                 resolver=resolver,
+                resource_key=f"experiment:{name}",
             )
 
     @property

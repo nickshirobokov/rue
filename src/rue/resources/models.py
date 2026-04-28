@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum, auto
 from typing import Any
 
-from rue.models import Locator, Spec
+from rue.models import Spec
 
 
-class Scope(Enum):
+class Scope(StrEnum):
     """Resource lifecycle scope."""
 
-    TEST = "test"  # Fresh instance per test
-    MODULE = "module"  # Shared across tests in same file
-    RUN = "run"  # Shared across entire test run
+    TEST = auto()  # Fresh instance per test
+    MODULE = auto()  # Shared across tests in same file
+    RUN = auto()  # Shared across entire test run
 
 
 @dataclass(slots=True, unsafe_hash=True)
@@ -30,11 +30,11 @@ class ResourceSpec(Spec):
     @property
     def snapshot_key(self) -> str:
         """Return the stable identity used by resource transfer snapshots."""
-        module_path = self.locator.module_path
+        module_path = self.module_path
         return "|".join(
             (
                 self.scope.value,
-                self.locator.function_name,
+                self.name,
                 "" if module_path is None else str(module_path),
                 "" if module_path is None else str(module_path.parent),
             )
@@ -56,10 +56,42 @@ class LoadedResourceDef:
 
 
 @dataclass(frozen=True, slots=True)
-class SelectedResource:
-    """Selected resource provider for one resolution request."""
+class ResourceGraph:
+    """Precompiled concrete resource graph for known injection consumers."""
 
-    definition: LoadedResourceDef
+    roots_by_key: dict[str, tuple[ResourceSpec, ...]] = field(
+        default_factory=dict
+    )
+    autouse_by_key: dict[str, tuple[ResourceSpec, ...]] = field(
+        default_factory=dict
+    )
+    injections_by_key: dict[str, dict[str, ResourceSpec]] = field(
+        default_factory=dict
+    )
+    dependencies_by_spec: dict[ResourceSpec, tuple[ResourceSpec, ...]] = field(
+        default_factory=dict
+    )
+    order_by_key: dict[str, tuple[ResourceSpec, ...]] = field(
+        default_factory=dict
+    )
+
+    def slice(self, key: str) -> ResourceGraph:
+        """Return the subgraph needed to execute one consumer key."""
+        order = self.order_by_key[key]
+        specs = set(order)
+        return ResourceGraph(
+            roots_by_key={key: self.roots_by_key.get(key, ())},
+            autouse_by_key={key: self.autouse_by_key.get(key, ())},
+            injections_by_key={
+                key: dict(self.injections_by_key.get(key, {}))
+            },
+            dependencies_by_spec={
+                identity: dependencies
+                for identity, dependencies in self.dependencies_by_spec.items()
+                if identity in specs
+            },
+            order_by_key={key: order},
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,8 +99,8 @@ class ResolverSyncSnapshot:
     """CRDT-backed transfer payload for reconstructing resources in a worker."""
 
     res_specs: tuple[ResourceSpec, ...]
-    request_locator: Locator
+    resource_graph: ResourceGraph
     graph_update: bytes
     base_state: bytes
-    resolution_order: tuple[ResourceSpec, ...] = field(default_factory=tuple)
+    resource_order: tuple[ResourceSpec, ...] = field(default_factory=tuple)
     sync_actor_id: int = 0

@@ -4,21 +4,16 @@ import asyncio
 import contextlib
 import inspect
 import threading
-from collections import deque
 from collections.abc import AsyncGenerator, Generator, Iterator, Sequence
-from contextvars import ContextVar
-from dataclasses import replace
-from pathlib import Path
 from typing import Any, cast
 
-from rue.context.runtime import (
-    ResourceTransactionContext,
-)
+from rue.context.runtime import ResourceTransactionContext
 from rue.models import Spec
 from rue.patching.runtime import PatchHandle
 from rue.resources.models import (
     LoadedResourceDef,
     ResolverSyncSnapshot,
+    ResourceGraph,
     ResourceSpec,
     Scope,
 )
@@ -31,11 +26,15 @@ from rue.resources.snapshot import (
 )
 
 
-_RESOLUTION_PATH: ContextVar[tuple[ResourceSpec, ...]] = ContextVar(
-    "resource_resolution_path",
-    default=(),
-)
 _MAIN_SYNC_ACTOR_ID = 0
+
+type ResourceTeardown = tuple[
+    ResourceSpec,
+    LoadedResourceDef,
+    Generator[Any, None, None] | AsyncGenerator[Any, None],
+    Spec,
+    tuple[ResourceSpec, ...],
+]
 
 
 class ResourceResolver:
@@ -49,21 +48,11 @@ class ResourceResolver:
         shadow_mode: bool = False,
         sync_actor_id: int = _MAIN_SYNC_ACTOR_ID,
     ) -> None:
-        self._registry = registry
+        self.registry = registry
         self._cache: dict[ResourceSpec, Any] = {}
-        self._teardowns: list[
-            tuple[
-                ResourceSpec,
-                LoadedResourceDef,
-                Generator[Any, None, None] | AsyncGenerator[Any, None],
-                Spec,
-            ]
-        ] = []
+        self._teardowns: list[ResourceTeardown] = []
         self._parent = parent
         self._pending: dict[ResourceSpec, asyncio.Future[Any]] = {}
-        self._shared_dependency_graph: dict[
-            ResourceSpec, list[ResourceSpec]
-        ] = parent._shared_dependency_graph if parent is not None else {}
         self._shadow_mode = shadow_mode
         self._sync_graph = SyncGraph(actor_id=sync_actor_id)
         self._sync_lock = threading.RLock()
@@ -74,47 +63,20 @@ class ResourceResolver:
         """Return a shallow copy of the identity-to-value cache."""
         return dict(self._cache)
 
-    def direct_dependencies_for(
-        self, identity: ResourceSpec
-    ) -> list[ResourceSpec]:
-        """Return direct resource dependencies captured during resolution."""
-        return list(self._shared_dependency_graph.get(identity, []))
-
-    def autouse_names(self, request_path: Path | None) -> tuple[str, ...]:
-        """Return autouse resource names selected for a request path."""
-        return tuple(
-            definition.spec.locator.function_name
-            for definition in self._registry.autouse(request_path)
-        )
-
-    async def resolve_autouse(
-        self,
-        consumer_spec: Spec,
-        *,
-        apply_injection_hook: bool = True,
-    ) -> tuple[str, ...]:
-        """Resolve autouse resources selected for a request path."""
-        names = self.autouse_names(consumer_spec.locator.module_path)
-        for name in names:
-            await self.resolve(
-                name,
-                consumer_spec=consumer_spec,
-                apply_injection_hook=apply_injection_hook,
-            )
-        return names
-
     @contextlib.contextmanager
     def open_transaction(
         self,
         *,
         consumer_spec: Spec,
         provider_spec: Spec,
+        direct_dependencies: tuple[ResourceSpec, ...] = (),
     ) -> Iterator[None]:
         """Bind consumer/provider attribution for resolver-owned work."""
         with ResourceTransactionContext(
             consumer_spec=consumer_spec,
             provider_spec=provider_spec,
             resolver=self,
+            direct_dependencies=direct_dependencies,
         ):
             yield
 
@@ -128,184 +90,94 @@ class ResourceResolver:
         )
         resolver._patch_handles.append(handle)
 
-    def collect_dependency_closure(
+    async def resolve_consumer(
         self,
-        names: tuple[str, ...],
-        *,
-        consumer_spec: Spec,
-    ) -> tuple[ResourceSpec, ...]:
-        """Return the selected transitive resource closure for a consumer."""
-        request_path = consumer_spec.locator.module_path
-        connected: dict[str, ResourceSpec] = {}
-
-        def sort_key(spec: ResourceSpec) -> tuple[int, str, str, str]:
-            return (
-                {"run": 0, "module": 1, "test": 2}.get(
-                    spec.scope.value, 99
-                ),
-                spec.locator.function_name,
-                ""
-                if spec.locator.module_path is None
-                else str(spec.locator.module_path),
-                ""
-                if spec.locator.module_path is None
-                else str(spec.locator.module_path.parent),
-            )
-
-        def visit(name: str, path: tuple[ResourceSpec, ...]) -> None:
-            definition = self._registry.select(name, request_path).definition
-            identity = definition.spec
-
-            if identity in path:
-                cycle = " -> ".join(
-                    (
-                        f"{key.scope.value}:{key.locator.function_name}"
-                        if key.locator.module_path is None
-                        else (
-                            f"{key.scope.value}:{key.locator.function_name}"
-                            f"@{key.locator.module_path.parent}"
-                        )
-                    )
-                    for key in (*path, identity)
-                )
-                raise RuntimeError(
-                    f"Circular resource dependency detected: {cycle}"
-                )
-
-            if identity.snapshot_key in connected:
-                return
-
-            connected[identity.snapshot_key] = identity
-            for dependency in identity.dependencies:
-                visit(dependency, (*path, identity))
-
-        for name in names:
-            visit(name, ())
-
-        return tuple(sorted(connected.values(), key=sort_key))
-
-    async def resolve(
-        self,
-        name: str,
-        *,
-        consumer_spec: Spec,
-        apply_injection_hook: bool = True,
-    ) -> Any:
-        """Resolve one resource for the given consumer spec."""
-        return await self._resolve(
-            name,
-            request_spec=consumer_spec,
-            consumer_spec=consumer_spec,
-            apply_injection_hook=apply_injection_hook,
-        )
-
-    async def _resolve(
-        self,
-        name: str,
-        *,
-        request_spec: Spec,
-        consumer_spec: Spec,
-        apply_injection_hook: bool = True,
-    ) -> Any:
-        request_path = request_spec.locator.module_path
-        definition = self._registry.select(name, request_path).definition
-        identity = definition.spec
-        scope = identity.scope
-
-        path = _RESOLUTION_PATH.get()
-        if identity in path:
-            cycle = " -> ".join(
-                (
-                    f"{key.scope.value}:{key.locator.function_name}"
-                    if key.locator.module_path is None
-                    else (
-                        f"{key.scope.value}:{key.locator.function_name}"
-                        f"@{key.locator.module_path.parent}"
-                    )
-                )
-                for key in (*path, identity)
-            )
-            raise RuntimeError(
-                f"Circular resource dependency detected: {cycle}"
-            )
-
-        token = _RESOLUTION_PATH.set((*path, identity))
-        try:
-            owner = self._owner_resolver_for_scope(scope)
-            missing = object()
-            if isinstance(consumer_spec, ResourceSpec):
-                direct = self._shared_dependency_graph.get(consumer_spec)
-                if direct is None:
-                    direct = self._shared_dependency_graph[consumer_spec] = []
-                if identity not in direct:
-                    direct.append(identity)
-            value = owner._cache.get(identity, missing)
-            if value is missing:
-                pending = owner._pending.get(identity)
-                if pending is None:
-                    pending = asyncio.get_running_loop().create_future()
-                    owner._pending[identity] = pending
-                    try:
-                        value = await owner._resolve_uncached(
-                            name=name,
-                            definition=definition,
-                            cache_key=identity,
-                            request_spec=request_spec,
-                            consumer_spec=consumer_spec,
-                        )
-                    except Exception as error:
-                        pending.set_exception(error)
-                        pending.exception()
-                        raise
-                    else:
-                        pending.set_result(value)
-                    finally:
-                        owner._pending.pop(identity, None)
-                else:
-                    try:
-                        value = await pending
-                    finally:
-                        if pending.cancelled():
-                            owner._pending.pop(identity, None)
-
-            if owner is not self:
-                self._cache[identity] = value
-
-            if not apply_injection_hook:
-                return value
-
-            with owner.open_transaction(
-                consumer_spec=consumer_spec,
-                provider_spec=identity,
-            ):
-                return await self._apply_hook(
-                    definition.on_injection, name, value
-                )
-        finally:
-            _RESOLUTION_PATH.reset(token)
-
-    async def partially_resolve(
-        self,
-        unresolved_params: tuple[str, ...],
-        resolved_params: dict[str, Any],
+        key: str,
+        params: dict[str, Any],
         *,
         consumer_spec: Spec,
         apply_injection_hook: bool = True,
     ) -> dict[str, Any]:
-        """Resolve missing parameters into a kwargs dictionary."""
-        kwargs = dict(resolved_params)
-        for param in unresolved_params:
-            kwargs[param] = await self.resolve(
-                param,
+        """Resolve all resources needed by one compiled consumer key."""
+        graph = self.registry.graph
+        kwargs = dict(params)
+        for identity in graph.autouse_by_key[key]:
+            await self.resolve_resource(
+                identity,
+                consumer_spec=consumer_spec,
+                apply_injection_hook=apply_injection_hook,
+            )
+        for name, identity in graph.injections_by_key[key].items():
+            kwargs[name] = await self.resolve_resource(
+                identity,
                 consumer_spec=consumer_spec,
                 apply_injection_hook=apply_injection_hook,
             )
         return kwargs
 
+    async def resolve_resource(
+        self,
+        identity: ResourceSpec,
+        *,
+        consumer_spec: Spec,
+        apply_injection_hook: bool = True,
+    ) -> Any:
+        """Resolve one concrete resource identity from a compiled graph."""
+        graph = self.registry.graph
+        definition = self.registry.definition(identity)
+        scope = identity.scope
+        direct_dependencies = graph.dependencies_by_spec[identity]
+
+        owner = self._owner_resolver_for_scope(scope)
+        missing = object()
+        value = owner._cache.get(identity, missing)
+        if value is missing:
+            pending = owner._pending.get(identity)
+            if pending is None:
+                pending = asyncio.get_running_loop().create_future()
+                owner._pending[identity] = pending
+                try:
+                    value = await owner._resolve_uncached(
+                        graph=graph,
+                        identity=identity,
+                        consumer_spec=consumer_spec,
+                    )
+                except Exception as error:
+                    pending.set_exception(error)
+                    pending.exception()
+                    raise
+                else:
+                    pending.set_result(value)
+                finally:
+                    owner._pending.pop(identity, None)
+            else:
+                try:
+                    value = await pending
+                finally:
+                    if pending.cancelled():
+                        owner._pending.pop(identity, None)
+
+        if owner is not self:
+            self._cache[identity] = value
+
+        if not apply_injection_hook:
+            return value
+
+        with owner.open_transaction(
+            consumer_spec=consumer_spec,
+            provider_spec=identity,
+            direct_dependencies=direct_dependencies,
+        ):
+            return await self._apply_hook(
+                definition.on_injection,
+                identity.name,
+                value,
+            )
+
     def fork_for_test(self) -> "ResourceResolver":
         """Create a child resolver for isolated TEST-scope execution."""
         child = ResourceResolver(
-            self._registry,
+            self.registry,
             parent=self,
         )
         child._cache = {
@@ -331,21 +203,21 @@ class ResourceResolver:
 
     async def _run_teardowns(
         self,
-        teardowns: Sequence[
-            tuple[
-                ResourceSpec,
-                LoadedResourceDef,
-                Generator[Any, None, None] | AsyncGenerator[Any, None],
-                Spec,
-            ]
-        ],
+        teardowns: Sequence[ResourceTeardown],
     ) -> list[Exception]:
         teardown_errors: list[Exception] = []
 
-        for key, definition, generator, consumer_spec in reversed(teardowns):
+        for (
+            key,
+            definition,
+            generator,
+            consumer_spec,
+            direct_dependencies,
+        ) in reversed(teardowns):
             with self.open_transaction(
                 consumer_spec=consumer_spec,
                 provider_spec=key,
+                direct_dependencies=direct_dependencies,
             ):
                 try:
                     if definition.is_async_generator:
@@ -360,7 +232,7 @@ class ResourceResolver:
                     teardown_errors.append(
                         RuntimeError(
                             "Generator teardown failed for resource "
-                            f"'{key.locator.function_name}': {e}"
+                            f"'{key.name}': {e}"
                         )
                     )
 
@@ -368,7 +240,7 @@ class ResourceResolver:
                     try:
                         await self._apply_hook(
                             definition.on_teardown,
-                            key.locator.function_name,
+                            key.name,
                             self._cache[key],
                         )
                     except RuntimeError as e:
@@ -397,22 +269,8 @@ class ResourceResolver:
             return
 
         owner = self._owner_resolver_for_scope(scope)
-        matching: list[
-            tuple[
-                ResourceSpec,
-                LoadedResourceDef,
-                Generator[Any, None, None] | AsyncGenerator[Any, None],
-                Spec,
-            ]
-        ] = []
-        to_keep: list[
-            tuple[
-                ResourceSpec,
-                LoadedResourceDef,
-                Generator[Any, None, None] | AsyncGenerator[Any, None],
-                Spec,
-            ]
-        ] = []
+        matching: list[ResourceTeardown] = []
+        to_keep: list[ResourceTeardown] = []
 
         for teardown in owner._teardowns:
             if teardown[0].scope == scope:
@@ -446,16 +304,14 @@ class ResourceResolver:
 
     def export_sync_snapshot(
         self,
-        resources: Sequence[str] | Sequence[ResourceSpec],
+        key: str,
         *,
-        consumer_spec: Spec,
         sync_actor_id: int,
     ) -> ResolverSyncSnapshot:
         """Build a CRDT transfer snapshot for the given resource closure."""
-        identities = self._snapshot_identities(resources)
-        ordered_identities = self._topological_sort_snapshot_identities(
-            identities
-        )
+        graph = self.registry.graph
+        resource_order = graph.order_by_key[key]
+        identities = self._sync_identities(resource_order)
         self.flush_live_changes(identities)
 
         root_keys = [identity.snapshot_key for identity in identities]
@@ -464,10 +320,10 @@ class ResourceResolver:
         export_graph.sync_payload(payload)
         return ResolverSyncSnapshot(
             res_specs=tuple(identities),
-            request_locator=consumer_spec.locator,
+            resource_graph=graph.slice(key),
             graph_update=export_graph.doc.get_update(None),
             base_state=export_graph.doc.get_state(),
-            resolution_order=tuple(ordered_identities),
+            resource_order=resource_order,
             sync_actor_id=sync_actor_id,
         )
 
@@ -498,20 +354,17 @@ class ResourceResolver:
         consumer_spec: Spec,
     ) -> None:
         """Hydrate this resolver from a serialized sync snapshot."""
+        self.registry.graph = snapshot.resource_graph
         self._sync_graph = SyncGraph(actor_id=snapshot.sync_actor_id)
 
-        for identity in snapshot.resolution_order:
+        for identity in snapshot.resource_order:
+            if not identity.sync:
+                continue
             if identity in self._cache:
                 continue
-            definition = self._registry.select(
-                identity.locator.function_name,
-                snapshot.request_locator.module_path,
-            ).definition
             await self._resolve_uncached(
-                name=identity.locator.function_name,
-                definition=definition,
-                cache_key=identity,
-                request_spec=consumer_spec,
+                graph=snapshot.resource_graph,
+                identity=identity,
                 consumer_spec=consumer_spec,
             )
         self._sync_graph = SyncGraph.from_update(
@@ -526,10 +379,10 @@ class ResourceResolver:
 
     def flush_live_changes(
         self,
-        resources: Sequence[str] | Sequence[ResourceSpec],
+        resources: Sequence[ResourceSpec],
     ) -> None:
         """Push current live Python state into the canonical CRDT graph."""
-        identities = self._snapshot_identities(resources)
+        identities = self._sync_identities(resources)
         if not identities:
             return
         self._sync_graph.sync_live_roots(self._live_root_map(identities))
@@ -537,7 +390,7 @@ class ResourceResolver:
     def sync_update_since(
         self,
         base_state: bytes,
-        resources: Sequence[str] | Sequence[ResourceSpec],
+        resources: Sequence[ResourceSpec],
     ) -> bytes:
         """Return the CRDT update since ``base_state``."""
         self.flush_live_changes(resources)
@@ -647,6 +500,12 @@ class ResourceResolver:
             if identity in self._cache
         }
 
+    @staticmethod
+    def _sync_identities(
+        resources: Sequence[ResourceSpec],
+    ) -> list[ResourceSpec]:
+        return [identity for identity in resources if identity.sync]
+
     def _refresh_sync_counter(self) -> None:
         prefix = f"{self._sync_graph.actor_id}:"
         counters = [
@@ -662,67 +521,28 @@ class ResourceResolver:
             default=self._sync_graph.next_local_id - 1,
         ) + 1
 
-    def _snapshot_identities(
-        self,
-        resources: Sequence[str] | Sequence[ResourceSpec],
-    ) -> list[ResourceSpec]:
-        resource_items = list(resources)
-        if not resource_items:
-            return []
-        if all(isinstance(name, str) for name in resource_items):
-            names = cast("list[str]", resource_items)
-            closure = self._collect_snapshot_closure(
-                names, self._cache, self._shared_dependency_graph
-            )
-            return [
-                replace(
-                    identity,
-                    dependencies=tuple(
-                        d.locator.function_name for d in dependencies
-                    ),
-                )
-                for identity, dependencies in closure.items()
-                if identity.sync
-            ]
-        if all(isinstance(spec, ResourceSpec) for spec in resource_items):
-            specs = cast("list[ResourceSpec]", resource_items)
-            return [
-                replace(
-                    identity,
-                    dependencies=tuple(
-                        dependency.locator.function_name
-                        for dependency in self._shared_dependency_graph.get(
-                            identity,
-                            (),
-                        )
-                    ),
-                )
-                for identity in specs
-                if identity.sync
-            ]
-        msg = "resources must be list[str] or list[ResourceSpec]"
-        raise TypeError(msg)
-
     async def _resolve_uncached(
         self,
         *,
-        name: str,
-        definition: LoadedResourceDef,
-        cache_key: ResourceSpec,
-        request_spec: Spec,
+        graph: ResourceGraph,
+        identity: ResourceSpec,
         consumer_spec: Spec,
     ) -> Any:
+        definition = self.registry.definition(identity)
+        direct_dependencies = graph.dependencies_by_spec[identity]
         with self.open_transaction(
             consumer_spec=consumer_spec,
-            provider_spec=cache_key,
+            provider_spec=identity,
+            direct_dependencies=direct_dependencies,
         ):
             kwargs = {
-                dependency: await self._resolve(
-                    dependency,
-                    request_spec=request_spec,
-                    consumer_spec=cache_key,
+                dependency.name: (
+                    await self.resolve_resource(
+                        dependency,
+                        consumer_spec=identity,
+                    )
                 )
-                for dependency in cache_key.dependencies
+                for dependency in direct_dependencies
             }
 
             match definition:
@@ -734,10 +554,11 @@ class ResourceResolver:
                     if not self._shadow_mode:
                         self._teardowns.append(
                             (
-                                cache_key,
+                                identity,
                                 definition,
                                 async_generator,
                                 consumer_spec,
+                                direct_dependencies,
                             )
                         )
                 case LoadedResourceDef(is_generator=True):
@@ -747,16 +568,26 @@ class ResourceResolver:
                     value = next(generator)
                     if not self._shadow_mode:
                         self._teardowns.append(
-                            (cache_key, definition, generator, consumer_spec)
+                            (
+                                identity,
+                                definition,
+                                generator,
+                                consumer_spec,
+                                direct_dependencies,
+                            )
                         )
                 case LoadedResourceDef(is_async=True):
                     value = await definition.fn(**kwargs)
                 case _:
                     value = definition.fn(**kwargs)
 
-            value = await self._apply_hook(definition.on_resolve, name, value)
+            value = await self._apply_hook(
+                definition.on_resolve,
+                identity.name,
+                value,
+            )
 
-        self._cache[cache_key] = value
+        self._cache[identity] = value
         return value
 
     async def _apply_hook(
@@ -778,81 +609,3 @@ class ResourceResolver:
                 msg
             ) from e
         return value
-
-    @staticmethod
-    def _collect_snapshot_closure(
-        resource_names: list[str],
-        cache: dict[ResourceSpec, Any],
-        dep_graph: dict[ResourceSpec, list[ResourceSpec]],
-    ) -> dict[ResourceSpec, list[ResourceSpec]]:
-        """Expand names into the dependency closure for a transfer snapshot."""
-        name_to_identity = {
-            identity.locator.function_name: identity for identity in cache
-        }
-        for name in resource_names:
-            if name not in name_to_identity:
-                msg = f"Resource {name!r} is not present in the resolver cache"
-                raise ValueError(msg)
-        closure: dict[ResourceSpec, list[ResourceSpec]] = {}
-        visited: set[ResourceSpec] = set()
-        queue: deque[ResourceSpec] = deque(
-            name_to_identity[name] for name in resource_names
-        )
-
-        while queue:
-            identity = queue.popleft()
-            if identity in visited:
-                continue
-            visited.add(identity)
-
-            dependencies = list(dep_graph.get(identity, ()))
-            closure[identity] = dependencies
-            queue.extend(
-                dependency
-                for dependency in dependencies
-                if dependency not in visited
-            )
-
-        return closure
-
-    @staticmethod
-    def _topological_sort_snapshot_identities(
-        identities: list[ResourceSpec],
-    ) -> list[ResourceSpec]:
-        """Topologically sort identities for worker-side snapshot replay."""
-        identity_map = {
-            identity.locator.function_name: identity
-            for identity in identities
-        }
-        if not identity_map:
-            return []
-
-        in_degree = dict.fromkeys(identity_map, 0)
-        dependents: dict[str, list[str]] = {name: [] for name in identity_map}
-
-        for name, identity in identity_map.items():
-            for dependency in identity.dependencies:
-                if dependency in identity_map:
-                    in_degree[name] += 1
-                    dependents[dependency].append(name)
-
-        queue: deque[str] = deque(
-            name for name, degree in in_degree.items() if degree == 0
-        )
-        order: list[ResourceSpec] = []
-
-        while queue:
-            name = queue.popleft()
-            order.append(identity_map[name])
-            for dependent in dependents[name]:
-                in_degree[dependent] -= 1
-                if in_degree[dependent] == 0:
-                    queue.append(dependent)
-
-        if len(order) != len(identity_map):
-            resolved = {identity.locator.function_name for identity in order}
-            unresolved = set(identity_map) - resolved
-            msg = f"Circular dependency in snapshot resources: {unresolved}"
-            raise RuntimeError(msg)
-
-        return order

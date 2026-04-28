@@ -62,7 +62,10 @@ class SingleTest(ExecutableTest):
             run_id=context.run_id,
         )
 
-    async def _execute(self, resolver: ResourceResolver) -> ExecutedTest:
+    async def _execute(
+        self,
+        resolver: ResourceResolver,
+    ) -> ExecutedTest:
         exec_id = uuid4()
         match self:
             case SingleTest(is_stopped=is_stopped) if is_stopped():
@@ -119,6 +122,7 @@ class SingleTest(ExecutableTest):
                     await self.definition.run_loaded_test(
                         params=self.params,
                         resolver=resolver,
+                        resource_key=self.node_key,
                         run_sync_in_thread=self.backend
                         is not ExecutionBackend.MAIN,
                         is_stopped=self.is_stopped,
@@ -171,24 +175,14 @@ class SingleTest(ExecutableTest):
                 self.semaphore if self.semaphore else contextlib.nullcontext()
             )
             async with semaphore:
-                unresolved_params = tuple(
-                    param
-                    for param in self.definition.spec.params
-                    if param not in self.params
-                )
-                autouse_names = await resolver.resolve_autouse(
-                    self.definition.spec,
-                    apply_injection_hook=False,
-                )
-                await resolver.partially_resolve(
-                    unresolved_params,
+                await resolver.resolve_consumer(
+                    self.node_key,
                     self.params,
                     consumer_spec=self.definition.spec,
                     apply_injection_hook=False,
                 )
                 snapshot = resolver.export_sync_snapshot(
-                    (*autouse_names, *unresolved_params),
-                    consumer_spec=self.definition.spec,
+                    self.node_key,
                     sync_actor_id=self.sync_actor_id,
                 )
 
@@ -198,6 +192,7 @@ class SingleTest(ExecutableTest):
                     setup_chain=self.definition.setup_chain,
                     params=dict(self.params),
                     snapshot=snapshot,
+                    resource_key=self.node_key,
                     context=context,
                     execution_id=execution_id,
                 )
