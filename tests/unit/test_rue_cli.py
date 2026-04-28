@@ -17,6 +17,7 @@ from rue.experiments.models import (
 from rue.models import Locator
 from rue.storage.sqlite import SQLiteStore
 from rue.testing import LoadedTestDef
+from rue.testing.discovery import TestDefinitionErrors, TestDefinitionIssue
 from rue.testing.models.run import Run, RunEnvironment, RunResult
 from rue.testing.models.spec import TestSpecCollection
 from tests.unit.factories import make_definition
@@ -35,6 +36,18 @@ def make_item(
     return make_definition(
         name, fn=dummy, module_path="module.py", tags=tags, suffix=suffix
     )
+
+
+def make_definition_errors() -> TestDefinitionErrors:
+    return TestDefinitionErrors(
+        "test definition errors",
+        (TestDefinitionIssue(make_item("test_bad", set()).spec, "broken"),),
+    )
+
+
+def raise_definition_errors(*args, **kwargs) -> None:
+    del args, kwargs
+    raise make_definition_errors()
 
 
 def make_environment(**updates) -> RunEnvironment:
@@ -175,6 +188,35 @@ def test_run_tests_returns_2_when_run_id_already_exists(
     )
     assert planned is True
     assert result.exit_code == 2
+
+
+@pytest.mark.parametrize(
+    "command",
+    [["tests"], ["tests", "run"]],
+    ids=["alias", "run"],
+)
+def test_run_tests_returns_2_when_definition_errors(
+    command: list[str], monkeypatch
+):
+    monkeypatch.setattr(
+        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
+    )
+    monkeypatch.setattr(
+        "rue.cli.tests.run.TestLoader.load_from_collection",
+        raise_definition_errors,
+    )
+    monkeypatch.setattr(
+        "rue.cli.tests.run.Runner",
+        lambda **kwargs: pytest.fail("Runner should not be constructed"),
+    )
+
+    result = runner.invoke(app, [*command, "--no-db"])
+
+    assert result.exit_code == 2
+    assert "Test definition errors" in result.stdout
+    assert "test_bad" in result.stdout
+    assert "broken" in result.stdout
 
 
 def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
@@ -360,7 +402,9 @@ def test_run_and_status_share_selection_parsing(
         class FakeRunner:
             def __init__(self, **kwargs) -> None:
                 del kwargs
-                captured["verbosity"] = CURRENT_RUN_CONTEXT.get().config.verbosity
+                captured["verbosity"] = (
+                    CURRENT_RUN_CONTEXT.get().config.verbosity
+                )
 
             async def run(self, items, *, resolver):
                 del items, resolver
@@ -499,6 +543,52 @@ def test_experiments_run_no_experiments_does_not_run(monkeypatch):
 
     assert result.exit_code == 0
     assert "No experiments found" in result.stdout
+
+
+def test_experiments_run_returns_2_when_definition_errors(monkeypatch):
+    monkeypatch.setattr(
+        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
+    )
+    monkeypatch.setattr(
+        "rue.cli.experiments.run.TestLoader.load_from_collection",
+        raise_definition_errors,
+    )
+    monkeypatch.setattr(
+        "rue.cli.experiments.run.ExperimentRunner",
+        lambda **kwargs: pytest.fail(
+            "ExperimentRunner should not be constructed"
+        ),
+    )
+
+    result = runner.invoke(app, ["experiments", "run"])
+
+    assert result.exit_code == 2
+    assert "Test definition errors" in result.stdout
+    assert "test_bad" in result.stdout
+    assert "broken" in result.stdout
+
+
+def test_tests_status_returns_2_when_definition_errors(monkeypatch):
+    monkeypatch.setattr(
+        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
+    )
+    monkeypatch.setattr(
+        "rue.cli.tests.status.command.TestsStatusBuilder.build",
+        raise_definition_errors,
+    )
+    monkeypatch.setattr(
+        "rue.cli.tests.status.command.status_renderer.render",
+        lambda report, verbosity: pytest.fail("status should not render"),
+    )
+
+    result = runner.invoke(app, ["tests", "status"])
+
+    assert result.exit_code == 2
+    assert "Test definition errors" in result.stdout
+    assert "test_bad" in result.stdout
+    assert "broken" in result.stdout
 
 
 def test_tests_status_does_not_create_missing_db(tmp_path, monkeypatch):

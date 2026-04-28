@@ -43,7 +43,6 @@ class TestSpec(Spec):
     skip_reason: str | None = None
     xfail_reason: str | None = None
     xfail_strict: bool = False
-    definition_error: str | None = None
     suffix: str | None = None
     case_id: UUID | None = None
     collection_index: int = -1
@@ -97,7 +96,6 @@ class TestSpec(Spec):
             name for name in inspect.signature(fn).parameters if name != "self"
         )
         self.modifiers = tuple(reversed(getattr(fn, "__rue_modifiers__", ())))
-        self.definition_error = getattr(fn, "__rue_definition_error__", None)
 
 
 @dataclass(frozen=True)

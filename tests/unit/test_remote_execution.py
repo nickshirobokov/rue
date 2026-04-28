@@ -195,11 +195,8 @@ class TestBackendDecorator:
         def sample():
             pass
 
-        item = make_definition("sample")
-        item.spec.get_execution_from_fn(sample)
-
         assert (
-            item.spec.definition_error
+            getattr(sample, "__rue_definition_error__", None)
             == "Multiple @rue.test.backend(...) decorators are not supported."
         )
 

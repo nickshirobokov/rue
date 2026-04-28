@@ -2,6 +2,7 @@ from pathlib import Path
 from textwrap import dedent
 from uuid import UUID
 
+import pytest
 from rich.console import Console
 
 from rue.cli.tests.status import (
@@ -14,7 +15,7 @@ from rue.config import Config
 from rue.models import Locator
 from rue.resources import Scope
 from rue.resources.models import ResourceSpec
-from rue.testing.discovery import TestSpecCollector
+from rue.testing.discovery import TestDefinitionErrors, TestSpecCollector
 from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import TestStatus
 from rue.testing.models.modifiers import IterateModifier
@@ -89,11 +90,19 @@ def test_status_builder_matches_execution_tree_shape(tmp_path):
     }
 
     assert nodes["test_status_tree::test_plain"].leaf_count == 1
-    assert nodes["test_status_tree::test_repeat"].backend is ExecutionBackend.MAIN
+    assert (
+        nodes["test_status_tree::test_repeat"].backend
+        is ExecutionBackend.MAIN
+    )
     assert len(nodes["test_status_tree::test_repeat"].children) == 2
     assert nodes["test_status_tree::test_params"].leaf_count == 2
     assert len(nodes["test_status_tree::test_params"].children) == 2
-    assert nodes["test_status_tree::test_params"].children[0].definition.spec.suffix == "one"
+    assert (
+        nodes["test_status_tree::test_params"]
+        .children[0]
+        .definition.spec.suffix
+        == "one"
+    )
     assert nodes["test_status_tree::test_cases"].leaf_count == 2
     assert (
         nodes["test_status_tree::test_cases"].children[0].definition.spec.suffix
@@ -103,18 +112,10 @@ def test_status_builder_matches_execution_tree_shape(tmp_path):
     assert len(nodes["test_status_tree::test_groups"].children[0].children) == 2
 
 
-def test_status_builder_reports_load_definition_and_resolve_issues(tmp_path):
+def test_status_builder_raises_definition_errors(tmp_path):
     write_files(
         tmp_path,
         {
-            "bad/conftest.py": 'raise RuntimeError("bad setup")\n',
-            "bad/test_bad.py": """
-                import rue
-
-                @rue.test
-                def test_bad():
-                    pass
-            """,
             "test_definition.py": """
                 from rue import test
 
@@ -122,6 +123,24 @@ def test_status_builder_reports_load_definition_and_resolve_issues(tmp_path):
                 def test_definition(value):
                     pass
             """,
+        },
+    )
+
+    collection = TestSpecCollector((), (), None).build_spec_collection(
+        (tmp_path,)
+    )
+    builder = TestsStatusBuilder(Config.model_construct(db_enabled=False))
+    with pytest.raises(TestDefinitionErrors) as raised:
+        builder.build(collection, store=None)
+
+    [issue] = raised.value.exceptions
+    assert "requires at least one value set" in issue.message
+
+
+def test_status_builder_reports_resolve_issues(tmp_path):
+    write_files(
+        tmp_path,
+        {
             "test_unknown.py": """
                 import rue
 
@@ -151,14 +170,9 @@ def test_status_builder_reports_load_definition_and_resolve_issues(tmp_path):
         for node in module_nodes
     }
 
-    assert any(issue.phase == "load" for issue in nodes["test_bad::test_bad"].issues)
     assert any(
-        issue.phase == "definition"
-        and "requires at least one value set" in issue.message
-        for issue in nodes["test_definition::test_definition"].issues
-    )
-    assert any(
-        issue.phase == "resolve" and "Unknown resource: missing_resource" in issue.message
+        issue.phase == "resolve"
+        and "Unknown resource: missing_resource" in issue.message
         for issue in nodes["test_unknown::test_unknown"].issues
     )
     assert any(

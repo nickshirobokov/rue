@@ -13,13 +13,17 @@ from rue.testing.models import LoadedTestDef, Run, TestStatus
 
 @dataclass(frozen=True)
 class StatusIssue:
-    phase: Literal["load", "definition", "resolve"]
+    """Static status issue for a collected test node."""
+
+    phase: Literal["resolve"]
     message: str
     node_key: str | None = None
 
 
 @dataclass(frozen=True)
 class StatusNode:
+    """Rendered status tree node."""
+
     definition: LoadedTestDef
     backend: ExecutionBackend | None
     history: tuple[TestStatus | None, ...] = ()
@@ -27,12 +31,14 @@ class StatusNode:
     resources_by_type: dict[str, tuple[ResourceSpec, ...]] = field(
         default_factory=dict
     )
-    children: tuple["StatusNode", ...] = ()
+    children: tuple[StatusNode, ...] = ()
     leaf_count: int = 1
 
 
 @dataclass(frozen=True)
 class TestsStatusReport:
+    """Status command report model."""
+
     run_window: tuple[Run, ...] = ()
     module_nodes: dict[Path, list[StatusNode]] = field(default_factory=dict)
 

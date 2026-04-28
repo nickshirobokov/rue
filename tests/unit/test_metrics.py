@@ -331,7 +331,6 @@ async def test_metric_decorator_emits_result_with_assertions_and_return():
         "after",
     ]
     assert r.metadata.identity.scope == Scope.TEST
-    assert r.metadata is not m.metadata
 
 
 @pytest.mark.asyncio

@@ -61,32 +61,20 @@ class ExecutableTest(ABC):
         resolver: ResourceResolver,
     ) -> ExecutedTest:
         """Execute the test and return result."""
-        if self.definition.spec.definition_error:
+        start = time.perf_counter()
+        try:
+            execution = await self._execute(resolver)
+        except Exception as error:
             execution = ExecutedTest(
                 definition=self.definition,
                 node_key=self.node_key,
                 result=TestResult(
                     status=TestStatus.ERROR,
-                    duration_ms=0,
-                    error=ValueError(self.definition.spec.definition_error),
+                    duration_ms=(time.perf_counter() - start) * 1000,
+                    error=error,
                 ),
                 execution_id=uuid4(),
             )
-        else:
-            start = time.perf_counter()
-            try:
-                execution = await self._execute(resolver)
-            except Exception as error:
-                execution = ExecutedTest(
-                    definition=self.definition,
-                    node_key=self.node_key,
-                    result=TestResult(
-                        status=TestStatus.ERROR,
-                        duration_ms=(time.perf_counter() - start) * 1000,
-                        error=error,
-                    ),
-                    execution_id=uuid4(),
-                )
 
         if self.on_complete is not None:
             await self.on_complete(execution)

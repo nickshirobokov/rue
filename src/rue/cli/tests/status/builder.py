@@ -42,16 +42,13 @@ class TestsStatusBuilder:
         default_resource_registry.reset()
         self._issues_by_key = defaultdict(list)
 
-        items = TestLoader(collection.suite_root).load_from_collection_unsafe(
+        items = TestLoader(collection.suite_root).load_from_collection(
             collection
         )
         context = RunContext(config=self.config)
         with context:
             factory = DefaultTestFactory()
             tests = [factory.build(item, enqueue=False) for item in items]
-
-            for test in tests:
-                self._record_issues(test)
 
             if store is None:
                 run_window: tuple[Run, ...] = ()
@@ -94,24 +91,6 @@ class TestsStatusBuilder:
                 run_window=run_window,
                 module_nodes=dict(module_nodes),
             )
-
-    def _record_issues(self, root: ExecutableTest) -> None:
-        for test in root.walk():
-            if (
-                test.definition.load_error
-                and test.node_key == test.definition.spec.full_name
-            ):
-                self._add_issue(
-                    test.node_key,
-                    "load",
-                    test.definition.load_error,
-                )
-            if test.definition.spec.definition_error:
-                self._add_issue(
-                    test.node_key,
-                    "definition",
-                    test.definition.spec.definition_error,
-                )
 
     def _collect_static_dependencies(
         self,
@@ -156,9 +135,6 @@ class TestsStatusBuilder:
 
         for leaf in leaves:
             connected = connected_by_key[leaf.node_key]
-            if self._has_blocking_issue(leaf.node_key):
-                resources_by_key[leaf.node_key] = {}
-                continue
             if leaf.node_key not in graphs_by_key:
                 resources_by_key[leaf.node_key] = {}
                 continue
@@ -194,16 +170,10 @@ class TestsStatusBuilder:
 
         return resources_by_key
 
-    def _has_blocking_issue(self, node_key: str) -> bool:
-        return any(
-            issue.phase in {"load", "definition"}
-            for issue in self._issues_by_key.get(node_key, [])
-        )
-
     def _add_issue(
         self,
         node_key: str,
-        phase: Literal["load", "definition", "resolve"],
+        phase: Literal["resolve"],
         message: str,
     ) -> None:
         if any(

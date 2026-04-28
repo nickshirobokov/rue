@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from rich.console import Console
 
+from rue.cli.errors import print_definition_errors
 from rue.cli.tests.options import (
     DBPathOpt,
     KeywordOpt,
@@ -17,6 +18,7 @@ from rue.cli.tests.status.builder import TestsStatusBuilder
 from rue.cli.tests.status.render import StatusRenderer
 from rue.config import load_config
 from rue.storage.sqlite import SQLiteStore
+from rue.testing.discovery import TestDefinitionErrors
 
 
 status_renderer = StatusRenderer()
@@ -45,7 +47,11 @@ def status(
     store = None
     if status_config.resolved_db_path.exists():
         store = SQLiteStore(status_config.resolved_db_path)
-    report = builder.build(collection, store=store)
+    try:
+        report = builder.build(collection, store=store)
+    except TestDefinitionErrors as errors:
+        print_definition_errors(errors)
+        raise SystemExit(2) from errors
     Console().print(status_renderer.render(report, status_config.verbosity))
 
 

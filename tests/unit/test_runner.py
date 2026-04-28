@@ -344,22 +344,6 @@ class TestRunner:
         assert len(execution.result.assertion_results) == 1
         assert "first failure" in str(execution.result.error)
 
-    @pytest.mark.asyncio
-    async def test_definition_error_is_materialized_by_executable(
-        self, null_reporter
-    ):
-        item = make_definition(
-            "test_bad_definition",
-            definition_error="broken decorator state",
-        )
-
-        result = await make_runner(reporters=[null_reporter]).run(resolver=ResourceResolver(registry), items=[item])
-
-        execution = result.result.executions[0]
-        assert execution.result.status == TestStatus.ERROR
-        assert str(execution.result.error) == "broken decorator state"
-
-
 class TestRunId:
     @pytest.mark.asyncio
     async def test_run_uses_provided_run_id(self, null_reporter):

@@ -8,7 +8,12 @@ import pytest
 
 from rue.context.runtime import TestContext
 from rue.resources import ResourceResolver, Scope, registry
-from rue.testing.discovery import KeywordMatcher, TestLoader, TestSpecCollector
+from rue.testing.discovery import (
+    KeywordMatcher,
+    TestDefinitionErrors,
+    TestLoader,
+    TestSpecCollector,
+)
 from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import (
     BackendModifier,
@@ -280,9 +285,16 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
     assert planned_specs["test_main_skip"].skip_reason is None
     assert planned_specs["test_main_skip"].modifiers == ()
     assert planned_specs["test_expected_failure"].xfail_reason is None
-    assert planned_specs["test_bad"].definition_error is None
-
-    items = TestLoader(plan.suite_root).load_from_collection(plan)
+    valid_plan = replace(
+        plan,
+        specs=tuple(
+            spec
+            for spec in plan.specs
+            if spec.locator.function_name
+            in {"test_main_skip", "test_expected_failure"}
+        ),
+    )
+    items = TestLoader(valid_plan.suite_root).load_from_collection(valid_plan)
     items_by_name = {item.spec.locator.function_name: item for item in items}
     backend_modifier, params_modifier = items_by_name[
         "test_main_skip"
@@ -297,17 +309,23 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
     )
     assert items_by_name["test_expected_failure"].spec.xfail_reason == "known"
     assert items_by_name["test_expected_failure"].spec.xfail_strict is True
-    assert (
-        items_by_name["test_bad"].spec.definition_error
-        == "iterate.params() requires at least one value set"
+    with pytest.raises(TestDefinitionErrors) as raised:
+        TestLoader(plan.suite_root).load_from_collection(plan)
+    messages = {str(issue) for issue in raised.value.exceptions}
+    assert any(
+        "test_bad" in message
+        and "iterate.params() requires at least one value set" in message
+        for message in messages
     )
-    assert (
-        items_by_name["test_duplicate_backend"].spec.definition_error
-        == "Multiple @rue.test.backend(...) decorators are not supported."
+    assert any(
+        "test_duplicate_backend" in message
+        and "Multiple @rue.test.backend(...) decorators are not supported."
+        in message
+        for message in messages
     )
 
 
-def test_load_from_collection_preserves_setup_failures_when_requested(tmp_path):
+def test_load_from_collection_raises_setup_failures(tmp_path):
     write_files(
         tmp_path,
         {
@@ -323,15 +341,16 @@ def test_load_from_collection_preserves_setup_failures_when_requested(tmp_path):
     )
 
     plan = TestSpecCollector((), (), None).build_spec_collection((tmp_path,))
-    [item] = TestLoader(plan.suite_root).load_from_collection_unsafe(plan)
 
-    assert item.spec.full_name == "test_bad::test_bad"
-    assert item.load_error == "bad setup"
+    with pytest.raises(TestDefinitionErrors) as raised:
+        TestLoader(plan.suite_root).load_from_collection(plan)
+
+    [issue] = raised.value.exceptions
+    assert issue.spec.full_name == "test_bad::test_bad"
+    assert issue.message == "bad setup"
 
 
-def test_load_from_collection_preserves_definition_failures_when_requested(
-    tmp_path,
-):
+def test_load_from_collection_raises_missing_callable(tmp_path):
     write_files(
         tmp_path,
         {
@@ -364,14 +383,48 @@ def test_load_from_collection_preserves_definition_failures_when_requested(
         specs=(original_plan.specs[0], bad_spec),
     )
 
-    items = TestLoader(plan.suite_root).load_from_collection_unsafe(plan)
+    with pytest.raises(TestDefinitionErrors) as raised:
+        TestLoader(plan.suite_root).load_from_collection(plan)
 
-    assert [item.spec.locator.function_name for item in items] == [
-        "test_good",
-        "missing_test",
-    ]
-    assert items[0].load_error is None
-    assert "missing_test" in (items[1].load_error or "")
+    [issue] = raised.value.exceptions
+    assert issue.spec.locator.function_name == "missing_test"
+    assert "missing_test" in issue.message
+
+
+def test_load_from_collection_raises_non_callable_target(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "test_sample.py": """
+                import rue
+
+                not_callable = 1
+
+                @rue.test
+                def test_good():
+                    pass
+            """,
+        },
+    )
+
+    original_plan = TestSpecCollector((), (), None).build_spec_collection(
+        (tmp_path,)
+    )
+    bad_spec = replace(
+        original_plan.specs[0],
+        locator=Locator(
+            module_path=original_plan.specs[0].locator.module_path,
+            function_name="not_callable",
+        ),
+    )
+    plan = replace(original_plan, specs=(bad_spec,))
+
+    with pytest.raises(TestDefinitionErrors) as raised:
+        TestLoader(plan.suite_root).load_from_collection(plan)
+
+    [issue] = raised.value.exceptions
+    assert issue.spec.locator.function_name == "not_callable"
+    assert "not a function or method" in issue.message
 
 
 @pytest.mark.asyncio
@@ -483,6 +536,7 @@ def test_materialize_imports_nested_setup_chain_in_order(tmp_path, monkeypatch):
         item.spec.locator.module_path
     )
 
+    make_run_context(db_enabled=False)
     with TestContext(item=item, execution_id=uuid4()):
         item.fn()
 

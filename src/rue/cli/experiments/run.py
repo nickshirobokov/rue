@@ -7,6 +7,7 @@ from typing import Annotated
 from rich.console import Console
 from typer import Option
 
+from rue.cli.errors import print_definition_errors
 from rue.cli.experiments.render import experiment_renderer
 from rue.cli.tests.options import (
     KeywordOpt,
@@ -18,6 +19,7 @@ from rue.cli.tests.options import (
 )
 from rue.config import load_config
 from rue.experiments.runner import ExperimentRunner
+from rue.testing.discovery import TestDefinitionErrors, TestLoader
 
 
 def run(
@@ -69,13 +71,18 @@ def run(
         }
     )
     collection = collector.build_spec_collection(resolved_paths)
-    experiment_runner = ExperimentRunner(config=runner_config)
-    experiments = experiment_runner.collect(collection)
-    if not experiments:
-        Console().print("[yellow]No experiments found.[/yellow]")
-        raise SystemExit(0)
+    try:
+        TestLoader(collection.suite_root).load_from_collection(collection)
+        experiment_runner = ExperimentRunner(config=runner_config)
+        experiments = experiment_runner.collect(collection)
+        if not experiments:
+            Console().print("[yellow]No experiments found.[/yellow]")
+            raise SystemExit(0)
 
-    results = experiment_runner.run(collection, experiments)
+        results = experiment_runner.run(collection, experiments)
+    except TestDefinitionErrors as errors:
+        print_definition_errors(errors)
+        raise SystemExit(2) from errors
     console = Console()
     for renderable in experiment_renderer.render(
         results,

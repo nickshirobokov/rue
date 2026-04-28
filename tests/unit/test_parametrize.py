@@ -71,37 +71,6 @@ def test_runner_iterate_params_applies_values_and_runs_all_sets(null_reporter):
     assert len(execution.sub_executions) == 3
 
 
-def test_runner_iterate_params_reports_invalid_definition_as_error(
-    null_reporter,
-):
-    @t_decorator.iterate.params("value", [])
-    def test_invalid(value):
-        return value
-
-    item = make_definition(
-        "test_invalid",
-        fn=test_invalid,
-        module_path="sample.py",
-        params=["value"],
-        modifiers=getattr(test_invalid, "__rue_modifiers__", []),
-        definition_error=getattr(
-            test_invalid, "__rue_definition_error__", None
-        ),
-    )
-
-    run_result = asyncio.run(
-        make_runner(null_reporter).run(
-            items=[item],
-            resolver=ResourceResolver(registry),
-        )
-    )
-
-    assert run_result.result.errors == 1
-    assert "requires at least one value set" in str(
-        run_result.result.executions[0].result.error
-    )
-
-
 def test_runner_iterate_params_uses_min_passes_threshold(null_reporter):
     recorded: list[str] = []
 
@@ -155,7 +124,7 @@ def test_iterate_params_formats_default_suffixes():
     def sample(short, long_value, obj):
         return short, long_value, obj
 
-    [modifier] = getattr(sample, "__rue_modifiers__")
+    [modifier] = sample.__rue_modifiers__
     assert modifier.parameter_sets[0].suffix == (
         f"{{short={repr('abc')[:30]}, "
         f"long_value={repr(long_value)[:30]}, "

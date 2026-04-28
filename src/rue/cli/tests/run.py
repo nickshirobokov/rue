@@ -11,6 +11,7 @@ from typer import Option
 
 import rue.reports.console as console_reports
 import rue.reports.otel as otel_reports
+from rue.cli.errors import print_definition_errors
 from rue.cli.tests.options import (
     DBPathOpt,
     KeywordOpt,
@@ -28,7 +29,7 @@ from rue.resources import (
     registry as default_resource_registry,
 )
 from rue.storage import SQLiteStore
-from rue.testing.discovery import TestLoader
+from rue.testing.discovery import TestDefinitionErrors, TestLoader
 from rue.testing.runner import Runner
 
 
@@ -133,7 +134,13 @@ def run(
     )
 
     collection = collector.build_spec_collection(resolved_paths)
-    items = TestLoader(collection.suite_root).load_from_collection(collection)
+    try:
+        items = TestLoader(collection.suite_root).load_from_collection(
+            collection
+        )
+    except TestDefinitionErrors as errors:
+        print_definition_errors(errors)
+        raise SystemExit(2) from errors
 
     if (
         run_id is not None

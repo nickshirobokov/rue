@@ -31,7 +31,6 @@ def make_definition(
     skip_reason: str | None = None,
     xfail_reason: str | None = None,
     xfail_strict: bool = False,
-    definition_error: str | None = None,
     backend: ExecutionBackend = ExecutionBackend.ASYNCIO,
     suffix: str | None = None,
     case_id: UUID | None = None,
@@ -57,7 +56,6 @@ def make_definition(
         skip_reason=skip_reason,
         xfail_reason=xfail_reason,
         xfail_strict=xfail_strict,
-        definition_error=definition_error,
         suffix=suffix,
         case_id=case_id,
         collection_index=(
