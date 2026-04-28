@@ -8,7 +8,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
-from uuid import uuid4
+from uuid import UUID
 
 from rue.context.process_pool import get_process_pool
 from rue.context.runtime import (
@@ -41,7 +41,7 @@ class SingleTest(ExecutableTest):
 
     definition: LoadedTestDef
     params: dict[str, Any]
-    node_key: str
+    execution_id: UUID
     backend: ExecutionBackend = ExecutionBackend.ASYNCIO
     sync_actor_id: int = 1
     children: list[ExecutableTest] = field(
@@ -66,37 +66,35 @@ class SingleTest(ExecutableTest):
         self,
         resolver: ResourceResolver,
     ) -> ExecutedTest:
-        exec_id = uuid4()
+        execution_id = self.execution_id
         match self:
             case SingleTest(is_stopped=is_stopped) if is_stopped():
                 return ExecutedTest(
                     definition=self.definition,
-                    node_key=self.node_key,
                     result=TestResult(
                         status=TestStatus.SKIPPED,
                         duration_ms=0,
                         error=Exception("Run stopped early"),
                     ),
-                    execution_id=exec_id,
+                    execution_id=execution_id,
                 )
             case (
                 SingleTest(definition=LoadedTestDef(spec=spec))
             ) if spec.skip_reason:
                 return ExecutedTest(
                     definition=self.definition,
-                    node_key=self.node_key,
                     result=TestResult(
                         status=TestStatus.SKIPPED,
                         duration_ms=0,
                         error=Exception(spec.skip_reason),
                     ),
-                    execution_id=exec_id,
+                    execution_id=execution_id,
                 )
 
         test_resolver = resolver.fork_for_test()
         ctx = TestContext(
             item=self.definition,
-            execution_id=exec_id,
+            execution_id=execution_id,
         )
         with ctx:
             match self:
@@ -122,7 +120,7 @@ class SingleTest(ExecutableTest):
                     await self.definition.run_loaded_test(
                         params=self.params,
                         resolver=resolver,
-                        resource_key=self.node_key,
+                        execution_id=execution_id,
                         run_sync_in_thread=self.backend
                         is not ExecutionBackend.MAIN,
                         is_stopped=self.is_stopped,
@@ -155,7 +153,6 @@ class SingleTest(ExecutableTest):
 
         return ExecutedTest(
             definition=self.definition,
-            node_key=self.node_key,
             result=result,
             execution_id=execution_id,
             telemetry_artifacts=telemetry_artifacts,
@@ -176,13 +173,13 @@ class SingleTest(ExecutableTest):
             )
             async with semaphore:
                 await resolver.resolve_consumer(
-                    self.node_key,
+                    execution_id,
                     self.params,
                     consumer_spec=self.definition.spec,
                     apply_injection_hook=False,
                 )
                 snapshot = resolver.export_sync_snapshot(
-                    self.node_key,
+                    execution_id,
                     sync_actor_id=self.sync_actor_id,
                 )
 
@@ -192,7 +189,6 @@ class SingleTest(ExecutableTest):
                     setup_chain=self.definition.setup_chain,
                     params=dict(self.params),
                     snapshot=snapshot,
-                    resource_key=self.node_key,
                     context=context,
                     execution_id=execution_id,
                 )
@@ -211,7 +207,6 @@ class SingleTest(ExecutableTest):
 
         return ExecutedTest(
             definition=self.definition,
-            node_key=self.node_key,
             result=remote_result.result,
             execution_id=execution_id,
             telemetry_artifacts=remote_result.telemetry_artifacts,

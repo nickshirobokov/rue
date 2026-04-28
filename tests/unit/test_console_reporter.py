@@ -98,7 +98,7 @@ def make_execution(
             error=error,
             assertion_results=assertion_results or [],
         ),
-        node_key=item.spec.full_name,
+        execution_id=uuid4(),
         sub_executions=sub_executions or [],
     )
 

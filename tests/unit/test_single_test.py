@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 import pytest
 
 from rue.resources import ResourceResolver, registry
@@ -27,22 +29,25 @@ async def test_single_test_executes_without_runner():
     test = SingleTest(
         definition=definition,
         params={},
-        node_key=definition.spec.full_name,
+        execution_id=uuid4(),
     )
-    registry.compile_graph({test.node_key: (definition.spec, ())})
+    registry.compile_graph({test.execution_id: (definition.spec, ())})
 
     execution = await test.execute(ResourceResolver(registry))
 
     assert execution.result.status == TestStatus.PASSED
+    assert execution.execution_id == test.execution_id
     assert called == ["called"]
 
 
 def test_single_test_rejects_modifiers():
     definition = make_item(modifiers=[IterateModifier(count=2, min_passes=2)])
-    with pytest.raises(ValueError, match="SingleTest should not have modifiers"):
-        make_run_context()
+    make_run_context()
+    with pytest.raises(
+        ValueError, match="SingleTest should not have modifiers"
+    ):
         SingleTest(
             definition=definition,
             params={},
-            node_key=definition.spec.full_name,
+            execution_id=uuid4(),
         )

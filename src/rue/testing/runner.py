@@ -201,7 +201,7 @@ class Runner:
                 if isinstance(leaf, SingleTest)
             ]
             consumers = {
-                leaf.node_key: (
+                leaf.execution_id: (
                     leaf.definition.spec,
                     tuple(
                         param

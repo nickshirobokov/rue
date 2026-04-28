@@ -6,6 +6,7 @@ import inspect
 import threading
 from collections.abc import AsyncGenerator, Generator, Iterator, Sequence
 from typing import Any, cast
+from uuid import UUID
 
 from rue.context.runtime import ResourceTransactionContext
 from rue.models import Spec
@@ -92,7 +93,7 @@ class ResourceResolver:
 
     async def resolve_consumer(
         self,
-        key: str,
+        key: UUID,
         params: dict[str, Any],
         *,
         consumer_spec: Spec,
@@ -304,7 +305,7 @@ class ResourceResolver:
 
     def export_sync_snapshot(
         self,
-        key: str,
+        key: UUID,
         *,
         sync_actor_id: int,
     ) -> ResolverSyncSnapshot:

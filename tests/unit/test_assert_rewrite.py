@@ -180,14 +180,15 @@ def test_dummy():
     try:
         [item] = materialize_tests(mod_path)
         resolver = ResourceResolver(registry)
-        ctx = TestContext(item=item, execution_id=uuid4())
+        execution_id = uuid4()
+        ctx = TestContext(item=item, execution_id=execution_id)
         metric_results: list[MetricResult] = []
         with ctx, bind(CURRENT_METRIC_RESULTS, metric_results):
             graph = registry.compile_graph(
-                {"test": (item.spec, ("my_metric",))}
+                {execution_id: (item.spec, ("my_metric",))}
             )
             await resolver.resolve_resource(
-                graph.injections_by_key["test"]["my_metric"],
+                graph.injections_by_key[execution_id]["my_metric"],
                 consumer_spec=item.spec,
             )
             await resolver.teardown()

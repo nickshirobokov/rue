@@ -117,13 +117,13 @@ class ExperimentRenderer:
         table.add_column("Status", no_wrap=True)
         table.add_column("Test")
         if verbosity >= 2:
-            table.add_column("Node Key")
+            table.add_column("Execution ID")
             table.add_column("Error")
 
-        for label, status, node_key, error in result.failures:
+        for label, status, execution_id, error in result.failures:
             row = [status, label]
             if verbosity >= 2:
-                row.extend([node_key or "", error or ""])
+                row.extend([execution_id or "", error or ""])
             table.add_row(*row)
         return table
 

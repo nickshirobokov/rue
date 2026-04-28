@@ -17,7 +17,6 @@ class StatusIssue:
 
     phase: Literal["resolve"]
     message: str
-    node_key: str | None = None
 
 
 @dataclass(frozen=True)

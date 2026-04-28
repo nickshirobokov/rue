@@ -3,7 +3,6 @@
 import json
 import linecache
 import sqlite3
-from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -21,7 +20,6 @@ from rue.resources.metrics.base import (
 )
 from rue.storage.base import Store
 from rue.storage.sqlite.migrations import MigrationError, MigrationRunner
-from rue.testing.execution.base import ExecutableTest
 from rue.testing.models import (
     ExecutedTest,
     LoadedTestDef,
@@ -50,9 +48,9 @@ RUN_INSERT_SQL = """
 EXECUTION_INSERT_SQL = """
     INSERT INTO test_executions (
         execution_id, run_id, parent_id, test_name, file_path, class_name,
-        case_id, suffix, node_key, tags_json, skip_reason, xfail_reason,
+        case_id, suffix, tags_json, skip_reason, xfail_reason,
         status, duration_ms, error_message, error_traceback
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 METRIC_INSERT_SQL = """
@@ -448,7 +446,6 @@ class SQLiteStore(Store):
                 spec.locator.class_name,
                 str(spec.case_id) if spec.case_id else None,
                 spec.suffix,
-                execution.node_key,
                 json.dumps(list(tags)) if tags else None,
                 spec.skip_reason,
                 spec.xfail_reason,
@@ -466,112 +463,6 @@ class SQLiteStore(Store):
                 run_id=run_id,
                 parent_id=execution_id,
             )
-
-    def get_test_history(
-        self,
-        node_keys: Sequence[str],
-        limit: int = MAX_STORED_RUNS,
-    ) -> dict[str, tuple[TestStatus | None, ...]]:
-        requested = tuple(dict.fromkeys(node_keys))
-        if not requested:
-            return {}
-
-        with self._connect() as conn:
-            run_ids = [
-                row["run_id"]
-                for row in conn.execute(
-                    "SELECT run_id FROM runs ORDER BY start_time DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
-            ]
-            if not run_ids:
-                return {
-                    node_key: tuple(None for _ in range(limit))
-                    for node_key in requested
-                }
-
-            by_node = {
-                node_key: [None for _ in range(limit)] for node_key in requested
-            }
-            placeholders = ", ".join("?" for _ in run_ids)
-            key_placeholders = ", ".join("?" for _ in requested)
-            rows = conn.execute(
-                f"""
-                SELECT run_id, node_key, status
-                FROM test_executions
-                WHERE run_id IN ({placeholders}) AND node_key IN ({key_placeholders})
-                """,
-                (*run_ids, *requested),
-            ).fetchall()
-            run_index = {run_id: index for index, run_id in enumerate(run_ids)}
-            for row in rows:
-                node_key = row["node_key"]
-                if node_key is None:
-                    continue
-                by_node[node_key][run_index[row["run_id"]]] = TestStatus(
-                    row["status"]
-                )
-
-            return {
-                node_key: tuple(statuses)
-                for node_key, statuses in by_node.items()
-            }
-
-    def get_test_history_for_tests(
-        self,
-        tests: Sequence[ExecutableTest],
-        limit: int = MAX_STORED_RUNS,
-    ) -> dict[str, tuple[TestStatus | None, ...]]:
-        requested_by_key: dict[str, ExecutableTest] = {}
-        for test in tests:
-            for node in test.walk():
-                requested_by_key.setdefault(node.node_key, node)
-
-        if not requested_by_key:
-            return {}
-
-        history_by_key = self.get_test_history(tuple(requested_by_key), limit)
-        run_window = tuple(self.list_runs(limit=limit))
-        if not run_window:
-            return history_by_key
-
-        for node_key, test in requested_by_key.items():
-            history = list(history_by_key.get(node_key, (None,) * limit))
-            for index, run in enumerate(run_window):
-                if history[index] is not None:
-                    continue
-                status = self._find_legacy_status(test, run.result.executions)
-                if status is not None:
-                    history[index] = status
-            history_by_key[node_key] = tuple(history)
-
-        return history_by_key
-
-    def _find_legacy_status(
-        self,
-        test: ExecutableTest,
-        executions: list[ExecutedTest],
-    ) -> TestStatus | None:
-        spec = test.definition.spec
-        if test.node_key != spec.full_name and (
-            spec.suffix is None or "=" not in test.node_key.rsplit("/", 1)[-1]
-        ):
-            return None
-
-        for execution in executions:
-            exec_spec = execution.definition.spec
-            if (
-                exec_spec.locator.module_path == spec.locator.module_path
-                and exec_spec.locator.class_name == spec.locator.class_name
-                and exec_spec.locator.function_name
-                == spec.locator.function_name
-                and exec_spec.suffix == spec.suffix
-            ):
-                return execution.status
-            match = self._find_legacy_status(test, execution.sub_executions)
-            if match is not None:
-                return match
-        return None
 
     def get_run(self, run_id: UUID) -> Run | None:
         """Retrieve a test run by ID."""
@@ -714,7 +605,6 @@ class SQLiteStore(Store):
 
         return ExecutedTest(
             definition=definition,
-            node_key=row["node_key"] or definition.spec.full_name,
             result=result,
             execution_id=UUID(row["execution_id"]),
         )

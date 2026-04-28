@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
+from uuid import uuid4
 
 from rue.testing.execution.base import ExecutableTest, ExecutionBackend
 from rue.testing.execution.composite import CompositeTest
@@ -38,12 +39,10 @@ class DefaultTestFactory:
         backend: ExecutionBackend | None = None,
         *,
         enqueue: bool = True,
-        node_key: str | None = None,
     ) -> ExecutableTest:
         """Recursively build the full test tree from definition."""
         params = params or {}
         backend = backend or ExecutionBackend.ASYNCIO
-        node_key = node_key or definition.spec.full_name
         modifiers = definition.spec.modifiers
 
         if not modifiers:
@@ -62,7 +61,7 @@ class DefaultTestFactory:
                     test = SingleTest(
                         definition=definition,
                         params=params,
-                        node_key=node_key,
+                        execution_id=uuid4(),
                         backend=backend,
                         sync_actor_id=sync_actor_id,
                         semaphore=self.semaphore,
@@ -88,7 +87,6 @@ class DefaultTestFactory:
                     params,
                     backend=sub_backend,
                     enqueue=enqueue,
-                    node_key=node_key,
                 )
             case IterateModifier(count=count, min_passes=min_passes):
                 children = [
@@ -104,11 +102,6 @@ class DefaultTestFactory:
                         params,
                         backend=backend,
                         enqueue=False,
-                        node_key=self._child_node_key(
-                            parent_node_key=node_key,
-                            modifier_name=mod.display_name,
-                            index=i,
-                        ),
                     )
                     for i in range(count)
                 ]
@@ -116,7 +109,7 @@ class DefaultTestFactory:
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
-                    node_key=node_key,
+                    execution_id=uuid4(),
                     children=children,
                     on_complete=self.on_complete,
                 )
@@ -138,20 +131,14 @@ class DefaultTestFactory:
                         {**params, "case": c},
                         backend=backend,
                         enqueue=False,
-                        node_key=self._child_node_key(
-                            parent_node_key=node_key,
-                            modifier_name=mod.display_name,
-                            index=index,
-                            label=repr(c.metadata) if c.metadata else None,
-                        ),
                     )
-                    for index, c in enumerate(cases)
+                    for c in cases
                 ]
                 test = CompositeTest(
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
-                    node_key=node_key,
+                    execution_id=uuid4(),
                     children=children,
                     on_complete=self.on_complete,
                 )
@@ -178,20 +165,14 @@ class DefaultTestFactory:
                         {**params, "group": g},
                         backend=backend,
                         enqueue=False,
-                        node_key=self._child_node_key(
-                            parent_node_key=node_key,
-                            modifier_name=mod.display_name,
-                            index=index,
-                            label=g.name,
-                        ),
                     )
-                    for index, g in enumerate(groups)
+                    for g in groups
                 ]
                 test = CompositeTest(
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
-                    node_key=node_key,
+                    execution_id=uuid4(),
                     children=children,
                     on_complete=self.on_complete,
                 )
@@ -214,20 +195,14 @@ class DefaultTestFactory:
                         {**params, **ps.values},
                         backend=backend,
                         enqueue=False,
-                        node_key=self._child_node_key(
-                            parent_node_key=node_key,
-                            modifier_name=mod.display_name,
-                            index=index,
-                            label=ps.suffix,
-                        ),
                     )
-                    for index, ps in enumerate(parameter_sets)
+                    for ps in parameter_sets
                 ]
                 test = CompositeTest(
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
-                    node_key=node_key,
+                    execution_id=uuid4(),
                     children=children,
                     on_complete=self.on_complete,
                 )
@@ -236,16 +211,3 @@ class DefaultTestFactory:
                 return test
             case _:
                 raise NotImplementedError(f"Unknown modifier: {mod}")
-
-    @staticmethod
-    def _child_node_key(
-        *,
-        parent_node_key: str,
-        modifier_name: str,
-        index: int,
-        label: str | None = None,
-    ) -> str:
-        segment = f"{modifier_name}[{index}]"
-        if label:
-            segment = f"{segment}={label}"
-        return f"{parent_node_key}/{segment}"

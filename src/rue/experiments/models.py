@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from itertools import product
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from rue.models import Spec
 from rue.resources import MonkeyPatch, Scope
@@ -37,13 +37,13 @@ class ExperimentSpec(Spec):
         value_index: int,
         *,
         resolver: ResourceResolver,
-        resource_key: str,
+        graph_key: UUID,
     ) -> None:
         """Apply this experiment hook to the current run process."""
         kwargs: dict[str, Any] = {"value": self.values[value_index]}
         kwargs.update(
             await resolver.resolve_consumer(
-                resource_key,
+                graph_key,
                 {},
                 consumer_spec=self,
             )
@@ -106,9 +106,12 @@ class ExperimentVariant:
             experiment.locator.function_name: experiment
             for experiment in experiments
         }
+        keys_by_name = {
+            name: uuid4() for name, _value_index, _value_id in self.values
+        }
         resolver.registry.compile_graph(
             {
-                f"experiment:{name}": (
+                keys_by_name[name]: (
                     definitions[name],
                     tuple(
                         dependency
@@ -123,7 +126,7 @@ class ExperimentVariant:
             await definitions[name].apply(
                 value_index,
                 resolver=resolver,
-                resource_key=f"experiment:{name}",
+                graph_key=keys_by_name[name],
             )
 
     @property
@@ -185,7 +188,7 @@ class ExperimentVariantResult:
                     (
                         execution.label,
                         execution.status.value,
-                        execution.node_key,
+                        str(execution.execution_id),
                         None
                         if execution.result.error is None
                         else str(execution.result.error),

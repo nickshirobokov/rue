@@ -4,6 +4,7 @@ import inspect
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from rue.models import Locator, Spec
 from rue.resources.models import (
@@ -146,16 +147,16 @@ class ResourceRegistry:
 
     def compile_graph(
         self,
-        consumers: Mapping[str, tuple[Spec, tuple[str, ...]]],
+        consumers: Mapping[UUID, tuple[Spec, tuple[str, ...]]],
         *,
-        autouse_keys: frozenset[str] = frozenset(),
+        autouse_keys: frozenset[UUID] = frozenset(),
     ) -> ResourceGraph:
         """Compile a concrete resource graph for known injection consumers."""
         dependencies_by_spec: dict[ResourceSpec, tuple[ResourceSpec, ...]] = {}
-        roots_by_key: dict[str, tuple[ResourceSpec, ...]] = {}
-        autouse_by_key: dict[str, tuple[ResourceSpec, ...]] = {}
-        injections_by_key: dict[str, dict[str, ResourceSpec]] = {}
-        order_by_key: dict[str, tuple[ResourceSpec, ...]] = {}
+        roots_by_key: dict[UUID, tuple[ResourceSpec, ...]] = {}
+        autouse_by_key: dict[UUID, tuple[ResourceSpec, ...]] = {}
+        injections_by_key: dict[UUID, dict[str, ResourceSpec]] = {}
+        order_by_key: dict[UUID, tuple[ResourceSpec, ...]] = {}
         built: set[ResourceSpec] = set()
         resolving: list[ResourceSpec] = []
         resolving_set: set[ResourceSpec] = set()

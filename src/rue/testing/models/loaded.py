@@ -9,11 +9,11 @@ from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from rue.assertions.base import AssertionResult
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
-    CURRENT_TEST,
     bind,
 )
 from rue.patching.runtime import PatchContext, patch_manager
@@ -79,7 +79,7 @@ class LoadedTestDef:
         *,
         params: dict[str, Any],
         resolver: ResourceResolver,
-        resource_key: str,
+        execution_id: UUID,
         run_sync_in_thread: bool,
         is_stopped: Callable[[], bool] | None = None,
     ) -> tuple[
@@ -92,15 +92,13 @@ class LoadedTestDef:
         assertion_results: list[AssertionResult] = []
         error: BaseException | None = None
         imperative_outcome: TestStatus | None = None
-        ctx = CURRENT_TEST.get()
-        execution_id = ctx.execution_id
 
         start = time.perf_counter()
         with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
             try:
                 resource_graph = resolver.registry.graph
                 kwargs = await resolver.resolve_consumer(
-                    resource_key,
+                    execution_id,
                     params,
                     consumer_spec=self.spec,
                 )
@@ -113,7 +111,7 @@ class LoadedTestDef:
                             execution_id=execution_id,
                             module_path=self.spec.locator.module_path.resolve(),
                             resources=frozenset(
-                                resource_graph.order_by_key[resource_key]
+                                resource_graph.order_by_key[execution_id]
                             ),
                         )
                     ):

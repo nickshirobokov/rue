@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
-from uuid import uuid4
+from uuid import UUID
 
 from rue.resources.resolver import ResourceResolver
 from rue.testing.execution.base import ExecutableTest, ExecutionBackend
@@ -22,7 +22,7 @@ class CompositeTest(ExecutableTest):
     definition: LoadedTestDef
     backend: ExecutionBackend
     min_passes: int
-    node_key: str
+    execution_id: UUID
     children: list[ExecutableTest] = field(default_factory=list)
     on_complete: Callable | None = None
 
@@ -56,9 +56,8 @@ class CompositeTest(ExecutableTest):
         )
         return ExecutedTest(
             definition=self.definition,
-            node_key=self.node_key,
             result=TestResult(status=status, duration_ms=duration),
-            execution_id=uuid4(),
+            execution_id=self.execution_id,
             sub_executions=sub_executions,
         )
 

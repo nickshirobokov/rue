@@ -6,7 +6,7 @@ import time
 from abc import ABC, abstractmethod
 from enum import StrEnum
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID
 
 from rue.resources.resolver import ResourceResolver
 from rue.testing.models.executed import ExecutedTest
@@ -33,7 +33,7 @@ class ExecutableTest(ABC):
 
     definition: LoadedTestDef
     backend: ExecutionBackend
-    node_key: str
+    execution_id: UUID
     children: list[ExecutableTest]
     on_complete: Callable[[ExecutedTest], Awaitable[None]] | None = None
 
@@ -67,13 +67,12 @@ class ExecutableTest(ABC):
         except Exception as error:
             execution = ExecutedTest(
                 definition=self.definition,
-                node_key=self.node_key,
                 result=TestResult(
                     status=TestStatus.ERROR,
                     duration_ms=(time.perf_counter() - start) * 1000,
                     error=error,
                 ),
-                execution_id=uuid4(),
+                execution_id=self.execution_id,
             )
 
         if self.on_complete is not None:

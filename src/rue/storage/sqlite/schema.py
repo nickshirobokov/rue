@@ -29,7 +29,6 @@ CREATE TABLE IF NOT EXISTS test_executions (
     class_name          TEXT,
     case_id             TEXT,
     suffix              TEXT,
-    node_key            TEXT,
     tags_json           TEXT,
     skip_reason         TEXT,
     xfail_reason        TEXT,
@@ -43,7 +42,6 @@ CREATE TABLE IF NOT EXISTS test_executions (
 CREATE INDEX IF NOT EXISTS idx_tests_run ON test_executions(run_id);
 CREATE INDEX IF NOT EXISTS idx_tests_parent ON test_executions(parent_id);
 CREATE INDEX IF NOT EXISTS idx_tests_name ON test_executions(test_name);
-CREATE INDEX IF NOT EXISTS idx_tests_node_key ON test_executions(node_key);
 CREATE INDEX IF NOT EXISTS idx_tests_status ON test_executions(status);
 
 CREATE TABLE IF NOT EXISTS metrics (

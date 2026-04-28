@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from rue.telemetry.base import TelemetryArtifact
 from rue.testing.models.loaded import LoadedTestDef
@@ -22,8 +22,7 @@ class ExecutedTest:
 
     definition: LoadedTestDef
     result: TestResult
-    node_key: str
-    execution_id: UUID = field(default_factory=uuid4)
+    execution_id: UUID
     telemetry_artifacts: tuple[TelemetryArtifact, ...] = ()
     sub_executions: list[ExecutedTest] = field(default_factory=list)
 

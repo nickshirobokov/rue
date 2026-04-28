@@ -25,7 +25,7 @@ def _failed_executions(run):
         if execution.status is not TestStatus.PASSED:
             rows.append(
                 (
-                    execution.node_key,
+                    str(execution.execution_id),
                     execution.status.value,
                     str(execution.result.error)
                     if execution.result.error

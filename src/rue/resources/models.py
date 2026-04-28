@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from typing import Any
+from uuid import UUID
 
 from rue.models import Spec
 
@@ -59,23 +60,23 @@ class LoadedResourceDef:
 class ResourceGraph:
     """Precompiled concrete resource graph for known injection consumers."""
 
-    roots_by_key: dict[str, tuple[ResourceSpec, ...]] = field(
+    roots_by_key: dict[UUID, tuple[ResourceSpec, ...]] = field(
         default_factory=dict
     )
-    autouse_by_key: dict[str, tuple[ResourceSpec, ...]] = field(
+    autouse_by_key: dict[UUID, tuple[ResourceSpec, ...]] = field(
         default_factory=dict
     )
-    injections_by_key: dict[str, dict[str, ResourceSpec]] = field(
+    injections_by_key: dict[UUID, dict[str, ResourceSpec]] = field(
         default_factory=dict
     )
     dependencies_by_spec: dict[ResourceSpec, tuple[ResourceSpec, ...]] = field(
         default_factory=dict
     )
-    order_by_key: dict[str, tuple[ResourceSpec, ...]] = field(
+    order_by_key: dict[UUID, tuple[ResourceSpec, ...]] = field(
         default_factory=dict
     )
 
-    def slice(self, key: str) -> ResourceGraph:
+    def slice(self, key: UUID) -> ResourceGraph:
         """Return the subgraph needed to execute one consumer key."""
         order = self.order_by_key[key]
         specs = set(order)

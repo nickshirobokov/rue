@@ -722,8 +722,9 @@ def test_materialize_rewrites_pytest_fixture_aliases_to_resources(tmp_path):
     [item] = materialize(tmp_path)
 
     assert item.spec.locator.function_name == "test_uses_fixture"
-    graph = registry.compile_graph(
-        {"test": (item.spec, ("greeting",))}
+    execution_id = uuid4()
+    graph = registry.compile_graph({execution_id: (item.spec, ("greeting",))})
+    greeting = registry.definition(
+        graph.injections_by_key[execution_id]["greeting"]
     )
-    greeting = registry.definition(graph.injections_by_key["test"]["greeting"])
     assert greeting.spec.scope == Scope.MODULE

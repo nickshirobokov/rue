@@ -16,7 +16,11 @@ from rue.resources.sut import sut
 from rue.resources.sut.output import SUTOutputCapture
 from rue.testing.models import Case
 from rue.testing.runner import Runner
-from tests.unit.factories import make_definition, make_run_context, materialize_tests
+from tests.unit.factories import (
+    make_definition,
+    make_run_context,
+    materialize_tests,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -69,10 +73,13 @@ async def _run_module_with_tracing(
 async def _resolve(name: str) -> object:
     resolver = ResourceResolver(resources_registry)
     item = make_definition("test_sut")
-    graph = resources_registry.compile_graph({"test": (item.spec, (name,))})
-    with TestContext(item=item, execution_id=uuid4()):
+    execution_id = uuid4()
+    graph = resources_registry.compile_graph(
+        {execution_id: (item.spec, (name,))}
+    )
+    with TestContext(item=item, execution_id=execution_id):
         return await resolver.resolve_resource(
-            graph.injections_by_key["test"][name],
+            graph.injections_by_key[execution_id][name],
             consumer_spec=item.spec,
         )
 

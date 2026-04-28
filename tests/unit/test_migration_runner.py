@@ -298,7 +298,7 @@ class TestMigrationRunner:
         runner.migrate()
         assert runner.get_current_version() == runner.get_target_version()
 
-    def test_node_key_migration_preserves_existing_rows(
+    def test_node_key_migration_drops_deprecated_column(
         self, sqlite_db_path: Path
     ) -> None:
         full_runner = MigrationRunner(sqlite_db_path)
@@ -357,12 +357,12 @@ class TestMigrationRunner:
             ).fetchall()
         }
         row = conn.execute(
-            "SELECT execution_id, node_key FROM test_executions"
+            "SELECT execution_id FROM test_executions"
         ).fetchone()
 
-        assert "node_key" in columns
-        assert "idx_tests_node_key" in indexes
-        assert row == ("exec-1", None)
+        assert "node_key" not in columns
+        assert "idx_tests_node_key" not in indexes
+        assert row == ("exec-1",)
         conn.close()
 
 

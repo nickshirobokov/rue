@@ -4,7 +4,6 @@ from pathlib import Path
 from uuid import uuid4
 
 from rue.assertions.base import AssertionRepr, AssertionResult
-from rue.config import Config
 from rue.context.runtime import TestContext
 from rue.models import Locator
 from rue.predicates.models import PredicateResult
@@ -15,13 +14,8 @@ from rue.resources.metrics.base import (
 )
 from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.store import MAX_STORED_RUNS
-from rue.testing.execution.factory import DefaultTestFactory
 from rue.testing.models.executed import ExecutedTest
-from rue.testing.models.modifiers import (
-    IterateModifier,
-    ParameterSet,
-    ParamsIterateModifier,
-)
+from rue.testing.models.modifiers import IterateModifier
 from rue.testing.models.result import TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
 from tests.unit.factories import make_definition, make_run_context
@@ -60,7 +54,6 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     sub_execution = ExecutedTest(
         definition=sub_definition,
         result=TestResult(status=TestStatus.PASSED, duration_ms=10.0),
-        node_key=sub_definition.spec.full_name,
         execution_id=sub_execution_id,
     )
     execution = ExecutedTest(
@@ -70,7 +63,6 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
             duration_ms=20.0,
             error=Exception("boom"),
         ),
-        node_key=definition.spec.full_name,
         execution_id=execution_id,
         sub_executions=[sub_execution],
     )
@@ -140,12 +132,17 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     assert loaded.result.failed == 1
     assert loaded.result.total == 1
     assert len(loaded.result.executions) == 1
+    assert loaded.result.executions[0].execution_id == execution_id
     assert (
         loaded.result.executions[0].definition.spec.suffix
         == "{'slug': 'sample'}"
     )
     assert loaded.result.executions[0].definition.spec.case_id == case_id
     assert len(loaded.result.executions[0].sub_executions) == 1
+    assert (
+        loaded.result.executions[0].sub_executions[0].execution_id
+        == sub_execution_id
+    )
     assert len(loaded.result.metric_results) == 1
     assert (
         loaded.result.metric_results[0]
@@ -246,7 +243,6 @@ def test_sqlite_store_assertions_and_predicates(
             error=Exception("boom"),
             assertion_results=[assertion],
         ),
-        node_key=definition.spec.full_name,
         execution_id=execution_id,
     )
 
@@ -328,152 +324,3 @@ def test_sqlite_store_prunes_old_runs(sqlite_store: SQLiteStore) -> None:
     stored_run_ids = {r.run_id for r in stored_runs}
     expected_run_ids = set(created_run_ids[-MAX_STORED_RUNS:])
     assert stored_run_ids == expected_run_ids
-
-
-def test_sqlite_store_persists_node_keys_and_histories(
-    sqlite_store: SQLiteStore,
-) -> None:
-    node_key = "test_sample::test_history/params[0]=one"
-    statuses = [
-        TestStatus.PASSED,
-        TestStatus.FAILED,
-        TestStatus.ERROR,
-    ]
-
-    for index, status in enumerate(statuses):
-        child = ExecutedTest(
-            definition=make_definition(
-                "test_history",
-                module_path="tests/test_sample.py",
-                suffix="one",
-            ),
-            result=TestResult(status=status, duration_ms=1.0),
-            node_key=node_key,
-        )
-        run = Run(
-            run_id=uuid4(),
-            start_time=datetime(2024, 1, index + 1, 10, 0, tzinfo=UTC),
-            end_time=datetime(2024, 1, index + 1, 10, 1, tzinfo=UTC),
-            environment=make_environment(),
-            result=RunResult(
-                executions=[
-                    ExecutedTest(
-                        definition=make_definition(
-                            "test_history",
-                            module_path="tests/test_sample.py",
-                            modifiers=(
-                                ParamsIterateModifier(
-                                    parameter_sets=(
-                                        ParameterSet(
-                                            values={},
-                                            suffix="one",
-                                        ),
-                                    ),
-                                    min_passes=1,
-                                ),
-                            ),
-                        ),
-                        result=TestResult(status=status, duration_ms=1.0),
-                        node_key="test_sample::test_history",
-                        sub_executions=[child],
-                    )
-                ]
-            ),
-        )
-        sqlite_store.save_run(run)
-
-    assert sqlite_store.get_test_history([node_key])[node_key] == (
-        TestStatus.ERROR,
-        TestStatus.FAILED,
-        TestStatus.PASSED,
-        None,
-        None,
-    )
-
-
-def test_sqlite_store_falls_back_to_legacy_histories_for_tests(
-    sqlite_store: SQLiteStore,
-) -> None:
-    statuses = [
-        TestStatus.PASSED,
-        TestStatus.FAILED,
-        TestStatus.ERROR,
-    ]
-
-    for index, status in enumerate(statuses):
-        child = ExecutedTest(
-            definition=make_definition(
-                "test_history",
-                module_path="tests/test_sample.py",
-                suffix="one",
-            ),
-            result=TestResult(status=status, duration_ms=1.0),
-            node_key="test_sample::test_history/params[0]=one",
-        )
-        run = Run(
-            run_id=uuid4(),
-            start_time=datetime(2024, 2, index + 1, 10, 0, tzinfo=UTC),
-            end_time=datetime(2024, 2, index + 1, 10, 1, tzinfo=UTC),
-            environment=make_environment(),
-            result=RunResult(
-                executions=[
-                    ExecutedTest(
-                        definition=make_definition(
-                            "test_history",
-                            module_path="tests/test_sample.py",
-                            modifiers=(
-                                ParamsIterateModifier(
-                                    parameter_sets=(
-                                        ParameterSet(
-                                            values={},
-                                            suffix="one",
-                                        ),
-                                    ),
-                                    min_passes=1,
-                                ),
-                            ),
-                        ),
-                        result=TestResult(status=status, duration_ms=1.0),
-                        node_key="test_sample::test_history",
-                        sub_executions=[child],
-                    )
-                ]
-            ),
-        )
-        sqlite_store.save_run(run)
-
-    with sqlite_store._connect() as conn:
-        conn.execute(
-            """
-            UPDATE test_executions
-            SET node_key = NULL
-            WHERE test_name = ? AND suffix = ?
-            """,
-            ("test_history", "one"),
-        )
-
-    make_run_context(Config())
-    built = DefaultTestFactory().build(
-        make_definition(
-            "test_history",
-            module_path="tests/test_sample.py",
-            modifiers=(
-                ParamsIterateModifier(
-                    parameter_sets=(
-                        ParameterSet(values={}, suffix="one"),
-                    ),
-                    min_passes=1,
-                ),
-            ),
-        )
-    )
-    history_by_key = sqlite_store.get_test_history_for_tests([built])
-    child_node_key = built.children[0].node_key
-
-    assert history_by_key[child_node_key] == (
-        TestStatus.ERROR,
-        TestStatus.FAILED,
-        TestStatus.PASSED,
-        None,
-        None,
-    )

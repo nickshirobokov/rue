@@ -21,6 +21,9 @@ from rue.testing.models import LoadedTestDef
 from tests.unit.factories import make_definition, make_run_context
 
 
+_TEST_GRAPH_KEY = UUID(int=1)
+
+
 def _metric(name: str = "") -> Metric:
     return Metric(
         metadata=MetricMetadata(
@@ -63,9 +66,11 @@ async def _resolve(
     apply_injection_hook: bool = True,
 ):
     consumer = consumer_spec or _consumer_spec()
-    graph = resolver.registry.compile_graph({"test": (consumer, (name,))})
+    graph = resolver.registry.compile_graph(
+        {_TEST_GRAPH_KEY: (consumer, (name,))}
+    )
     return await resolver.resolve_resource(
-        graph.injections_by_key["test"][name],
+        graph.injections_by_key[_TEST_GRAPH_KEY][name],
         consumer_spec=consumer,
         apply_injection_hook=apply_injection_hook,
     )
@@ -73,8 +78,8 @@ async def _resolve(
 
 def _resource_spec(name: str, *, consumer_spec=None) -> ResourceSpec:
     consumer = consumer_spec or _consumer_spec()
-    graph = registry.compile_graph({"test": (consumer, (name,))})
-    return graph.injections_by_key["test"][name]
+    graph = registry.compile_graph({_TEST_GRAPH_KEY: (consumer, (name,))})
+    return graph.injections_by_key[_TEST_GRAPH_KEY][name]
 
 
 def _ctx(

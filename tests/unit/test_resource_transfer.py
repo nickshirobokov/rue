@@ -25,6 +25,9 @@ from rue.resources.snapshot import SyncGraph
 from tests.unit.factories import make_definition
 
 
+_TEST_GRAPH_KEY = UUID(int=1)
+
+
 @pytest.fixture(autouse=True)
 def clean_registry():
     registry.reset()
@@ -121,7 +124,7 @@ def _resource_graph(
     resource_names: tuple[str, ...],
     *,
     consumer_spec=None,
-    key: str = "test",
+    key: UUID = _TEST_GRAPH_KEY,
 ) -> ResourceGraph:
     consumer = consumer_spec or _consumer_spec()
     return registry.compile_graph({key: (consumer, resource_names)})
@@ -136,7 +139,7 @@ async def _resolve(
     consumer = consumer_spec or _consumer_spec()
     graph = _resource_graph((name,), consumer_spec=consumer)
     return await resolver.resolve_resource(
-        graph.injections_by_key["test"][name],
+        graph.injections_by_key[_TEST_GRAPH_KEY][name],
         consumer_spec=consumer,
     )
 
@@ -150,7 +153,7 @@ def _snapshot(
 ) -> ResolverSyncSnapshot:
     _resource_graph(resource_names, consumer_spec=consumer_spec)
     return resolver.export_sync_snapshot(
-        "test",
+        _TEST_GRAPH_KEY,
         sync_actor_id=sync_actor_id,
     )
 
@@ -341,7 +344,10 @@ class TestExportSyncSnapshot:
             sync_actor_id=7,
         )
 
-        assert snapshot.resource_graph.roots_by_key["test"][0].name == "simple"
+        assert (
+            snapshot.resource_graph.roots_by_key[_TEST_GRAPH_KEY][0].name
+            == "simple"
+        )
         assert snapshot.sync_actor_id == 7
 
     async def test_atomic_values_use_tagged_nodes(self):

@@ -11,7 +11,7 @@ from pathlib import Path
 from textwrap import dedent
 from typing import Any
 from unittest.mock import MagicMock
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -113,7 +113,7 @@ def make_runner(reporter) -> Runner:
 def _resource_graph(*tests: SingleTest):
     return registry.compile_graph(
         {
-            test.node_key: (
+            test.execution_id: (
                 test.definition.spec,
                 tuple(
                     param
@@ -123,7 +123,7 @@ def _resource_graph(*tests: SingleTest):
             )
             for test in tests
         },
-        autouse_keys=frozenset(test.node_key for test in tests),
+        autouse_keys=frozenset(test.execution_id for test in tests),
     )
 
 
@@ -249,7 +249,7 @@ class TestFactoryDispatch:
         assert len(built.children) == 3
         assert all(isinstance(c, SingleTest) for c in built.children)
 
-    def test_assigns_node_keys_across_modifier_tree(self):
+    def test_assigns_execution_ids_across_modifier_tree(self):
         make_run_context(Config())
         factory = DefaultTestFactory()
 
@@ -258,11 +258,13 @@ class TestFactoryDispatch:
                 modifiers=(IterateModifier(count=2, min_passes=2),),
             )
         )
-        assert iterate.node_key == "test_module::sample"
-        assert [child.node_key for child in iterate.children] == [
-            "test_module::sample/iterations[0]",
-            "test_module::sample/iterations[1]",
-        ]
+        assert isinstance(iterate.execution_id, UUID)
+        assert len(
+            {
+                iterate.execution_id,
+                *(child.execution_id for child in iterate.children),
+            }
+        ) == 3
 
         params = factory.build(
             self._definition(
@@ -277,10 +279,7 @@ class TestFactoryDispatch:
                 ),
             )
         )
-        assert [child.node_key for child in params.children] == [
-            "test_module::sample/parameter sets[0]=one",
-            "test_module::sample/parameter sets[1]=two",
-        ]
+        assert len({child.execution_id for child in params.children}) == 2
 
         cases = factory.build(
             self._definition(
@@ -295,10 +294,7 @@ class TestFactoryDispatch:
                 ),
             )
         )
-        assert [child.node_key for child in cases.children] == [
-            "test_module::sample/cases[0]={'slug': 'one'}",
-            "test_module::sample/cases[1]={'slug': 'two'}",
-        ]
+        assert len({child.execution_id for child in cases.children}) == 2
 
         groups = factory.build(
             self._definition(
@@ -315,10 +311,11 @@ class TestFactoryDispatch:
                 ),
             )
         )
-        assert groups.children[0].node_key == "test_module::sample/groups[0]=alpha"
-        assert groups.children[0].children[0].node_key == (
-            "test_module::sample/groups[0]=alpha/cases[0]={'slug': 'a'}"
-        )
+        child = groups.children[0]
+        grandchild = child.children[0]
+        assert len(
+            {groups.execution_id, child.execution_id, grandchild.execution_id}
+        ) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -332,12 +329,14 @@ class TestSingleTestSubprocess:
             modifiers=[IterateModifier(count=2, min_passes=2)],
             backend=ExecutionBackend.SUBPROCESS,
         )
-        with pytest.raises(ValueError, match="SingleTest should not have modifiers"):
-            make_run_context()
+        make_run_context()
+        with pytest.raises(
+            ValueError, match="SingleTest should not have modifiers"
+        ):
             SingleTest(
                 definition=definition,
                 params={},
-                node_key=definition.spec.full_name,
+                execution_id=uuid4(),
                 backend=ExecutionBackend.SUBPROCESS,
             )
 
@@ -369,7 +368,7 @@ class TestSingleTestSubprocess:
         remote = SingleTest(
             definition=definition,
             params={},
-            node_key=definition.spec.full_name,
+            execution_id=uuid4(),
             backend=ExecutionBackend.SUBPROCESS,
         )
 
@@ -392,7 +391,7 @@ class TestSingleTestSubprocess:
         assert payload.context.config.otel is False
         assert payload.context.run_id == UUID(int=1)
         assert payload.execution_id == execution.execution_id
-        assert payload.resource_key == remote.node_key
+        assert payload.execution_id == remote.execution_id
         assert [
             s.locator.function_name for s in payload.snapshot.resource_order
         ] == [
@@ -437,7 +436,7 @@ class TestSingleTestSubprocess:
         remote = SingleTest(
             definition=definition,
             params={},
-            node_key=definition.spec.full_name,
+            execution_id=uuid4(),
             backend=ExecutionBackend.SUBPROCESS,
         )
 
@@ -463,7 +462,7 @@ class TestSingleTestSubprocess:
         remote = SingleTest(
             definition=definition,
             params={},
-            node_key=definition.spec.full_name,
+            execution_id=uuid4(),
             backend=ExecutionBackend.SUBPROCESS,
             is_stopped=lambda: True,
         )
@@ -494,7 +493,7 @@ class TestSingleTestSubprocess:
         remote = SingleTest(
             definition=definition,
             params={},
-            node_key=definition.spec.full_name,
+            execution_id=uuid4(),
             backend=ExecutionBackend.SUBPROCESS,
         )
 
@@ -526,7 +525,7 @@ class TestSingleTestSubprocess:
         remote = SingleTest(
             definition=definition,
             params={},
-            node_key=definition.spec.full_name,
+            execution_id=uuid4(),
             backend=ExecutionBackend.SUBPROCESS,
             on_complete=capture,
         )
@@ -561,7 +560,7 @@ class TestSingleTestSubprocess:
                     suite_root=tmp_path,
                 ),
                 params={},
-                node_key=f"test_module::sample_{idx}",
+                execution_id=uuid4(),
                 backend=ExecutionBackend.SUBPROCESS,
                 semaphore=semaphore,
             )

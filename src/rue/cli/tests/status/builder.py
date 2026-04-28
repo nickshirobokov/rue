@@ -6,6 +6,7 @@ import asyncio
 from collections import defaultdict
 from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
 from rue.cli.tests.status.models import (
     StatusIssue,
@@ -17,20 +18,21 @@ from rue.context.runtime import RunContext
 from rue.resources import ResourceGraph, ResourceResolver, ResourceSpec
 from rue.resources.registry import registry as default_resource_registry
 from rue.storage.sqlite import SQLiteStore
-from rue.storage.sqlite.store import MAX_STORED_RUNS
 from rue.testing.discovery import TestLoader
 from rue.testing.execution.base import ExecutableTest
 from rue.testing.execution.factory import DefaultTestFactory
 from rue.testing.execution.single import SingleTest
-from rue.testing.models import Run, TestSpecCollection, TestStatus
+from rue.testing.models import TestSpecCollection
 
 
 class TestsStatusBuilder:
-    """Build status reports from discovered tests and recent run history."""
+    """Build status reports from discovered tests."""
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self._issues_by_key: dict[str, list[StatusIssue]] = defaultdict(list)
+        self._issues_by_execution_id: dict[UUID, list[StatusIssue]] = defaultdict(
+            list
+        )
 
     def build(
         self,
@@ -40,7 +42,7 @@ class TestsStatusBuilder:
     ) -> TestsStatusReport:
         """Return the current test status report for a collection."""
         default_resource_registry.reset()
-        self._issues_by_key = defaultdict(list)
+        self._issues_by_execution_id = defaultdict(list)
 
         items = TestLoader(collection.suite_root).load_from_collection(
             collection
@@ -50,31 +52,21 @@ class TestsStatusBuilder:
             factory = DefaultTestFactory()
             tests = [factory.build(item, enqueue=False) for item in items]
 
-            if store is None:
-                run_window: tuple[Run, ...] = ()
-                history_by_key = {
-                    node.node_key: ()
-                    for test in tests
-                    for node in test.walk()
-                }
-            else:
-                run_window = tuple(store.list_runs(limit=MAX_STORED_RUNS))
-                history_by_key = store.get_test_history_for_tests(
-                    tests,
-                    limit=MAX_STORED_RUNS,
-                )
-
             leaves = [
                 leaf
                 for test in tests
                 for leaf in test.leaves()
                 if isinstance(leaf, SingleTest)
             ]
-            connected_by_key, graphs_by_key = self._collect_static_dependencies(
-                leaves
+            connected_by_execution_id, graphs_by_execution_id = (
+                self._collect_static_dependencies(leaves)
             )
-            resources_by_key = asyncio.run(
-                self._preflight(leaves, connected_by_key, graphs_by_key)
+            resources_by_execution_id = asyncio.run(
+                self._preflight(
+                    leaves,
+                    connected_by_execution_id,
+                    graphs_by_execution_id,
+                )
             )
 
             module_nodes: dict[Path, list[StatusNode]] = defaultdict(list)
@@ -82,13 +74,12 @@ class TestsStatusBuilder:
                 module_nodes[test.definition.spec.locator.module_path].append(
                     self._finalize_node(
                         test,
-                        history_by_key,
-                        resources_by_key,
+                        resources_by_execution_id,
                     )
                 )
 
             return TestsStatusReport(
-                run_window=run_window,
+                run_window=(),
                 module_nodes=dict(module_nodes),
             )
 
@@ -96,16 +87,16 @@ class TestsStatusBuilder:
         self,
         leaves: list[SingleTest],
     ) -> tuple[
-        dict[str, tuple[ResourceSpec, ...]],
-        dict[str, ResourceGraph],
+        dict[UUID, tuple[ResourceSpec, ...]],
+        dict[UUID, ResourceGraph],
     ]:
-        connected_by_key: dict[str, tuple[ResourceSpec, ...]] = {}
-        graphs_by_key: dict[str, ResourceGraph] = {}
+        connected_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]] = {}
+        graphs_by_execution_id: dict[UUID, ResourceGraph] = {}
         for leaf in leaves:
             try:
                 graph = default_resource_registry.compile_graph(
                     {
-                        leaf.node_key: (
+                        leaf.execution_id: (
                             leaf.definition.spec,
                             tuple(
                                 param
@@ -114,41 +105,46 @@ class TestsStatusBuilder:
                             ),
                         )
                     },
-                    autouse_keys=frozenset({leaf.node_key}),
+                    autouse_keys=frozenset({leaf.execution_id}),
                 )
-                graphs_by_key[leaf.node_key] = graph
-                connected_by_key[leaf.node_key] = graph.order_by_key[
-                    leaf.node_key
+                graphs_by_execution_id[leaf.execution_id] = graph
+                connected_by_execution_id[leaf.execution_id] = graph.order_by_key[
+                    leaf.execution_id
                 ]
             except Exception as error:
-                self._add_issue(leaf.node_key, "resolve", str(error))
-                connected_by_key[leaf.node_key] = ()
-        return connected_by_key, graphs_by_key
+                self._add_issue(leaf.execution_id, "resolve", str(error))
+                connected_by_execution_id[leaf.execution_id] = ()
+        return connected_by_execution_id, graphs_by_execution_id
 
     async def _preflight(
         self,
         leaves: list[SingleTest],
-        connected_by_key: dict[str, tuple[ResourceSpec, ...]],
-        graphs_by_key: dict[str, ResourceGraph],
-    ) -> dict[str, dict[str, tuple[ResourceSpec, ...]]]:
-        resources_by_key: dict[str, dict[str, tuple[ResourceSpec, ...]]] = {}
+        connected_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]],
+        graphs_by_execution_id: dict[UUID, ResourceGraph],
+    ) -> dict[UUID, dict[str, tuple[ResourceSpec, ...]]]:
+        resources_by_execution_id: dict[
+            UUID, dict[str, tuple[ResourceSpec, ...]]
+        ] = {}
 
         for leaf in leaves:
-            connected = connected_by_key[leaf.node_key]
-            if leaf.node_key not in graphs_by_key:
-                resources_by_key[leaf.node_key] = {}
+            execution_id = leaf.execution_id
+            connected = connected_by_execution_id[execution_id]
+            if execution_id not in graphs_by_execution_id:
+                resources_by_execution_id[execution_id] = {}
                 continue
 
             resolver = ResourceResolver(default_resource_registry)
             try:
-                default_resource_registry.graph = graphs_by_key[leaf.node_key]
+                default_resource_registry.graph = graphs_by_execution_id[
+                    execution_id
+                ]
                 await resolver.resolve_consumer(
-                    leaf.node_key,
+                    execution_id,
                     leaf.params,
                     consumer_spec=leaf.definition.spec,
                 )
             except Exception as error:
-                self._add_issue(leaf.node_key, "resolve", str(error))
+                self._add_issue(execution_id, "resolve", str(error))
             finally:
                 grouped_resources: dict[str, list[ResourceSpec]] = {}
                 for identity in connected:
@@ -159,43 +155,43 @@ class TestsStatusBuilder:
                         type(value).__name__,
                         [],
                     ).append(identity)
-                resources_by_key[leaf.node_key] = {
+                resources_by_execution_id[execution_id] = {
                     type_name: tuple(specs)
                     for type_name, specs in grouped_resources.items()
                 }
                 try:
                     await resolver.teardown()
                 except Exception as error:
-                    self._add_issue(leaf.node_key, "resolve", str(error))
+                    self._add_issue(execution_id, "resolve", str(error))
 
-        return resources_by_key
+        return resources_by_execution_id
 
     def _add_issue(
         self,
-        node_key: str,
+        execution_id: UUID,
         phase: Literal["resolve"],
         message: str,
     ) -> None:
         if any(
             issue.phase == phase and issue.message == message
-            for issue in self._issues_by_key[node_key]
+            for issue in self._issues_by_execution_id[execution_id]
         ):
             return
-        self._issues_by_key[node_key].append(
-            StatusIssue(phase=phase, message=message, node_key=node_key)
+        self._issues_by_execution_id[execution_id].append(
+            StatusIssue(phase=phase, message=message)
         )
 
     def _finalize_node(
         self,
         test: ExecutableTest,
-        history_by_key: dict[str, tuple[TestStatus | None, ...]],
-        resources_by_key: dict[str, dict[str, tuple[ResourceSpec, ...]]],
+        resources_by_execution_id: dict[
+            UUID, dict[str, tuple[ResourceSpec, ...]]
+        ],
     ) -> StatusNode:
         children = tuple(
             self._finalize_node(
                 child,
-                history_by_key,
-                resources_by_key,
+                resources_by_execution_id,
             )
             for child in test.children
         )
@@ -205,9 +201,13 @@ class TestsStatusBuilder:
         return StatusNode(
             definition=test.definition,
             backend=test.backend,
-            history=history_by_key.get(test.node_key, ()),
-            issues=tuple(self._issues_by_key.get(test.node_key, ())),
-            resources_by_type=resources_by_key.get(test.node_key, {}),
+            history=(),
+            issues=tuple(
+                self._issues_by_execution_id.get(test.execution_id, ())
+            ),
+            resources_by_type=resources_by_execution_id.get(
+                test.execution_id, {}
+            ),
             children=children,
             leaf_count=leaf_count,
         )

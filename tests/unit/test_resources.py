@@ -4,6 +4,7 @@ import asyncio
 import builtins
 from pathlib import Path
 from textwrap import dedent
+from uuid import UUID
 
 import pytest
 
@@ -19,6 +20,9 @@ from rue.resources import (
 )
 from rue.testing.models import LoadedTestDef
 from tests.unit.factories import make_definition
+
+
+_TEST_GRAPH_KEY = UUID(int=1)
 
 
 def _make_item(
@@ -49,7 +53,7 @@ def _resource_graph(
     resource_names: tuple[str, ...],
     *,
     consumer_spec=None,
-    key: str = "test",
+    key: UUID = _TEST_GRAPH_KEY,
 ):
     consumer = consumer_spec or _consumer_spec()
     return resource_registry.compile_graph({key: (consumer, resource_names)})
@@ -68,7 +72,7 @@ async def _resolve(
         consumer_spec=consumer,
     )
     return await resolver.resolve_resource(
-        graph.injections_by_key["test"][name],
+        graph.injections_by_key[_TEST_GRAPH_KEY][name],
         consumer_spec=consumer,
     )
 
@@ -249,11 +253,16 @@ class TestResourceRegistry:
 
         graph = _resource_graph(registry, ("leaf",))
 
-        root_names = [identity.name for identity in graph.roots_by_key["test"]]
-        node_names = [identity.name for identity in graph.order_by_key["test"]]
+        root_names = [
+            identity.name for identity in graph.roots_by_key[_TEST_GRAPH_KEY]
+        ]
+        node_names = [
+            identity.name for identity in graph.order_by_key[_TEST_GRAPH_KEY]
+        ]
         assert root_names == ["leaf"]
         assert node_names == ["leaf"]
-        assert graph.dependencies_by_spec[graph.roots_by_key["test"][0]] == ()
+        root = graph.roots_by_key[_TEST_GRAPH_KEY][0]
+        assert graph.dependencies_by_spec[root] == ()
 
     def test_compile_graph_transitive_dependency_first(self):
         @resource
@@ -269,7 +278,7 @@ class TestResourceRegistry:
             return middle
 
         graph = _resource_graph(registry, ("root",))
-        nodes = graph.order_by_key["test"]
+        nodes = graph.order_by_key[_TEST_GRAPH_KEY]
 
         node_names = [identity.name for identity in nodes]
         assert node_names == ["leaf", "middle", "root"]
@@ -294,14 +303,16 @@ class TestResourceRegistry:
             return left, right
 
         graph = _resource_graph(registry, ("root",))
-        root_spec = graph.roots_by_key["test"][0]
+        root_spec = graph.roots_by_key[_TEST_GRAPH_KEY][0]
         left_spec, right_spec = graph.dependencies_by_spec[root_spec]
 
         assert (
             graph.dependencies_by_spec[left_spec][0]
             == graph.dependencies_by_spec[right_spec][0]
         )
-        node_names = [identity.name for identity in graph.order_by_key["test"]]
+        node_names = [
+            identity.name for identity in graph.order_by_key[_TEST_GRAPH_KEY]
+        ]
         assert node_names == ["shared", "left", "right", "root"]
 
     def test_compile_graph_preserves_root_order(self):
@@ -315,7 +326,9 @@ class TestResourceRegistry:
 
         graph = _resource_graph(registry, ("right", "left"))
 
-        root_names = [identity.name for identity in graph.roots_by_key["test"]]
+        root_names = [
+            identity.name for identity in graph.roots_by_key[_TEST_GRAPH_KEY]
+        ]
         assert root_names == ["right", "left"]
 
     def test_compile_graph_keeps_same_name_run_roots(
@@ -347,13 +360,15 @@ class TestResourceRegistry:
             resource_decorator=custom_registry.resource,
         )
 
+        child_key = UUID(int=2)
+        sibling_key = UUID(int=3)
         graph = custom_registry.compile_graph(
             {
-                "child": (
+                child_key: (
                     _consumer_spec(module_path=child / "rue_child.py"),
                     ("shared",),
                 ),
-                "sibling": (
+                sibling_key: (
                     _consumer_spec(module_path=sibling / "rue_sibling.py"),
                     ("shared",),
                 ),
@@ -362,7 +377,7 @@ class TestResourceRegistry:
 
         assert {
             graph.roots_by_key[key][0].module_path.parent
-            for key in ("child", "sibling")
+            for key in (child_key, sibling_key)
         } == {child.resolve(), root.resolve()}
 
     def test_run_scope_keeps_directory_overrides(self, tmp_path):
@@ -413,8 +428,8 @@ class TestResourceRegistry:
         )
 
         assert {
-            root_graph.injections_by_key["test"]["shared"].module_path.parent,
-            child_graph.injections_by_key["test"]["shared"].module_path.parent,
+            root_graph.injections_by_key[_TEST_GRAPH_KEY]["shared"].module_path.parent,
+            child_graph.injections_by_key[_TEST_GRAPH_KEY]["shared"].module_path.parent,
         } == {root.resolve(), child.resolve()}
         assert root_selected.spec.scope == Scope.RUN
         assert child_selected.spec.scope == Scope.RUN
@@ -460,13 +475,13 @@ class TestResourceRegistry:
         )
 
         assert (
-            child_graph.injections_by_key["test"][
+            child_graph.injections_by_key[_TEST_GRAPH_KEY][
                 "shared"
             ].module_path.parent
             == child.resolve()
         )
         assert (
-            sibling_graph.injections_by_key["test"][
+            sibling_graph.injections_by_key[_TEST_GRAPH_KEY][
                 "shared"
             ].module_path.parent
             == root.resolve()
@@ -499,7 +514,7 @@ class TestResourceRegistry:
             consumer_spec=_consumer_spec(module_path=root / "rue_test.py"),
         )
         selected = custom_registry.definition(
-            graph.injections_by_key["test"]["shared"]
+            graph.injections_by_key[_TEST_GRAPH_KEY]["shared"]
         )
 
         assert selected.spec.scope == Scope.MODULE
@@ -547,7 +562,7 @@ class TestResourceRegistry:
         assert builtin_session_def.fn() == "builtin-session"
         with pytest.raises(ValueError, match="Unknown resource"):
             custom_registry.compile_graph(
-                {"test": (_consumer_spec(), ("extra_resource",))}
+                {_TEST_GRAPH_KEY: (_consumer_spec(), ("extra_resource",))}
             )
 
 
@@ -1313,7 +1328,7 @@ class TestResourceResolutionErrors:
         with pytest.raises(ValueError, match="Unknown resource: unknown"):
             registry.compile_graph(
                 {
-                    "test": (
+                    _TEST_GRAPH_KEY: (
                         _consumer_spec(module_path=Path("tests/test_sample.py")),
                         ("unknown",),
                     )
@@ -1334,7 +1349,7 @@ class TestResourceResolutionErrors:
             RuntimeError, match="Circular resource dependency detected"
         ):
             registry.compile_graph(
-                {"test": (_consumer_spec(), ("shared_left",))}
+                {_TEST_GRAPH_KEY: (_consumer_spec(), ("shared_left",))}
             )
 
     def test_compile_graph_raises_for_circular_dependency(self):
@@ -1351,7 +1366,7 @@ class TestResourceResolutionErrors:
         ):
             registry.compile_graph(
                 {
-                    "test": (
+                    _TEST_GRAPH_KEY: (
                         _consumer_spec(module_path=Path("tests/test_sample.py")),
                         ("shared_left",),
                     )
