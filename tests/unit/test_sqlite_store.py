@@ -1,9 +1,12 @@
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 from rue.assertions.base import AssertionRepr, AssertionResult
 from rue.config import Config
+from rue.context.runtime import TestContext
+from rue.models import Locator
 from rue.predicates.models import PredicateResult
 from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.base import (
@@ -76,15 +79,19 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         first_item_recorded_at=start_time,
         last_item_recorded_at=end_time,
         identity=ResourceSpec(
-            name="latency_ms",
+            locator=Locator(
+                module_path=Path("/tmp/project/confrue_root.py"),
+                function_name="latency_ms",
+            ),
             scope=Scope.TEST,
-            provider_path="/tmp/project/confrue_root.py",
-            provider_dir="/tmp/project",
         ),
-        collected_from_tests={"test_test"},
-        collected_from_resources={"resource"},
-        collected_from_cases={"case-1"},
-        collected_from_modules={"tests/test_sample.py"},
+        consumers=[
+            definition.spec,
+            ResourceSpec(
+                locator=Locator(module_path=None, function_name="resource"),
+                scope=Scope.RUN,
+            ),
+        ],
     )
     metric_result = MetricResult(
         metadata=metric_metadata,
@@ -92,13 +99,13 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         value=12.5,
         dependencies=[
             ResourceSpec(
-                name="overall_latency",
+                locator=Locator(
+                    module_path=Path("/tmp/project/confrue_root.py"),
+                    function_name="overall_latency",
+                ),
                 scope=Scope.RUN,
-                provider_path="/tmp/project/confrue_root.py",
-                provider_dir="/tmp/project",
             )
         ],
-        execution_id=execution_id,
     )
 
     environment = make_environment(
@@ -141,25 +148,40 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     assert len(loaded.result.executions[0].sub_executions) == 1
     assert len(loaded.result.metric_results) == 1
     assert (
-        loaded.result.metric_results[0].metadata.identity.name == "latency_ms"
+        loaded.result.metric_results[0]
+        .metadata.identity.locator.function_name
+        == "latency_ms"
     )
     assert loaded.result.metric_results[0].value == 12.5
     assert loaded.result.metric_results[0].metadata.identity.scope == Scope.TEST
-    assert loaded.result.metric_results[0].metadata.collected_from_modules == {
-        "tests/test_sample.py"
-    }
-    assert loaded.result.metric_results[0].metadata.identity.provider_path == (
-        "/tmp/project/confrue_root.py"
+    consumers = loaded.result.metric_results[0].metadata.consumers
+    test_consumer = next(
+        consumer
+        for consumer in consumers
+        if consumer.locator.function_name == "test_one"
     )
-    assert loaded.result.metric_results[0].metadata.identity.provider_dir == (
-        "/tmp/project"
+    assert test_consumer.locator.module_path == Path("tests/test_sample.py")
+    assert test_consumer.case_id == case_id
+    assert (
+        loaded.result.metric_results[0].metadata.identity.locator.module_path
+        == Path("/tmp/project/confrue_root.py")
     )
+    assert loaded.result.metric_results[0].metadata.direct_providers == [
+        ResourceSpec(
+            locator=Locator(
+                module_path=Path("/tmp/project/confrue_root.py"),
+                function_name="overall_latency",
+            ),
+            scope=Scope.RUN,
+        )
+    ]
     assert loaded.result.metric_results[0].dependencies == [
         ResourceSpec(
-            name="overall_latency",
+            locator=Locator(
+                module_path=Path("/tmp/project/confrue_root.py"),
+                function_name="overall_latency",
+            ),
             scope=Scope.RUN,
-            provider_path="/tmp/project/confrue_root.py",
-            provider_dir="/tmp/project",
         )
     ]
 
@@ -202,19 +224,20 @@ def test_sqlite_store_assertions_and_predicates(
         confidence=0.3,
         message="nope",
     )
-    assertion = AssertionResult(
-        expression_repr=AssertionRepr(
-            expr="x == y",
-            lines_above="",
-            lines_below="",
-            resolved_args={},
-        ),
-        passed=False,
-        error_message="bad",
-        predicate_results=[predicate_result],
-    )
-
     definition = make_definition("test_one", module_path="tests/test_sample.py")
+    make_run_context(db_enabled=False)
+    with TestContext(item=definition, execution_id=execution_id):
+        assertion = AssertionResult(
+            expression_repr=AssertionRepr(
+                expr="x == y",
+                lines_above="",
+                lines_below="",
+                resolved_args={},
+            ),
+            passed=False,
+            error_message="bad",
+            predicate_results=[predicate_result],
+        )
     execution = ExecutedTest(
         definition=definition,
         result=TestResult(
@@ -228,22 +251,25 @@ def test_sqlite_store_assertions_and_predicates(
     )
 
     metric_metadata = MetricMetadata(
-        identity=ResourceSpec(name="count", scope=Scope.RUN)
+        identity=ResourceSpec(
+            locator=Locator(module_path=None, function_name="count"),
+            scope=Scope.RUN,
+        )
     )
-    metric_assertion = AssertionResult(
-        expression_repr=AssertionRepr(
-            expr="metric > 0",
-            lines_above="",
-            lines_below="",
-            resolved_args={},
-        ),
-        passed=True,
-    )
+    with TestContext(item=definition, execution_id=execution_id):
+        metric_assertion = AssertionResult(
+            expression_repr=AssertionRepr(
+                expr="metric > 0",
+                lines_above="",
+                lines_below="",
+                resolved_args={},
+            ),
+            passed=True,
+        )
     metric_result = MetricResult(
         metadata=metric_metadata,
         assertion_results=[metric_assertion],
         value=[1, 2, 3],
-        execution_id=None,
     )
 
     run = Run(

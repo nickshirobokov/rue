@@ -196,15 +196,15 @@ class StatusRenderer:
 
     def _resource_text(self, spec: ResourceSpec) -> Text:
         text = Text()
-        text.append(spec.name)
+        text.append(spec.locator.function_name)
         text.append(
             f" [scope: {spec.scope.value}]",
             style=_RESOURCE_SCOPE_STYLE,
         )
-        origin = spec.provider_path or spec.provider_dir
+        origin = spec.locator.module_path
         if origin:
             text.append(
-                f" @ {_safe_relative_path(Path(origin)).as_posix()}",
+                f" @ {_safe_relative_path(origin).as_posix()}",
                 style="dim",
             )
         return text

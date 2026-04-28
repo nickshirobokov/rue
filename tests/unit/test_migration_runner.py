@@ -273,13 +273,15 @@ class TestMigrationRunner:
             for row in conn.execute("PRAGMA table_info(metrics)").fetchall()
         }
         provider = conn.execute(
-            "SELECT provider_name, provider_scope, collected_from_modules_json, "
+            "SELECT provider_name, provider_scope, consumers_json, "
             "depends_on_metrics_json FROM metrics"
         ).fetchone()
 
         assert "provider_name" in columns
         assert "provider_scope" in columns
-        assert "collected_from_modules_json" in columns
+        assert "consumers_json" in columns
+        assert "collected_from_modules_json" not in columns
+        assert "test_execution_id" not in columns
         assert "depends_on_metrics_json" in columns
         assert provider == ("quality", "run", None, None)
         conn.close()

@@ -10,7 +10,7 @@ from itertools import product
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from rue.context.runtime import CURRENT_RESOURCE_RESOLVER, bind
+from rue.models import Spec
 from rue.resources import MonkeyPatch, Scope
 
 
@@ -23,17 +23,14 @@ if TYPE_CHECKING:
 _RECEIVER_PARAMETER_NAMES = {"self", "cls"}
 
 
-@dataclass(frozen=True, slots=True)
-class ExperimentSpec:
+@dataclass(slots=True)
+class ExperimentSpec(Spec):
     """Registered experiment dimension and live hook."""
 
-    name: str
     values: tuple[Any, ...] = field(repr=False, compare=False)
     ids: tuple[str, ...]
     fn: Callable[..., Any] = field(repr=False, compare=False)
     dependencies: tuple[str, ...] = field(default=(), compare=False)
-    provider_path: str | None = None
-    provider_dir: str | None = None
 
     async def apply(
         self,
@@ -43,13 +40,22 @@ class ExperimentSpec:
     ) -> None:
         """Apply this experiment hook to the current run process."""
         kwargs: dict[str, Any] = {"value": self.values[value_index]}
-        with bind(CURRENT_RESOURCE_RESOLVER, resolver):
-            for dependency in self.dependencies:
-                if dependency == "monkeypatch":
-                    kwargs[dependency] = MonkeyPatch(scope=Scope.RUN)
-                else:
-                    kwargs[dependency] = await resolver.resolve(dependency)
+        for dependency in self.dependencies:
+            if dependency == "monkeypatch":
+                kwargs[dependency] = MonkeyPatch(
+                    resolver=resolver,
+                    scope=Scope.RUN,
+                )
+            else:
+                kwargs[dependency] = await resolver.resolve(
+                    dependency,
+                    consumer_spec=self,
+                )
 
+        with resolver.open_transaction(
+            consumer_spec=self,
+            provider_spec=self,
+        ):
             result = self.fn(**kwargs)
             if inspect.isawaitable(result):
                 await result
@@ -75,7 +81,7 @@ class ExperimentVariant:
                     index=index,
                     values=tuple(
                         (
-                            experiment.name,
+                            experiment.locator.function_name,
                             value_index,
                             experiment.ids[value_index],
                         )
@@ -95,7 +101,8 @@ class ExperimentVariant:
     ) -> None:
         """Apply this variant's selected experiment hooks."""
         definitions = {
-            experiment.name: experiment for experiment in experiments
+            experiment.locator.function_name: experiment
+            for experiment in experiments
         }
         for name, value_index, _value_id in self.values:
             await definitions[name].apply(
@@ -208,5 +215,5 @@ class ExperimentVariantResult:
             value_str = "N/A"
         else:
             value_str = str(value)
-        name = metric.metadata.identity.name
+        name = metric.metadata.identity.locator.function_name
         return (name, value_str)

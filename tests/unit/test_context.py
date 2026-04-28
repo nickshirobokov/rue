@@ -1,5 +1,5 @@
 import asyncio
-from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -9,15 +9,15 @@ from rue.context.collectors import (
     CURRENT_ASSERTION_RESULTS,
 )
 from rue.context.runtime import (
-    CURRENT_RESOURCE_CONSUMER,
     CURRENT_TEST,
     TestContext as Ctx,
     bind,
 )
+from rue.models import Locator
 from rue.resources import ResourceSpec, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata
 from rue.testing.models import LoadedTestDef
-from tests.unit.factories import make_definition
+from tests.unit.factories import make_definition, make_run_context
 
 
 def _make_item(
@@ -31,6 +31,11 @@ def _make_item(
     )
 
 
+def _ctx(name: str = "test_fn") -> Ctx:
+    make_run_context(db_enabled=False)
+    return Ctx(item=_make_item(name), execution_id=uuid4())
+
+
 @pytest.fixture(autouse=True)
 def clean_registry():
     """Avoid cross-test leakage of globally-registered metric resources."""
@@ -42,7 +47,7 @@ def clean_registry():
 def test_assertionresult_appends_to_test_context():
     assertion_results: list[AssertionResult] = []
 
-    with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
+    with _ctx(), bind(CURRENT_ASSERTION_RESULTS, assertion_results):
         ar = AssertionResult(
             passed=True,
             expression_repr=AssertionRepr(
@@ -56,36 +61,43 @@ def test_assertionresult_appends_to_test_context():
     assert assertion_results == [ar]
 
     # Outside the scope, assertion results should not be auto-attached.
-    ar2 = AssertionResult(
-        passed=True,
-        expression_repr=AssertionRepr(
-            expr="a == b",
-            lines_above="",
-            lines_below="",
-            resolved_args={},
-        ),
-    )
+    with _ctx():
+        ar2 = AssertionResult(
+            passed=True,
+            expression_repr=AssertionRepr(
+                expr="a == b",
+                lines_above="",
+                lines_below="",
+                resolved_args={},
+            ),
+        )
     assert assertion_results == [ar]
     assert ar2 not in assertion_results
 
 
-def test_metrics_records_assertion_passed_and_reads_test_context_for_metadata():
-    test_ctx = Ctx(item=_make_item("my_merit"))
+def test_metrics_records_assertion_passed_without_test_context_metadata():
+    test_ctx = _ctx("my_merit")
 
     m1 = Metric(
         metadata=MetricMetadata(
-            identity=ResourceSpec(name="m1", scope=Scope.RUN)
+            identity=ResourceSpec(
+                locator=Locator(module_path=None, function_name="m1"),
+                scope=Scope.RUN,
+            )
         )
     )
     m2 = Metric(
         metadata=MetricMetadata(
-            identity=ResourceSpec(name="m2", scope=Scope.RUN)
+            identity=ResourceSpec(
+                locator=Locator(module_path=None, function_name="m2"),
+                scope=Scope.RUN,
+            )
         )
     )
 
-    with bind(CURRENT_TEST, test_ctx), metrics(m1, m2):
+    with test_ctx, metrics(m1, m2):
         # AssertionResult.__post_init__ calls metric.add_record(self.passed)
-        ar1 = AssertionResult(
+        AssertionResult(
             passed=True,
             expression_repr=AssertionRepr(
                 expr="first",
@@ -94,7 +106,7 @@ def test_metrics_records_assertion_passed_and_reads_test_context_for_metadata():
                 resolved_args={},
             ),
         )
-        ar2 = AssertionResult(
+        AssertionResult(
             passed=False,
             expression_repr=AssertionRepr(
                 expr="second",
@@ -107,30 +119,37 @@ def test_metrics_records_assertion_passed_and_reads_test_context_for_metadata():
     assert m1.raw_values == [True, False]
     assert m2.raw_values == [True, False]
 
-    # add_record is called from AssertionResult.__post_init__, so attribution should be captured.
-    assert "my_merit" in m1.metadata.collected_from_tests
+    # add_record no longer records consumers; metric resources get them from
+    # resolver injection hooks.
+    assert m1.metadata.consumers == []
+    assert m2.metadata.consumers == []
 
 
 def test_bind_restores_previous_value():
-    assert CURRENT_RESOURCE_CONSUMER.get() is None
+    outer = _ctx("outer")
+    inner = _ctx("inner")
 
-    with bind(CURRENT_RESOURCE_CONSUMER, "outer"):
-        assert CURRENT_RESOURCE_CONSUMER.get() == "outer"
-        with bind(CURRENT_RESOURCE_CONSUMER, "inner"):
-            assert CURRENT_RESOURCE_CONSUMER.get() == "inner"
-        assert CURRENT_RESOURCE_CONSUMER.get() == "outer"
+    with outer:
+        assert CURRENT_TEST.get().item.spec.locator.function_name == "outer"
+        with inner:
+            assert (
+                CURRENT_TEST.get().item.spec.locator.function_name == "inner"
+            )
+        assert CURRENT_TEST.get().item.spec.locator.function_name == "outer"
 
-    assert CURRENT_RESOURCE_CONSUMER.get() is None
+    with pytest.raises(LookupError):
+        CURRENT_TEST.get()
 
 
 @pytest.mark.asyncio
 async def test_bind_isolates_values_between_tasks():
-    async def read_value(name: str) -> str | None:
-        with bind(CURRENT_RESOURCE_CONSUMER, name):
+    async def read_value(name: str) -> str:
+        with _ctx(name):
             await asyncio.sleep(0)
-            return CURRENT_RESOURCE_CONSUMER.get()
+            return CURRENT_TEST.get().item.spec.locator.function_name
 
     values = await asyncio.gather(read_value("left"), read_value("right"))
 
     assert values == ["left", "right"]
-    assert CURRENT_RESOURCE_CONSUMER.get() is None
+    with pytest.raises(LookupError):
+        CURRENT_TEST.get()

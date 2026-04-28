@@ -14,6 +14,7 @@ from rue.experiments.models import (
     ExperimentVariant,
     ExperimentVariantResult,
 )
+from rue.models import Locator
 from rue.storage.sqlite import SQLiteStore
 from rue.testing import LoadedTestDef
 from rue.testing.models.run import Run, RunEnvironment, RunResult
@@ -185,7 +186,6 @@ def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
             *,
             reporters,
             store=None,
-            fail_fast=False,
             capture_output=True,
         ) -> None:
             context = CURRENT_RUN_CONTEXT.get()
@@ -193,7 +193,6 @@ def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
             captured["config"] = context.config
             captured["reporters"] = reporters
             captured["store"] = store
-            captured["fail_fast"] = fail_fast
             captured["capture_output"] = capture_output
 
         async def run(self, items, *, resolver):
@@ -220,12 +219,14 @@ def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
             str(tmp_path / "rue.db"),
             "--reporter",
             "ConsoleReporter",
+            "--fail-fast",
             "--show-output",
         ],
     )
 
     assert result.exit_code == 0
     assert captured["config"].reporters == ["ConsoleReporter"]
+    assert captured["config"].fail_fast is True
     assert [type(r).__name__ for r in captured["reporters"]] == [
         "ConsoleReporter"
     ]
@@ -265,7 +266,6 @@ def test_tests_without_subcommand_defaults_to_run(monkeypatch):
             *,
             reporters,
             store=None,
-            fail_fast=False,
             capture_output=True,
         ) -> None:
             context = CURRENT_RUN_CONTEXT.get()
@@ -273,7 +273,6 @@ def test_tests_without_subcommand_defaults_to_run(monkeypatch):
             captured["config"] = context.config
             captured["reporters"] = reporters
             captured["store"] = store
-            captured["fail_fast"] = fail_fast
             captured["capture_output"] = capture_output
 
         async def run(self, items, *, resolver):
@@ -287,7 +286,8 @@ def test_tests_without_subcommand_defaults_to_run(monkeypatch):
         return TestSpecCollection(suite_root=Path.cwd())
 
     monkeypatch.setattr(
-        "rue.cli.tests.run.load_config", lambda: Config(db_enabled=False)
+        "rue.cli.tests.run.load_config",
+        lambda: Config(db_enabled=False, fail_fast=True),
     )
     monkeypatch.setattr(
         "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
@@ -303,6 +303,7 @@ def test_tests_without_subcommand_defaults_to_run(monkeypatch):
 
     assert result.exit_code == 0
     assert captured["paths"] == ["."]
+    assert captured["config"].fail_fast is True
     assert captured["store"] is None
 
 
@@ -397,7 +398,7 @@ def test_experiments_run_shares_selection_and_forces_no_db(
 ):
     captured: dict[str, object] = {}
     experiment = ExperimentSpec(
-        name="model",
+        locator=Locator(module_path=None, function_name="model"),
         values=("mini",),
         ids=("mini",),
         fn=lambda value: None,

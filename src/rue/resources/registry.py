@@ -5,6 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
 
+from rue.models import Locator
 from rue.resources.models import (
     LoadedResourceDef,
     ResourceSpec,
@@ -47,16 +48,17 @@ class ResourceRegistry:
 
     def _register(self, definition: LoadedResourceDef) -> None:
         ident = definition.spec
+        name = ident.locator.function_name
         if ident.scope == Scope.RUN:
-            run_defs = self._run_definitions.setdefault(ident.name, [])
+            run_defs = self._run_definitions.setdefault(name, [])
             run_defs.append(definition)
 
-            current = self._definitions.get(ident.name)
+            current = self._definitions.get(name)
             if current is None or current.spec.scope == Scope.RUN:
-                self._definitions[ident.name] = definition
+                self._definitions[name] = definition
             return
 
-        self._definitions[ident.name] = definition
+        self._definitions[name] = definition
 
     def resource(
         self,
@@ -86,18 +88,15 @@ class ResourceRegistry:
             is_async = inspect.iscoroutinefunction(fn)
             is_async_generator = inspect.isasyncgenfunction(fn)
             is_generator = inspect.isgeneratorfunction(fn)
-            origin_path, origin_dir = self._resource_origin(origin_fn or fn)
+            origin_path, _origin_dir = self._resource_origin(origin_fn or fn)
 
             definition = LoadedResourceDef(
                 spec=ResourceSpec(
-                    name=fn.__name__,
+                    locator=Locator(
+                        module_path=origin_path,
+                        function_name=fn.__name__,
+                    ),
                     scope=scope,
-                    provider_path=str(origin_path)
-                    if origin_path is not None
-                    else None,
-                    provider_dir=str(origin_dir)
-                    if origin_dir is not None
-                    else None,
                     dependencies=tuple(dependencies),
                     autouse=autouse,
                     sync=sync,
@@ -167,9 +166,10 @@ class ResourceRegistry:
         if request_path is not None:
             request_dir = request_path.resolve().parent
             for run_definition in self._run_definitions.get(name, []):
-                origin_dir = run_definition.spec.origin_dir
-                if origin_dir is None:
+                origin_path = run_definition.spec.locator.module_path
+                if origin_path is None:
                     continue
+                origin_dir = origin_path.parent
                 if not request_dir.is_relative_to(origin_dir):
                     continue
                 depth = len(origin_dir.parts)

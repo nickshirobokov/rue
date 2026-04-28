@@ -17,35 +17,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
+from rue.models import Locator, Spec
+
 
 if TYPE_CHECKING:
     from rue.testing.decorators.tag import TagData
     from rue.testing.models.modifiers import Modifier
 
 
-@dataclass(frozen=True)
-class TestLocator:
-    """Uniquely identifies a test function. Fully serializable.
-
-    Sufficient to find the function in any process that has access to the
-    filesystem and can import the module via a TestLoader.
-    """
-
-    module_path: Path
-    function_name: str
-    class_name: str | None = None
-
-    def __str__(self) -> str:
-        if self.class_name:
-            return (
-                f"{self.module_path.stem}::"
-                f"{self.class_name}::{self.function_name}"
-            )
-        return f"{self.module_path.stem}::{self.function_name}"
-
-
 @dataclass
-class TestSpec:
+class TestSpec(Spec):
     """Fully serializable test specification produced during discovery.
 
     Contains every piece of metadata needed to understand and schedule a
@@ -54,7 +35,7 @@ class TestSpec:
     ``TestLoader.load_definition()`` to obtain a runnable ``LoadedTestDef``.
     """
 
-    locator: TestLocator
+    locator: Locator
     is_async: bool
     params: tuple[str, ...]
     modifiers: tuple[Modifier, ...]
@@ -67,29 +48,18 @@ class TestSpec:
     case_id: UUID | None = None
     collection_index: int = -1
 
-    # --- Convenience accessors derived from locator / case fields ---
-
-    @property
-    def name(self) -> str:
-        return self.locator.function_name
-
-    @property
-    def module_path(self) -> Path:
-        return self.locator.module_path
-
-    @property
-    def class_name(self) -> str | None:
-        return self.locator.class_name
-
     @property
     def full_name(self) -> str:
         return str(self.locator)
 
     @property
     def local_name(self) -> str:
-        if self.class_name:
-            return f"{self.class_name}::{self.name}"
-        return self.name
+        if self.locator.class_name:
+            return (
+                f"{self.locator.class_name}::"
+                f"{self.locator.function_name}"
+            )
+        return self.locator.function_name
 
     def get_label(
         self,

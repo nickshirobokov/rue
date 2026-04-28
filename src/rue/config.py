@@ -119,6 +119,7 @@ class Config(BaseSettings):
     exclude_tags: list[str] = Field(default_factory=list)
     keyword: str | None = None
     maxfail: Annotated[int, Field(gt=0)] | None = None
+    fail_fast: bool = False
     verbosity: int = 0
     addopts: list[str] = Field(default_factory=list)
     concurrency: Annotated[int, Field(ge=0)] = 1

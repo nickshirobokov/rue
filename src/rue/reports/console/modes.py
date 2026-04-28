@@ -152,14 +152,14 @@ class CompactMode(OutputMode):
     ) -> None:
         definition = execution.definition
         style = STATUS_STYLES[execution.result.status]
-        if state.current_module != definition.spec.module_path:
+        if state.current_module != definition.spec.locator.module_path:
             if state.current_module is not None:
                 self.console.print()
             self.console.print(
-                _compact_module_text(definition.spec.module_path),
+                _compact_module_text(definition.spec.locator.module_path),
                 end="",
             )
-            state.current_module = definition.spec.module_path
+            state.current_module = definition.spec.locator.module_path
         self.console.print(Text(style.symbol, style=style.color), end="")
 
     def print_completed_module(
@@ -319,11 +319,13 @@ class VerboseMode(OutputMode):
         self, execution: ExecutedTest, state: ConsoleReporter
     ) -> None:
         definition = execution.definition
-        if state.current_module != definition.spec.module_path:
+        if state.current_module != definition.spec.locator.module_path:
             if state.current_module is not None:
                 self.console.print(Text(""))
-            self.console.print(_tree_module_text(definition.spec.module_path))
-            state.current_module = definition.spec.module_path
+            self.console.print(
+                _tree_module_text(definition.spec.locator.module_path)
+            )
+            state.current_module = definition.spec.locator.module_path
 
         if execution.sub_executions:
             self.console.print(

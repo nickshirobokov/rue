@@ -2,12 +2,15 @@
 
 import io
 from dataclasses import replace
-from uuid import UUID
+from pathlib import Path
+from uuid import UUID, uuid4
 
 import pytest
 from rich.console import Console
 
 from rue.assertions.base import AssertionRepr, AssertionResult
+from rue.context.runtime import TestContext
+from rue.models import Locator
 from rue.reports.console import ConsoleReporter
 from rue.reports.console.metrics import MetricGroup
 from rue.resources import ResourceSpec, Scope
@@ -25,7 +28,7 @@ from rue.testing.models import (
     TestResult,
     TestStatus,
 )
-from tests.unit.factories import make_definition
+from tests.unit.factories import make_definition, make_run_context
 
 
 class FakeLive:
@@ -100,6 +103,25 @@ def make_execution(
     )
 
 
+def make_assertion_result(
+    expression_repr: AssertionRepr,
+    *,
+    passed: bool,
+    error_message: str | None = None,
+) -> AssertionResult:
+    make_run_context(db_enabled=False)
+    ctx = TestContext(
+        item=make_item("test_assertion", "tests/test_assertions.py"),
+        execution_id=uuid4(),
+    )
+    with ctx:
+        return AssertionResult(
+            expression_repr=expression_repr,
+            passed=passed,
+            error_message=error_message,
+        )
+
+
 def render_to_text(renderable) -> str:
     output = io.StringIO()
     console = Console(
@@ -122,26 +144,41 @@ def make_metric_result(
     provider_path: str | None = None,
     provider_dir: str | None = None,
     depends_on: list[ResourceSpec] | None = None,
-    execution_id: UUID | None = None,
 ) -> MetricResult:
+    consumers = []
+    if tests or modules or cases:
+        for module in modules or {None}:
+            for test_name in tests or {name}:
+                for case in cases or {None}:
+                    consumers.append(
+                        make_definition(
+                            test_name,
+                            module_path=module or "test_module.py",
+                            suffix=case,
+                        ).spec
+                    )
+    for resource_name in resources or set():
+        consumers.append(
+            ResourceSpec(
+                locator=Locator(module_path=None, function_name=resource_name),
+                scope=Scope.RUN,
+            )
+        )
     metadata = MetricMetadata(
         identity=ResourceSpec(
-            name=name,
+            locator=Locator(
+                module_path=Path(provider_path) if provider_path else None,
+                function_name=name,
+            ),
             scope=scope,
-            provider_path=provider_path,
-            provider_dir=provider_dir,
         ),
-        collected_from_tests=tests or set(),
-        collected_from_resources=resources or set(),
-        collected_from_cases=cases or set(),
-        collected_from_modules=modules or set(),
+        consumers=consumers,
     )
     return MetricResult(
         metadata=metadata,
         assertion_results=assertion_results or [],
         value=value,
         dependencies=depends_on or [],
-        execution_id=execution_id,
     )
 
 
@@ -332,7 +369,7 @@ async def test_nested_failures_render_leaf_assertion_repr():
         "test_nested", "tests/test_nested.py", suffix="iterate=0"
     )
     leaf = make_item("test_nested", "tests/test_nested.py", suffix="case=1")
-    assertion = AssertionResult(
+    assertion = make_assertion_result(
         expression_repr=AssertionRepr(
             expr="left == right",
             lines_above="",
@@ -418,7 +455,7 @@ async def test_mixed_assertion_and_exception_renders_both_sections_ordered():
     reporter = ConsoleReporter(console=console, verbosity=1)
 
     item = make_item("test_mixed", "tests/test_mixed.py")
-    assertion = AssertionResult(
+    assertion = make_assertion_result(
         expression_repr=AssertionRepr(
             expr="x == 1",
             lines_above="",
@@ -784,7 +821,7 @@ async def test_metrics_compact_mode_shows_threshold_snippets_only():
     )
     reporter = ConsoleReporter(console=console, verbosity=0)
 
-    assertion = AssertionResult(
+    assertion = make_assertion_result(
         expression_repr=AssertionRepr(
             expr="assert metric.mean > 0.8",
             lines_above="",
@@ -824,7 +861,7 @@ async def test_metrics_verbose_mode_groups_case_metrics_into_instances_panel():
     )
     reporter = ConsoleReporter(console=console, verbosity=1)
 
-    passing = AssertionResult(
+    passing = make_assertion_result(
         expression_repr=AssertionRepr(
             expr="assert metric.mean > 0.8",
             lines_above="",
@@ -833,7 +870,7 @@ async def test_metrics_verbose_mode_groups_case_metrics_into_instances_panel():
         ),
         passed=True,
     )
-    failing = AssertionResult(
+    failing = make_assertion_result(
         expression_repr=AssertionRepr(
             expr="assert metric.mean > 0.8",
             lines_above="",
@@ -855,7 +892,6 @@ async def test_metrics_verbose_mode_groups_case_metrics_into_instances_panel():
             modules={"tests/rue_cases.py"},
             provider_path="/tmp/project/confrue_root.py",
             provider_dir="/tmp/project",
-            execution_id=UUID(int=1),
         ),
         make_metric_result(
             "case_accuracy",
@@ -867,7 +903,6 @@ async def test_metrics_verbose_mode_groups_case_metrics_into_instances_panel():
             modules={"tests/rue_cases.py"},
             provider_path="/tmp/project/confrue_root.py",
             provider_dir="/tmp/project",
-            execution_id=UUID(int=2),
         ),
     ]
 
@@ -905,7 +940,7 @@ async def test_metrics_verbose_mode_shows_modules_and_composite_tree():
         "accuracy",
         value=0.92,
         assertion_results=[
-            AssertionResult(
+            make_assertion_result(
                 expression_repr=AssertionRepr(
                     expr="assert metric.mean > 0.8",
                     lines_above="",
@@ -1001,7 +1036,7 @@ async def test_metrics_verbose_mode_truncates_long_instance_labels():
 
 def test_metrics_overview_assertion_summary_substitutes_resolved_value_with_dim_label():
     reporter = ConsoleReporter(verbosity=0)
-    assertion = AssertionResult(
+    assertion = make_assertion_result(
         expression_repr=AssertionRepr(
             expr="assert metric.distribution[True] > 0.8",
             lines_above="",
@@ -1011,7 +1046,10 @@ def test_metrics_overview_assertion_summary_substitutes_resolved_value_with_dim_
         passed=True,
     )
     group = MetricGroup(
-        key=ResourceSpec(name="accuracy", scope=Scope.RUN),
+        key=ResourceSpec(
+            locator=Locator(module_path=None, function_name="accuracy"),
+            scope=Scope.RUN,
+        ),
         metrics=[],
     )
     group.metrics = [

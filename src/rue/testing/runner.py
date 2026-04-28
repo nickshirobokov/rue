@@ -39,16 +39,12 @@ class Runner:
         *,
         reporters: list[Reporter],
         store: Store | None = None,
-        fail_fast: bool = False,
         capture_output: bool = True,
     ) -> None:
-        self.fail_fast = fail_fast
         self.capture_output = capture_output
         self.reporters = reporters
         self.store = store
         context = CURRENT_RUN_CONTEXT.get()
-        if context is None:
-            raise RuntimeError("Runner requires an active run context.")
         for reporter in self.reporters:
             reporter.configure(context.config)
 
@@ -62,8 +58,6 @@ class Runner:
 
     def _concurrency_limit(self) -> int:
         context = CURRENT_RUN_CONTEXT.get()
-        if context is None:
-            raise RuntimeError("Runner requires an active run context.")
         config = context.config
         return (
             config.concurrency
@@ -117,8 +111,6 @@ class Runner:
             Run with environment, results, and test executions.
         """
         context = CURRENT_RUN_CONTEXT.get()
-        if context is None:
-            raise RuntimeError("Runner requires an active run context.")
         config = context.config
         self.current_run = Run(
             run_id=context.run_id,
@@ -135,10 +127,6 @@ class Runner:
                 return self.current_run
             finally:
                 await resolver.teardown()
-
-        if self.fail_fast:
-            for item in items:
-                item.fail_fast = True
 
         metric_results: list[MetricResult] = []
         start = time.perf_counter()
@@ -209,8 +197,6 @@ class Runner:
             await self._notify_tests_ready(self._queue.tests)
             self._completed_executions = {}
             context = CURRENT_RUN_CONTEXT.get()
-            if context is None:
-                raise RuntimeError("Runner requires an active run context.")
             config = context.config
             try:
                 for step in self._queue.steps:
@@ -303,8 +289,6 @@ class Runner:
             return
         self._failure_count += 1
         context = CURRENT_RUN_CONTEXT.get()
-        if context is None:
-            raise RuntimeError("Runner requires an active run context.")
         maxfail = context.config.maxfail
         if maxfail and self._failure_count >= maxfail:
             self.stop_flag = True

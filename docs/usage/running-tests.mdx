@@ -256,9 +256,9 @@ test-paths = ["tests", "integrations"]
 include-tags = ["smoke"]
 exclude-tags = ["slow", "flaky"]
 maxfail = 5
+fail-fast = true
 verbosity = 1
 concurrency = 4
-addopts = ["--fail-fast"]
 ```
 
 **rue.toml**:
@@ -522,8 +522,8 @@ uv run rue tests run --tag fast --fail-fast
 test-paths = ["tests"]
 exclude-tags = ["manual", "slow"]
 maxfail = 10
+fail-fast = true
 concurrency = 4
-addopts = ["--fail-fast"]
 ```
 
 ## Database Persistence

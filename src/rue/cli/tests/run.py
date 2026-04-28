@@ -21,7 +21,7 @@ from rue.cli.tests.options import (
     resolve_selection,
 )
 from rue.config import load_config
-from rue.context.runtime import CURRENT_RUN_CONTEXT, bind
+from rue.context.runtime import RunContext
 from rue.reports.base import Reporter
 from rue.resources import (
     ResourceResolver,
@@ -29,7 +29,6 @@ from rue.resources import (
 )
 from rue.storage import SQLiteStore
 from rue.testing.discovery import TestLoader
-from rue.testing.models import RunContext
 from rue.testing.runner import Runner
 
 
@@ -43,12 +42,12 @@ def run(
         Option("--maxfail", help="Stop after this many failures"),
     ] = None,
     fail_fast: Annotated[
-        bool,
+        bool | None,
         Option(
             "--fail-fast",
             help="Stop test after the first failed assertion",
         ),
-    ] = False,
+    ] = None,
     concurrency: Annotated[
         int | None,
         Option(
@@ -108,6 +107,7 @@ def run(
         quiet=quiet,
         db_path=db_path,
         maxfail=maxfail if maxfail and maxfail > 0 else None,
+        fail_fast=fail_fast,
         concurrency=max(0, concurrency) if concurrency is not None else None,
         timeout=timeout if timeout and timeout > 0 else None,
         otel=otel,
@@ -148,11 +148,10 @@ def run(
         if run_id is None
         else RunContext(config=runner_config, run_id=run_id)
     )
-    with bind(CURRENT_RUN_CONTEXT, context):
+    with context:
         runner = Runner(
             reporters=reporters,
             store=store,
-            fail_fast=fail_fast,
             capture_output=not show_output,
         )
         run_result = asyncio.run(

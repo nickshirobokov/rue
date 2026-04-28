@@ -365,7 +365,7 @@ class TestLoader:
 
         by_module: dict[Path, list[TestSpec]] = {}
         for spec in collection.specs:
-            by_module.setdefault(spec.module_path, []).append(spec)
+            by_module.setdefault(spec.locator.module_path, []).append(spec)
 
         items: list[LoadedTestDef] = []
         for module_path, requested_specs in by_module.items():
@@ -395,7 +395,7 @@ class TestLoader:
 
         by_module: dict[Path, list[TestSpec]] = {}
         for spec in collection.specs:
-            by_module.setdefault(spec.module_path, []).append(spec)
+            by_module.setdefault(spec.locator.module_path, []).append(spec)
 
         items: list[LoadedTestDef] = []
         for module_path, requested_specs in by_module.items():
@@ -464,7 +464,9 @@ class TestLoader:
         inside the module or class namespace.
         """
         if module is None:
-            module = self._session.load_module(spec.module_path.resolve())
+            module = self._session.load_module(
+                spec.locator.module_path.resolve()
+            )
 
         match spec.locator.class_name:
             case str() as class_name:

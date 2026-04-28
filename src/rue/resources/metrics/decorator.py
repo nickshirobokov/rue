@@ -9,10 +9,7 @@ from typing import TYPE_CHECKING, Any, ParamSpec, cast
 
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
-    CURRENT_RESOURCE_CONSUMER,
-    CURRENT_RESOURCE_CONSUMER_KIND,
-    CURRENT_RESOURCE_PROVIDER,
-    CURRENT_RESOURCE_RESOLVER,
+    CURRENT_RESOURCE_TRANSACTION,
     bind,
 )
 from rue.resources.models import ResourceSpec, Scope
@@ -34,27 +31,14 @@ def _finalize_metric_result(
     assertions_results: list[AssertionResult],
     value: CalculatedValue,
 ) -> None:
-    provider = CURRENT_RESOURCE_PROVIDER.get()
-    resolver = CURRENT_RESOURCE_RESOLVER.get()
-    metadata = replace(metric_instance.metadata)
-    if provider is not None:
-        ident = metadata.identity
-        metadata = replace(
-            metadata,
-            identity=replace(
-                ident,
-                provider_path=provider.spec.provider_path,
-                provider_dir=provider.spec.provider_dir,
-            ),
-        )
-    dependencies = (
-        resolver.direct_dependencies_for(provider.spec)
-        if provider is not None and resolver is not None
-        else []
+    metadata = replace(
+        metric_instance.metadata,
+        consumers=list(metric_instance.metadata.consumers),
+        direct_providers=list(metric_instance.metadata.direct_providers),
     )
     MetricResult(
         metadata=metadata,
-        dependencies=dependencies,
+        dependencies=metadata.direct_providers,
         assertion_results=assertions_results,
         value=value,
     )
@@ -107,17 +91,23 @@ def metric(
         scope_val = scope if isinstance(scope, Scope) else Scope(scope)
         ident = m.metadata.identity
         m.metadata.identity = ResourceSpec(
-            name=name,
+            locator=replace(ident.locator, function_name=name),
             scope=scope_val,
-            provider_path=ident.provider_path,
-            provider_dir=ident.provider_dir,
         )
         return m
 
     def on_injection_hook(m: Metric) -> Metric:
-        consumer_name = CURRENT_RESOURCE_CONSUMER.get()
-        if consumer_name and CURRENT_RESOURCE_CONSUMER_KIND.get() == "resource":
-            m.metadata.collected_from_resources.add(consumer_name)
+        transaction = CURRENT_RESOURCE_TRANSACTION.get()
+        consumer = transaction.consumer_spec
+        if consumer not in m.metadata.consumers:
+            m.metadata.consumers.append(consumer)
+        if isinstance(transaction.provider_spec, ResourceSpec):
+            m.metadata.identity = transaction.provider_spec
+            for provider in transaction.resolver.direct_dependencies_for(
+                transaction.provider_spec
+            ):
+                if provider not in m.metadata.direct_providers:
+                    m.metadata.direct_providers.append(provider)
         return m
 
     if is_generator:

@@ -8,7 +8,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from rue.context.process_pool import get_process_pool
 from rue.context.runtime import (
@@ -57,8 +57,6 @@ class SingleTest(ExecutableTest):
         if self.definition.spec.modifiers:
             raise ValueError("SingleTest should not have modifiers")
         context = CURRENT_RUN_CONTEXT.get()
-        if context is None:
-            raise RuntimeError("SingleTest requires an active run context.")
         self.tracer = TestTracer.build(
             config=context.config,
             run_id=context.run_id,
@@ -91,36 +89,36 @@ class SingleTest(ExecutableTest):
                     ),
                     execution_id=exec_id,
                 )
-            case SingleTest(backend=ExecutionBackend.SUBPROCESS):
-                return await self._execute_subprocess(
-                    resolver.fork_for_test(),
-                    execution_id=exec_id,
-                )
-            case SingleTest():
-                return await self._execute_local(
-                    resolver.fork_for_test(),
-                    execution_id=exec_id,
-                )
+
+        test_resolver = resolver.fork_for_test()
+        ctx = TestContext(
+            item=self.definition,
+            execution_id=exec_id,
+        )
+        with ctx:
+            match self:
+                case SingleTest(backend=ExecutionBackend.SUBPROCESS):
+                    return await self._execute_subprocess(test_resolver)
+                case SingleTest():
+                    return await self._execute_local(test_resolver)
 
     async def _execute_local(
         self,
         resolver: ResourceResolver,
-        *,
-        execution_id: UUID,
     ) -> ExecutedTest:
+        ctx = CURRENT_TEST.get()
+        execution_id = ctx.execution_id
         semaphore = (
             self.semaphore if self.semaphore else contextlib.nullcontext()
         )
-        ctx = TestContext(item=self.definition, execution_id=execution_id)
 
         with bind(CURRENT_TEST_TRACER, self.tracer):
             self.tracer.start(self.definition, execution_id=execution_id)
             async with semaphore:
                 duration_ms, imperative_outcome, error, assertion_results = (
                     await self.definition.run_loaded_test(
-                        resolver=resolver,
                         params=self.params,
-                        execution_id=execution_id,
+                        resolver=resolver,
                         run_sync_in_thread=self.backend
                         is not ExecutionBackend.MAIN,
                         is_stopped=self.is_stopped,
@@ -133,15 +131,14 @@ class SingleTest(ExecutableTest):
                     if identity.scope is not Scope.TEST
                 ]
             )
-            with bind(CURRENT_TEST, ctx):
-                try:
-                    await resolver.teardown_scope(Scope.TEST)
-                except Exception as teardown_error:
-                    logging.warning(
-                        f"Error during resource teardown: {teardown_error}"
-                    )
-                    if error is None:
-                        error = teardown_error
+            try:
+                await resolver.teardown_scope(Scope.TEST)
+            except Exception as teardown_error:
+                logging.warning(
+                    f"Error during resource teardown: {teardown_error}"
+                )
+                if error is None:
+                    error = teardown_error
             result = TestResult.build(
                 definition=self.definition,
                 imperative_outcome=imperative_outcome,
@@ -163,63 +160,59 @@ class SingleTest(ExecutableTest):
     async def _execute_subprocess(
         self,
         resolver: ResourceResolver,
-        *,
-        execution_id: UUID,
     ) -> ExecutedTest:
-        ctx = TestContext(item=self.definition, execution_id=execution_id)
+        ctx = CURRENT_TEST.get()
+        execution_id = ctx.execution_id
         remote_result: RemoteExecutionResult
         context = CURRENT_RUN_CONTEXT.get()
-        if context is None:
-            raise RuntimeError("SingleTest requires an active run context.")
 
         try:
             semaphore = (
                 self.semaphore if self.semaphore else contextlib.nullcontext()
             )
-            with bind(CURRENT_TEST, ctx):
-                async with semaphore:
-                    unresolved_params = tuple(
-                        param
-                        for param in self.definition.spec.params
-                        if param not in self.params
-                    )
-                    autouse_names = await resolver.resolve_autouse(
-                        self.definition.spec.module_path,
-                        apply_injection_hook=False,
-                    )
-                    await resolver.partially_resolve(
-                        unresolved_params,
-                        self.params,
-                        apply_injection_hook=False,
-                    )
-                    snapshot = resolver.export_sync_snapshot(
-                        (*autouse_names, *unresolved_params),
-                        request_path=self.definition.spec.module_path,
-                        sync_actor_id=self.sync_actor_id,
-                    )
+            async with semaphore:
+                unresolved_params = tuple(
+                    param
+                    for param in self.definition.spec.params
+                    if param not in self.params
+                )
+                autouse_names = await resolver.resolve_autouse(
+                    self.definition.spec,
+                    apply_injection_hook=False,
+                )
+                await resolver.partially_resolve(
+                    unresolved_params,
+                    self.params,
+                    consumer_spec=self.definition.spec,
+                    apply_injection_hook=False,
+                )
+                snapshot = resolver.export_sync_snapshot(
+                    (*autouse_names, *unresolved_params),
+                    consumer_spec=self.definition.spec,
+                    sync_actor_id=self.sync_actor_id,
+                )
 
-                    payload = ExecutorPayload(
-                        spec=self.definition.spec,
-                        suite_root=self.definition.suite_root,
-                        setup_chain=self.definition.setup_chain,
-                        params=dict(self.params),
-                        snapshot=snapshot,
-                        context=context,
-                        execution_id=execution_id,
-                    )
+                payload = ExecutorPayload(
+                    spec=self.definition.spec,
+                    suite_root=self.definition.suite_root,
+                    setup_chain=self.definition.setup_chain,
+                    params=dict(self.params),
+                    snapshot=snapshot,
+                    context=context,
+                    execution_id=execution_id,
+                )
 
-                    future = get_process_pool().submit(
-                        run_remote_test,
-                        payload,
-                    )
-                    remote_result = await asyncio.wrap_future(future)
-                    resolver.apply_sync_update(
-                        snapshot,
-                        remote_result.sync_update,
-                    )
+                future = get_process_pool().submit(
+                    run_remote_test,
+                    payload,
+                )
+                remote_result = await asyncio.wrap_future(future)
+                resolver.apply_sync_update(
+                    snapshot,
+                    remote_result.sync_update,
+                )
         finally:
-            with bind(CURRENT_TEST, ctx):
-                await resolver.teardown_scope(Scope.TEST)
+            await resolver.teardown_scope(Scope.TEST)
 
         return ExecutedTest(
             definition=self.definition,

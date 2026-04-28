@@ -49,7 +49,6 @@ CREATE INDEX IF NOT EXISTS idx_tests_status ON test_executions(status);
 CREATE TABLE IF NOT EXISTS metrics (
     metric_id           INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id              TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-    test_execution_id   TEXT REFERENCES test_executions(execution_id) ON DELETE CASCADE,
 
     name                TEXT NOT NULL,
     scope               TEXT NOT NULL,
@@ -58,10 +57,7 @@ CREATE TABLE IF NOT EXISTS metrics (
 
     first_recorded_at   TEXT,
     last_recorded_at    TEXT,
-    collected_from_tests_json       TEXT,
-    collected_from_resources_json   TEXT,
-    collected_from_cases_json       TEXT,
-    collected_from_modules_json     TEXT,
+    consumers_json                  TEXT,
     provider_name                   TEXT,
     provider_scope                  TEXT,
     provider_path                   TEXT,
@@ -70,7 +66,6 @@ CREATE TABLE IF NOT EXISTS metrics (
 );
 
 CREATE INDEX IF NOT EXISTS idx_metrics_run ON metrics(run_id);
-CREATE INDEX IF NOT EXISTS idx_metrics_execution ON metrics(test_execution_id);
 CREATE INDEX IF NOT EXISTS idx_metrics_name ON metrics(name);
 
 CREATE TABLE IF NOT EXISTS assertions (

@@ -7,7 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 
 from rue.config import Config
-from rue.context.runtime import CURRENT_RUN_CONTEXT, bind
+from rue.context.runtime import RunContext
 from rue.experiments.models import (
     ExperimentSpec,
     ExperimentVariant,
@@ -17,7 +17,6 @@ from rue.experiments.registry import registry as default_experiment_registry
 from rue.resources import ResourceResolver
 from rue.resources.registry import registry as default_resource_registry
 from rue.testing.discovery import TestLoader
-from rue.testing.models import RunContext
 from rue.testing.models.spec import TestSpecCollection
 from rue.testing.runner import Runner
 
@@ -27,7 +26,6 @@ class ExperimentRunner:
     """Runs experiment variants as isolated processes."""
 
     config: Config
-    fail_fast: bool = False
     capture_output: bool = True
 
     def collect(
@@ -65,7 +63,6 @@ class ExperimentRunner:
                     collection,
                     variant,
                     self.config,
-                    self.fail_fast,
                     self.capture_output,
                 )
                 results.append(future.result())
@@ -76,7 +73,6 @@ def run_experiment_variant(
     collection: TestSpecCollection,
     variant: ExperimentVariant,
     config: Config,
-    fail_fast: bool,
     capture_output: bool,
 ) -> ExperimentVariantResult:
     """Process entrypoint for one experiment variant."""
@@ -85,7 +81,6 @@ def run_experiment_variant(
             collection,
             variant,
             config,
-            fail_fast,
             capture_output,
         )
     )
@@ -95,7 +90,6 @@ async def _run_experiment_variant(
     collection: TestSpecCollection,
     variant: ExperimentVariant,
     config: Config,
-    fail_fast: bool,
     capture_output: bool,
 ) -> ExperimentVariantResult:
     default_resource_registry.reset()
@@ -111,7 +105,7 @@ async def _run_experiment_variant(
     )
     resolver = ResourceResolver(default_resource_registry)
     run = None
-    with bind(CURRENT_RUN_CONTEXT, context):
+    with context:
         try:
             await variant.apply(
                 default_experiment_registry.all(),
@@ -120,7 +114,6 @@ async def _run_experiment_variant(
             items = loader.load_from_collection(collection)
             runner = Runner(
                 reporters=[],
-                fail_fast=fail_fast,
                 capture_output=capture_output,
             )
             run = await runner.run(items, resolver=resolver)

@@ -1,23 +1,20 @@
 """Resource system for dependency injection."""
 
 import asyncio
+import contextlib
 import inspect
 import threading
 from collections import deque
-from collections.abc import AsyncGenerator, Generator, Sequence
+from collections.abc import AsyncGenerator, Generator, Iterator, Sequence
 from contextvars import ContextVar
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
 from rue.context.runtime import (
-    CURRENT_RESOURCE_CONSUMER,
-    CURRENT_RESOURCE_CONSUMER_KIND,
-    CURRENT_RESOURCE_PROVIDER,
-    CURRENT_RESOURCE_RESOLVER,
-    CURRENT_TEST,
-    bind,
+    ResourceTransactionContext,
 )
+from rue.models import Spec
 from rue.patching.runtime import PatchHandle
 from rue.resources.models import (
     LoadedResourceDef,
@@ -59,6 +56,7 @@ class ResourceResolver:
                 ResourceSpec,
                 LoadedResourceDef,
                 Generator[Any, None, None] | AsyncGenerator[Any, None],
+                Spec,
             ]
         ] = []
         self._parent = parent
@@ -79,26 +77,46 @@ class ResourceResolver:
     def direct_dependencies_for(
         self, identity: ResourceSpec
     ) -> list[ResourceSpec]:
+        """Return direct resource dependencies captured during resolution."""
         return list(self._shared_dependency_graph.get(identity, []))
 
     def autouse_names(self, request_path: Path | None) -> tuple[str, ...]:
         """Return autouse resource names selected for a request path."""
         return tuple(
-            definition.spec.name
+            definition.spec.locator.function_name
             for definition in self._registry.autouse(request_path)
         )
 
     async def resolve_autouse(
         self,
-        request_path: Path | None,
+        consumer_spec: Spec,
         *,
         apply_injection_hook: bool = True,
     ) -> tuple[str, ...]:
         """Resolve autouse resources selected for a request path."""
-        names = self.autouse_names(request_path)
+        names = self.autouse_names(consumer_spec.locator.module_path)
         for name in names:
-            await self.resolve(name, apply_injection_hook=apply_injection_hook)
+            await self.resolve(
+                name,
+                consumer_spec=consumer_spec,
+                apply_injection_hook=apply_injection_hook,
+            )
         return names
+
+    @contextlib.contextmanager
+    def open_transaction(
+        self,
+        *,
+        consumer_spec: Spec,
+        provider_spec: Spec,
+    ) -> Iterator[None]:
+        """Bind consumer/provider attribution for resolver-owned work."""
+        with ResourceTransactionContext(
+            consumer_spec=consumer_spec,
+            provider_spec=provider_spec,
+            resolver=self,
+        ):
+            yield
 
     def register_patch(self, handle: PatchHandle) -> None:
         """Attach a patch handle to the resolver that owns its lifetime."""
@@ -114,8 +132,10 @@ class ResourceResolver:
         self,
         names: tuple[str, ...],
         *,
-        request_path: Path,
+        consumer_spec: Spec,
     ) -> tuple[ResourceSpec, ...]:
+        """Return the selected transitive resource closure for a consumer."""
+        request_path = consumer_spec.locator.module_path
         connected: dict[str, ResourceSpec] = {}
 
         def sort_key(spec: ResourceSpec) -> tuple[int, str, str, str]:
@@ -123,9 +143,13 @@ class ResourceResolver:
                 {"run": 0, "module": 1, "test": 2}.get(
                     spec.scope.value, 99
                 ),
-                spec.name,
-                spec.provider_path or "",
-                spec.provider_dir or "",
+                spec.locator.function_name,
+                ""
+                if spec.locator.module_path is None
+                else str(spec.locator.module_path),
+                ""
+                if spec.locator.module_path is None
+                else str(spec.locator.module_path.parent),
             )
 
         def visit(name: str, path: tuple[ResourceSpec, ...]) -> None:
@@ -135,9 +159,12 @@ class ResourceResolver:
             if identity in path:
                 cycle = " -> ".join(
                     (
-                        f"{key.scope.value}:{key.name}"
-                        if key.provider_dir is None
-                        else f"{key.scope.value}:{key.name}@{key.provider_dir}"
+                        f"{key.scope.value}:{key.locator.function_name}"
+                        if key.locator.module_path is None
+                        else (
+                            f"{key.scope.value}:{key.locator.function_name}"
+                            f"@{key.locator.module_path.parent}"
+                        )
                     )
                     for key in (*path, identity)
                 )
@@ -161,17 +188,14 @@ class ResourceResolver:
         self,
         name: str,
         *,
+        consumer_spec: Spec,
         apply_injection_hook: bool = True,
     ) -> Any:
-        test_ctx = CURRENT_TEST.get()
-        request_path = (
-            None
-            if test_ctx is None
-            else test_ctx.item.spec.module_path.resolve()
-        )
+        """Resolve one resource for the given consumer spec."""
         return await self._resolve(
             name,
-            request_path=request_path,
+            request_spec=consumer_spec,
+            consumer_spec=consumer_spec,
             apply_injection_hook=apply_injection_hook,
         )
 
@@ -179,9 +203,11 @@ class ResourceResolver:
         self,
         name: str,
         *,
-        request_path: Path | None,
+        request_spec: Spec,
+        consumer_spec: Spec,
         apply_injection_hook: bool = True,
     ) -> Any:
+        request_path = request_spec.locator.module_path
         definition = self._registry.select(name, request_path).definition
         identity = definition.spec
         scope = identity.scope
@@ -190,9 +216,12 @@ class ResourceResolver:
         if identity in path:
             cycle = " -> ".join(
                 (
-                    f"{key.scope.value}:{key.name}"
-                    if key.provider_dir is None
-                    else f"{key.scope.value}:{key.name}@{key.provider_dir}"
+                    f"{key.scope.value}:{key.locator.function_name}"
+                    if key.locator.module_path is None
+                    else (
+                        f"{key.scope.value}:{key.locator.function_name}"
+                        f"@{key.locator.module_path.parent}"
+                    )
                 )
                 for key in (*path, identity)
             )
@@ -204,14 +233,12 @@ class ResourceResolver:
         try:
             owner = self._owner_resolver_for_scope(scope)
             missing = object()
-            parent = CURRENT_RESOURCE_PROVIDER.get()
-            if parent is not None:
-                direct = self._shared_dependency_graph.get(parent.spec)
+            if isinstance(consumer_spec, ResourceSpec):
+                direct = self._shared_dependency_graph.get(consumer_spec)
                 if direct is None:
-                    direct = self._shared_dependency_graph[parent.spec] = []
+                    direct = self._shared_dependency_graph[consumer_spec] = []
                 if identity not in direct:
                     direct.append(identity)
-
             value = owner._cache.get(identity, missing)
             if value is missing:
                 pending = owner._pending.get(identity)
@@ -223,7 +250,8 @@ class ResourceResolver:
                             name=name,
                             definition=definition,
                             cache_key=identity,
-                            request_path=request_path,
+                            request_spec=request_spec,
+                            consumer_spec=consumer_spec,
                         )
                     except Exception as error:
                         pending.set_exception(error)
@@ -246,9 +274,9 @@ class ResourceResolver:
             if not apply_injection_hook:
                 return value
 
-            with (
-                bind(CURRENT_RESOURCE_PROVIDER, definition),
-                bind(CURRENT_RESOURCE_RESOLVER, owner),
+            with owner.open_transaction(
+                consumer_spec=consumer_spec,
+                provider_spec=identity,
             ):
                 return await self._apply_hook(
                     definition.on_injection, name, value
@@ -261,24 +289,25 @@ class ResourceResolver:
         unresolved_params: tuple[str, ...],
         resolved_params: dict[str, Any],
         *,
+        consumer_spec: Spec,
         apply_injection_hook: bool = True,
     ) -> dict[str, Any]:
+        """Resolve missing parameters into a kwargs dictionary."""
         kwargs = dict(resolved_params)
-        test_ctx = CURRENT_TEST.get()
-        with (
-            bind(CURRENT_RESOURCE_CONSUMER, test_ctx.item.spec.name),
-            bind(CURRENT_RESOURCE_CONSUMER_KIND, "test"),
-        ):
-            for param in unresolved_params:
-                kwargs[param] = await self.resolve(
-                    param,
-                    apply_injection_hook=apply_injection_hook,
-                )
+        for param in unresolved_params:
+            kwargs[param] = await self.resolve(
+                param,
+                consumer_spec=consumer_spec,
+                apply_injection_hook=apply_injection_hook,
+            )
         return kwargs
 
     def fork_for_test(self) -> "ResourceResolver":
         """Create a child resolver for isolated TEST-scope execution."""
-        child = ResourceResolver(self._registry, parent=self)
+        child = ResourceResolver(
+            self._registry,
+            parent=self,
+        )
         child._cache = {
             key: value
             for key, value in self._cache.items()
@@ -288,6 +317,7 @@ class ResourceResolver:
         return child
 
     async def teardown(self) -> None:
+        """Tear down resources and patches owned by this resolver."""
         if self._shadow_mode:
             self._cache.clear()
             self._teardowns.clear()
@@ -306,15 +336,16 @@ class ResourceResolver:
                 ResourceSpec,
                 LoadedResourceDef,
                 Generator[Any, None, None] | AsyncGenerator[Any, None],
+                Spec,
             ]
         ],
     ) -> list[Exception]:
         teardown_errors: list[Exception] = []
 
-        for key, definition, generator in reversed(teardowns):
-            with (
-                bind(CURRENT_RESOURCE_PROVIDER, definition),
-                bind(CURRENT_RESOURCE_RESOLVER, self),
+        for key, definition, generator, consumer_spec in reversed(teardowns):
+            with self.open_transaction(
+                consumer_spec=consumer_spec,
+                provider_spec=key,
             ):
                 try:
                     if definition.is_async_generator:
@@ -329,7 +360,7 @@ class ResourceResolver:
                     teardown_errors.append(
                         RuntimeError(
                             "Generator teardown failed for resource "
-                            f"'{key.name}': {e}"
+                            f"'{key.locator.function_name}': {e}"
                         )
                     )
 
@@ -337,7 +368,7 @@ class ResourceResolver:
                     try:
                         await self._apply_hook(
                             definition.on_teardown,
-                            key.name,
+                            key.locator.function_name,
                             self._cache[key],
                         )
                     except RuntimeError as e:
@@ -371,6 +402,7 @@ class ResourceResolver:
                 ResourceSpec,
                 LoadedResourceDef,
                 Generator[Any, None, None] | AsyncGenerator[Any, None],
+                Spec,
             ]
         ] = []
         to_keep: list[
@@ -378,6 +410,7 @@ class ResourceResolver:
                 ResourceSpec,
                 LoadedResourceDef,
                 Generator[Any, None, None] | AsyncGenerator[Any, None],
+                Spec,
             ]
         ] = []
 
@@ -415,7 +448,7 @@ class ResourceResolver:
         self,
         resources: Sequence[str] | Sequence[ResourceSpec],
         *,
-        request_path: Path | None = None,
+        consumer_spec: Spec,
         sync_actor_id: int,
     ) -> ResolverSyncSnapshot:
         """Build a CRDT transfer snapshot for the given resource closure."""
@@ -431,7 +464,7 @@ class ResourceResolver:
         export_graph.sync_payload(payload)
         return ResolverSyncSnapshot(
             res_specs=tuple(identities),
-            request_path=(str(request_path) if request_path else None),
+            request_locator=consumer_spec.locator,
             graph_update=export_graph.doc.get_update(None),
             base_state=export_graph.doc.get_state(),
             resolution_order=tuple(ordered_identities),
@@ -443,36 +476,43 @@ class ResourceResolver:
         cls,
         snapshot: ResolverSyncSnapshot,
         registry: ResourceRegistry,
+        *,
+        consumer_spec: Spec,
     ) -> "ResourceResolver":
+        """Build a shadow resolver from a serialized sync snapshot."""
         resolver = cls(
             registry,
             shadow_mode=True,
             sync_actor_id=snapshot.sync_actor_id,
         )
-        await resolver.hydrate_sync_snapshot(snapshot)
+        await resolver.hydrate_sync_snapshot(
+            snapshot,
+            consumer_spec=consumer_spec,
+        )
         return resolver
 
     async def hydrate_sync_snapshot(
         self,
         snapshot: ResolverSyncSnapshot,
+        *,
+        consumer_spec: Spec,
     ) -> None:
+        """Hydrate this resolver from a serialized sync snapshot."""
         self._sync_graph = SyncGraph(actor_id=snapshot.sync_actor_id)
-        request_path = (
-            Path(snapshot.request_path) if snapshot.request_path else None
-        )
 
         for identity in snapshot.resolution_order:
             if identity in self._cache:
                 continue
             definition = self._registry.select(
-                identity.name,
-                request_path,
+                identity.locator.function_name,
+                snapshot.request_locator.module_path,
             ).definition
             await self._resolve_uncached(
-                name=identity.name,
+                name=identity.locator.function_name,
                 definition=definition,
                 cache_key=identity,
-                request_path=request_path,
+                request_spec=consumer_spec,
+                consumer_spec=consumer_spec,
             )
         self._sync_graph = SyncGraph.from_update(
             snapshot.graph_update,
@@ -637,7 +677,9 @@ class ResourceResolver:
             return [
                 replace(
                     identity,
-                    dependencies=tuple(d.name for d in dependencies),
+                    dependencies=tuple(
+                        d.locator.function_name for d in dependencies
+                    ),
                 )
                 for identity, dependencies in closure.items()
                 if identity.sync
@@ -648,7 +690,7 @@ class ResourceResolver:
                 replace(
                     identity,
                     dependencies=tuple(
-                        dependency.name
+                        dependency.locator.function_name
                         for dependency in self._shared_dependency_graph.get(
                             identity,
                             (),
@@ -667,23 +709,21 @@ class ResourceResolver:
         name: str,
         definition: LoadedResourceDef,
         cache_key: ResourceSpec,
-        request_path: Path | None,
+        request_spec: Spec,
+        consumer_spec: Spec,
     ) -> Any:
-        with (
-            bind(CURRENT_RESOURCE_PROVIDER, definition),
-            bind(CURRENT_RESOURCE_RESOLVER, self),
+        with self.open_transaction(
+            consumer_spec=consumer_spec,
+            provider_spec=cache_key,
         ):
-            with (
-                bind(CURRENT_RESOURCE_CONSUMER, name),
-                bind(CURRENT_RESOURCE_CONSUMER_KIND, "resource"),
-            ):
-                kwargs = {
-                    dependency: await self._resolve(
-                        dependency,
-                        request_path=request_path,
-                    )
-                    for dependency in cache_key.dependencies
-                }
+            kwargs = {
+                dependency: await self._resolve(
+                    dependency,
+                    request_spec=request_spec,
+                    consumer_spec=cache_key,
+                )
+                for dependency in cache_key.dependencies
+            }
 
             match definition:
                 case LoadedResourceDef(is_async_generator=True):
@@ -693,7 +733,12 @@ class ResourceResolver:
                     value = await anext(async_generator)
                     if not self._shadow_mode:
                         self._teardowns.append(
-                            (cache_key, definition, async_generator)
+                            (
+                                cache_key,
+                                definition,
+                                async_generator,
+                                consumer_spec,
+                            )
                         )
                 case LoadedResourceDef(is_generator=True):
                     generator = cast(
@@ -702,7 +747,7 @@ class ResourceResolver:
                     value = next(generator)
                     if not self._shadow_mode:
                         self._teardowns.append(
-                            (cache_key, definition, generator)
+                            (cache_key, definition, generator, consumer_spec)
                         )
                 case LoadedResourceDef(is_async=True):
                     value = await definition.fn(**kwargs)
@@ -741,7 +786,9 @@ class ResourceResolver:
         dep_graph: dict[ResourceSpec, list[ResourceSpec]],
     ) -> dict[ResourceSpec, list[ResourceSpec]]:
         """Expand names into the dependency closure for a transfer snapshot."""
-        name_to_identity = {identity.name: identity for identity in cache}
+        name_to_identity = {
+            identity.locator.function_name: identity for identity in cache
+        }
         for name in resource_names:
             if name not in name_to_identity:
                 msg = f"Resource {name!r} is not present in the resolver cache"
@@ -773,7 +820,10 @@ class ResourceResolver:
         identities: list[ResourceSpec],
     ) -> list[ResourceSpec]:
         """Topologically sort identities for worker-side snapshot replay."""
-        identity_map = {identity.name: identity for identity in identities}
+        identity_map = {
+            identity.locator.function_name: identity
+            for identity in identities
+        }
         if not identity_map:
             return []
 
@@ -800,7 +850,7 @@ class ResourceResolver:
                     queue.append(dependent)
 
         if len(order) != len(identity_map):
-            resolved = {identity.name for identity in order}
+            resolved = {identity.locator.function_name for identity in order}
             unresolved = set(identity_map) - resolved
             msg = f"Circular dependency in snapshot resources: {unresolved}"
             raise RuntimeError(msg)

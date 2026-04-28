@@ -7,12 +7,12 @@ from typing import Any
 from uuid import UUID
 
 from rue.config import Config
-from rue.context.runtime import CURRENT_RUN_CONTEXT
+from rue.context.runtime import CURRENT_RUN_CONTEXT, RunContext
 from rue.testing.discovery import TestLoader, TestSpecCollector
 from rue.testing.execution.base import ExecutionBackend
-from rue.testing.models import BackendModifier, LoadedTestDef, RunContext
+from rue.testing.models import BackendModifier, LoadedTestDef
 from rue.testing.models.modifiers import Modifier
-from rue.testing.models.spec import SetupFileRef, TestLocator, TestSpec
+from rue.testing.models.spec import Locator, SetupFileRef, TestSpec
 
 
 _COLLECTION_INDEX = count()
@@ -33,20 +33,19 @@ def make_definition(
     xfail_strict: bool = False,
     definition_error: str | None = None,
     backend: ExecutionBackend = ExecutionBackend.ASYNCIO,
-    fail_fast: bool = False,
     suffix: str | None = None,
     case_id: UUID | None = None,
     suite_root: str | Path | None = None,
     setup_chain: tuple[SetupFileRef, ...] = (),
     collection_index: int | None = None,
 ) -> LoadedTestDef:
-    """Build a LoadedTestDef for use in unit tests without needing a real module."""
+    """Build a LoadedTestDef without needing a real module."""
     module_path = Path(module_path)
     all_modifiers = list(modifiers)
     if backend is not ExecutionBackend.ASYNCIO:
         all_modifiers.insert(0, BackendModifier(backend=backend))
     spec = TestSpec(
-        locator=TestLocator(
+        locator=Locator(
             module_path=module_path,
             function_name=name,
             class_name=class_name,
@@ -74,7 +73,6 @@ def make_definition(
         if suite_root is not None
         else module_path.parent,
         setup_chain=setup_chain,
-        fail_fast=fail_fast,
     )
 
 

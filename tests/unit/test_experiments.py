@@ -7,13 +7,13 @@ from uuid import uuid4
 import pytest
 
 from rue.config import Config
-from rue.context.runtime import CURRENT_RUN_CONTEXT, bind
+from rue.context.runtime import RunContext
 from rue.experiments import registry as experiment_registry
 from rue.experiments.models import ExperimentSpec, ExperimentVariant
 from rue.experiments.runner import ExperimentRunner
+from rue.models import Locator
 from rue.resources import ResourceResolver, registry as resource_registry
 from rue.testing.discovery import TestSpecCollector
-from rue.testing.models import RunContext
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +32,7 @@ def test_experiment_uses_function_name_and_ids():
 
     [definition] = experiment_registry.all()
 
-    assert definition.name == "model"
+    assert definition.locator.function_name == "model"
     assert definition.ids == ("gpt",)
     assert definition.values == ("openai:gpt-5.4",)
     assert definition.dependencies == ()
@@ -73,13 +73,13 @@ def test_experiment_variants_include_baseline_then_cartesian_product():
     variants = ExperimentVariant.build_all(
         (
             ExperimentSpec(
-                name="model",
+                locator=Locator(module_path=None, function_name="model"),
                 values=("mini", "full"),
                 ids=("mini", "full"),
                 fn=lambda value: None,
             ),
             ExperimentSpec(
-                name="prompt",
+                locator=Locator(module_path=None, function_name="prompt"),
                 values=("strict", "friendly"),
                 ids=("strict", "friendly"),
                 fn=lambda value: None,
@@ -113,7 +113,7 @@ async def test_experiment_monkeypatch_is_run_scoped():
     )
     resolver = ResourceResolver(resource_registry)
 
-    with bind(CURRENT_RUN_CONTEXT, context):
+    with context:
         await variant.apply(
             experiment_registry.all(),
             resolver=resolver,
@@ -138,7 +138,7 @@ async def test_experiment_monkeypatch_does_not_accept_method_scope():
     variant = ExperimentVariant.build_all((experiment,))[1]
     context = RunContext(config=Config.model_construct(db_enabled=False))
 
-    with bind(CURRENT_RUN_CONTEXT, context):
+    with context:
         with pytest.raises(TypeError, match="scope"):
             await variant.apply(
                 experiment_registry.all(),

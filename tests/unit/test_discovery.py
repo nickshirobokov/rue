@@ -2,10 +2,11 @@ import builtins
 from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
+from rue.context.runtime import TestContext
 from rue.resources import ResourceResolver, Scope, registry
 from rue.testing.discovery import KeywordMatcher, TestLoader, TestSpecCollector
 from rue.testing.execution.base import ExecutionBackend
@@ -13,7 +14,7 @@ from rue.testing.models import (
     BackendModifier,
     ParameterSet,
     ParamsIterateModifier,
-    TestLocator,
+    Locator,
     TestSpec,
 )
 from rue.testing.runner import Runner
@@ -49,7 +50,7 @@ def make_runner(null_reporter) -> Runner:
 def test_spec_labels_are_bounded_and_keep_full_case_id():
     case_id = UUID("00000000-0000-0000-0000-000000000001")
     spec = TestSpec(
-        locator=TestLocator(Path("test_sample.py"), "test_case"),
+        locator=Locator(Path("test_sample.py"), "test_case"),
         is_async=False,
         params=(),
         modifiers=(),
@@ -75,14 +76,14 @@ def test_spec_labels_are_bounded_and_keep_full_case_id():
 def test_selector_filters_by_tags_and_keyword():
     items = [
         TestSpec(
-            locator=TestLocator(Path("test_sample.py"), "test_fast"),
+            locator=Locator(Path("test_sample.py"), "test_fast"),
             is_async=False,
             params=(),
             modifiers=(),
             tags=frozenset({"fast", "smoke"}),
         ),
         TestSpec(
-            locator=TestLocator(Path("test_sample.py"), "test_slow"),
+            locator=Locator(Path("test_sample.py"), "test_slow"),
             is_async=False,
             params=(),
             modifiers=(),
@@ -97,7 +98,7 @@ def test_selector_filters_by_tags_and_keyword():
         items
     )
 
-    assert [item.name for item in selected] == ["test_fast"]
+    assert [item.locator.function_name for item in selected] == ["test_fast"]
 
 
 def test_selector_plan_discovers_rue_tests_and_static_tags(tmp_path):
@@ -210,7 +211,7 @@ def test_selector_skips_unselected_modules_before_import(tmp_path):
     )
     items = TestLoader(plan.suite_root).load_from_collection(plan)
 
-    assert [item.spec.name for item in items] == ["test_good"]
+    assert [item.spec.locator.function_name for item in items] == ["test_good"]
 
 
 def test_load_from_collection_skips_unselected_invalid_tests_in_same_module(
@@ -238,7 +239,7 @@ def test_load_from_collection_skips_unselected_invalid_tests_in_same_module(
     )
     items = TestLoader(plan.suite_root).load_from_collection(plan)
 
-    assert [item.spec.name for item in items] == ["test_good"]
+    assert [item.spec.locator.function_name for item in items] == ["test_good"]
 
 
 def test_load_from_collection_enriches_runtime_metadata(tmp_path):
@@ -273,7 +274,7 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
     plan = TestSpecCollector((), (), None).build_spec_collection(
         (tmp_path / "test_metadata.py",)
     )
-    planned_specs = {spec.name: spec for spec in plan.specs}
+    planned_specs = {spec.locator.function_name: spec for spec in plan.specs}
 
     assert planned_specs["test_main_skip"].params == ()
     assert planned_specs["test_main_skip"].skip_reason is None
@@ -282,7 +283,7 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
     assert planned_specs["test_bad"].definition_error is None
 
     items = TestLoader(plan.suite_root).load_from_collection(plan)
-    items_by_name = {item.spec.name: item for item in items}
+    items_by_name = {item.spec.locator.function_name: item for item in items}
     backend_modifier, params_modifier = items_by_name[
         "test_main_skip"
     ].spec.modifiers
@@ -353,8 +354,8 @@ def test_load_from_collection_preserves_definition_failures_when_requested(
     )
     bad_spec = replace(
         original_plan.specs[1],
-        locator=TestLocator(
-            module_path=original_plan.specs[1].module_path,
+        locator=Locator(
+            module_path=original_plan.specs[1].locator.module_path,
             function_name="missing_test",
         ),
     )
@@ -365,7 +366,10 @@ def test_load_from_collection_preserves_definition_failures_when_requested(
 
     items = TestLoader(plan.suite_root).load_from_collection_unsafe(plan)
 
-    assert [item.spec.name for item in items] == ["test_good", "missing_test"]
+    assert [item.spec.locator.function_name for item in items] == [
+        "test_good",
+        "missing_test",
+    ]
     assert items[0].load_error is None
     assert "missing_test" in (items[1].load_error or "")
 
@@ -475,9 +479,12 @@ def test_materialize_imports_nested_setup_chain_in_order(tmp_path, monkeypatch):
     [item] = TestLoader(plan.suite_root).load_from_collection(plan)
 
     assert item.suite_root == plan.suite_root
-    assert item.setup_chain == plan.setup_chain_for(item.spec.module_path)
+    assert item.setup_chain == plan.setup_chain_for(
+        item.spec.locator.module_path
+    )
 
-    item.fn()
+    with TestContext(item=item, execution_id=uuid4()):
+        item.fn()
 
 
 def test_materialize_collects_class_based_and_method_marked_tests(tmp_path):
@@ -560,7 +567,10 @@ def test_materialize_uses_single_session_for_selected_modules(
     )
     items = TestLoader(plan.suite_root).load_from_collection(plan)
 
-    assert [item.spec.name for item in items] == ["test_good", "test_good_two"]
+    assert [item.spec.locator.function_name for item in items] == [
+        "test_good",
+        "test_good_two",
+    ]
     assert builtins.confrue_counter == 1
 
 
@@ -657,6 +667,6 @@ def test_materialize_rewrites_pytest_fixture_aliases_to_resources(tmp_path):
 
     [item] = materialize(tmp_path)
 
-    assert item.spec.name == "test_uses_fixture"
+    assert item.spec.locator.function_name == "test_uses_fixture"
     assert registry.get("greeting") is not None
     assert registry.get("greeting").spec.scope == Scope.MODULE

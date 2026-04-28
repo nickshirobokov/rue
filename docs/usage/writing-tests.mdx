@@ -353,7 +353,8 @@ def test_multiple_checks(classifier):
 
 All three assertions will be evaluated and reported, even if the first one fails. This behavior lets you see all test failures in a single run rather than fixing them one at a time.
 
-To stop on the first failure, use the `--fail-fast` CLI flag:
+To stop on the first failure, set `fail-fast = true` in Rue config or use
+the `--fail-fast` CLI flag:
 
 ```bash
 uv run rue tests run --fail-fast

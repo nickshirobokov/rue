@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from collections.abc import MutableMapping, MutableSequence
 from pkgutil import resolve_name
-from typing import Any, overload
+from typing import TYPE_CHECKING, Any, overload
 
 from rue.patching.runtime import (
     PatchOwner,
     patch_manager,
 )
 from rue.resources.models import Scope
+
+
+if TYPE_CHECKING:
+    from rue.resources.resolver import ResourceResolver
 
 
 _UNSET = object()
@@ -22,8 +26,10 @@ class MonkeyPatch:
     def __init__(
         self,
         *,
+        resolver: ResourceResolver,
         scope: Scope = Scope.TEST,
     ) -> None:
+        self.resolver = resolver
         self.scope: Scope = scope
 
     @overload
@@ -98,7 +104,7 @@ class MonkeyPatch:
             owner=owner,
             raising=raising,
         )
-        handle.register_to_resolver()
+        handle.register_to_resolver(self.resolver)
 
     def delattr(
         self,
@@ -116,7 +122,7 @@ class MonkeyPatch:
             raising=raising,
         )
         if handle is not None:
-            handle.register_to_resolver()
+            handle.register_to_resolver(self.resolver)
 
     @overload
     def setitem(
@@ -181,7 +187,7 @@ class MonkeyPatch:
             owner=owner,
             replace=replace,
         )
-        handle.register_to_resolver()
+        handle.register_to_resolver(self.resolver)
 
     @overload
     def delitem(
@@ -239,4 +245,4 @@ class MonkeyPatch:
             raising=raising,
         )
         if handle is not None:
-            handle.register_to_resolver()
+            handle.register_to_resolver(self.resolver)

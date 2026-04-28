@@ -89,7 +89,6 @@ def make_runner(
     *,
     reporters: list[Reporter],
     store: Store | None = None,
-    fail_fast: bool = False,
     capture_output: bool = True,
     run_id: UUID | None = None,
     **config_kwargs,
@@ -100,7 +99,6 @@ def make_runner(
     return Runner(
         reporters=reporters,
         store=store,
-        fail_fast=fail_fast,
         capture_output=capture_output,
     )
 
@@ -132,17 +130,17 @@ class EventReporter(Reporter):
     async def on_test_start(self, item: LoadedTestDef) -> None:
         self._started_ids.add(id(item))
         elapsed = time.perf_counter() - self.start_time
-        self.event_times.append(("start", item.spec.name, elapsed))
-        self.event_order.append(("start", item.spec.name))
+        self.event_times.append(("start", item.spec.locator.function_name, elapsed))
+        self.event_order.append(("start", item.spec.locator.function_name))
 
     async def on_execution_complete(self, execution: ExecutedTest) -> None:
         elapsed = time.perf_counter() - self.start_time
         if id(execution.definition) in self._started_ids:
             self.event_times.append(
-                ("complete", execution.definition.spec.name, elapsed)
+                ("complete", execution.definition.spec.locator.function_name, elapsed)
             )
             self.event_order.append(
-                ("complete", execution.definition.spec.name)
+                ("complete", execution.definition.spec.locator.function_name)
             )
         else:
             label = execution.definition.spec.suffix or (
@@ -151,7 +149,7 @@ class EventReporter(Reporter):
                 else ""
             )
             self.subtest_event_times.append(
-                (execution.definition.spec.name, label, elapsed)
+                (execution.definition.spec.locator.function_name, label, elapsed)
             )
         self.trace_events.extend(
             (execution.execution_id, artifact)
@@ -332,10 +330,13 @@ class TestRunner:
         )
         monkeypatch.setattr(builtins, "fail_fast_events", [], raising=False)
 
-        result = await make_runner(
+        make_run_context(fail_fast=True, db_enabled=False)
+        result = await Runner(
             reporters=[null_reporter],
-            fail_fast=True,
-        ).run(resolver=ResourceResolver(registry), items=materialize_tests(module_path))
+        ).run(
+            resolver=ResourceResolver(registry),
+            items=materialize_tests(module_path),
+        )
 
         execution = result.result.executions[0]
         assert result.result.failed == 1
@@ -532,14 +533,14 @@ class TestOpenTelemetry:
             spans = payloads_by_execution[execution.execution_id]
             expected_child = (
                 "first_step"
-                if execution.definition.spec.name == "test_first"
+                if execution.definition.spec.locator.function_name == "test_first"
                 else "second_step"
             )
             assert {span["name"] for span in spans} == {
                 f"test.{execution.definition.spec.full_name}",
                 (
                     "sut.first_agent.__call__"
-                    if execution.definition.spec.name == "test_first"
+                    if execution.definition.spec.locator.function_name == "test_first"
                     else "sut.second_agent.__call__"
                 ),
                 expected_child,
@@ -914,7 +915,7 @@ class TestMaxfail:
         assert result.result.stopped_early
         assert started == ["slow_pass", "fail_1", "fail_2"]
         assert [
-            execution.definition.spec.name
+            execution.definition.spec.locator.function_name
             for execution in result.result.executions
         ] == ["slow_pass", "fail_1", "fail_2"]
 
@@ -1010,7 +1011,8 @@ class TestConcurrency:
         batches = runner._factory.queue.batches
 
         assert [
-            [test.definition.spec.name for test in batch.tests] for batch in batches
+            [test.definition.spec.locator.function_name for test in batch.tests]
+            for batch in batches
         ] == [
             ["A"],
             ["B", "C", "D"],
@@ -1075,23 +1077,24 @@ class TestConcurrency:
         first = steps[0]
         assert not first.is_main
         assert [
-            [test.definition.spec.name for test in batch.tests]
+            [test.definition.spec.locator.function_name for test in batch.tests]
             for batch in first.module_queues[0].batches
         ] == [["a1_async"], ["a1_barrier"]]
         assert [
-            [test.definition.spec.name for test in batch.tests]
+            [test.definition.spec.locator.function_name for test in batch.tests]
             for batch in first.module_queues[1].batches
         ] == [["a2_async", "a2_subprocess"]]
 
         assert steps[1].main_batch is not None
         assert [
-            test.definition.spec.name for test in steps[1].main_batch.tests
+            test.definition.spec.locator.function_name
+            for test in steps[1].main_batch.tests
         ] == ["global_main"]
 
         third = steps[2]
         assert not third.is_main
         assert [
-            [test.definition.spec.name for test in batch.tests]
+            [test.definition.spec.locator.function_name for test in batch.tests]
             for batch in third.module_queues[0].batches
         ] == [["a1_after"]]
 
@@ -1146,12 +1149,16 @@ class TestConcurrency:
         completed = {
             name for kind, name in reporter.event_order if kind == "complete"
         }
-        assert started == completed == {item.spec.name for item in items}
+        assert started == completed == {
+            item.spec.locator.function_name for item in items
+        }
 
         for item in items:
-            start_idx = reporter.event_order.index(("start", item.spec.name))
+            start_idx = reporter.event_order.index(
+                ("start", item.spec.locator.function_name)
+            )
             complete_idx = reporter.event_order.index(
-                ("complete", item.spec.name)
+                ("complete", item.spec.locator.function_name)
             )
             assert start_idx < complete_idx
 
@@ -1178,7 +1185,7 @@ class TestConcurrency:
 
         assert [
             name for kind, name in reporter.event_order if kind == "start"
-        ] == [item.spec.name for item in items]
+        ] == [item.spec.locator.function_name for item in items]
 
     @pytest.mark.asyncio
     async def test_main_stage_waits_for_parallel_stage_completion(self):
@@ -1270,8 +1277,9 @@ class TestConcurrency:
 
         assert barrier_start < a2_after_start < barrier_complete
         assert [
-            execution.definition.spec.name for execution in run.result.executions
-        ] == [item.spec.name for item in items]
+            execution.definition.spec.locator.function_name
+            for execution in run.result.executions
+        ] == [item.spec.locator.function_name for item in items]
 
     @pytest.mark.asyncio
     async def test_global_main_still_blocks_everything(self):
@@ -1389,7 +1397,7 @@ class TestConcurrency:
         parent_complete_elapsed = next(
             elapsed
             for kind, name, elapsed in reporter.event_times
-            if kind == "complete" and name == item.spec.name
+            if kind == "complete" and name == item.spec.locator.function_name
         )
         assert max(
             elapsed
@@ -1531,7 +1539,10 @@ class TestResultOrdering:
         result = await runner.run(resolver=ResourceResolver(registry), items=items)
 
         # Results should be in discovery order, not completion order
-        names = [r.definition.spec.name for r in result.result.executions]
+        names = [
+            r.definition.spec.locator.function_name
+            for r in result.result.executions
+        ]
         assert names == ["test_0", "test_1", "test_2"]
 
 

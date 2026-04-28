@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
 
 from rue.experiments.models import ExperimentSpec
+from rue.models import Locator
 
 _EXPERIMENT_RECEIVER = frozenset({"self", "cls"})
 
@@ -50,16 +51,14 @@ class ExperimentRegistry:
                 raise ValueError("experiment hooks must accept a value parameter")
 
             filename = fn.__code__.co_filename
-            if filename.startswith("<") and filename.endswith(">"):
-                provider_path: str | None = None
-                provider_dir: str | None = None
-            else:
-                path = Path(filename).resolve()
-                provider_path = str(path)
-                provider_dir = str(path.parent)
+            path = (
+                None
+                if filename.startswith("<") and filename.endswith(">")
+                else Path(filename).resolve()
+            )
 
             spec = ExperimentSpec(
-                name=fn.__name__,
+                locator=Locator(module_path=path, function_name=fn.__name__),
                 values=values_tuple,
                 ids=ids_tuple,
                 fn=fn,
@@ -68,12 +67,11 @@ class ExperimentRegistry:
                     for p in signature.parameters
                     if p not in _EXPERIMENT_RECEIVER and p != "value"
                 ),
-                provider_path=provider_path,
-                provider_dir=provider_dir,
             )
-            if spec.name in self._experiments:
-                raise ValueError(f"Duplicate experiment: {spec.name}")
-            self._experiments[spec.name] = spec
+            name = spec.locator.function_name
+            if name in self._experiments:
+                raise ValueError(f"Duplicate experiment: {name}")
+            self._experiments[name] = spec
             return fn
 
         return decorator

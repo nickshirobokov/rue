@@ -377,7 +377,9 @@ class TestSingleTestSubprocess:
         assert payload.context.config.otel is False
         assert payload.context.run_id == UUID(int=1)
         assert payload.execution_id == execution.execution_id
-        assert [s.name for s in payload.snapshot.resolution_order] == [
+        assert [
+            s.locator.function_name for s in payload.snapshot.resolution_order
+        ] == [
             "shared_value"
         ]
 

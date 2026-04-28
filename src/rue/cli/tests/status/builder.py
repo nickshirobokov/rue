@@ -6,7 +6,6 @@ import asyncio
 from collections import defaultdict
 from pathlib import Path
 from typing import Literal
-from uuid import uuid4
 
 from rue.cli.tests.status.models import (
     StatusIssue,
@@ -14,12 +13,7 @@ from rue.cli.tests.status.models import (
     TestsStatusReport,
 )
 from rue.config import Config
-from rue.context.runtime import (
-    CURRENT_RUN_CONTEXT,
-    CURRENT_TEST,
-    TestContext,
-    bind,
-)
+from rue.context.runtime import RunContext
 from rue.resources import ResourceResolver, ResourceSpec
 from rue.resources.registry import registry as default_resource_registry
 from rue.storage.sqlite import SQLiteStore
@@ -28,7 +22,7 @@ from rue.testing.discovery import TestLoader
 from rue.testing.execution.base import ExecutableTest
 from rue.testing.execution.factory import DefaultTestFactory
 from rue.testing.execution.single import SingleTest
-from rue.testing.models import Run, RunContext, TestSpecCollection, TestStatus
+from rue.testing.models import Run, TestSpecCollection, TestStatus
 
 
 class TestsStatusBuilder:
@@ -49,7 +43,7 @@ class TestsStatusBuilder:
             collection
         )
         context = RunContext(config=self.config)
-        with bind(CURRENT_RUN_CONTEXT, context):
+        with context:
             factory = DefaultTestFactory()
             tests = [factory.build(item, enqueue=False) for item in items]
 
@@ -83,7 +77,7 @@ class TestsStatusBuilder:
 
             module_nodes: dict[Path, list[StatusNode]] = defaultdict(list)
             for test in tests:
-                module_nodes[test.definition.spec.module_path].append(
+                module_nodes[test.definition.spec.locator.module_path].append(
                     self._finalize_node(
                         test,
                         history_by_key,
@@ -129,7 +123,7 @@ class TestsStatusBuilder:
                             for param in leaf.definition.spec.params
                             if param not in leaf.params
                         ),
-                        request_path=leaf.definition.spec.module_path.resolve(),
+                        consumer_spec=leaf.definition.spec,
                     )
                 )
             except Exception as error:
@@ -151,20 +145,16 @@ class TestsStatusBuilder:
                 continue
 
             resolver = ResourceResolver(default_resource_registry)
-            ctx = TestContext(
-                item=leaf.definition,
-                execution_id=uuid4(),
-            )
             try:
-                with bind(CURRENT_TEST, ctx):
-                    await resolver.partially_resolve(
-                        tuple(
-                            param
-                            for param in leaf.definition.spec.params
-                            if param not in leaf.params
-                        ),
-                        leaf.params,
-                    )
+                await resolver.partially_resolve(
+                    tuple(
+                        param
+                        for param in leaf.definition.spec.params
+                        if param not in leaf.params
+                    ),
+                    leaf.params,
+                    consumer_spec=leaf.definition.spec,
+                )
             except Exception as error:
                 self._add_issue(leaf.node_key, "resolve", str(error))
             finally:
@@ -182,8 +172,7 @@ class TestsStatusBuilder:
                     for type_name, specs in grouped_resources.items()
                 }
                 try:
-                    with bind(CURRENT_TEST, ctx):
-                        await resolver.teardown()
+                    await resolver.teardown()
                 except Exception as error:
                     self._add_issue(leaf.node_key, "resolve", str(error))
 

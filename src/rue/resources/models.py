@@ -5,8 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import Any
+
+from rue.models import Locator, Spec
 
 
 class Scope(Enum):
@@ -17,38 +18,25 @@ class Scope(Enum):
     RUN = "run"  # Shared across entire test run
 
 
-@dataclass(frozen=True, slots=True)
-class ResourceSpec:
+@dataclass(slots=True, unsafe_hash=True)
+class ResourceSpec(Spec):
     """Canonical spec for one resolved resource provider."""
 
-    name: str
     scope: Scope
-    provider_path: str | None = None
-    provider_dir: str | None = None
     dependencies: tuple[str, ...] = field(default=(), compare=False)
     autouse: bool = field(default=False, compare=False)
     sync: bool = field(default=True, compare=False)
 
     @property
-    def origin_path(self) -> Path | None:
-        if self.provider_path is None:
-            return None
-        return Path(self.provider_path)
-
-    @property
-    def origin_dir(self) -> Path | None:
-        if self.provider_dir is None:
-            return None
-        return Path(self.provider_dir)
-
-    @property
     def snapshot_key(self) -> str:
+        """Return the stable identity used by resource transfer snapshots."""
+        module_path = self.locator.module_path
         return "|".join(
             (
                 self.scope.value,
-                self.name,
-                self.provider_path or "",
-                self.provider_dir or "",
+                self.locator.function_name,
+                "" if module_path is None else str(module_path),
+                "" if module_path is None else str(module_path.parent),
             )
         )
 
@@ -79,7 +67,7 @@ class ResolverSyncSnapshot:
     """CRDT-backed transfer payload for reconstructing resources in a worker."""
 
     res_specs: tuple[ResourceSpec, ...]
-    request_path: str | None
+    request_locator: Locator
     graph_update: bytes
     base_state: bytes
     resolution_order: tuple[ResourceSpec, ...] = field(default_factory=tuple)

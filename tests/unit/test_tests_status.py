@@ -11,6 +11,7 @@ from rue.cli.tests.status import (
     TestsStatusReport,
 )
 from rue.config import Config
+from rue.models import Locator
 from rue.resources import Scope
 from rue.resources.models import ResourceSpec
 from rue.testing.discovery import TestSpecCollector
@@ -228,11 +229,16 @@ def test_status_builder_groups_resources_by_runtime_type(tmp_path):
     [node] = next(iter(report.module_nodes.values()))
 
     assert set(node.resources_by_type) == {"int", "Metric", "SUT"}
-    assert [spec.name for spec in node.resources_by_type["int"]] == ["db"]
-    assert [spec.name for spec in node.resources_by_type["Metric"]] == [
-        "latency"
-    ]
-    assert [spec.name for spec in node.resources_by_type["SUT"]] == ["agent"]
+    assert [
+        spec.locator.function_name for spec in node.resources_by_type["int"]
+    ] == ["db"]
+    assert [
+        spec.locator.function_name
+        for spec in node.resources_by_type["Metric"]
+    ] == ["latency"]
+    assert [
+        spec.locator.function_name for spec in node.resources_by_type["SUT"]
+    ] == ["agent"]
 
 
 def test_status_renderer_respects_verbosity_levels():
@@ -247,16 +253,20 @@ def test_status_renderer_respects_verbosity_levels():
         resources_by_type={
             "Metric": (
                 ResourceSpec(
-                    name="latency",
+                    locator=Locator(
+                        module_path=Path("/tmp/project/confrue_metrics.py"),
+                        function_name="latency",
+                    ),
                     scope=Scope.RUN,
-                    provider_path="/tmp/project/confrue_metrics.py",
                 ),
             ),
             "SUT": (
                 ResourceSpec(
-                    name="agent",
+                    locator=Locator(
+                        module_path=Path("/tmp/project/conftest.py"),
+                        function_name="agent",
+                    ),
                     scope=Scope.TEST,
-                    provider_path="/tmp/project/conftest.py",
                 ),
             ),
         },

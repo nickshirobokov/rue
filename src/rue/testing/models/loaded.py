@@ -9,14 +9,11 @@ from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import Any
-from uuid import UUID
 
 from rue.assertions.base import AssertionResult
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
-    CURRENT_RESOURCE_RESOLVER,
     CURRENT_TEST,
-    TestContext,
     bind,
 )
 from rue.patching.runtime import PatchContext, patch_manager
@@ -34,10 +31,6 @@ class LoadedTestDef:
     by the loader.  The ``spec`` is the cross-process-safe record; ``fn`` is
     the process-local binding.
 
-    ``fail_fast`` is the one runtime-mutable field: it is not part of the
-    spec because it is set by the :class:`Runner` after collection, not by
-    user decorators.
-
     ``suite_root`` and ``setup_chain`` capture the import context used to
     materialize this callable so expanded leaves still describe the original
     suite/session they came from.
@@ -49,7 +42,6 @@ class LoadedTestDef:
     fn: Callable[..., Any]
     suite_root: Path = field(default_factory=Path)
     setup_chain: tuple[SetupFileRef, ...] = field(default_factory=tuple)
-    fail_fast: bool = field(default=False)
     load_error: str | None = field(default=None)
 
     @classmethod
@@ -77,12 +69,12 @@ class LoadedTestDef:
     ) -> None:
         instance = None
 
-        if self.spec.class_name:
-            cls = self.fn.__globals__.get(self.spec.class_name)
+        if self.spec.locator.class_name:
+            cls = self.fn.__globals__.get(self.spec.locator.class_name)
             if cls is None:
                 raise RuntimeError(
-                    f"Test class '{self.spec.class_name}' not found "
-                    f"for test '{self.spec.name}'"
+                    f"Test class '{self.spec.locator.class_name}' not found "
+                    f"for test '{self.spec.locator.function_name}'"
                 )
             instance = cls()
 
@@ -102,9 +94,8 @@ class LoadedTestDef:
     async def run_loaded_test(
         self,
         *,
-        resolver: ResourceResolver,
         params: dict[str, Any],
-        execution_id: UUID,
+        resolver: ResourceResolver,
         run_sync_in_thread: bool,
         is_stopped: Callable[[], bool] | None = None,
     ) -> tuple[
@@ -116,17 +107,14 @@ class LoadedTestDef:
         assertion_results: list[AssertionResult] = []
         error: BaseException | None = None
         imperative_outcome: TestStatus | None = None
-        ctx = TestContext(item=self, execution_id=execution_id)
+        ctx = CURRENT_TEST.get()
+        execution_id = ctx.execution_id
 
         start = time.perf_counter()
-        with (
-            bind(CURRENT_TEST, ctx),
-            bind(CURRENT_ASSERTION_RESULTS, assertion_results),
-            bind(CURRENT_RESOURCE_RESOLVER, resolver),
-        ):
+        with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
             try:
                 autouse_names = await resolver.resolve_autouse(
-                    self.spec.module_path
+                    self.spec,
                 )
                 unresolved_params = tuple(
                     param for param in self.spec.params if param not in params
@@ -134,6 +122,7 @@ class LoadedTestDef:
                 kwargs = await resolver.partially_resolve(
                     unresolved_params,
                     params,
+                    consumer_spec=self.spec,
                 )
                 if is_stopped is not None and is_stopped():
                     imperative_outcome = TestStatus.SKIPPED
@@ -143,7 +132,7 @@ class LoadedTestDef:
                     resources = (
                         resolver.collect_dependency_closure(
                             resource_names,
-                            request_path=self.spec.module_path,
+                            consumer_spec=self.spec,
                         )
                         if resource_names
                         else ()
@@ -151,7 +140,7 @@ class LoadedTestDef:
                     with patch_manager.bind_context(
                         PatchContext(
                             execution_id=execution_id,
-                            module_path=self.spec.module_path.resolve(),
+                            module_path=self.spec.locator.module_path.resolve(),
                             resources=frozenset(resources),
                         )
                     ):
