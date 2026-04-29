@@ -12,6 +12,7 @@ from rue.context.runtime import (
     CURRENT_RESOURCE_TRANSACTION,
 )
 from rue.resources import (
+    ResourceCacheKey,
     ResourceRegistry,
     ResourceResolver,
     Scope,
@@ -256,15 +257,15 @@ class TestResourceRegistry:
 
         graph = _resource_graph(registry, ("leaf",))
 
-        root_names = [
-            identity.name for identity in graph.roots_by_execution_id[_TEST_GRAPH_KEY]
+        roots = graph.roots_by_execution_id[_TEST_GRAPH_KEY]
+        resolution_order = graph.resolution_order_by_execution_id[
+            _TEST_GRAPH_KEY
         ]
-        node_names = [
-            identity.name for identity in graph.resolution_order_by_execution_id[_TEST_GRAPH_KEY]
-        ]
+        root_names = [identity.name for identity in roots]
+        node_names = [identity.name for identity in resolution_order]
         assert root_names == ["leaf"]
         assert node_names == ["leaf"]
-        root = graph.roots_by_execution_id[_TEST_GRAPH_KEY][0]
+        root = roots[0]
         assert graph.dependencies_by_resource[root] == ()
 
     def test_compile_di_graph_transitive_dependency_first(self):
@@ -313,9 +314,10 @@ class TestResourceRegistry:
             graph.dependencies_by_resource[left_spec][0]
             == graph.dependencies_by_resource[right_spec][0]
         )
-        node_names = [
-            identity.name for identity in graph.resolution_order_by_execution_id[_TEST_GRAPH_KEY]
+        resolution_order = graph.resolution_order_by_execution_id[
+            _TEST_GRAPH_KEY
         ]
+        node_names = [identity.name for identity in resolution_order]
         assert node_names == ["shared", "left", "right", "root"]
 
     def test_compile_di_graph_preserves_root_order(self):
@@ -329,9 +331,8 @@ class TestResourceRegistry:
 
         graph = _resource_graph(registry, ("right", "left"))
 
-        root_names = [
-            identity.name for identity in graph.roots_by_execution_id[_TEST_GRAPH_KEY]
-        ]
+        roots = graph.roots_by_execution_id[_TEST_GRAPH_KEY]
+        root_names = [identity.name for identity in roots]
         assert root_names == ["right", "left"]
 
     def test_compile_di_graph_keeps_same_name_run_roots(
@@ -803,8 +804,8 @@ class TestResourceTeardown:
         assert v2 == 2
 
 
-class TestForkForTest:
-    """Tests for fork_for_test and parent/child isolation."""
+class TestResolverViews:
+    """Tests for scoped resolver view isolation."""
 
     @pytest.mark.asyncio
     async def test_child_test_scope_isolated(self):
@@ -824,7 +825,7 @@ class TestForkForTest:
         )
         assert parent_val == 1
 
-        child = parent.fork_for_test()
+        child = parent.view_for_test(UUID(int=2), _consumer_spec())
         child_val = await _resolve(
             child,
             "case_val",
@@ -869,7 +870,10 @@ class TestForkForTest:
                 teardown_count += 1
 
         parent = ResourceResolver(registry)
-        children = [parent.fork_for_test() for _ in range(8)]
+        children = [
+            parent.view_for_test(UUID(int=index + 1), _consumer_spec())
+            for index in range(8)
+        ]
         values = await asyncio.gather(
             *[
                 _resolve(child, name, consumer_spec=_consumer_spec())
@@ -1122,12 +1126,13 @@ class TestHierarchicalProcessResources:
 
         cache_keys = [
             key
-            for key in resolver._cache
-            if key.scope == Scope.RUN
-            and key.locator.function_name == "shared"
+            for key in resolver.state.cached_resource_instances()
+            if isinstance(key, ResourceCacheKey)
+            and key.spec.scope == Scope.RUN
+            and key.spec.locator.function_name == "shared"
         ]
         assert len(cache_keys) == 2
-        assert {key.locator.module_path.parent for key in cache_keys} == {
+        assert {key.spec.locator.module_path.parent for key in cache_keys} == {
             root.resolve(),
             child.resolve(),
         }
