@@ -66,11 +66,11 @@ async def _resolve(
     apply_injection_hook: bool = True,
 ):
     consumer = consumer_spec or _consumer_spec()
-    graph = resolver.registry.compile_graph(
+    graph = resolver.registry.compile_di_graph(
         {_TEST_GRAPH_KEY: (consumer, (name,))}
     )
     return await resolver.resolve_resource(
-        graph.injections_by_key[_TEST_GRAPH_KEY][name],
+        graph.injections_by_execution_id[_TEST_GRAPH_KEY][name],
         consumer_spec=consumer,
         apply_injection_hook=apply_injection_hook,
     )
@@ -78,8 +78,8 @@ async def _resolve(
 
 def _resource_spec(name: str, *, consumer_spec=None) -> ResourceSpec:
     consumer = consumer_spec or _consumer_spec()
-    graph = registry.compile_graph({_TEST_GRAPH_KEY: (consumer, (name,))})
-    return graph.injections_by_key[_TEST_GRAPH_KEY][name]
+    graph = registry.compile_di_graph({_TEST_GRAPH_KEY: (consumer, (name,))})
+    return graph.injections_by_execution_id[_TEST_GRAPH_KEY][name]
 
 
 def _ctx(
@@ -428,7 +428,7 @@ async def test_metric_records_module_and_provider_identity():
 async def test_metric_decorator_records_metric_dependencies():
     registry.reset()
 
-    @registry.resource
+    @registry.register_resource
     def clock():
         return "utc"
 

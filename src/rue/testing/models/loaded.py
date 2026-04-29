@@ -96,8 +96,8 @@ class LoadedTestDef:
         start = time.perf_counter()
         with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
             try:
-                resource_graph = resolver.registry.graph
-                kwargs = await resolver.resolve_consumer(
+                di_graph = resolver.registry.graph
+                kwargs = await resolver.resolve_test_deps(
                     execution_id,
                     params,
                     consumer_spec=self.spec,
@@ -111,7 +111,9 @@ class LoadedTestDef:
                             execution_id=execution_id,
                             module_path=self.spec.locator.module_path.resolve(),
                             resources=frozenset(
-                                resource_graph.order_by_key[execution_id]
+                                di_graph.resolution_order_by_execution_id[
+                                    execution_id
+                                ]
                             ),
                         )
                     ):

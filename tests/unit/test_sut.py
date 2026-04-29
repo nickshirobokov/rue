@@ -74,12 +74,12 @@ async def _resolve(name: str) -> object:
     resolver = ResourceResolver(resources_registry)
     item = make_definition("test_sut")
     execution_id = uuid4()
-    graph = resources_registry.compile_graph(
+    graph = resources_registry.compile_di_graph(
         {execution_id: (item.spec, (name,))}
     )
     with TestContext(item=item, execution_id=execution_id):
         return await resolver.resolve_resource(
-            graph.injections_by_key[execution_id][name],
+            graph.injections_by_execution_id[execution_id][name],
             consumer_spec=item.spec,
         )
 

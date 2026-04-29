@@ -12,6 +12,7 @@ from rue.context.runtime import CURRENT_RUN_CONTEXT, bind
 from rue.reports.base import Reporter
 from rue.resources import ResourceResolver
 from rue.resources.metrics.base import MetricResult
+from rue.resources.models import Scope
 from rue.resources.sut.output import SUTOutputCapture
 from rue.storage import Store
 from rue.telemetry.otel.runtime import otel_runtime
@@ -53,6 +54,7 @@ class Runner:
         self._failure_count: int = 0
         self._queue = SessionQueue()
         self._completed_executions: dict[int, ExecutedTest] = {}
+        self._remaining_module_leaves: dict[str, int] = {}
 
         self.current_run: Run | None = None
 
@@ -212,10 +214,21 @@ class Runner:
                 for leaf in leaves
             }
             autouse_keys = frozenset(consumers)
-            resolver.registry.compile_graph(
+            resolver.registry.compile_di_graph(
                 consumers,
                 autouse_keys=autouse_keys,
             )
+            self._remaining_module_leaves = {}
+            for leaf in leaves:
+                module_path = leaf.definition.spec.locator.module_path
+                module_key = (
+                    str(module_path.resolve())
+                    if module_path is not None
+                    else "<unknown>"
+                )
+                self._remaining_module_leaves[module_key] = (
+                    self._remaining_module_leaves.get(module_key, 0) + 1
+                )
             await self._notify_tests_ready(self._queue.tests)
             self._completed_executions = {}
             context = CURRENT_RUN_CONTEXT.get()
@@ -257,6 +270,10 @@ class Runner:
                 await self._notify_test_start(test.definition)
                 execution = await test.execute(resolver)
                 self._record_execution(run, execution)
+                await self._teardown_module_if_complete(
+                    resolver,
+                    execution,
+                )
             return
 
         condition = asyncio.Condition()
@@ -278,6 +295,10 @@ class Runner:
 
                 execution = await test.execute(resolver)
                 self._record_execution(run, execution)
+                await self._teardown_module_if_complete(
+                    resolver,
+                    execution,
+                )
 
                 async with condition:
                     step.finish(mq, batch)
@@ -315,3 +336,23 @@ class Runner:
         if maxfail and self._failure_count >= maxfail:
             self.stop_flag = True
             run.result.stopped_early = True
+
+    async def _teardown_module_if_complete(
+        self,
+        resolver: ResourceResolver,
+        execution: ExecutedTest,
+    ) -> None:
+        module_path = execution.definition.spec.locator.module_path
+        module_key = (
+            str(module_path.resolve())
+            if module_path is not None
+            else "<unknown>"
+        )
+        remaining = self._remaining_module_leaves[module_key] - 1
+        self._remaining_module_leaves[module_key] = remaining
+        if remaining:
+            return
+        await resolver.view_for_test(
+            execution.execution_id,
+            execution.definition.spec,
+        ).teardown_scope(Scope.MODULE)

@@ -57,41 +57,47 @@ class LoadedResourceDef:
 
 
 @dataclass(frozen=True, slots=True)
-class ResourceGraph:
+class DIGraph:
     """Precompiled concrete resource graph for known injection consumers."""
 
-    roots_by_key: dict[UUID, tuple[ResourceSpec, ...]] = field(
+    roots_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]] = field(
         default_factory=dict
     )
-    autouse_by_key: dict[UUID, tuple[ResourceSpec, ...]] = field(
+    autouse_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]] = field(
         default_factory=dict
     )
-    injections_by_key: dict[UUID, dict[str, ResourceSpec]] = field(
+    injections_by_execution_id: dict[UUID, dict[str, ResourceSpec]] = field(
         default_factory=dict
     )
-    dependencies_by_spec: dict[ResourceSpec, tuple[ResourceSpec, ...]] = field(
+    dependencies_by_resource: dict[ResourceSpec, tuple[ResourceSpec, ...]] = field(
         default_factory=dict
     )
-    order_by_key: dict[UUID, tuple[ResourceSpec, ...]] = field(
+    resolution_order_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]] = field(
         default_factory=dict
     )
 
-    def slice(self, key: UUID) -> ResourceGraph:
+    def get_subgraph(self, execution_id: UUID) -> DIGraph:
         """Return the subgraph needed to execute one consumer key."""
-        order = self.order_by_key[key]
+        order = self.resolution_order_by_execution_id[execution_id]
         specs = set(order)
-        return ResourceGraph(
-            roots_by_key={key: self.roots_by_key.get(key, ())},
-            autouse_by_key={key: self.autouse_by_key.get(key, ())},
-            injections_by_key={
-                key: dict(self.injections_by_key.get(key, {}))
+        return DIGraph(
+            roots_by_execution_id={
+                execution_id: self.roots_by_execution_id.get(execution_id, ())
             },
-            dependencies_by_spec={
-                identity: dependencies
-                for identity, dependencies in self.dependencies_by_spec.items()
-                if identity in specs
+            autouse_by_execution_id={
+                execution_id: self.autouse_by_execution_id.get(execution_id, ())
             },
-            order_by_key={key: order},
+            injections_by_execution_id={
+                execution_id: dict(
+                    self.injections_by_execution_id.get(execution_id, {})
+                )
+            },
+            dependencies_by_resource={
+                spec: dependencies
+                for spec, dependencies in self.dependencies_by_resource.items()
+                if spec in specs
+            },
+            resolution_order_by_execution_id={execution_id: order},
         )
 
 
@@ -99,9 +105,9 @@ class ResourceGraph:
 class ResolverSyncSnapshot:
     """CRDT-backed transfer payload for reconstructing resources in a worker."""
 
-    res_specs: tuple[ResourceSpec, ...]
-    resource_graph: ResourceGraph
+    resource_specs: tuple[ResourceSpec, ...]
+    execution_graph: DIGraph
     graph_update: bytes
     base_state: bytes
-    resource_order: tuple[ResourceSpec, ...] = field(default_factory=tuple)
-    sync_actor_id: int = 0
+    resolution_order: tuple[ResourceSpec, ...] = field(default_factory=tuple)
+    actor_id: int = 0

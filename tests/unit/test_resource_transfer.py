@@ -15,11 +15,11 @@ from pydantic import BaseModel
 
 from rue.resources import (
     ResolverSyncSnapshot,
-    ResourceGraph,
+    DIGraph,
     ResourceResolver,
     Scope,
-    registry,
     resource,
+    registry,
 )
 from rue.resources.snapshot import SyncGraph
 from tests.unit.factories import make_definition
@@ -112,7 +112,7 @@ class NestedHolder:
 def _snapshot_payload(snapshot: ResolverSyncSnapshot) -> dict[str, object]:
     graph = SyncGraph.from_update(snapshot.graph_update, actor_id=0)
     return graph.payload(
-        identity.snapshot_key for identity in snapshot.res_specs
+        identity.snapshot_key for identity in snapshot.resource_specs
     )
 
 
@@ -125,9 +125,9 @@ def _resource_graph(
     *,
     consumer_spec=None,
     key: UUID = _TEST_GRAPH_KEY,
-) -> ResourceGraph:
+) -> DIGraph:
     consumer = consumer_spec or _consumer_spec()
-    return registry.compile_graph({key: (consumer, resource_names)})
+    return registry.compile_di_graph({key: (consumer, resource_names)})
 
 
 async def _resolve(
@@ -139,7 +139,7 @@ async def _resolve(
     consumer = consumer_spec or _consumer_spec()
     graph = _resource_graph((name,), consumer_spec=consumer)
     return await resolver.resolve_resource(
-        graph.injections_by_key[_TEST_GRAPH_KEY][name],
+        graph.injections_by_execution_id[_TEST_GRAPH_KEY][name],
         consumer_spec=consumer,
     )
 
@@ -162,9 +162,9 @@ def _sync_update(
     resolver: ResourceResolver,
     snapshot: ResolverSyncSnapshot,
 ) -> bytes:
-    return resolver.sync_update_since(
+    return resolver.sync_update_for_resources_since(
         snapshot.base_state,
-        list(snapshot.res_specs),
+        list(snapshot.resource_specs),
     )
 
 
@@ -197,13 +197,13 @@ class TestExportSyncSnapshot:
         )
 
         names = {
-            identity.locator.function_name for identity in snapshot.res_specs
+            identity.locator.function_name for identity in snapshot.resource_specs
         }
         payload = _snapshot_payload(snapshot)
 
         assert names == {"shared", "per_test"}
         assert set(payload["root_ids"]) == {
-            identity.snapshot_key for identity in snapshot.res_specs
+            identity.snapshot_key for identity in snapshot.resource_specs
         }
 
     async def test_records_ignored_runtime_fields(self):
@@ -215,7 +215,7 @@ class TestExportSyncSnapshot:
         await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
         snapshot = _snapshot(resolver, ("state",), consumer_spec=_consumer_spec())
-        identity = snapshot.res_specs[0]
+        identity = snapshot.resource_specs[0]
         payload = _snapshot_payload(snapshot)
         root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
         attrs = set(root_node["attrs"])
@@ -238,7 +238,7 @@ class TestExportSyncSnapshot:
         await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
         snapshot = _snapshot(resolver, ("state",), consumer_spec=_consumer_spec())
-        identity = snapshot.res_specs[0]
+        identity = snapshot.resource_specs[0]
         payload = _snapshot_payload(snapshot)
         root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
 
@@ -257,7 +257,7 @@ class TestExportSyncSnapshot:
         await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
         snapshot = _snapshot(resolver, ("state",), consumer_spec=_consumer_spec())
-        identity = snapshot.res_specs[0]
+        identity = snapshot.resource_specs[0]
         payload = _snapshot_payload(snapshot)
         root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
 
@@ -277,10 +277,10 @@ class TestExportSyncSnapshot:
         live = await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
         snapshot = _snapshot(resolver, ("state",), consumer_spec=_consumer_spec())
-        identity = snapshot.res_specs[0]
+        identity = snapshot.resource_specs[0]
         payload = _snapshot_payload(snapshot)
         root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),
@@ -318,7 +318,7 @@ class TestExportSyncSnapshot:
         payload = _snapshot_payload(snapshot)
         identity_map = {
             identity.locator.function_name: identity
-            for identity in snapshot.res_specs
+            for identity in snapshot.resource_specs
         }
 
         assert (
@@ -345,10 +345,10 @@ class TestExportSyncSnapshot:
         )
 
         assert (
-            snapshot.resource_graph.roots_by_key[_TEST_GRAPH_KEY][0].name
+            snapshot.execution_graph.roots_by_execution_id[_TEST_GRAPH_KEY][0].name
             == "simple"
         )
-        assert snapshot.sync_actor_id == 7
+        assert snapshot.actor_id == 7
 
     async def test_atomic_values_use_tagged_nodes(self):
         class Mode(Enum):
@@ -378,7 +378,7 @@ class TestExportSyncSnapshot:
         await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
         snapshot = _snapshot(resolver, ("state",), consumer_spec=_consumer_spec())
-        identity = snapshot.res_specs[0]
+        identity = snapshot.resource_specs[0]
         payload = _snapshot_payload(snapshot)
         root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
         node_kinds = {
@@ -421,7 +421,7 @@ class TestHydrateFromSyncSnapshot:
         assert resolve_count == 1
 
         snapshot = _snapshot(resolver, ("config",), consumer_spec=_consumer_spec())
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),
@@ -446,7 +446,7 @@ class TestHydrateFromSyncSnapshot:
         shared_state["count"] = 4
 
         snapshot = _snapshot(resolver, ("shared",), consumer_spec=_consumer_spec())
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),
@@ -470,7 +470,7 @@ class TestHydrateFromSyncSnapshot:
         await _resolve(resolver, "holder", consumer_spec=_consumer_spec())
 
         snapshot = _snapshot(resolver, ("holder",), consumer_spec=_consumer_spec())
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),
@@ -482,20 +482,20 @@ class TestHydrateFromSyncSnapshot:
     async def test_empty_snapshot_hydration(self):
         graph = SyncGraph(actor_id=1)
         snapshot = ResolverSyncSnapshot(
-            res_specs=(),
-            resource_graph=ResourceGraph(),
+            resource_specs=(),
+            execution_graph=DIGraph(),
             graph_update=graph.doc.get_update(None),
             base_state=graph.doc.get_state(),
-            resource_order=(),
-            sync_actor_id=1,
+            resolution_order=(),
+            actor_id=1,
         )
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),
         )
 
-        assert len(worker.cached_identities) == 0
+        assert len(worker.cached_resources) == 0
 
 
 class TestSyncRoundTrip:
@@ -505,11 +505,19 @@ class TestSyncRoundTrip:
             return {"events": []}
 
         parent = ResourceResolver(registry)
-        forked = parent.fork_for_test()
-        state = await _resolve(forked, "case_state", consumer_spec=_consumer_spec())
-        snapshot = _snapshot(forked, ("case_state",), consumer_spec=_consumer_spec())
+        forked = parent.view_for_test(UUID(int=2), _consumer_spec())
+        state = await _resolve(
+            forked,
+            "case_state",
+            consumer_spec=_consumer_spec(),
+        )
+        snapshot = _snapshot(
+            forked,
+            ("case_state",),
+            consumer_spec=_consumer_spec(),
+        )
 
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),
@@ -534,7 +542,7 @@ class TestSyncRoundTrip:
         shared_state = await _resolve(parent, "shared", consumer_spec=_consumer_spec())
         snapshot = _snapshot(parent, ("shared",), consumer_spec=_consumer_spec())
 
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),
@@ -560,7 +568,7 @@ class TestSyncRoundTrip:
         parent = ResourceResolver(registry)
         shared_state = await _resolve(parent, "shared", consumer_spec=_consumer_spec())
         snapshot = _snapshot(parent, ("shared",), consumer_spec=_consumer_spec())
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),
@@ -586,7 +594,7 @@ class TestSyncRoundTrip:
         parent = ResourceResolver(registry)
         shared_state = await _resolve(parent, "shared", consumer_spec=_consumer_spec())
         snapshot = _snapshot(parent, ("shared",), consumer_spec=_consumer_spec())
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),
@@ -613,7 +621,7 @@ class TestSyncRoundTrip:
         parent = ResourceResolver(registry)
         shared_state = await _resolve(parent, "shared", consumer_spec=_consumer_spec())
         snapshot = _snapshot(parent, ("shared",), consumer_spec=_consumer_spec())
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),
@@ -647,7 +655,7 @@ class TestSyncRoundTrip:
         live_shared = await _resolve(parent, "shared", consumer_spec=_consumer_spec())
         live_alias = await _resolve(parent, "alias", consumer_spec=_consumer_spec())
         snapshot = _snapshot(parent, ("alias",), consumer_spec=_consumer_spec())
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),
@@ -673,11 +681,19 @@ class TestSyncRoundTrip:
             events.append("teardown")
 
         parent = ResourceResolver(registry)
-        forked = parent.fork_for_test()
-        state = await _resolve(forked, "case_state", consumer_spec=_consumer_spec())
-        snapshot = _snapshot(forked, ("case_state",), consumer_spec=_consumer_spec())
+        forked = parent.view_for_test(UUID(int=2), _consumer_spec())
+        state = await _resolve(
+            forked,
+            "case_state",
+            consumer_spec=_consumer_spec(),
+        )
+        snapshot = _snapshot(
+            forked,
+            ("case_state",),
+            consumer_spec=_consumer_spec(),
+        )
 
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),
@@ -706,7 +722,7 @@ class TestSyncRoundTrip:
         live = await _resolve(parent, "state", consumer_spec=_consumer_spec())
         snapshot = _snapshot(parent, ("state",), consumer_spec=_consumer_spec())
 
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),
@@ -733,7 +749,7 @@ class TestSyncRoundTrip:
         items_before = state["items"]
         snapshot = _snapshot(parent, ("holder",), consumer_spec=_consumer_spec())
 
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),
@@ -761,7 +777,7 @@ class TestSyncRoundTrip:
         items_before = state.payload["items"]
         snapshot = _snapshot(parent, ("holder",), consumer_spec=_consumer_spec())
 
-        worker = await ResourceResolver.hydrate_from_sync_snapshot(
+        worker = await ResourceResolver.from_sync_snapshot(
             snapshot,
             registry,
             consumer_spec=_consumer_spec(),

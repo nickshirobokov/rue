@@ -91,7 +91,10 @@ class SingleTest(ExecutableTest):
                     execution_id=execution_id,
                 )
 
-        test_resolver = resolver.fork_for_test()
+        test_resolver = resolver.view_for_test(
+            execution_id,
+            self.definition.spec,
+        )
         ctx = TestContext(
             item=self.definition,
             execution_id=execution_id,
@@ -126,11 +129,11 @@ class SingleTest(ExecutableTest):
                         is_stopped=self.is_stopped,
                     )
                 )
-            resolver.flush_live_changes(
+            resolver.flush_resources_to_sync_graph(
                 [
-                    identity
-                    for identity in resolver.cached_identities
-                    if identity.scope is not Scope.TEST
+                    spec
+                    for spec in resolver.cached_resources
+                    if spec.scope is not Scope.TEST
                 ]
             )
             try:
@@ -172,7 +175,7 @@ class SingleTest(ExecutableTest):
                 self.semaphore if self.semaphore else contextlib.nullcontext()
             )
             async with semaphore:
-                await resolver.resolve_consumer(
+                await resolver.resolve_test_deps(
                     execution_id,
                     self.params,
                     consumer_spec=self.definition.spec,

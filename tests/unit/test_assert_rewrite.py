@@ -184,11 +184,11 @@ def test_dummy():
         ctx = TestContext(item=item, execution_id=execution_id)
         metric_results: list[MetricResult] = []
         with ctx, bind(CURRENT_METRIC_RESULTS, metric_results):
-            graph = registry.compile_graph(
+            graph = registry.compile_di_graph(
                 {execution_id: (item.spec, ("my_metric",))}
             )
             await resolver.resolve_resource(
-                graph.injections_by_key[execution_id]["my_metric"],
+                graph.injections_by_execution_id[execution_id]["my_metric"],
                 consumer_spec=item.spec,
             )
             await resolver.teardown()

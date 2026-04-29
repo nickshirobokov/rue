@@ -42,7 +42,7 @@ class ExperimentSpec(Spec):
         """Apply this experiment hook to the current run process."""
         kwargs: dict[str, Any] = {"value": self.values[value_index]}
         kwargs.update(
-            await resolver.resolve_consumer(
+            await resolver.resolve_test_deps(
                 graph_key,
                 {},
                 consumer_spec=self,
@@ -109,7 +109,7 @@ class ExperimentVariant:
         keys_by_name = {
             name: uuid4() for name, _value_index, _value_id in self.values
         }
-        resolver.registry.compile_graph(
+        resolver.registry.compile_di_graph(
             {
                 keys_by_name[name]: (
                     definitions[name],

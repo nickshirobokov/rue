@@ -15,7 +15,7 @@ from rue.cli.tests.status.models import (
 )
 from rue.config import Config
 from rue.context.runtime import RunContext
-from rue.resources import ResourceGraph, ResourceResolver, ResourceSpec
+from rue.resources import DIGraph, ResourceResolver, ResourceSpec
 from rue.resources.registry import registry as default_resource_registry
 from rue.storage.sqlite import SQLiteStore
 from rue.testing.discovery import TestLoader
@@ -88,13 +88,13 @@ class TestsStatusBuilder:
         leaves: list[SingleTest],
     ) -> tuple[
         dict[UUID, tuple[ResourceSpec, ...]],
-        dict[UUID, ResourceGraph],
+        dict[UUID, DIGraph],
     ]:
         connected_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]] = {}
-        graphs_by_execution_id: dict[UUID, ResourceGraph] = {}
+        graphs_by_execution_id: dict[UUID, DIGraph] = {}
         for leaf in leaves:
             try:
-                graph = default_resource_registry.compile_graph(
+                graph = default_resource_registry.compile_di_graph(
                     {
                         leaf.execution_id: (
                             leaf.definition.spec,
@@ -108,9 +108,9 @@ class TestsStatusBuilder:
                     autouse_keys=frozenset({leaf.execution_id}),
                 )
                 graphs_by_execution_id[leaf.execution_id] = graph
-                connected_by_execution_id[leaf.execution_id] = graph.order_by_key[
+                connected_by_execution_id[
                     leaf.execution_id
-                ]
+                ] = graph.resolution_order_by_execution_id[leaf.execution_id]
             except Exception as error:
                 self._add_issue(leaf.execution_id, "resolve", str(error))
                 connected_by_execution_id[leaf.execution_id] = ()
@@ -120,7 +120,7 @@ class TestsStatusBuilder:
         self,
         leaves: list[SingleTest],
         connected_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]],
-        graphs_by_execution_id: dict[UUID, ResourceGraph],
+        graphs_by_execution_id: dict[UUID, DIGraph],
     ) -> dict[UUID, dict[str, tuple[ResourceSpec, ...]]]:
         resources_by_execution_id: dict[
             UUID, dict[str, tuple[ResourceSpec, ...]]
@@ -138,7 +138,7 @@ class TestsStatusBuilder:
                 default_resource_registry.graph = graphs_by_execution_id[
                     execution_id
                 ]
-                await resolver.resolve_consumer(
+                await resolver.resolve_test_deps(
                     execution_id,
                     leaf.params,
                     consumer_spec=leaf.definition.spec,
@@ -147,14 +147,14 @@ class TestsStatusBuilder:
                 self._add_issue(execution_id, "resolve", str(error))
             finally:
                 grouped_resources: dict[str, list[ResourceSpec]] = {}
-                for identity in connected:
-                    value = resolver.cached_identities.get(identity)
+                for spec in connected:
+                    value = resolver.cached_resources.get(spec)
                     if value is None:
                         continue
                     grouped_resources.setdefault(
                         type(value).__name__,
                         [],
-                    ).append(identity)
+                    ).append(spec)
                 resources_by_execution_id[execution_id] = {
                     type_name: tuple(specs)
                     for type_name, specs in grouped_resources.items()

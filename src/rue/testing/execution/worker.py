@@ -18,6 +18,7 @@ from rue.experiments.registry import registry as default_experiment_registry
 from rue.resources import ResourceResolver
 from rue.resources.models import ResolverSyncSnapshot
 from rue.resources.registry import registry as default_resource_registry
+from rue.resources.state import ResolverState
 from rue.telemetry.base import TelemetryArtifact
 from rue.testing.discovery.loader import TestLoader
 from rue.testing.models import TestResult
@@ -56,8 +57,9 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
     loader = TestLoader(payload.suite_root)
     resolver = ResourceResolver(
         default_resource_registry,
-        shadow_mode=True,
-        sync_actor_id=payload.snapshot.sync_actor_id,
+        state=ResolverState.shadow(
+            sync_actor_id=payload.snapshot.actor_id,
+        ),
     )
     with payload.context:
         if payload.context.experiment_variant is not None:
@@ -90,7 +92,11 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
         bind(CURRENT_TEST_TRACER, tracer),
     ):
         try:
-            await resolver.hydrate_sync_snapshot(
+            resolver = resolver.view_for_test(
+                payload.execution_id,
+                definition.spec,
+            )
+            await resolver.load_sync_snapshot(
                 payload.snapshot,
                 consumer_spec=definition.spec,
             )
@@ -112,9 +118,9 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
             )
             tracer.record_result(result)
             telemetry_artifacts = tracer.finish()
-            sync_update = resolver.sync_update_since(
+            sync_update = resolver.sync_update_for_resources_since(
                 payload.snapshot.base_state,
-                list(payload.snapshot.res_specs),
+                list(payload.snapshot.resource_specs),
             )
         finally:
             await resolver.teardown()
