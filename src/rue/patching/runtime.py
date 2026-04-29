@@ -5,13 +5,13 @@ from __future__ import annotations
 import inspect
 from collections.abc import Iterator, MutableMapping, MutableSequence
 from contextvars import ContextVar, Token
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
-from typing import Any, Literal, Protocol
+from typing import Any, Literal
 from uuid import UUID
 
-from rue.resources.models import Scope
+from rue.context.scopes import Scope, ScopeOwner
 
 
 type PatchTargetKind = Literal["attr", "item"]
@@ -31,49 +31,11 @@ class PatchContext:
 
 
 @dataclass(frozen=True, slots=True)
-class PatchOwner:
-    """Owns visibility and cleanup for one patch record."""
-
-    scope: Scope
-    execution_id: UUID | None = None
-    run_id: UUID | None = None
-    module_path: Path | None = None
-
-    def is_active(self, context: PatchContext | None) -> bool:
-        """Return whether this owner applies in the current runtime context."""
-        if context is None:
-            return False
-        match self.scope:
-            case Scope.TEST:
-                return (
-                    self.execution_id is not None
-                    and context.execution_id == self.execution_id
-                )
-            case Scope.MODULE:
-                return (
-                    self.module_path is not None
-                    and context.module_path == self.module_path
-                )
-            case Scope.RUN:
-                return (
-                    self.run_id is not None
-                    and context.run_id == self.run_id
-                )
-
-
-class PatchHandleRegistry(Protocol):
-    """Stores patch handles for later lifecycle teardown."""
-
-    def register_patch(self, handle: PatchHandle) -> None:
-        """Attach one patch handle to its owning lifecycle."""
-
-
-@dataclass(frozen=True, slots=True)
 class PatchLifetime:
     """Owner and storage API for one monkeypatch resource."""
 
-    owner: PatchOwner
-    registry: PatchHandleRegistry
+    owner: ScopeOwner
+    store: PatchStore
 
     @property
     def scope(self) -> Scope:
@@ -82,14 +44,14 @@ class PatchLifetime:
 
     def register(self, handle: PatchHandle) -> None:
         """Register a patch handle with this lifetime's storage."""
-        self.registry.register_patch(handle)
+        self.store.register_patch(handle)
 
 
 @dataclass(frozen=True, slots=True)
 class PatchHandle:
     """A registered patch that can be undone by its owning resolver."""
 
-    owner: PatchOwner
+    owner: ScopeOwner
     target_key: PatchTargetKey
     record: _PatchRecord
     manager: PatchManager
@@ -100,8 +62,44 @@ class PatchHandle:
 
 
 @dataclass(slots=True)
+class PatchStore:
+    """Stores patch handles by their patch lifecycle owner."""
+
+    _handles: dict[ScopeOwner, list[PatchHandle]] = field(
+        default_factory=dict
+    )
+
+    def lifetime(self, owner: ScopeOwner) -> PatchLifetime:
+        """Build a lifetime API for one patch owner."""
+        return PatchLifetime(owner=owner, store=self)
+
+    def register_patch(self, handle: PatchHandle) -> None:
+        """Attach a patch handle to its owning patch lifecycle."""
+        self._handles.setdefault(handle.owner, []).append(handle)
+
+    def pop_owner(self, owner: ScopeOwner) -> list[PatchHandle]:
+        """Remove and return patch handles for one owner."""
+        return self._handles.pop(owner, [])
+
+    def pop_scope(self, scope: Scope) -> list[PatchHandle]:
+        """Remove and return patch handles for all owners in one scope."""
+        handles: list[PatchHandle] = []
+        for owner in tuple(self._handles):
+            if owner.scope is scope:
+                handles.extend(self.pop_owner(owner))
+        return handles
+
+    def pop_all(self) -> list[PatchHandle]:
+        """Remove and return all patch handles."""
+        handles: list[PatchHandle] = []
+        for owner in tuple(self._handles):
+            handles.extend(self.pop_owner(owner))
+        return handles
+
+
+@dataclass(slots=True)
 class _PatchRecord:
-    owner: PatchOwner
+    owner: ScopeOwner
     value: Any
 
 
@@ -206,7 +204,7 @@ class PatchManager:
         name: str,
         value: Any,
         *,
-        owner: PatchOwner,
+        owner: ScopeOwner,
         raising: bool,
     ) -> PatchHandle:
         """Install or append one context-routed attribute patch."""
@@ -239,7 +237,7 @@ class PatchManager:
         target: Any,
         name: str,
         *,
-        owner: PatchOwner,
+        owner: ScopeOwner,
         raising: bool,
     ) -> PatchHandle | None:
         """Install or append one context-routed attribute deletion."""
@@ -273,7 +271,7 @@ class PatchManager:
         name: Any,
         value: Any,
         *,
-        owner: PatchOwner,
+        owner: ScopeOwner,
         replace: bool | None = None,
     ) -> PatchHandle:
         """Install or append one context-routed item patch."""
@@ -311,7 +309,7 @@ class PatchManager:
         target: MutableMapping[Any, Any] | MutableSequence[Any],
         name: Any,
         *,
-        owner: PatchOwner,
+        owner: ScopeOwner,
         raising: bool,
     ) -> PatchHandle | None:
         """Install or append one context-routed item deletion."""
@@ -350,7 +348,7 @@ class PatchManager:
     def _add_record(
         self,
         patched: _PatchedTarget,
-        owner: PatchOwner,
+        owner: ScopeOwner,
         value: Any,
     ) -> PatchHandle:
         record = _PatchRecord(owner=owner, value=value)
@@ -368,7 +366,11 @@ class PatchManager:
             patched = self._patched[target_key]
             context = self._context.get()
             for record in reversed(patched.records):
-                if record.owner.is_active(context):
+                if context is not None and record.owner.is_active(
+                    execution_id=context.execution_id,
+                    run_id=context.run_id,
+                    module_path=context.module_path,
+                ):
                     if record.value is _MISSING:
                         self._raise_missing(patched)
                     return record.value

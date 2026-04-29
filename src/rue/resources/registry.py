@@ -1,5 +1,7 @@
 """Resource registry and registration APIs."""
 
+from __future__ import annotations
+
 import inspect
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -8,7 +10,6 @@ from uuid import UUID
 
 from rue.models import Locator, Spec
 from rue.resources.models import (
-    DIGraph,
     LoadedResourceDef,
     ResourceSpec,
     Scope,
@@ -17,6 +18,11 @@ from rue.resources.models import (
 
 _RECEIVER_PARAMETER_NAMES = {"self", "cls"}
 RESOURCE_PROVIDER_SCOPE_PRIORITY = (Scope.TEST, Scope.MODULE, Scope.RUN)
+RESOURCE_DEPENDENCY_SCOPES = {
+    Scope.TEST: frozenset({Scope.TEST, Scope.MODULE, Scope.RUN}),
+    Scope.MODULE: frozenset({Scope.MODULE, Scope.RUN}),
+    Scope.RUN: frozenset({Scope.RUN}),
+}
 type _DefinitionsByScope = dict[Scope, dict[Path | None, LoadedResourceDef]]
 type _ProviderSelectionPlan = tuple[
     tuple[tuple[Path, LoadedResourceDef], ...],
@@ -30,18 +36,17 @@ class ResourceRegistry:
     def __init__(self) -> None:
         self._definitions: dict[str, _DefinitionsByScope] = {}
         self._builtin_definitions: dict[str, _DefinitionsByScope] = {}
-        self._graph: DIGraph | None = None
-
-    @property
-    def graph(self) -> DIGraph:
-        """Return the active compiled resource graph."""
-        if self._graph is None:
-            raise RuntimeError("Resource graph is not compiled")
-        return self._graph
-
-    @graph.setter
-    def graph(self, graph: DIGraph) -> None:
-        self._graph = graph
+        self.roots_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]] = {}
+        self.autouse_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]] = {}
+        self.injections_by_execution_id: dict[
+            UUID, dict[str, ResourceSpec]
+        ] = {}
+        self.dependencies_by_resource: dict[
+            ResourceSpec, tuple[ResourceSpec, ...]
+        ] = {}
+        self.resolution_order_by_execution_id: dict[
+            UUID, tuple[ResourceSpec, ...]
+        ] = {}
 
     def register_resource[**P, T](
         self,
@@ -102,7 +107,11 @@ class ResourceRegistry:
             by_scope = self._definitions.setdefault(spec.name, {})
             by_path = by_scope.setdefault(spec.scope, {})
             by_path[spec.module_path] = definition
-            self._graph = None
+            self.roots_by_execution_id.clear()
+            self.autouse_by_execution_id.clear()
+            self.injections_by_execution_id.clear()
+            self.dependencies_by_resource.clear()
+            self.resolution_order_by_execution_id.clear()
             if builtin:
                 builtin_by_scope = self._builtin_definitions.setdefault(
                     spec.name,
@@ -126,7 +135,11 @@ class ResourceRegistry:
             }
             for name, by_scope in self._builtin_definitions.items()
         }
-        self._graph = None
+        self.roots_by_execution_id.clear()
+        self.autouse_by_execution_id.clear()
+        self.injections_by_execution_id.clear()
+        self.dependencies_by_resource.clear()
+        self.resolution_order_by_execution_id.clear()
 
     def get_definition(self, spec: ResourceSpec) -> LoadedResourceDef:
         """Return the exact registered definition for a resource identity."""
@@ -150,19 +163,16 @@ class ResourceRegistry:
         consumers: Mapping[UUID, tuple[Spec, tuple[str, ...]]],
         *,
         autouse_keys: frozenset[UUID] = frozenset(),
-    ) -> DIGraph:
+    ) -> None:
         """Compile a concrete resource graph for known injection consumers."""
-        dependencies_by_resource: dict[
-            ResourceSpec, tuple[ResourceSpec, ...]
-        ] = {}
-        roots_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]] = {}
-        autouse_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]] = {}
-        injections_by_execution_id: dict[UUID, dict[str, ResourceSpec]] = {}
-        resolution_order_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]] = {}
+        self.roots_by_execution_id.clear()
+        self.autouse_by_execution_id.clear()
+        self.injections_by_execution_id.clear()
+        self.dependencies_by_resource.clear()
+        self.resolution_order_by_execution_id.clear()
         built: set[ResourceSpec] = set()
         resolving: list[ResourceSpec] = []
         resolving_set: set[ResourceSpec] = set()
-        self._graph = None
         autouse_names = tuple(
             sorted(
                 name
@@ -175,82 +185,124 @@ class ResourceRegistry:
             )
         )
         dir_cache: dict[Path | None, Path | None] = {None: None}
-        select_cache: dict[tuple[str, Path | None], LoadedResourceDef] = {}
-        plan_cache: dict[str, _ProviderSelectionPlan] = {}
+        select_cache: dict[
+            tuple[str, Path | None, tuple[Scope, ...]], LoadedResourceDef
+        ] = {}
+        plan_cache: dict[tuple[str, Scope], _ProviderSelectionPlan] = {}
         closure_cache: dict[ResourceSpec, tuple[ResourceSpec, ...]] = {}
 
         def consumer_dir(consumer: Spec) -> Path | None:
             path = consumer.module_path
-            if path not in dir_cache:
+            if path not in dir_cache and path is not None:
                 dir_cache[path] = path.resolve().parent
             return dir_cache[path]
 
         def selection_plan(
             requested_resource: str,
+            scope: Scope,
         ) -> _ProviderSelectionPlan:
-            if requested_resource in plan_cache:
-                return plan_cache[requested_resource]
+            cache_key = (requested_resource, scope)
+            if cache_key in plan_cache:
+                return plan_cache[cache_key]
             by_scope = self._definitions.get(requested_resource)
             if by_scope is None:
                 msg = f"Unknown resource: {requested_resource}"
                 raise ValueError(msg)
 
-            for scope in RESOURCE_PROVIDER_SCOPE_PRIORITY:
-                by_path = by_scope.get(scope)
-                if not by_path:
-                    continue
+            by_path = by_scope.get(scope)
+            if not by_path:
+                msg = f"Unknown resource: {requested_resource}"
+                raise ValueError(msg)
 
-                candidates = [
-                    (
-                        module_path.parent,
-                        len(module_path.parent.parts),
-                        index,
+            candidates = [
+                (
+                    module_path.parent,
+                    len(module_path.parent.parts),
+                    index,
+                    definition,
+                )
+                for index, (module_path, definition) in enumerate(
+                    by_path.items()
+                )
+                if module_path is not None
+            ]
+            candidates.sort(
+                key=lambda item: (item[1], item[2]),
+                reverse=True,
+            )
+            compiled = (
+                tuple(
+                    (provider_dir, definition)
+                    for (
+                        provider_dir,
+                        _depth,
+                        _index,
                         definition,
-                    )
-                    for index, (module_path, definition) in enumerate(
-                        by_path.items()
-                    )
-                    if module_path is not None
-                ]
-                candidates.sort(
-                    key=lambda item: (item[1], item[2]),
-                    reverse=True,
-                )
-                compiled = (
-                    tuple(
-                        (provider_dir, definition)
-                        for (
-                            provider_dir,
-                            _depth,
-                            _index,
-                            definition,
-                        ) in candidates
-                    ),
-                    next(reversed(by_path.values())),
-                )
-                plan_cache[requested_resource] = compiled
-                return compiled
+                    ) in candidates
+                ),
+                next(reversed(by_path.values())),
+            )
+            plan_cache[cache_key] = compiled
+            return compiled
 
-            msg = f"Unknown resource: {requested_resource}"
-            raise ValueError(msg)
+        def available_scopes(requested_resource: str) -> tuple[Scope, ...]:
+            by_scope = self._definitions.get(requested_resource)
+            if by_scope is None:
+                msg = f"Unknown resource: {requested_resource}"
+                raise ValueError(msg)
+            return tuple(
+                scope
+                for scope in RESOURCE_PROVIDER_SCOPE_PRIORITY
+                if by_scope.get(scope)
+            )
 
         def select_definition(
             consumer: Spec,
             requested_resource: str,
+            *,
+            scopes: frozenset[Scope] | None = None,
         ) -> LoadedResourceDef:
             directory = consumer_dir(consumer)
-            cache_key = (requested_resource, directory)
+            allowed_scopes = (
+                frozenset(RESOURCE_PROVIDER_SCOPE_PRIORITY)
+                if scopes is None
+                else scopes
+            )
+            candidate_scopes = tuple(
+                scope
+                for scope in available_scopes(requested_resource)
+                if scope in allowed_scopes
+            )
+            if not candidate_scopes:
+                available = available_scopes(requested_resource)
+                if isinstance(consumer, ResourceSpec) and available:
+                    msg = (
+                        f"{consumer.scope.value}-scoped resource "
+                        f"'{consumer.name}' cannot depend on "
+                        f"{available[0].value}-scoped resource "
+                        f"'{requested_resource}'."
+                    )
+                else:
+                    msg = f"Unknown resource: {requested_resource}"
+                raise ValueError(msg)
+            cache_key = (requested_resource, directory, candidate_scopes)
             if cache_key in select_cache:
                 return select_cache[cache_key]
 
-            candidates, fallback = selection_plan(requested_resource)
-            if directory is None:
+            for scope in candidate_scopes:
+                candidates, fallback = selection_plan(
+                    requested_resource,
+                    scope,
+                )
+                if directory is None:
+                    select_cache[cache_key] = fallback
+                    return fallback
+                for provider_dir, definition in candidates:
+                    if directory.is_relative_to(provider_dir):
+                        select_cache[cache_key] = definition
+                        return definition
                 select_cache[cache_key] = fallback
                 return fallback
-            for provider_dir, definition in candidates:
-                if directory.is_relative_to(provider_dir):
-                    select_cache[cache_key] = definition
-                    return definition
             select_cache[cache_key] = fallback
             return fallback
 
@@ -264,18 +316,21 @@ class ResourceRegistry:
 
             resolving.append(spec)
             resolving_set.add(spec)
-            dependencies = tuple(
-                compile_definition(
-                    select_definition(
-                        consumer=spec,
-                        requested_resource=dependency,
-                    )
+            selected_dependencies = tuple(
+                select_definition(
+                    consumer=spec,
+                    requested_resource=dependency,
+                    scopes=RESOURCE_DEPENDENCY_SCOPES[spec.scope],
                 )
                 for dependency in spec.dependencies
             )
+            dependencies = tuple(
+                compile_definition(dependency)
+                for dependency in selected_dependencies
+            )
             resolving.pop()
             resolving_set.remove(spec)
-            dependencies_by_resource[spec] = dependencies
+            self.dependencies_by_resource[spec] = dependencies
             built.add(spec)
             return spec
 
@@ -285,7 +340,7 @@ class ResourceRegistry:
 
             ordered: list[ResourceSpec] = []
             seen: set[ResourceSpec] = set()
-            for dependency in dependencies_by_resource[spec]:
+            for dependency in self.dependencies_by_resource[spec]:
                 for dep_spec in dependency_closure(dependency):
                     if dep_spec in seen:
                         continue
@@ -333,20 +388,39 @@ class ResourceRegistry:
                 for name in resource_names
             }
             roots = (*autouse_specs, *injections.values())
-            autouse_by_execution_id[execution_id] = autouse_specs
-            injections_by_execution_id[execution_id] = injections
-            roots_by_execution_id[execution_id] = roots
-            resolution_order_by_execution_id[execution_id] = resolution_order(roots)
+            self.autouse_by_execution_id[execution_id] = autouse_specs
+            self.injections_by_execution_id[execution_id] = injections
+            self.roots_by_execution_id[execution_id] = roots
+            order = resolution_order(roots)
+            self.resolution_order_by_execution_id[execution_id] = order
 
-        graph = DIGraph(
-            roots_by_execution_id=roots_by_execution_id,
-            autouse_by_execution_id=autouse_by_execution_id,
-            injections_by_execution_id=injections_by_execution_id,
-            dependencies_by_resource=dependencies_by_resource,
-            resolution_order_by_execution_id=resolution_order_by_execution_id,
-        )
-        self._graph = graph
-        return graph
+    def slice_registry(self, execution_id: UUID) -> ResourceRegistry:
+        """Return a registry view with graph fields for one execution."""
+        resolution_order = self.resolution_order_by_execution_id[execution_id]
+        specs = set(resolution_order)
+        registry = ResourceRegistry()
+        registry._definitions = self._definitions
+        registry._builtin_definitions = self._builtin_definitions
+        registry.roots_by_execution_id = {
+            execution_id: self.roots_by_execution_id.get(execution_id, ())
+        }
+        registry.autouse_by_execution_id = {
+            execution_id: self.autouse_by_execution_id.get(execution_id, ())
+        }
+        registry.injections_by_execution_id = {
+            execution_id: dict(
+                self.injections_by_execution_id.get(execution_id, {})
+            )
+        }
+        registry.dependencies_by_resource = {
+            spec: dependencies
+            for spec, dependencies in self.dependencies_by_resource.items()
+            if spec in specs
+        }
+        registry.resolution_order_by_execution_id = {
+            execution_id: resolution_order
+        }
+        return registry
 
 
 registry = ResourceRegistry()

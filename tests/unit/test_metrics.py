@@ -10,6 +10,7 @@ from rue import metrics
 from rue.assertions.base import AssertionRepr, AssertionResult
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.runtime import (
+    CURRENT_TEST,
     TestContext as Ctx,
     bind,
 )
@@ -66,20 +67,33 @@ async def _resolve(
     apply_injection_hook: bool = True,
 ):
     consumer = consumer_spec or _consumer_spec()
-    graph = resolver.registry.compile_di_graph(
+    resolver.registry.compile_di_graph(
         {_TEST_GRAPH_KEY: (consumer, (name,))}
     )
-    return await resolver.resolve_resource(
-        graph.injections_by_execution_id[_TEST_GRAPH_KEY][name],
-        consumer_spec=consumer,
-        apply_injection_hook=apply_injection_hook,
-    )
+    async def resolve() -> object:
+        return await resolver.resolve_resource(
+            resolver.registry.injections_by_execution_id[_TEST_GRAPH_KEY][
+                name
+            ],
+            consumer_spec=consumer,
+            apply_injection_hook=apply_injection_hook,
+        )
+
+    try:
+        CURRENT_TEST.get()
+    except LookupError:
+        with Ctx(
+            item=_make_item(consumer.name, module_path=consumer.module_path),
+            execution_id=_TEST_GRAPH_KEY,
+        ):
+            return await resolve()
+    return await resolve()
 
 
 def _resource_spec(name: str, *, consumer_spec=None) -> ResourceSpec:
     consumer = consumer_spec or _consumer_spec()
-    graph = registry.compile_di_graph({_TEST_GRAPH_KEY: (consumer, (name,))})
-    return graph.injections_by_execution_id[_TEST_GRAPH_KEY][name]
+    registry.compile_di_graph({_TEST_GRAPH_KEY: (consumer, (name,))})
+    return registry.injections_by_execution_id[_TEST_GRAPH_KEY][name]
 
 
 def _ctx(
@@ -428,7 +442,7 @@ async def test_metric_records_module_and_provider_identity():
 async def test_metric_decorator_records_metric_dependencies():
     registry.reset()
 
-    @registry.register_resource
+    @registry.register_resource(scope=Scope.RUN)
     def clock():
         return "utc"
 

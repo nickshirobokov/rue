@@ -13,17 +13,17 @@ from uuid import UUID
 import pytest
 from pydantic import BaseModel
 
+from rue.context.runtime import TestContext
 from rue.resources import (
-    DIGraph,
-    ResolverState,
     ResourceResolver,
+    ResourceStore,
     ResourceTransferSnapshot,
     Scope,
     registry,
     resource,
 )
 from rue.resources.snapshot import SyncGraph
-from tests.unit.factories import make_definition
+from tests.unit.factories import make_definition, make_run_context
 
 
 _TEST_GRAPH_KEY = UUID(int=1)
@@ -31,6 +31,7 @@ _TEST_GRAPH_KEY = UUID(int=1)
 
 @pytest.fixture(autouse=True)
 def clean_registry():
+    make_run_context(db_enabled=False)
     registry.reset()
     yield
     registry.reset()
@@ -128,9 +129,10 @@ def _resource_graph(
     *,
     consumer_spec=None,
     key: UUID = _TEST_GRAPH_KEY,
-) -> DIGraph:
+):
     consumer = consumer_spec or _consumer_spec()
-    return registry.compile_di_graph({key: (consumer, resource_names)})
+    registry.compile_di_graph({key: (consumer, resource_names)})
+    return registry.slice_registry(key)
 
 
 async def _resolve(
@@ -138,13 +140,19 @@ async def _resolve(
     name: str,
     *,
     consumer_spec=None,
+    execution_id: UUID = _TEST_GRAPH_KEY,
 ):
     consumer = consumer_spec or _consumer_spec()
-    graph = _resource_graph((name,), consumer_spec=consumer)
-    return await resolver.resolve_resource(
-        graph.injections_by_execution_id[_TEST_GRAPH_KEY][name],
-        consumer_spec=consumer,
+    graph = _resource_graph((name,), consumer_spec=consumer, key=execution_id)
+    item = make_definition(
+        consumer.name,
+        module_path=consumer.module_path or "test.py",
     )
+    with TestContext(item=item, execution_id=execution_id):
+        return await resolver.resolve_resource(
+            graph.injections_by_execution_id[execution_id][name],
+            consumer_spec=consumer,
+        )
 
 
 def _snapshot(
@@ -154,29 +162,56 @@ def _snapshot(
     consumer_spec=None,
     sync_actor_id: int = 1,
 ) -> ResourceTransferSnapshot:
-    _resource_graph(resource_names, consumer_spec=consumer_spec)
-    return resolver.transfer.export_snapshot(
-        _TEST_GRAPH_KEY,
-        actor_id=sync_actor_id,
+    consumer = consumer_spec or _consumer_spec()
+    _resource_graph(resource_names, consumer_spec=consumer)
+    item = make_definition(
+        consumer.name,
+        module_path=consumer.module_path or "test.py",
     )
+    with TestContext(item=item, execution_id=_TEST_GRAPH_KEY):
+        return resolver.transfer.export_snapshot(
+            _TEST_GRAPH_KEY,
+            actor_id=sync_actor_id,
+        )
 
 
 def _sync_update(
     resolver: ResourceResolver,
     snapshot: ResourceTransferSnapshot,
+    *,
+    consumer_spec=None,
 ) -> bytes:
-    return resolver.transfer.update_since(
-        snapshot.base_state,
-        list(snapshot.resource_specs),
+    consumer = consumer_spec or _consumer_spec()
+    item = make_definition(
+        consumer.name,
+        module_path=consumer.module_path or "test.py",
     )
+    with TestContext(item=item, execution_id=_TEST_GRAPH_KEY):
+        return resolver.transfer.update_since(
+            snapshot.base_state,
+            list(snapshot.resource_specs),
+        )
 
 
 def _apply_worker_update(
     parent: ResourceResolver,
     worker: ResourceResolver,
     snapshot: ResourceTransferSnapshot,
+    *,
+    consumer_spec=None,
 ) -> None:
-    parent.transfer.apply_update(snapshot, _sync_update(worker, snapshot))
+    consumer = consumer_spec or _consumer_spec()
+    item = make_definition(
+        consumer.name,
+        module_path=consumer.module_path or "test.py",
+    )
+    update = _sync_update(
+        worker,
+        snapshot,
+        consumer_spec=consumer,
+    )
+    with TestContext(item=item, execution_id=_TEST_GRAPH_KEY):
+        parent.transfer.apply_update(snapshot, update)
 
 
 async def _worker_from_snapshot(
@@ -187,11 +222,15 @@ async def _worker_from_snapshot(
     consumer = consumer_spec or _consumer_spec()
     resolver = ResourceResolver(
         registry,
-        state=ResolverState.shadow(sync_actor_id=snapshot.actor_id),
+        resources=ResourceStore.shadow(sync_actor_id=snapshot.actor_id),
     )
-    worker = resolver.view_for_test(_TEST_GRAPH_KEY, consumer)
-    await worker.transfer.hydrate(snapshot, consumer_spec=consumer)
-    return worker
+    item = make_definition(
+        consumer.name,
+        module_path=consumer.module_path or "test.py",
+    )
+    with TestContext(item=item, execution_id=_TEST_GRAPH_KEY):
+        await resolver.transfer.hydrate(snapshot, consumer_spec=consumer)
+    return resolver
 
 
 class TestExportSnapshot:
@@ -373,7 +412,7 @@ class TestExportSnapshot:
             == payload["root_ids"][identity_map["alias"].snapshot_key]
         )
 
-    async def test_resource_graph_and_actor_are_stored(self):
+    async def test_resource_snapshot_fields_and_actor_are_stored(self):
         @resource(scope=Scope.RUN)
         def simple():
             return 1
@@ -391,12 +430,7 @@ class TestExportSnapshot:
             sync_actor_id=7,
         )
 
-        assert (
-            snapshot.execution_graph.roots_by_execution_id[_TEST_GRAPH_KEY][
-                0
-            ].name
-            == "simple"
-        )
+        assert snapshot.roots[0].name == "simple"
         assert snapshot.actor_id == 7
 
     async def test_atomic_values_use_tagged_nodes(self):
@@ -539,7 +573,6 @@ class TestHydrateTransferSnapshot:
         graph = SyncGraph(actor_id=1)
         snapshot = ResourceTransferSnapshot(
             resource_specs=(),
-            execution_graph=DIGraph(),
             graph_update=graph.doc.get_update(None),
             base_state=graph.doc.get_state(),
             resolution_order=(),
@@ -560,14 +593,13 @@ class TestSyncRoundTrip:
             return {"events": []}
 
         parent = ResourceResolver(registry)
-        forked = parent.view_for_test(UUID(int=2), _consumer_spec())
         state = await _resolve(
-            forked,
+            parent,
             "case_state",
             consumer_spec=_consumer_spec(),
         )
         snapshot = _snapshot(
-            forked,
+            parent,
             ("case_state",),
             consumer_spec=_consumer_spec(),
         )
@@ -583,7 +615,7 @@ class TestSyncRoundTrip:
         )
         worker_state["events"].append("worker")
 
-        forked.transfer.apply_update(snapshot, _sync_update(worker, snapshot))
+        _apply_worker_update(parent, worker, snapshot)
 
         assert state["events"] == ["worker"]
 
@@ -752,14 +784,13 @@ class TestSyncRoundTrip:
             events.append("teardown")
 
         parent = ResourceResolver(registry)
-        forked = parent.view_for_test(UUID(int=2), _consumer_spec())
         state = await _resolve(
-            forked,
+            parent,
             "case_state",
             consumer_spec=_consumer_spec(),
         )
         snapshot = _snapshot(
-            forked,
+            parent,
             ("case_state",),
             consumer_spec=_consumer_spec(),
         )
@@ -775,10 +806,12 @@ class TestSyncRoundTrip:
         )
         worker_state["body"].append("worker")
 
-        _apply_worker_update(forked, worker, snapshot)
+        _apply_worker_update(parent, worker, snapshot)
 
         assert state["body"] == ["worker"]
-        await forked.teardown(Scope.TEST)
+        item = make_definition("test_transfer", module_path="test.py")
+        with TestContext(item=item, execution_id=_TEST_GRAPH_KEY):
+            await parent.teardown(Scope.TEST)
         assert await _resolve(
             parent, "events", consumer_spec=_consumer_spec()
         ) == ["teardown"]

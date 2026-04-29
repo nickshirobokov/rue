@@ -21,6 +21,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from rue.config import Config
+from rue.context.scopes import Scope, ScopeOwner
 from rue.models import Spec
 from rue.patching.runtime import PatchContext, patch_manager
 
@@ -56,18 +57,24 @@ class TestContext:
     def __enter__(self) -> TestContext:
         """Bind this test context to the current execution scope."""
         self._tokens.append(CURRENT_TEST.set(self))
-        module_path = self.item.spec.locator.module_path or Path("<dynamic>")
         run_context = CURRENT_RUN_CONTEXT.get()
         self._patch_tokens.append(
             patch_manager.bind_context(
                 PatchContext(
                     execution_id=self.execution_id,
-                    module_path=module_path.resolve(),
+                    module_path=self.module_path,
                     run_id=run_context.run_id,
                 )
             )
         )
         return self
+
+    @property
+    def module_path(self) -> Path:
+        """Return the resolved module path for this test context."""
+        return (
+            self.item.spec.locator.module_path or Path("<dynamic>")
+        ).resolve()
 
     def __exit__(
         self,
@@ -241,6 +248,36 @@ CURRENT_RESOURCE_TRANSACTION: ContextVar[
 ] = ContextVar(
     "current_resource_transaction",
 )
+
+
+def current_resource_owner(scope: Scope) -> ScopeOwner:
+    """Return the runtime owner for a resource scope."""
+    run_context = CURRENT_RUN_CONTEXT.get()
+    match scope:
+        case Scope.RUN:
+            return ScopeOwner(scope=scope, run_id=run_context.run_id)
+        case Scope.TEST:
+            try:
+                test_context = CURRENT_TEST.get()
+            except LookupError as error:
+                msg = "Test-scoped resources require an open TestContext."
+                raise RuntimeError(msg) from error
+            return ScopeOwner(
+                scope=scope,
+                execution_id=test_context.execution_id,
+                run_id=run_context.run_id,
+            )
+        case Scope.MODULE:
+            try:
+                test_context = CURRENT_TEST.get()
+            except LookupError as error:
+                msg = "Module-scoped resources require an open TestContext."
+                raise RuntimeError(msg) from error
+            return ScopeOwner(
+                scope=scope,
+                run_id=run_context.run_id,
+                module_path=test_context.module_path,
+            )
 
 
 @contextmanager

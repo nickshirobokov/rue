@@ -1,22 +1,19 @@
 """Resource injection system."""
 
+from rue.context.scopes import Scope
 from rue.patching import MonkeyPatch
 from rue.resources.builtins import register_builtin_resources
 from rue.resources.models import (
-    DIGraph,
     LoadedResourceDef,
     ResourceSpec,
     ResourceTransferSnapshot,
-    Scope,
 )
 from rue.resources.registry import ResourceRegistry, registry, resource
 from rue.resources.resolver import ResourceResolver
 from rue.resources.state import (
-    ResolverExecutionContext,
     ResolverLifecycleMode,
-    ResolverScopeOwner,
-    ResolverState,
     ResourceCacheKey,
+    ResourceStore,
     ResourceTeardownRecord,
     ResourceTransferState,
 )
@@ -27,17 +24,14 @@ register_builtin_resources(registry)
 
 
 __all__ = [
-    "DIGraph",
     "LoadedResourceDef",
     "MonkeyPatch",
-    "ResolverExecutionContext",
     "ResolverLifecycleMode",
-    "ResolverScopeOwner",
-    "ResolverState",
     "ResourceCacheKey",
     "ResourceRegistry",
     "ResourceResolver",
     "ResourceSpec",
+    "ResourceStore",
     "ResourceTeardownRecord",
     "ResourceTransfer",
     "ResourceTransferSnapshot",

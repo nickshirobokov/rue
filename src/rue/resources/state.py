@@ -7,79 +7,22 @@ import threading
 from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
-from pathlib import Path
 from typing import Any
-from uuid import UUID
 
+from rue.context.scopes import Scope, ScopeOwner
 from rue.models import Spec
-from rue.patching.runtime import PatchHandle, PatchOwner
-from rue.resources.models import LoadedResourceDef, ResourceSpec, Scope
+from rue.resources.models import (
+    LoadedResourceDef,
+    ResourceSpec,
+)
 from rue.resources.snapshot import SyncGraph
 
 
 class ResolverLifecycleMode(StrEnum):
-    """Runtime behavior for a resolver state."""
+    """Runtime behavior for a resource store."""
 
     LIVE = auto()
     SHADOW = auto()
-
-
-@dataclass(frozen=True, slots=True)
-class ResolverExecutionContext:
-    """Consumer execution context used to choose resource owners."""
-
-    execution_id: UUID
-    module_path: Path
-
-    @classmethod
-    def from_consumer(
-        cls,
-        execution_id: UUID,
-        consumer_spec: Spec,
-    ) -> ResolverExecutionContext:
-        """Build context from an execution id and consumer spec."""
-        module_path = consumer_spec.module_path
-        if module_path is None:
-            module_path = Path("<unknown>")
-        return cls(
-            execution_id=execution_id,
-            module_path=module_path.resolve(),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class ResolverScopeOwner:
-    """Runtime owner for a resource or patch lifecycle."""
-
-    scope: Scope
-    execution_id: UUID | None = None
-    module_path: Path | None = None
-
-    @classmethod
-    def for_resource_scope(
-        cls,
-        scope: Scope,
-        context: ResolverExecutionContext,
-    ) -> ResolverScopeOwner:
-        """Build the owner key for a resource scope in this context."""
-        match scope:
-            case Scope.TEST:
-                return cls(scope=scope, execution_id=context.execution_id)
-            case Scope.MODULE:
-                return cls(scope=scope, module_path=context.module_path)
-            case Scope.RUN:
-                return cls(scope=scope)
-
-    @classmethod
-    def for_patch_owner(cls, owner: PatchOwner) -> ResolverScopeOwner:
-        """Build the owner key for a patch owner."""
-        match owner.scope:
-            case Scope.TEST:
-                return cls(scope=owner.scope, execution_id=owner.execution_id)
-            case Scope.MODULE:
-                return cls(scope=owner.scope, module_path=owner.module_path)
-            case Scope.RUN:
-                return cls(scope=owner.scope)
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +30,7 @@ class ResourceCacheKey:
     """Cache key for one provider instance owned by one runtime scope."""
 
     spec: ResourceSpec
-    owner: ResolverScopeOwner
+    owner: ScopeOwner
 
 
 @dataclass(slots=True)
@@ -110,7 +53,6 @@ class ResolverScopeState:
         default_factory=dict
     )
     teardowns: list[ResourceTeardownRecord] = field(default_factory=list)
-    patch_handles: list[PatchHandle] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -122,17 +64,17 @@ class ResourceTransferState:
 
 
 @dataclass(slots=True)
-class ResolverState:
-    """Mutable runtime state shared by resolver execution views."""
+class ResourceStore:
+    """Mutable resource state shared by resolver execution views."""
 
     lifecycle_mode: ResolverLifecycleMode
     transfer: ResourceTransferState
-    _scopes: dict[ResolverScopeOwner, ResolverScopeState] = field(
+    _scopes: dict[ScopeOwner, ResolverScopeState] = field(
         default_factory=dict
     )
 
     @classmethod
-    def main(cls, *, sync_actor_id: int = 0) -> ResolverState:
+    def main(cls, *, sync_actor_id: int = 0) -> ResourceStore:
         """Create live resource state."""
         return cls(
             lifecycle_mode=ResolverLifecycleMode.LIVE,
@@ -140,7 +82,7 @@ class ResolverState:
         )
 
     @classmethod
-    def shadow(cls, *, sync_actor_id: int = 0) -> ResolverState:
+    def shadow(cls, *, sync_actor_id: int = 0) -> ResourceStore:
         """Create shadow resource state for worker hydration."""
         return cls(
             lifecycle_mode=ResolverLifecycleMode.SHADOW,
@@ -155,15 +97,12 @@ class ResolverState:
     def cache_key_for(
         self,
         spec: ResourceSpec,
-        context: ResolverExecutionContext,
+        owner: ScopeOwner,
     ) -> ResourceCacheKey:
         """Build the runtime instance key for a provider spec."""
-        return ResourceCacheKey(
-            spec=spec,
-            owner=ResolverScopeOwner.for_resource_scope(spec.scope, context),
-        )
+        return ResourceCacheKey(spec=spec, owner=owner)
 
-    def state_for_owner(self, owner: ResolverScopeOwner) -> ResolverScopeState:
+    def state_for_owner(self, owner: ScopeOwner) -> ResolverScopeState:
         """Return mutable state for one owner."""
         return self._scopes.setdefault(owner, ResolverScopeState())
 
@@ -215,21 +154,15 @@ class ResolverState:
             for key, value in scope_state.cache.items()
         }
 
-    def cached_instances_for_view(
+    def cached_instances_for_owner(
         self,
-        scope_context: ResolverExecutionContext | None,
+        owner: ScopeOwner,
     ) -> dict[ResourceCacheKey, Any]:
-        """Return cached values visible to one resolver view."""
-        if scope_context is None:
-            return self.cached_resource_instances()
+        """Return cached values visible to one runtime owner."""
         return {
             key: value
             for key, value in self.cached_resource_instances().items()
-            if key.owner
-            == ResolverScopeOwner.for_resource_scope(
-                key.spec.scope,
-                scope_context,
-            )
+            if key.owner == owner
         }
 
     def cached_resources_by_spec(self) -> dict[ResourceSpec, Any]:
@@ -255,13 +188,8 @@ class ResolverState:
         """Return whether a runtime value is cached."""
         return key in self.state_for_owner(key.owner).cache
 
-    def register_patch(self, handle: PatchHandle) -> None:
-        """Attach a patch handle to its owning scope state."""
-        owner = ResolverScopeOwner.for_patch_owner(handle.owner)
-        self.state_for_owner(owner).patch_handles.append(handle)
-
     def pop_teardown_records(
-        self, owner: ResolverScopeOwner
+        self, owner: ScopeOwner
     ) -> list[ResourceTeardownRecord]:
         """Remove and return teardowns for one owner."""
         scope_state = self.state_for_owner(owner)
@@ -269,23 +197,16 @@ class ResolverState:
         scope_state.teardowns = []
         return teardowns
 
-    def clear_scope_owner(self, owner: ResolverScopeOwner) -> None:
+    def clear_scope_owner(self, owner: ScopeOwner) -> None:
         """Clear cache and pending creations for one owner."""
         scope_state = self.state_for_owner(owner)
         scope_state.cache.clear()
         scope_state.pending.clear()
 
-    def pop_patch_handles(self, owner: ResolverScopeOwner) -> list[PatchHandle]:
-        """Remove and return patch handles for one owner."""
-        scope_state = self.state_for_owner(owner)
-        handles = scope_state.patch_handles
-        scope_state.patch_handles = []
-        return handles
-
-    def scope_owners_for(self, scope: Scope) -> tuple[ResolverScopeOwner, ...]:
+    def scope_owners_for(self, scope: Scope) -> tuple[ScopeOwner, ...]:
         """Return owners matching a lifecycle scope."""
         return tuple(owner for owner in self._scopes if owner.scope is scope)
 
-    def scope_owners(self) -> tuple[ResolverScopeOwner, ...]:
+    def scope_owners(self) -> tuple[ScopeOwner, ...]:
         """Return all known runtime owners."""
         return tuple(self._scopes)

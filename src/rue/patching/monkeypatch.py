@@ -10,7 +10,7 @@ from rue.patching.runtime import (
     PatchLifetime,
     patch_manager,
 )
-from rue.resources.models import Scope
+from rue.context.scopes import Scope
 
 
 _UNSET = object()

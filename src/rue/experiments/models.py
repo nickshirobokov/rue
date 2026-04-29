@@ -10,9 +10,9 @@ from itertools import product
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
+from rue.context.runtime import ResourceTransactionContext
 from rue.models import Spec
 from rue.resources import MonkeyPatch, Scope
-from rue.context.runtime import ResourceTransactionContext
 
 
 if TYPE_CHECKING:
@@ -43,7 +43,7 @@ class ExperimentSpec(Spec):
         """Apply this experiment hook to the current run process."""
         kwargs: dict[str, Any] = {"value": self.values[value_index]}
         kwargs.update(
-            await resolver.resolve_test_deps(
+            await resolver.resolve_graph_deps(
                 graph_key,
                 {},
                 consumer_spec=self,
@@ -53,7 +53,6 @@ class ExperimentSpec(Spec):
             kwargs["monkeypatch"] = MonkeyPatch(
                 lifetime=resolver.patch_lifetime(
                     Scope.RUN,
-                    consumer_spec=self,
                 ),
             )
 

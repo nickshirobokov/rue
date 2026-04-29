@@ -91,10 +91,6 @@ class SingleTest(ExecutableTest):
                     execution_id=execution_id,
                 )
 
-        test_resolver = resolver.view_for_test(
-            execution_id,
-            self.definition.spec,
-        )
         ctx = TestContext(
             item=self.definition,
             execution_id=execution_id,
@@ -102,9 +98,9 @@ class SingleTest(ExecutableTest):
         with ctx:
             match self:
                 case SingleTest(backend=ExecutionBackend.SUBPROCESS):
-                    return await self._execute_subprocess(test_resolver)
+                    return await self._execute_subprocess(resolver)
                 case SingleTest():
-                    return await self._execute_local(test_resolver)
+                    return await self._execute_local(resolver)
 
     async def _execute_local(
         self,
@@ -127,7 +123,6 @@ class SingleTest(ExecutableTest):
                 ) = await self.definition.run_loaded_test(
                     params=self.params,
                     resolver=resolver,
-                    execution_id=execution_id,
                     run_sync_in_thread=self.backend
                     is not ExecutionBackend.MAIN,
                     is_stopped=self.is_stopped,
@@ -172,7 +167,7 @@ class SingleTest(ExecutableTest):
                 self.semaphore if self.semaphore else contextlib.nullcontext()
             )
             async with semaphore:
-                await resolver.resolve_test_deps(
+                await resolver.resolve_graph_deps(
                     execution_id,
                     self.params,
                     consumer_spec=self.definition.spec,

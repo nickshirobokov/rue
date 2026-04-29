@@ -1,14 +1,14 @@
 """Runtime patching APIs."""
 
+from rue.context.scopes import Scope, ScopeOwner
 from rue.patching.monkeypatch import MonkeyPatch
 from rue.patching.runtime import (
     PatchContext,
     PatchHandle,
     PatchLifetime,
-    PatchOwner,
+    PatchStore,
     patch_manager,
 )
-from rue.resources.models import Scope
 
 
 __all__ = [
@@ -16,7 +16,8 @@ __all__ = [
     "PatchContext",
     "PatchHandle",
     "PatchLifetime",
-    "PatchOwner",
+    "PatchStore",
     "Scope",
+    "ScopeOwner",
     "patch_manager",
 ]

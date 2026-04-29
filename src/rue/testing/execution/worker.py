@@ -18,7 +18,7 @@ from rue.experiments.registry import registry as default_experiment_registry
 from rue.resources import ResourceResolver
 from rue.resources.models import ResourceTransferSnapshot
 from rue.resources.registry import registry as default_resource_registry
-from rue.resources.state import ResolverState
+from rue.resources.state import ResourceStore
 from rue.telemetry.base import TelemetryArtifact
 from rue.testing.discovery.loader import TestLoader
 from rue.testing.models import TestResult
@@ -57,7 +57,7 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
     loader = TestLoader(payload.suite_root)
     resolver = ResourceResolver(
         default_resource_registry,
-        state=ResolverState.shadow(
+        resources=ResourceStore.shadow(
             sync_actor_id=payload.snapshot.actor_id,
         ),
     )
@@ -92,10 +92,6 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
         bind(CURRENT_TEST_TRACER, tracer),
     ):
         try:
-            resolver = resolver.view_for_test(
-                payload.execution_id,
-                definition.spec,
-            )
             await resolver.transfer.hydrate(
                 payload.snapshot,
                 consumer_spec=definition.spec,
@@ -109,7 +105,6 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
             ) = await definition.run_loaded_test(
                 params=payload.params,
                 resolver=resolver,
-                execution_id=payload.execution_id,
                 run_sync_in_thread=False,
             )
             result = TestResult.build(

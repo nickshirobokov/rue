@@ -3,30 +3,28 @@
 import inspect
 from collections.abc import AsyncGenerator, Generator, Sequence
 from typing import Any, cast
-from uuid import UUID
 
-from rue.context.runtime import CURRENT_RUN_CONTEXT, ResourceTransactionContext
+from rue.context.runtime import (
+    ResourceTransactionContext,
+    current_resource_owner,
+)
+from rue.context.scopes import Scope, ScopeOwner
 from rue.models import Spec
-from rue.patching.runtime import PatchLifetime, PatchOwner
 from rue.resources.models import (
-    DIGraph,
     LoadedResourceDef,
     ResourceSpec,
-    Scope,
 )
+from rue.patching.runtime import PatchLifetime, PatchStore
 from rue.resources.registry import ResourceRegistry
 from rue.resources.state import (
-    ResolverExecutionContext,
-    ResolverScopeOwner,
-    ResolverState,
     ResourceCacheKey,
+    ResourceStore,
     ResourceTeardownRecord,
 )
 from rue.resources.transfer import ResourceTransfer
 
 
 _MAIN_SYNC_ACTOR_ID = 0
-_DIRECT_EXECUTION_ID = UUID(int=0)
 
 
 class ResourceResolver:
@@ -36,92 +34,47 @@ class ResourceResolver:
         self,
         registry: ResourceRegistry,
         *,
-        state: ResolverState | None = None,
-        scope_context: ResolverExecutionContext | None = None,
+        resources: ResourceStore | None = None,
+        patches: PatchStore | None = None,
         sync_actor_id: int = _MAIN_SYNC_ACTOR_ID,
     ) -> None:
         self.registry = registry
-        self.state = state or ResolverState.main(sync_actor_id=sync_actor_id)
-        self._scope_context = scope_context
+        self.resources = resources or ResourceStore.main(
+            sync_actor_id=sync_actor_id
+        )
+        self.patches = patches or PatchStore()
         self.transfer = ResourceTransfer(self)
 
     @property
     def cached_resources(self) -> dict[ResourceSpec, Any]:
         """Return a shallow copy of the identity-to-value cache."""
-        return self.state.cached_resources_by_spec()
-
-    @property
-    def scope_context(self) -> ResolverExecutionContext | None:
-        """Return the execution context bound to this resolver view."""
-        return self._scope_context
-
-    def view_for_test(
-        self,
-        execution_id: UUID,
-        consumer_spec: Spec,
-    ) -> "ResourceResolver":
-        """Return a scoped resolver view for one consumer execution."""
-        return ResourceResolver(
-            self.registry,
-            state=self.state,
-            scope_context=ResolverExecutionContext.from_consumer(
-                execution_id,
-                consumer_spec,
-            ),
-        )
+        return self.resources.cached_resources_by_spec()
 
     def patch_lifetime(
         self,
         scope: Scope,
-        *,
-        consumer_spec: Spec | None = None,
     ) -> PatchLifetime:
         """Build a patch lifetime owned by this resolver's state."""
-        match scope:
-            case Scope.TEST:
-                if consumer_spec is None:
-                    msg = "Test-scoped patches require a consumer spec."
-                    raise ValueError(msg)
-                context = self._scope_context_for(consumer_spec)
-                owner = PatchOwner(
-                    scope=Scope.TEST,
-                    execution_id=context.execution_id,
-                )
-            case Scope.MODULE:
-                if consumer_spec is None:
-                    msg = "Module-scoped patches require a consumer spec."
-                    raise ValueError(msg)
-                context = self._scope_context_for(consumer_spec)
-                owner = PatchOwner(
-                    scope=Scope.MODULE,
-                    module_path=context.module_path,
-                )
-            case Scope.RUN:
-                owner = PatchOwner(
-                    scope=Scope.RUN,
-                    run_id=CURRENT_RUN_CONTEXT.get().run_id,
-                )
-        return PatchLifetime(owner=owner, registry=self.state)
+        return self.patches.lifetime(current_resource_owner(scope))
 
-    async def resolve_test_deps(
+    async def resolve_graph_deps(
         self,
-        execution_id: UUID,
+        graph_key: Any,
         params: dict[str, Any],
         *,
         consumer_spec: Spec,
         apply_injection_hook: bool = True,
     ) -> dict[str, Any]:
-        """Resolve all resources needed by one compiled test."""
-        graph = self.registry.graph
+        """Resolve all resources needed by one compiled dependency graph."""
         kwargs = dict(params)
-        for spec in graph.autouse_by_execution_id[execution_id]:
+        for spec in self.registry.autouse_by_execution_id[graph_key]:
             await self.resolve_resource(
                 spec,
                 consumer_spec=consumer_spec,
                 apply_injection_hook=apply_injection_hook,
             )
-        for name, spec in graph.injections_by_execution_id[
-            execution_id
+        for name, spec in self.registry.injections_by_execution_id[
+            graph_key
         ].items():
             kwargs[name] = await self.resolve_resource(
                 spec,
@@ -136,21 +89,19 @@ class ResourceResolver:
         *,
         consumer_spec: Spec,
         apply_injection_hook: bool = True,
-        scope_context: ResolverExecutionContext | None = None,
     ) -> Any:
         """Resolve one concrete resource identity from a compiled graph."""
-        graph = self.registry.graph
         definition = self.registry.get_definition(spec)
-        direct_dependencies = graph.dependencies_by_resource[spec]
-        scope_context = scope_context or self._scope_context_for(consumer_spec)
-        key = self.state.cache_key_for(spec, scope_context)
-        value = await self.state.get_or_create_instance(
+        direct_dependencies = self.registry.dependencies_by_resource[spec]
+        key = self.resources.cache_key_for(
+            spec,
+            current_resource_owner(spec.scope),
+        )
+        value = await self.resources.get_or_create_instance(
             key,
             lambda: self._resolve_uncached(
-                graph=graph,
                 key=key,
                 consumer_spec=consumer_spec,
-                scope_context=scope_context,
             ),
         )
 
@@ -173,28 +124,23 @@ class ResourceResolver:
         """Tear down resources and patches owned by this resolver."""
         teardown_errors: list[Exception] = []
         if scope is None:
-            owners = tuple(reversed(tuple(self.state.scope_owners())))
-        elif self._scope_context is None:
-            owners = self.state.scope_owners_for(scope)
+            owners = tuple(reversed(tuple(self.resources.scope_owners())))
         else:
-            owners = (
-                ResolverScopeOwner.for_resource_scope(
-                    scope,
-                    self._scope_context,
-                ),
-            )
+            owners = (current_resource_owner(scope),)
         for owner in owners:
-            if self.state.is_shadow:
-                self.state.clear_scope_owner(owner)
-                self._undo_patches(owner)
+            if self.resources.is_shadow:
+                self.resources.clear_scope_owner(owner)
+                self.undo_patches(owner=owner)
                 continue
             teardown_errors.extend(
                 await self._run_teardowns(
-                    self.state.pop_teardown_records(owner)
+                    self.resources.pop_teardown_records(owner)
                 )
             )
-            self.state.clear_scope_owner(owner)
-            self._undo_patches(owner)
+            self.resources.clear_scope_owner(owner)
+            self.undo_patches(owner=owner)
+        if scope is None:
+            self.undo_patches()
         match teardown_errors:
             case []:
                 pass
@@ -244,8 +190,8 @@ class ResourceResolver:
                         )
                     )
 
-                if self.state.has_cached_instance(teardown.key):
-                    value = self.state.cached_instance(teardown.key)
+                if self.resources.has_cached_instance(teardown.key):
+                    value = self.resources.cached_instance(teardown.key)
                     try:
                         await self._apply_hook(
                             teardown.definition.on_teardown,
@@ -256,21 +202,35 @@ class ResourceResolver:
                         teardown_errors.append(e)
         return teardown_errors
 
-    def _undo_patches(self, owner: ResolverScopeOwner) -> None:
-        for handle in reversed(self.state.pop_patch_handles(owner)):
+    def undo_patches(
+        self,
+        *,
+        scope: Scope | None = None,
+        owner: ScopeOwner | None = None,
+    ) -> None:
+        """Pop patches from the store and undo them."""
+        match (owner, scope):
+            case (ScopeOwner() as o, None):
+                handles = reversed(self.patches.pop_owner(o))
+            case (None, None):
+                handles = reversed(self.patches.pop_all())
+            case (None, Scope.TEST | Scope.MODULE | Scope.RUN):
+                handles = reversed(self.patches.pop_scope(scope))
+            case (ScopeOwner() as o, Scope.TEST | Scope.MODULE | Scope.RUN):
+                msg = "Owner and scope cannot both be specified."
+                raise ValueError(msg)
+        for handle in handles:
             handle.undo()
 
     async def _resolve_uncached(
         self,
         *,
-        graph: DIGraph,
         key: ResourceCacheKey,
         consumer_spec: Spec,
-        scope_context: ResolverExecutionContext,
     ) -> Any:
         spec = key.spec
         definition = self.registry.get_definition(spec)
-        direct_dependencies = graph.dependencies_by_resource[spec]
+        direct_dependencies = self.registry.dependencies_by_resource[spec]
         with ResourceTransactionContext(
             consumer_spec=consumer_spec,
             provider_spec=spec,
@@ -282,7 +242,6 @@ class ResourceResolver:
                     await self.resolve_resource(
                         dependency,
                         consumer_spec=spec,
-                        scope_context=scope_context,
                     )
                 )
                 for dependency in direct_dependencies
@@ -294,7 +253,7 @@ class ResourceResolver:
                         "AsyncGenerator[Any, None]", definition.fn(**kwargs)
                     )
                     value = await anext(async_generator)
-                    self.state.record_teardown(
+                    self.resources.record_teardown(
                         ResourceTeardownRecord(
                             key=key,
                             definition=definition,
@@ -308,7 +267,7 @@ class ResourceResolver:
                         "Generator[Any, None, None]", definition.fn(**kwargs)
                     )
                     value = next(generator)
-                    self.state.record_teardown(
+                    self.resources.record_teardown(
                         ResourceTeardownRecord(
                             key=key,
                             definition=definition,
@@ -329,15 +288,6 @@ class ResourceResolver:
             )
 
         return value
-
-    def _scope_context_for(
-        self, consumer_spec: Spec
-    ) -> ResolverExecutionContext:
-        if self._scope_context is not None:
-            return self._scope_context
-        return ResolverExecutionContext.from_consumer(
-            _DIRECT_EXECUTION_ID, consumer_spec
-        )
 
     async def _apply_hook(
         self, hook: Any, resource_name: str, value: Any

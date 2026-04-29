@@ -10,6 +10,7 @@ import pytest
 
 from rue.context.runtime import (
     CURRENT_RESOURCE_TRANSACTION,
+    TestContext,
 )
 from rue.resources import (
     ResourceCacheKey,
@@ -20,7 +21,7 @@ from rue.resources import (
     resource,
 )
 from rue.testing.models import LoadedTestDef
-from tests.unit.factories import make_definition
+from tests.unit.factories import make_definition, make_run_context
 
 
 _TEST_GRAPH_KEY = UUID(int=1)
@@ -57,7 +58,8 @@ def _resource_graph(
     key: UUID = _TEST_GRAPH_KEY,
 ):
     consumer = consumer_spec or _consumer_spec()
-    return resource_registry.compile_di_graph({key: (consumer, resource_names)})
+    resource_registry.compile_di_graph({key: (consumer, resource_names)})
+    return resource_registry.slice_registry(key)
 
 
 async def _resolve(
@@ -65,17 +67,34 @@ async def _resolve(
     name: str,
     *,
     consumer_spec=None,
+    execution_id: UUID = _TEST_GRAPH_KEY,
 ):
     consumer = consumer_spec or _consumer_spec()
     graph = _resource_graph(
         resolver.registry,
         (name,),
         consumer_spec=consumer,
+        key=execution_id,
     )
-    return await resolver.resolve_resource(
-        graph.injections_by_execution_id[_TEST_GRAPH_KEY][name],
-        consumer_spec=consumer,
-    )
+    item = _make_item(name=consumer.name, module_path=consumer.module_path)
+    with TestContext(item=item, execution_id=execution_id):
+        return await resolver.resolve_resource(
+            graph.injections_by_execution_id[execution_id][name],
+            consumer_spec=consumer,
+        )
+
+
+async def _teardown(
+    resolver: ResourceResolver,
+    scope: Scope,
+    *,
+    consumer_spec=None,
+    execution_id: UUID = _TEST_GRAPH_KEY,
+) -> None:
+    consumer = consumer_spec or _consumer_spec()
+    item = _make_item(name=consumer.name, module_path=consumer.module_path)
+    with TestContext(item=item, execution_id=execution_id):
+        await resolver.teardown(scope)
 
 
 def _register_resource_source(
@@ -103,6 +122,7 @@ def _only_definition(
 @pytest.fixture(autouse=True)
 def clean_registry():
     """Clear the global registry before and after each test."""
+    make_run_context(db_enabled=False)
     registry.reset()
     yield
     registry.reset()
@@ -366,7 +386,7 @@ class TestResourceRegistry:
 
         child_key = UUID(int=2)
         sibling_key = UUID(int=3)
-        graph = custom_registry.compile_di_graph(
+        custom_registry.compile_di_graph(
             {
                 child_key: (
                     _consumer_spec(module_path=child / "rue_child.py"),
@@ -380,7 +400,7 @@ class TestResourceRegistry:
         )
 
         assert {
-            graph.roots_by_execution_id[key][0].module_path.parent
+            custom_registry.roots_by_execution_id[key][0].module_path.parent
             for key in (child_key, sibling_key)
         } == {child.resolve(), root.resolve()}
 
@@ -585,13 +605,26 @@ class TestResourceResolver:
 
         resolver = ResourceResolver(registry)
         identity = _only_definition(registry, "simple").spec
-        with pytest.raises(
-            RuntimeError,
-            match="Resource graph is not compiled",
-        ):
+        with pytest.raises(KeyError):
             await resolver.resolve_resource(
                 identity,
                 consumer_spec=_consumer_spec(),
+            )
+
+    @pytest.mark.asyncio
+    async def test_test_scope_requires_open_test_context(self):
+        @resource(scope=Scope.TEST)
+        def simple():
+            return 42
+
+        resolver = ResourceResolver(registry)
+        consumer = _consumer_spec()
+        graph = _resource_graph(registry, ("simple",), consumer_spec=consumer)
+
+        with pytest.raises(RuntimeError, match="open TestContext"):
+            await resolver.resolve_resource(
+                graph.injections_by_execution_id[_TEST_GRAPH_KEY]["simple"],
+                consumer_spec=consumer,
             )
 
     @pytest.mark.parametrize(
@@ -769,7 +802,7 @@ class TestResourceTeardown:
         await _resolve(resolver, "case_res", consumer_spec=_consumer_spec())
         await _resolve(resolver, "suite_res", consumer_spec=_consumer_spec())
 
-        await resolver.teardown(Scope.TEST)
+        await _teardown(resolver, Scope.TEST)
         assert case_torn
         assert not suite_torn
 
@@ -794,7 +827,7 @@ class TestResourceTeardown:
         )
         assert v1 == 1
 
-        await resolver.teardown(Scope.TEST)
+        await _teardown(resolver, Scope.TEST)
 
         v2 = await _resolve(
             resolver,
@@ -825,11 +858,11 @@ class TestResolverViews:
         )
         assert parent_val == 1
 
-        child = parent.view_for_test(UUID(int=2), _consumer_spec())
         child_val = await _resolve(
-            child,
+            parent,
             "case_val",
             consumer_spec=_consumer_spec(),
+            execution_id=UUID(int=2),
         )
         assert child_val == 2  # New instance for child
 
@@ -870,18 +903,19 @@ class TestResolverViews:
                 teardown_count += 1
 
         parent = ResourceResolver(registry)
-        children = [
-            parent.view_for_test(UUID(int=index + 1), _consumer_spec())
-            for index in range(8)
-        ]
         values = await asyncio.gather(
             *[
-                _resolve(child, name, consumer_spec=_consumer_spec())
-                for child in children
+                _resolve(
+                    parent,
+                    name,
+                    consumer_spec=_consumer_spec(),
+                    execution_id=UUID(int=index + 1),
+                )
+                for index in range(8)
             ]
         )
 
-        assert values == [f"{scope.value}_1"] * len(children)
+        assert values == [f"{scope.value}_1"] * 8
         assert create_count == 1
 
         await parent.teardown()
@@ -1126,7 +1160,7 @@ class TestHierarchicalProcessResources:
 
         cache_keys = [
             key
-            for key in resolver.state.cached_resource_instances()
+            for key in resolver.resources.cached_resource_instances()
             if isinstance(key, ResourceCacheKey)
             and key.spec.scope == Scope.RUN
             and key.spec.locator.function_name == "shared"
@@ -1216,7 +1250,7 @@ class TestResourceHooks:
         await _resolve(resolver, "case_gen", consumer_spec=_consumer_spec())
 
         assert not teardown_hook_called
-        await resolver.teardown(Scope.TEST)
+        await _teardown(resolver, Scope.TEST)
         assert teardown_hook_called
 
     @pytest.mark.asyncio
@@ -1381,6 +1415,26 @@ class TestResourceResolutionErrors:
                 }
             )
 
+    def test_compile_di_graph_rejects_narrower_scope_dependency(self):
+        @resource(scope=Scope.TEST)
+        def case_value():
+            return "case"
+
+        @resource(scope=Scope.RUN)
+        def run_value(case_value):
+            return case_value
+
+        with pytest.raises(
+            ValueError,
+            match=(
+                "run-scoped resource 'run_value' cannot depend on "
+                "test-scoped resource 'case_value'"
+            ),
+        ):
+            registry.compile_di_graph(
+                {_TEST_GRAPH_KEY: (_consumer_spec(), ("run_value",))}
+            )
+
     @pytest.mark.asyncio
     async def test_resource_on_injection_error(self):
         """Test that errors in on_injection hook are surfaced."""
@@ -1421,7 +1475,7 @@ class TestResourceResolutionErrors:
         )
 
         with pytest.raises(ExceptionGroup) as exc_info:
-            await resolver.teardown(Scope.TEST)
+            await _teardown(resolver, Scope.TEST)
 
         messages = {str(error) for error in exc_info.value.exceptions}
         assert any(

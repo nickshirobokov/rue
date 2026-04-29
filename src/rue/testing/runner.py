@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.process_pool import process_pool_scope
-from rue.context.runtime import CURRENT_RUN_CONTEXT, bind
+from rue.context.runtime import CURRENT_RUN_CONTEXT, TestContext, bind
 from rue.reports.base import Reporter
 from rue.resources import ResourceResolver
 from rue.resources.metrics.base import MetricResult
@@ -352,7 +352,8 @@ class Runner:
         self._remaining_module_leaves[module_key] = remaining
         if remaining:
             return
-        await resolver.view_for_test(
-            execution.execution_id,
-            execution.definition.spec,
-        ).teardown(Scope.MODULE)
+        with TestContext(
+            item=execution.definition,
+            execution_id=execution.execution_id,
+        ):
+            await resolver.teardown(Scope.MODULE)

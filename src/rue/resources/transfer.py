@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from rue.context.runtime import CURRENT_TEST, current_resource_owner
 from rue.models import Spec
 from rue.resources.models import ResourceSpec, ResourceTransferSnapshot, Scope
 from rue.resources.snapshot import (
@@ -37,8 +38,10 @@ class ResourceTransfer:
         actor_id: int,
     ) -> ResourceTransferSnapshot:
         """Build a CRDT transfer snapshot for the given resource closure."""
-        graph = self.resolver.registry.graph
-        resolution_order = graph.resolution_order_by_execution_id[execution_id]
+        registry = self.resolver.registry.slice_registry(execution_id)
+        resolution_order = registry.resolution_order_by_execution_id[
+            execution_id
+        ]
         resources = self._syncable_resources(resolution_order)
         self.flush_live_resources(resources)
 
@@ -48,9 +51,12 @@ class ResourceTransfer:
         export_graph.sync_payload(payload)
         return ResourceTransferSnapshot(
             resource_specs=tuple(resources),
-            execution_graph=graph.get_subgraph(execution_id),
             graph_update=export_graph.doc.get_update(None),
             base_state=export_graph.doc.get_state(),
+            roots=registry.roots_by_execution_id[execution_id],
+            autouse=registry.autouse_by_execution_id[execution_id],
+            injections=registry.injections_by_execution_id[execution_id],
+            dependencies=registry.dependencies_by_resource,
             resolution_order=resolution_order,
             actor_id=actor_id,
         )
@@ -62,26 +68,41 @@ class ResourceTransfer:
         consumer_spec: Spec,
     ) -> None:
         """Hydrate this resolver from a serialized transfer snapshot."""
-        self.resolver.registry.graph = snapshot.execution_graph
-        self.resolver.state.transfer.graph = SyncGraph(
+        execution_id = CURRENT_TEST.get().execution_id
+        self.resolver.registry.roots_by_execution_id = {
+            execution_id: snapshot.roots
+        }
+        self.resolver.registry.autouse_by_execution_id = {
+            execution_id: snapshot.autouse
+        }
+        self.resolver.registry.injections_by_execution_id = {
+            execution_id: dict(snapshot.injections)
+        }
+        self.resolver.registry.dependencies_by_resource = dict(
+            snapshot.dependencies
+        )
+        self.resolver.registry.resolution_order_by_execution_id = {
+            execution_id: snapshot.resolution_order
+        }
+        self.resolver.resources.transfer.graph = SyncGraph(
             actor_id=snapshot.actor_id
         )
 
         for spec in snapshot.resolution_order:
             if not spec.sync:
                 continue
-            scope_context = self.resolver._scope_context_for(consumer_spec)
-            key = self.resolver.state.cache_key_for(spec, scope_context)
-            if self.resolver.state.has_cached_instance(key):
+            key = self.resolver.resources.cache_key_for(
+                spec,
+                current_resource_owner(spec.scope),
+            )
+            if self.resolver.resources.has_cached_instance(key):
                 continue
             value = await self.resolver._resolve_uncached(
-                graph=snapshot.execution_graph,
                 key=key,
                 consumer_spec=consumer_spec,
-                scope_context=scope_context,
             )
-            self.resolver.state.cache_instance(key, value)
-        self.resolver.state.transfer.graph = SyncGraph.from_update(
+            self.resolver.resources.cache_instance(key, value)
+        self.resolver.resources.transfer.graph = SyncGraph.from_update(
             snapshot.graph_update,
             actor_id=snapshot.actor_id,
         )
@@ -136,7 +157,7 @@ class ResourceTransfer:
         ]
         root_keys = [spec.snapshot_key for spec in merge_order]
 
-        with self.resolver.state.transfer.lock:
+        with self.resolver.resources.transfer.lock:
             transport = SyncGraph.from_update(
                 snapshot.graph_update,
                 actor_id=_MAIN_SYNC_ACTOR_ID,
@@ -155,7 +176,7 @@ class ResourceTransfer:
     @property
     def state(self) -> ResourceTransferState:
         """Return the resolver transfer state."""
-        return self.resolver.state.transfer
+        return self.resolver.resources.transfer
 
     def _materialize_payload(self, payload: dict[str, Any]) -> None:
         roots = {
@@ -179,7 +200,7 @@ class ResourceTransfer:
         for root_key, value in patched_roots.items():
             key = key_to_spec.get(root_key)
             if key is not None:
-                self.resolver.state.cache_instance(key, value)
+                self.resolver.resources.cache_instance(key, value)
 
     def _apply_payload_delta(
         self,
@@ -206,7 +227,7 @@ class ResourceTransfer:
         for root_key, value in patched_roots.items():
             key = key_to_spec.get(root_key)
             if key is not None:
-                self.resolver.state.cache_instance(key, value)
+                self.resolver.resources.cache_instance(key, value)
 
     def _live_snapshot_roots(
         self,
@@ -221,9 +242,13 @@ class ResourceTransfer:
     def _cached_instances_visible_to_view(
         self,
     ) -> dict[ResourceCacheKey, Any]:
-        return self.resolver.state.cached_instances_for_view(
-            self.resolver.scope_context
-        )
+        return {
+            key: value
+            for key, value in (
+                self.resolver.resources.cached_resource_instances().items()
+            )
+            if key.owner == current_resource_owner(key.spec.scope)
+        }
 
     @staticmethod
     def _syncable_resources(
