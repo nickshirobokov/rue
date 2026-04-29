@@ -16,7 +16,7 @@ from rue.context.runtime import (
 )
 from rue.experiments.registry import registry as default_experiment_registry
 from rue.resources import ResourceResolver
-from rue.resources.models import ResolverSyncSnapshot
+from rue.resources.models import ResourceTransferSnapshot
 from rue.resources.registry import registry as default_resource_registry
 from rue.resources.state import ResolverState
 from rue.telemetry.base import TelemetryArtifact
@@ -34,7 +34,7 @@ class ExecutorPayload:
     suite_root: Path
     setup_chain: tuple[SetupFileRef, ...]
     params: dict[str, Any]
-    snapshot: ResolverSyncSnapshot
+    snapshot: ResourceTransferSnapshot
     context: RunContext
     execution_id: UUID
 
@@ -96,18 +96,21 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
                 payload.execution_id,
                 definition.spec,
             )
-            await resolver.load_sync_snapshot(
+            await resolver.transfer.hydrate(
                 payload.snapshot,
                 consumer_spec=definition.spec,
             )
             tracer.start(definition, execution_id=payload.execution_id)
-            duration_ms, imperative_outcome, error, assertion_results = (
-                await definition.run_loaded_test(
-                    params=payload.params,
-                    resolver=resolver,
-                    execution_id=payload.execution_id,
-                    run_sync_in_thread=False,
-                )
+            (
+                duration_ms,
+                imperative_outcome,
+                error,
+                assertion_results,
+            ) = await definition.run_loaded_test(
+                params=payload.params,
+                resolver=resolver,
+                execution_id=payload.execution_id,
+                run_sync_in_thread=False,
             )
             result = TestResult.build(
                 definition=definition,
@@ -118,7 +121,7 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
             )
             tracer.record_result(result)
             telemetry_artifacts = tracer.finish()
-            sync_update = resolver.sync_update_for_resources_since(
+            sync_update = resolver.transfer.update_since(
                 payload.snapshot.base_state,
                 list(payload.snapshot.resource_specs),
             )

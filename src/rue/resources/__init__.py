@@ -3,41 +3,45 @@
 from rue.patching import MonkeyPatch
 from rue.resources.builtins import register_builtin_resources
 from rue.resources.models import (
-    LoadedResourceDef,
     DIGraph,
-    ResolverSyncSnapshot,
+    LoadedResourceDef,
     ResourceSpec,
+    ResourceTransferSnapshot,
     Scope,
 )
 from rue.resources.registry import ResourceRegistry, registry, resource
 from rue.resources.resolver import ResourceResolver
 from rue.resources.state import (
-    ResourceCacheKey,
-    ResolverLifecycleMode,
     ResolverExecutionContext,
+    ResolverLifecycleMode,
     ResolverScopeOwner,
     ResolverState,
+    ResourceCacheKey,
     ResourceTeardownRecord,
+    ResourceTransferState,
 )
+from rue.resources.transfer import ResourceTransfer
 
 
 register_builtin_resources(registry)
 
 
 __all__ = [
+    "DIGraph",
     "LoadedResourceDef",
     "MonkeyPatch",
-    "DIGraph",
     "ResolverExecutionContext",
     "ResolverLifecycleMode",
-    "ResolverSyncSnapshot",
     "ResolverScopeOwner",
+    "ResolverState",
+    "ResourceCacheKey",
     "ResourceRegistry",
     "ResourceResolver",
-    "ResourceCacheKey",
     "ResourceSpec",
-    "ResolverState",
     "ResourceTeardownRecord",
+    "ResourceTransfer",
+    "ResourceTransferSnapshot",
+    "ResourceTransferState",
     "Scope",
     "register_builtin_resources",
     "registry",

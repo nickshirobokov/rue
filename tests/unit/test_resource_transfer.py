@@ -14,12 +14,13 @@ import pytest
 from pydantic import BaseModel
 
 from rue.resources import (
-    ResolverSyncSnapshot,
     DIGraph,
+    ResolverState,
     ResourceResolver,
+    ResourceTransferSnapshot,
     Scope,
-    resource,
     registry,
+    resource,
 )
 from rue.resources.snapshot import SyncGraph
 from tests.unit.factories import make_definition
@@ -109,7 +110,7 @@ class NestedHolder:
         self.payload = {"items": [Box(1), Box(2)]}
 
 
-def _snapshot_payload(snapshot: ResolverSyncSnapshot) -> dict[str, object]:
+def _snapshot_payload(snapshot: ResourceTransferSnapshot) -> dict[str, object]:
     graph = SyncGraph.from_update(snapshot.graph_update, actor_id=0)
     return graph.payload(
         identity.snapshot_key for identity in snapshot.resource_specs
@@ -117,7 +118,9 @@ def _snapshot_payload(snapshot: ResolverSyncSnapshot) -> dict[str, object]:
 
 
 def _consumer_spec(module_path: Path | None = None):
-    return make_definition("test_transfer", module_path=module_path or "test.py").spec
+    return make_definition(
+        "test_transfer", module_path=module_path or "test.py"
+    ).spec
 
 
 def _resource_graph(
@@ -150,19 +153,19 @@ def _snapshot(
     *,
     consumer_spec=None,
     sync_actor_id: int = 1,
-) -> ResolverSyncSnapshot:
+) -> ResourceTransferSnapshot:
     _resource_graph(resource_names, consumer_spec=consumer_spec)
-    return resolver.export_sync_snapshot(
+    return resolver.transfer.export_snapshot(
         _TEST_GRAPH_KEY,
-        sync_actor_id=sync_actor_id,
+        actor_id=sync_actor_id,
     )
 
 
 def _sync_update(
     resolver: ResourceResolver,
-    snapshot: ResolverSyncSnapshot,
+    snapshot: ResourceTransferSnapshot,
 ) -> bytes:
-    return resolver.sync_update_for_resources_since(
+    return resolver.transfer.update_since(
         snapshot.base_state,
         list(snapshot.resource_specs),
     )
@@ -171,12 +174,46 @@ def _sync_update(
 def _apply_worker_update(
     parent: ResourceResolver,
     worker: ResourceResolver,
-    snapshot: ResolverSyncSnapshot,
+    snapshot: ResourceTransferSnapshot,
 ) -> None:
-    parent.apply_sync_update(snapshot, _sync_update(worker, snapshot))
+    parent.transfer.apply_update(snapshot, _sync_update(worker, snapshot))
 
 
-class TestExportSyncSnapshot:
+async def _worker_from_snapshot(
+    snapshot: ResourceTransferSnapshot,
+    *,
+    consumer_spec=None,
+) -> ResourceResolver:
+    consumer = consumer_spec or _consumer_spec()
+    resolver = ResourceResolver(
+        registry,
+        state=ResolverState.shadow(sync_actor_id=snapshot.actor_id),
+    )
+    worker = resolver.view_for_test(_TEST_GRAPH_KEY, consumer)
+    await worker.transfer.hydrate(snapshot, consumer_spec=consumer)
+    return worker
+
+
+class TestExportSnapshot:
+    def test_resolver_exposes_transfer_facade_only(self):
+        removed_methods = {
+            "export_sync_snapshot",
+            "from_sync_snapshot",
+            "load_sync_snapshot",
+            "flush_resources_to_sync_graph",
+            "sync_update_for_resources_since",
+            "apply_sync_update",
+        }
+
+        assert not removed_methods & set(dir(ResourceResolver))
+
+    def test_resolver_does_not_import_transfer_primitives(self):
+        source = inspect.getsource(ResourceResolver)
+
+        assert "SnapshotApplier" not in source
+        assert "SnapshotDeltaApplier" not in source
+        assert "build_path_ids" not in source
+
     async def test_includes_test_scope_in_snapshot_closure(self):
         @resource(scope=Scope.TEST)
         def per_test():
@@ -197,7 +234,8 @@ class TestExportSyncSnapshot:
         )
 
         names = {
-            identity.locator.function_name for identity in snapshot.resource_specs
+            identity.locator.function_name
+            for identity in snapshot.resource_specs
         }
         payload = _snapshot_payload(snapshot)
 
@@ -214,7 +252,9 @@ class TestExportSyncSnapshot:
         resolver = ResourceResolver(registry)
         await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
-        snapshot = _snapshot(resolver, ("state",), consumer_spec=_consumer_spec())
+        snapshot = _snapshot(
+            resolver, ("state",), consumer_spec=_consumer_spec()
+        )
         identity = snapshot.resource_specs[0]
         payload = _snapshot_payload(snapshot)
         root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
@@ -237,7 +277,9 @@ class TestExportSyncSnapshot:
         resolver = ResourceResolver(registry)
         await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
-        snapshot = _snapshot(resolver, ("state",), consumer_spec=_consumer_spec())
+        snapshot = _snapshot(
+            resolver, ("state",), consumer_spec=_consumer_spec()
+        )
         identity = snapshot.resource_specs[0]
         payload = _snapshot_payload(snapshot)
         root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
@@ -256,7 +298,9 @@ class TestExportSyncSnapshot:
         resolver = ResourceResolver(registry)
         await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
-        snapshot = _snapshot(resolver, ("state",), consumer_spec=_consumer_spec())
+        snapshot = _snapshot(
+            resolver, ("state",), consumer_spec=_consumer_spec()
+        )
         identity = snapshot.resource_specs[0]
         payload = _snapshot_payload(snapshot)
         root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
@@ -276,13 +320,14 @@ class TestExportSyncSnapshot:
         resolver = ResourceResolver(registry)
         live = await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
-        snapshot = _snapshot(resolver, ("state",), consumer_spec=_consumer_spec())
+        snapshot = _snapshot(
+            resolver, ("state",), consumer_spec=_consumer_spec()
+        )
         identity = snapshot.resource_specs[0]
         payload = _snapshot_payload(snapshot)
         root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
-        worker = await ResourceResolver.from_sync_snapshot(
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
         worker_state = await _resolve(
@@ -314,7 +359,9 @@ class TestExportSyncSnapshot:
         resolver = ResourceResolver(registry)
         await _resolve(resolver, "alias", consumer_spec=_consumer_spec())
 
-        snapshot = _snapshot(resolver, ("alias",), consumer_spec=_consumer_spec())
+        snapshot = _snapshot(
+            resolver, ("alias",), consumer_spec=_consumer_spec()
+        )
         payload = _snapshot_payload(snapshot)
         identity_map = {
             identity.locator.function_name: identity
@@ -345,7 +392,9 @@ class TestExportSyncSnapshot:
         )
 
         assert (
-            snapshot.execution_graph.roots_by_execution_id[_TEST_GRAPH_KEY][0].name
+            snapshot.execution_graph.roots_by_execution_id[_TEST_GRAPH_KEY][
+                0
+            ].name
             == "simple"
         )
         assert snapshot.actor_id == 7
@@ -377,7 +426,9 @@ class TestExportSyncSnapshot:
         resolver = ResourceResolver(registry)
         await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
-        snapshot = _snapshot(resolver, ("state",), consumer_spec=_consumer_spec())
+        snapshot = _snapshot(
+            resolver, ("state",), consumer_spec=_consumer_spec()
+        )
         identity = snapshot.resource_specs[0]
         payload = _snapshot_payload(snapshot)
         root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
@@ -406,7 +457,7 @@ class TestExportSyncSnapshot:
             )
 
 
-class TestHydrateFromSyncSnapshot:
+class TestHydrateTransferSnapshot:
     async def test_worker_replays_shadow_factories(self):
         resolve_count = 0
 
@@ -420,17 +471,18 @@ class TestHydrateFromSyncSnapshot:
         await _resolve(resolver, "config", consumer_spec=_consumer_spec())
         assert resolve_count == 1
 
-        snapshot = _snapshot(resolver, ("config",), consumer_spec=_consumer_spec())
-        worker = await ResourceResolver.from_sync_snapshot(
+        snapshot = _snapshot(
+            resolver, ("config",), consumer_spec=_consumer_spec()
+        )
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
 
         assert resolve_count == 2
-        assert await _resolve(worker, "config", consumer_spec=_consumer_spec()) == {
-            "key": "value"
-        }
+        assert await _resolve(
+            worker, "config", consumer_spec=_consumer_spec()
+        ) == {"key": "value"}
 
     async def test_worker_applies_parent_state_over_shadow_defaults(self):
         @resource(scope=Scope.RUN)
@@ -445,16 +497,17 @@ class TestHydrateFromSyncSnapshot:
         )
         shared_state["count"] = 4
 
-        snapshot = _snapshot(resolver, ("shared",), consumer_spec=_consumer_spec())
-        worker = await ResourceResolver.from_sync_snapshot(
+        snapshot = _snapshot(
+            resolver, ("shared",), consumer_spec=_consumer_spec()
+        )
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
 
-        assert await _resolve(worker, "shared", consumer_spec=_consumer_spec()) == {
-            "count": 4
-        }
+        assert await _resolve(
+            worker, "shared", consumer_spec=_consumer_spec()
+        ) == {"count": 4}
 
     async def test_worker_hydrates_contextvar_values(self):
         class Holder:
@@ -469,19 +522,22 @@ class TestHydrateFromSyncSnapshot:
         resolver = ResourceResolver(registry)
         await _resolve(resolver, "holder", consumer_spec=_consumer_spec())
 
-        snapshot = _snapshot(resolver, ("holder",), consumer_spec=_consumer_spec())
-        worker = await ResourceResolver.from_sync_snapshot(
+        snapshot = _snapshot(
+            resolver, ("holder",), consumer_spec=_consumer_spec()
+        )
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
-        hydrated = await _resolve(worker, "holder", consumer_spec=_consumer_spec())
+        hydrated = await _resolve(
+            worker, "holder", consumer_spec=_consumer_spec()
+        )
 
         assert hydrated.ctx.get() == 7
 
     async def test_empty_snapshot_hydration(self):
         graph = SyncGraph(actor_id=1)
-        snapshot = ResolverSyncSnapshot(
+        snapshot = ResourceTransferSnapshot(
             resource_specs=(),
             execution_graph=DIGraph(),
             graph_update=graph.doc.get_update(None),
@@ -489,9 +545,8 @@ class TestHydrateFromSyncSnapshot:
             resolution_order=(),
             actor_id=1,
         )
-        worker = await ResourceResolver.from_sync_snapshot(
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
 
@@ -517,9 +572,8 @@ class TestSyncRoundTrip:
             consumer_spec=_consumer_spec(),
         )
 
-        worker = await ResourceResolver.from_sync_snapshot(
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
         worker_state = await _resolve(
@@ -529,7 +583,7 @@ class TestSyncRoundTrip:
         )
         worker_state["events"].append("worker")
 
-        forked.apply_sync_update(snapshot, _sync_update(worker, snapshot))
+        forked.transfer.apply_update(snapshot, _sync_update(worker, snapshot))
 
         assert state["events"] == ["worker"]
 
@@ -539,12 +593,15 @@ class TestSyncRoundTrip:
             return {"values": ["base"]}
 
         parent = ResourceResolver(registry)
-        shared_state = await _resolve(parent, "shared", consumer_spec=_consumer_spec())
-        snapshot = _snapshot(parent, ("shared",), consumer_spec=_consumer_spec())
+        shared_state = await _resolve(
+            parent, "shared", consumer_spec=_consumer_spec()
+        )
+        snapshot = _snapshot(
+            parent, ("shared",), consumer_spec=_consumer_spec()
+        )
 
-        worker = await ResourceResolver.from_sync_snapshot(
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
         worker_shared = await _resolve(
@@ -566,11 +623,14 @@ class TestSyncRoundTrip:
             return {"base": True}
 
         parent = ResourceResolver(registry)
-        shared_state = await _resolve(parent, "shared", consumer_spec=_consumer_spec())
-        snapshot = _snapshot(parent, ("shared",), consumer_spec=_consumer_spec())
-        worker = await ResourceResolver.from_sync_snapshot(
+        shared_state = await _resolve(
+            parent, "shared", consumer_spec=_consumer_spec()
+        )
+        snapshot = _snapshot(
+            parent, ("shared",), consumer_spec=_consumer_spec()
+        )
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
         worker_shared = await _resolve(
@@ -592,11 +652,14 @@ class TestSyncRoundTrip:
             return AttrState()
 
         parent = ResourceResolver(registry)
-        shared_state = await _resolve(parent, "shared", consumer_spec=_consumer_spec())
-        snapshot = _snapshot(parent, ("shared",), consumer_spec=_consumer_spec())
-        worker = await ResourceResolver.from_sync_snapshot(
+        shared_state = await _resolve(
+            parent, "shared", consumer_spec=_consumer_spec()
+        )
+        snapshot = _snapshot(
+            parent, ("shared",), consumer_spec=_consumer_spec()
+        )
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
         worker_shared = await _resolve(
@@ -619,11 +682,14 @@ class TestSyncRoundTrip:
             return BranchHolder()
 
         parent = ResourceResolver(registry)
-        shared_state = await _resolve(parent, "shared", consumer_spec=_consumer_spec())
-        snapshot = _snapshot(parent, ("shared",), consumer_spec=_consumer_spec())
-        worker = await ResourceResolver.from_sync_snapshot(
+        shared_state = await _resolve(
+            parent, "shared", consumer_spec=_consumer_spec()
+        )
+        snapshot = _snapshot(
+            parent, ("shared",), consumer_spec=_consumer_spec()
+        )
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
         worker_shared = await _resolve(
@@ -652,16 +718,21 @@ class TestSyncRoundTrip:
             return shared
 
         parent = ResourceResolver(registry)
-        live_shared = await _resolve(parent, "shared", consumer_spec=_consumer_spec())
-        live_alias = await _resolve(parent, "alias", consumer_spec=_consumer_spec())
+        live_shared = await _resolve(
+            parent, "shared", consumer_spec=_consumer_spec()
+        )
+        live_alias = await _resolve(
+            parent, "alias", consumer_spec=_consumer_spec()
+        )
         snapshot = _snapshot(parent, ("alias",), consumer_spec=_consumer_spec())
-        worker = await ResourceResolver.from_sync_snapshot(
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
 
-        worker_alias = await _resolve(worker, "alias", consumer_spec=_consumer_spec())
+        worker_alias = await _resolve(
+            worker, "alias", consumer_spec=_consumer_spec()
+        )
         worker_alias["events"].append("worker")
 
         _apply_worker_update(parent, worker, snapshot)
@@ -693,9 +764,8 @@ class TestSyncRoundTrip:
             consumer_spec=_consumer_spec(),
         )
 
-        worker = await ResourceResolver.from_sync_snapshot(
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
         worker_state = await _resolve(
@@ -709,9 +779,9 @@ class TestSyncRoundTrip:
 
         assert state["body"] == ["worker"]
         await forked.teardown_scope(Scope.TEST)
-        assert await _resolve(parent, "events", consumer_spec=_consumer_spec()) == [
-            "teardown"
-        ]
+        assert await _resolve(
+            parent, "events", consumer_spec=_consumer_spec()
+        ) == ["teardown"]
 
     async def test_slots_private_fields_and_runtime_ignores_round_trip(self):
         @resource(scope=Scope.RUN)
@@ -722,12 +792,13 @@ class TestSyncRoundTrip:
         live = await _resolve(parent, "state", consumer_spec=_consumer_spec())
         snapshot = _snapshot(parent, ("state",), consumer_spec=_consumer_spec())
 
-        worker = await ResourceResolver.from_sync_snapshot(
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
-        worker_state = await _resolve(worker, "state", consumer_spec=_consumer_spec())
+        worker_state = await _resolve(
+            worker, "state", consumer_spec=_consumer_spec()
+        )
         worker_state.count = 8
         worker_state._private = "worker"
         worker_state.ctx.set(11)
@@ -747,11 +818,12 @@ class TestSyncRoundTrip:
         parent = ResourceResolver(registry)
         state = await _resolve(parent, "holder", consumer_spec=_consumer_spec())
         items_before = state["items"]
-        snapshot = _snapshot(parent, ("holder",), consumer_spec=_consumer_spec())
+        snapshot = _snapshot(
+            parent, ("holder",), consumer_spec=_consumer_spec()
+        )
 
-        worker = await ResourceResolver.from_sync_snapshot(
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
         worker_state = await _resolve(
@@ -775,11 +847,12 @@ class TestSyncRoundTrip:
         state = await _resolve(parent, "holder", consumer_spec=_consumer_spec())
         payload_before = state.payload
         items_before = state.payload["items"]
-        snapshot = _snapshot(parent, ("holder",), consumer_spec=_consumer_spec())
+        snapshot = _snapshot(
+            parent, ("holder",), consumer_spec=_consumer_spec()
+        )
 
-        worker = await ResourceResolver.from_sync_snapshot(
+        worker = await _worker_from_snapshot(
             snapshot,
-            registry,
             consumer_spec=_consumer_spec(),
         )
         worker_state = await _resolve(

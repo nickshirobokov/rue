@@ -12,24 +12,18 @@ from rue.patching.runtime import PatchHandle
 from rue.resources.models import (
     DIGraph,
     LoadedResourceDef,
-    ResolverSyncSnapshot,
     ResourceSpec,
     Scope,
 )
 from rue.resources.registry import ResourceRegistry
-from rue.resources.snapshot import (
-    SnapshotApplier,
-    SnapshotDeltaApplier,
-    SyncGraph,
-    build_path_ids,
-)
 from rue.resources.state import (
-    ResourceCacheKey,
-    ResourceTeardownRecord,
     ResolverExecutionContext,
     ResolverScopeOwner,
     ResolverState,
+    ResourceCacheKey,
+    ResourceTeardownRecord,
 )
+from rue.resources.transfer import ResourceTransfer
 
 
 _MAIN_SYNC_ACTOR_ID = 0
@@ -50,11 +44,17 @@ class ResourceResolver:
         self.registry = registry
         self.state = state or ResolverState.main(sync_actor_id=sync_actor_id)
         self._scope_context = scope_context
+        self.transfer = ResourceTransfer(self)
 
     @property
     def cached_resources(self) -> dict[ResourceSpec, Any]:
         """Return a shallow copy of the identity-to-value cache."""
         return self.state.cached_resources_by_spec()
+
+    @property
+    def scope_context(self) -> ResolverExecutionContext | None:
+        """Return the execution context bound to this resolver view."""
+        return self._scope_context
 
     def view_for_test(
         self,
@@ -109,7 +109,9 @@ class ResourceResolver:
                 consumer_spec=consumer_spec,
                 apply_injection_hook=apply_injection_hook,
             )
-        for name, spec in graph.injections_by_execution_id[execution_id].items():
+        for name, spec in graph.injections_by_execution_id[
+            execution_id
+        ].items():
             kwargs[name] = await self.resolve_resource(
                 spec,
                 consumer_spec=consumer_spec,
@@ -164,7 +166,9 @@ class ResourceResolver:
                 self._undo_patches(owner)
                 continue
             teardown_errors.extend(
-                await self._run_teardowns(self.state.pop_teardown_records(owner))
+                await self._run_teardowns(
+                    self.state.pop_teardown_records(owner)
+                )
             )
             self.state.clear_scope_owner(owner)
             self._undo_patches(owner)
@@ -241,7 +245,9 @@ class ResourceResolver:
                 self._undo_patches(owner)
                 continue
             teardown_errors.extend(
-                await self._run_teardowns(self.state.pop_teardown_records(owner))
+                await self._run_teardowns(
+                    self.state.pop_teardown_records(owner)
+                )
             )
             self.state.clear_scope_owner(owner)
             self._undo_patches(owner)
@@ -259,238 +265,6 @@ class ResourceResolver:
     def _undo_patches(self, owner: ResolverScopeOwner) -> None:
         for handle in reversed(self.state.pop_patch_handles(owner)):
             handle.undo()
-
-    def export_sync_snapshot(
-        self,
-        execution_id: UUID,
-        *,
-        sync_actor_id: int,
-    ) -> ResolverSyncSnapshot:
-        """Build a CRDT transfer snapshot for the given resource closure."""
-        graph = self.registry.graph
-        resolution_order = graph.resolution_order_by_execution_id[execution_id]
-        resources = self._syncable_resources(resolution_order)
-        self.flush_resources_to_sync_graph(resources)
-
-        root_keys = [spec.snapshot_key for spec in resources]
-        payload = self.state.sync_graph.payload(root_keys)
-        export_graph = SyncGraph(actor_id=_MAIN_SYNC_ACTOR_ID)
-        export_graph.sync_payload(payload)
-        return ResolverSyncSnapshot(
-            resource_specs=tuple(resources),
-            execution_graph=graph.get_subgraph(execution_id),
-            graph_update=export_graph.doc.get_update(None),
-            base_state=export_graph.doc.get_state(),
-            resolution_order=resolution_order,
-            actor_id=sync_actor_id,
-        )
-
-    @classmethod
-    async def from_sync_snapshot(
-        cls,
-        snapshot: ResolverSyncSnapshot,
-        registry: ResourceRegistry,
-        *,
-        consumer_spec: Spec,
-    ) -> "ResourceResolver":
-        """Build a shadow resolver from a serialized sync snapshot."""
-        resolver = cls(
-            registry,
-            state=ResolverState.shadow(sync_actor_id=snapshot.actor_id),
-        )
-        await resolver.load_sync_snapshot(
-            snapshot,
-            consumer_spec=consumer_spec,
-        )
-        return resolver
-
-    async def load_sync_snapshot(
-        self,
-        snapshot: ResolverSyncSnapshot,
-        *,
-        consumer_spec: Spec,
-    ) -> None:
-        """Hydrate this resolver from a serialized sync snapshot."""
-        self.registry.graph = snapshot.execution_graph
-        self.state.sync_graph = SyncGraph(actor_id=snapshot.actor_id)
-
-        for spec in snapshot.resolution_order:
-            if not spec.sync:
-                continue
-            scope_context = self._scope_context_for(consumer_spec)
-            key = self.state.cache_key_for(spec, scope_context)
-            if self.state.has_cached_instance(key):
-                continue
-            value = await self._resolve_uncached(
-                graph=snapshot.execution_graph,
-                key=key,
-                consumer_spec=consumer_spec,
-                scope_context=scope_context,
-            )
-            self.state.cache_instance(key, value)
-        self.state.sync_graph = SyncGraph.from_update(
-            snapshot.graph_update,
-            actor_id=snapshot.actor_id,
-        )
-        payload = self.state.sync_graph.payload(
-            spec.snapshot_key for spec in snapshot.resource_specs
-        )
-        self.state.sync_graph.set_baseline(payload)
-        self._materialize_payload(payload)
-
-    def flush_resources_to_sync_graph(
-        self,
-        resources: Sequence[ResourceSpec],
-    ) -> None:
-        """Push current live Python state into the canonical CRDT graph."""
-        synced = self._syncable_resources(resources)
-        if not synced:
-            return
-        self.state.sync_graph.sync_live_roots(self._live_snapshot_roots(synced))
-
-    def sync_update_for_resources_since(
-        self,
-        base_state: bytes,
-        resources: Sequence[ResourceSpec],
-    ) -> bytes:
-        """Return the CRDT update since ``base_state``."""
-        self.flush_resources_to_sync_graph(resources)
-        return self.state.sync_graph.doc.get_update(base_state)
-
-    def apply_sync_update(
-        self,
-        snapshot: ResolverSyncSnapshot,
-        sync_update: bytes,
-    ) -> None:
-        """Merge worker CRDT updates onto live objects."""
-        resource_specs = list(snapshot.resource_specs)
-        if not resource_specs:
-            return
-
-        merge_order = [
-            *[
-                spec
-                for spec in resource_specs
-                if spec.scope is not Scope.TEST
-            ],
-            *[
-                spec
-                for spec in resource_specs
-                if spec.scope is Scope.TEST
-            ],
-        ]
-        root_keys = [spec.snapshot_key for spec in merge_order]
-
-        with self.state.sync_lock:
-            transport = SyncGraph.from_update(
-                snapshot.graph_update,
-                actor_id=_MAIN_SYNC_ACTOR_ID,
-            )
-            transport.object_ids = dict(self.state.sync_graph.object_ids)
-            transport.path_ids = dict(self.state.sync_graph.path_ids)
-            transport.next_local_id = self.state.sync_graph.next_local_id
-            baseline_payload = transport.payload(root_keys)
-            transport.sync_live_roots(self._live_snapshot_roots(merge_order))
-            transport.apply_update(sync_update)
-            after_payload = transport.payload(root_keys)
-            self._apply_payload_delta(baseline_payload, after_payload)
-            self.state.sync_graph.sync_payload(after_payload)
-            self._refresh_sync_counter()
-
-    def _materialize_payload(self, payload: dict[str, Any]) -> None:
-        roots = {
-            key.spec.snapshot_key: value
-            for key, value in self._cached_instances_visible_to_view().items()
-            if key.spec.snapshot_key in payload["root_ids"]
-        }
-        applier = SnapshotApplier(
-            payload,
-            object_ids=self.state.sync_graph.object_ids,
-        )
-        patched_roots = applier.apply_roots(roots)
-        self.state.sync_graph.object_ids = applier.object_ids
-        self.state.sync_graph.path_ids = build_path_ids(payload)
-        self.state.sync_graph.set_baseline(payload)
-        self._refresh_sync_counter()
-        key_to_spec = {
-            key.spec.snapshot_key: key
-            for key in self._cached_instances_visible_to_view()
-        }
-        for root_key, value in patched_roots.items():
-            key = key_to_spec.get(root_key)
-            if key is not None:
-                self.state.cache_instance(key, value)
-
-    def _apply_payload_delta(
-        self,
-        before_payload: dict[str, Any],
-        after_payload: dict[str, Any],
-    ) -> None:
-        roots = {
-            key.spec.snapshot_key: value
-            for key, value in self._cached_instances_visible_to_view().items()
-            if key.spec.snapshot_key in after_payload["root_ids"]
-        }
-        applier = SnapshotDeltaApplier(
-            before_payload,
-            after_payload,
-            object_ids=self.state.sync_graph.object_ids,
-        )
-        patched_roots = applier.apply_roots(roots)
-        self.state.sync_graph.object_ids = applier.object_ids
-        self.state.sync_graph.path_ids = build_path_ids(after_payload)
-        key_to_spec = {
-            key.spec.snapshot_key: key
-            for key in self._cached_instances_visible_to_view()
-        }
-        for root_key, value in patched_roots.items():
-            key = key_to_spec.get(root_key)
-            if key is not None:
-                self.state.cache_instance(key, value)
-
-    def _live_snapshot_roots(
-        self,
-        resources: Sequence[ResourceSpec],
-    ) -> dict[str, Any]:
-        return {
-            key.spec.snapshot_key: value
-            for key, value in self._cached_instances_visible_to_view().items()
-            if key.spec in resources
-        }
-
-    def _cached_instances_visible_to_view(self) -> dict[ResourceCacheKey, Any]:
-        if self._scope_context is None:
-            return self.state.cached_resource_instances()
-        return {
-            key: value
-            for key, value in self.state.cached_resource_instances().items()
-            if key.owner
-            == ResolverScopeOwner.for_resource_scope(
-                key.spec.scope,
-                self._scope_context,
-            )
-        }
-
-    @staticmethod
-    def _syncable_resources(
-        resources: Sequence[ResourceSpec],
-    ) -> list[ResourceSpec]:
-        return [spec for spec in resources if spec.sync]
-
-    def _refresh_sync_counter(self) -> None:
-        prefix = f"{self.state.sync_graph.actor_id}:"
-        counters = [
-            int(node_id.removeprefix(prefix))
-            for node_id in (
-                *self.state.sync_graph.object_ids.values(),
-                *self.state.sync_graph.path_ids.values(),
-            )
-            if node_id.startswith(prefix)
-        ]
-        self.state.sync_graph.next_local_id = max(
-            counters,
-            default=self.state.sync_graph.next_local_id - 1,
-        ) + 1
 
     async def _resolve_uncached(
         self,
@@ -561,7 +335,9 @@ class ResourceResolver:
 
         return value
 
-    def _scope_context_for(self, consumer_spec: Spec) -> ResolverExecutionContext:
+    def _scope_context_for(
+        self, consumer_spec: Spec
+    ) -> ResolverExecutionContext:
         if self._scope_context is not None:
             return self._scope_context
         return ResolverExecutionContext.from_consumer(
@@ -583,7 +359,5 @@ class ResourceResolver:
                 f"Hook {hook.__name__} failed for resource "
                 f"'{resource_name}': {e}"
             )
-            raise RuntimeError(
-                msg
-            ) from e
+            raise RuntimeError(msg) from e
         return value

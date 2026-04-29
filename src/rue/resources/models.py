@@ -102,7 +102,7 @@ class DIGraph:
 
 
 @dataclass(frozen=True, slots=True)
-class ResolverSyncSnapshot:
+class ResourceTransferSnapshot:
     """CRDT-backed transfer payload for reconstructing resources in a worker."""
 
     resource_specs: tuple[ResourceSpec, ...]

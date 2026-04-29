@@ -114,12 +114,19 @@ class ResolverScopeState:
 
 
 @dataclass(slots=True)
+class ResourceTransferState:
+    """Mutable CRDT state used by resource transfer."""
+
+    graph: SyncGraph
+    lock: threading.RLock = field(default_factory=threading.RLock)
+
+
+@dataclass(slots=True)
 class ResolverState:
     """Mutable runtime state shared by resolver execution views."""
 
     lifecycle_mode: ResolverLifecycleMode
-    sync_graph: SyncGraph
-    sync_lock: threading.RLock = field(default_factory=threading.RLock)
+    transfer: ResourceTransferState
     _scopes: dict[ResolverScopeOwner, ResolverScopeState] = field(
         default_factory=dict
     )
@@ -129,7 +136,7 @@ class ResolverState:
         """Create live resource state."""
         return cls(
             lifecycle_mode=ResolverLifecycleMode.LIVE,
-            sync_graph=SyncGraph(actor_id=sync_actor_id),
+            transfer=ResourceTransferState(SyncGraph(actor_id=sync_actor_id)),
         )
 
     @classmethod
@@ -137,7 +144,7 @@ class ResolverState:
         """Create shadow resource state for worker hydration."""
         return cls(
             lifecycle_mode=ResolverLifecycleMode.SHADOW,
-            sync_graph=SyncGraph(actor_id=sync_actor_id),
+            transfer=ResourceTransferState(SyncGraph(actor_id=sync_actor_id)),
         )
 
     @property
@@ -206,6 +213,23 @@ class ResolverState:
             key: value
             for scope_state in self._scopes.values()
             for key, value in scope_state.cache.items()
+        }
+
+    def cached_instances_for_view(
+        self,
+        scope_context: ResolverExecutionContext | None,
+    ) -> dict[ResourceCacheKey, Any]:
+        """Return cached values visible to one resolver view."""
+        if scope_context is None:
+            return self.cached_resource_instances()
+        return {
+            key: value
+            for key, value in self.cached_resource_instances().items()
+            if key.owner
+            == ResolverScopeOwner.for_resource_scope(
+                key.spec.scope,
+                scope_context,
+            )
         }
 
     def cached_resources_by_spec(self) -> dict[ResourceSpec, Any]:

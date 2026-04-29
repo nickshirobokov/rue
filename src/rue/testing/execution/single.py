@@ -78,9 +78,9 @@ class SingleTest(ExecutableTest):
                     ),
                     execution_id=execution_id,
                 )
-            case (
-                SingleTest(definition=LoadedTestDef(spec=spec))
-            ) if spec.skip_reason:
+            case SingleTest(definition=LoadedTestDef(spec=spec)) if (
+                spec.skip_reason
+            ):
                 return ExecutedTest(
                     definition=self.definition,
                     result=TestResult(
@@ -119,23 +119,20 @@ class SingleTest(ExecutableTest):
         with bind(CURRENT_TEST_TRACER, self.tracer):
             self.tracer.start(self.definition, execution_id=execution_id)
             async with semaphore:
-                duration_ms, imperative_outcome, error, assertion_results = (
-                    await self.definition.run_loaded_test(
-                        params=self.params,
-                        resolver=resolver,
-                        execution_id=execution_id,
-                        run_sync_in_thread=self.backend
-                        is not ExecutionBackend.MAIN,
-                        is_stopped=self.is_stopped,
-                    )
+                (
+                    duration_ms,
+                    imperative_outcome,
+                    error,
+                    assertion_results,
+                ) = await self.definition.run_loaded_test(
+                    params=self.params,
+                    resolver=resolver,
+                    execution_id=execution_id,
+                    run_sync_in_thread=self.backend
+                    is not ExecutionBackend.MAIN,
+                    is_stopped=self.is_stopped,
                 )
-            resolver.flush_resources_to_sync_graph(
-                [
-                    spec
-                    for spec in resolver.cached_resources
-                    if spec.scope is not Scope.TEST
-                ]
-            )
+            resolver.transfer.flush_visible_shared_resources()
             try:
                 await resolver.teardown_scope(Scope.TEST)
             except Exception as teardown_error:
@@ -181,9 +178,9 @@ class SingleTest(ExecutableTest):
                     consumer_spec=self.definition.spec,
                     apply_injection_hook=False,
                 )
-                snapshot = resolver.export_sync_snapshot(
+                snapshot = resolver.transfer.export_snapshot(
                     execution_id,
-                    sync_actor_id=self.sync_actor_id,
+                    actor_id=self.sync_actor_id,
                 )
 
                 payload = ExecutorPayload(
@@ -201,7 +198,7 @@ class SingleTest(ExecutableTest):
                     payload,
                 )
                 remote_result = await asyncio.wrap_future(future)
-                resolver.apply_sync_update(
+                resolver.transfer.apply_update(
                     snapshot,
                     remote_result.sync_update,
                 )
