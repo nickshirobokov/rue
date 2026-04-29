@@ -355,4 +355,4 @@ class Runner:
         await resolver.view_for_test(
             execution.execution_id,
             execution.definition.spec,
-        ).teardown_scope(Scope.MODULE)
+        ).teardown(Scope.MODULE)

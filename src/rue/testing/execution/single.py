@@ -134,7 +134,7 @@ class SingleTest(ExecutableTest):
                 )
             resolver.transfer.flush_visible_shared_resources()
             try:
-                await resolver.teardown_scope(Scope.TEST)
+                await resolver.teardown(Scope.TEST)
             except Exception as teardown_error:
                 logging.warning(
                     f"Error during resource teardown: {teardown_error}"
@@ -203,7 +203,7 @@ class SingleTest(ExecutableTest):
                     remote_result.sync_update,
                 )
         finally:
-            await resolver.teardown_scope(Scope.TEST)
+            await resolver.teardown(Scope.TEST)
 
         return ExecutedTest(
             definition=self.definition,

@@ -87,8 +87,8 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
         run_id=payload.context.run_id,
     )
     with (
-        test_ctx,
         payload.context,
+        test_ctx,
         bind(CURRENT_TEST_TRACER, tracer),
     ):
         try:

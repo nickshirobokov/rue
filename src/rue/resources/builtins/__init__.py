@@ -11,7 +11,10 @@ def register_builtin_resources(registry: ResourceRegistry) -> None:
 
     @registry.register_resource(scope=Scope.TEST, sync=False, builtin=True)
     def monkeypatch() -> MonkeyPatch:
+        transaction = CURRENT_RESOURCE_TRANSACTION.get()
         return MonkeyPatch(
-            resolver=CURRENT_RESOURCE_TRANSACTION.get().resolver,
-            scope=Scope.TEST,
+            lifetime=transaction.resolver.patch_lifetime(
+                Scope.TEST,
+                consumer_spec=transaction.consumer_spec,
+            ),
         )

@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 from rue.models import Spec
 from rue.resources import MonkeyPatch, Scope
+from rue.context.runtime import ResourceTransactionContext
 
 
 if TYPE_CHECKING:
@@ -50,13 +51,16 @@ class ExperimentSpec(Spec):
         )
         if "monkeypatch" in self.dependencies:
             kwargs["monkeypatch"] = MonkeyPatch(
-                resolver=resolver,
-                scope=Scope.RUN,
+                lifetime=resolver.patch_lifetime(
+                    Scope.RUN,
+                    consumer_spec=self,
+                ),
             )
 
-        with resolver.open_transaction(
+        with ResourceTransactionContext(
             consumer_spec=self,
             provider_spec=self,
+            resolver=resolver,
         ):
             result = self.fn(**kwargs)
             if inspect.isawaitable(result):

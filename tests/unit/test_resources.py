@@ -749,7 +749,7 @@ class TestResourceTeardown:
         assert teardown_called
 
     @pytest.mark.asyncio
-    async def test_teardown_scope_test(self):
+    async def test_teardown_test_scope(self):
         case_torn = False
         suite_torn = False
 
@@ -769,7 +769,7 @@ class TestResourceTeardown:
         await _resolve(resolver, "case_res", consumer_spec=_consumer_spec())
         await _resolve(resolver, "suite_res", consumer_spec=_consumer_spec())
 
-        await resolver.teardown_scope(Scope.TEST)
+        await resolver.teardown(Scope.TEST)
         assert case_torn
         assert not suite_torn
 
@@ -794,7 +794,7 @@ class TestResourceTeardown:
         )
         assert v1 == 1
 
-        await resolver.teardown_scope(Scope.TEST)
+        await resolver.teardown(Scope.TEST)
 
         v2 = await _resolve(
             resolver,
@@ -1201,7 +1201,7 @@ class TestResourceHooks:
         assert call_order == [("generator_teardown",), ("hook", "value")]
 
     @pytest.mark.asyncio
-    async def test_on_teardown_with_teardown_scope(self):
+    async def test_on_teardown_with_scoped_teardown(self):
         teardown_hook_called = False
 
         def on_teardown_hook(value):
@@ -1216,7 +1216,7 @@ class TestResourceHooks:
         await _resolve(resolver, "case_gen", consumer_spec=_consumer_spec())
 
         assert not teardown_hook_called
-        await resolver.teardown_scope(Scope.TEST)
+        await resolver.teardown(Scope.TEST)
         assert teardown_hook_called
 
     @pytest.mark.asyncio
@@ -1421,7 +1421,7 @@ class TestResourceResolutionErrors:
         )
 
         with pytest.raises(ExceptionGroup) as exc_info:
-            await resolver.teardown_scope(Scope.TEST)
+            await resolver.teardown(Scope.TEST)
 
         messages = {str(error) for error in exc_info.value.exceptions}
         assert any(

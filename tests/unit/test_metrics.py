@@ -414,7 +414,7 @@ async def test_metric_records_module_and_provider_identity():
                 consumer_spec=ctx.item.spec,
             )
             m.add_record(1)
-            await resolver.teardown_scope(Scope.TEST)
+            await resolver.teardown(Scope.TEST)
 
     [result] = metric_results
     assert result.metadata.consumers == [ctx.item.spec]

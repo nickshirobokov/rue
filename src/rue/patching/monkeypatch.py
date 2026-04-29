@@ -4,17 +4,13 @@ from __future__ import annotations
 
 from collections.abc import MutableMapping, MutableSequence
 from pkgutil import resolve_name
-from typing import TYPE_CHECKING, Any, overload
+from typing import Any, overload
 
 from rue.patching.runtime import (
-    PatchOwner,
+    PatchLifetime,
     patch_manager,
 )
 from rue.resources.models import Scope
-
-
-if TYPE_CHECKING:
-    from rue.resources.resolver import ResourceResolver
 
 
 _UNSET = object()
@@ -26,11 +22,14 @@ class MonkeyPatch:
     def __init__(
         self,
         *,
-        resolver: ResourceResolver,
-        scope: Scope = Scope.TEST,
+        lifetime: PatchLifetime,
     ) -> None:
-        self.resolver = resolver
-        self.scope: Scope = scope
+        self.lifetime = lifetime
+
+    @property
+    def scope(self) -> Scope:
+        """Return the lifecycle scope for patches created by this resource."""
+        return self.lifetime.scope
 
     @overload
     def setattr(
@@ -96,15 +95,14 @@ class MonkeyPatch:
             attr_name = name
             patch_value = value
 
-        owner = PatchOwner.build(self.scope)
         handle = patch_manager.setattr(
             patch_target,
             attr_name,
             patch_value,
-            owner=owner,
+            owner=self.lifetime.owner,
             raising=raising,
         )
-        handle.register_to_resolver(self.resolver)
+        self.lifetime.register(handle)
 
     def delattr(
         self,
@@ -114,15 +112,14 @@ class MonkeyPatch:
         raising: bool = True,
     ) -> None:
         """Delete an attribute while the selected Rue scope is active."""
-        owner = PatchOwner.build(self.scope)
         handle = patch_manager.delattr(
             target,
             name,
-            owner=owner,
+            owner=self.lifetime.owner,
             raising=raising,
         )
         if handle is not None:
-            handle.register_to_resolver(self.resolver)
+            self.lifetime.register(handle)
 
     @overload
     def setitem(
@@ -179,15 +176,14 @@ class MonkeyPatch:
             name = key
             patch_value = value
 
-        owner = PatchOwner.build(self.scope)
         handle = patch_manager.setitem(
             target,
             name,
             patch_value,
-            owner=owner,
+            owner=self.lifetime.owner,
             replace=replace,
         )
-        handle.register_to_resolver(self.resolver)
+        self.lifetime.register(handle)
 
     @overload
     def delitem(
@@ -237,12 +233,11 @@ class MonkeyPatch:
                 )
             name = key
 
-        owner = PatchOwner.build(self.scope)
         handle = patch_manager.delitem(
             target,
             name,
-            owner=owner,
+            owner=self.lifetime.owner,
             raising=raising,
         )
         if handle is not None:
-            handle.register_to_resolver(self.resolver)
+            self.lifetime.register(handle)

@@ -778,7 +778,7 @@ class TestSyncRoundTrip:
         _apply_worker_update(forked, worker, snapshot)
 
         assert state["body"] == ["worker"]
-        await forked.teardown_scope(Scope.TEST)
+        await forked.teardown(Scope.TEST)
         assert await _resolve(
             parent, "events", consumer_spec=_consumer_spec()
         ) == ["teardown"]

@@ -16,7 +16,6 @@ from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
     bind,
 )
-from rue.patching.runtime import PatchContext, patch_manager
 from rue.resources import ResourceResolver
 from rue.testing.models.result import TestStatus
 from rue.testing.models.spec import SetupFileRef, TestSpec
@@ -96,7 +95,6 @@ class LoadedTestDef:
         start = time.perf_counter()
         with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
             try:
-                di_graph = resolver.registry.graph
                 kwargs = await resolver.resolve_test_deps(
                     execution_id,
                     params,
@@ -106,21 +104,10 @@ class LoadedTestDef:
                     imperative_outcome = TestStatus.SKIPPED
                     error = Exception("Run stopped early")
                 else:
-                    with patch_manager.bind_context(
-                        PatchContext(
-                            execution_id=execution_id,
-                            module_path=self.spec.locator.module_path.resolve(),
-                            resources=frozenset(
-                                di_graph.resolution_order_by_execution_id[
-                                    execution_id
-                                ]
-                            ),
-                        )
-                    ):
-                        await self.call_test_fn(
-                            kwargs=kwargs,
-                            run_sync_in_thread=run_sync_in_thread,
-                        )
+                    await self.call_test_fn(
+                        kwargs=kwargs,
+                        run_sync_in_thread=run_sync_in_thread,
+                    )
             except SkipTest as raised:
                 imperative_outcome = TestStatus.SKIPPED
                 error = raised

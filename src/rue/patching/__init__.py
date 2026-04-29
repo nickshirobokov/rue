@@ -4,6 +4,7 @@ from rue.patching.monkeypatch import MonkeyPatch
 from rue.patching.runtime import (
     PatchContext,
     PatchHandle,
+    PatchLifetime,
     PatchOwner,
     patch_manager,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "MonkeyPatch",
     "PatchContext",
     "PatchHandle",
+    "PatchLifetime",
     "PatchOwner",
     "Scope",
     "patch_manager",

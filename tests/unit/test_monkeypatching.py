@@ -5,10 +5,15 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from textwrap import dedent
+from uuid import uuid4
 
 import pytest
 
+from rue.patching import MonkeyPatch
+from rue.patching.runtime import PatchContext, PatchLifetime, PatchOwner
 from rue.resources import ResourceResolver, registry
+from rue.resources.models import Scope
+from rue.resources.state import ResolverState
 from rue.testing.runner import Runner
 from tests.unit.conftest import NullReporter
 from tests.unit.factories import make_run_context, materialize_tests
@@ -39,6 +44,51 @@ class ImmediatePool:
 
     def shutdown(self) -> None:
         self._executor.shutdown(wait=True)
+
+
+def test_monkeypatch_stores_lifetime_not_resolver() -> None:
+    owner = PatchOwner(scope=Scope.TEST, execution_id=uuid4())
+    lifetime = PatchLifetime(owner=owner, registry=ResolverState.main())
+    monkeypatch = MonkeyPatch(lifetime=lifetime)
+
+    assert monkeypatch.lifetime is lifetime
+    assert monkeypatch.scope is Scope.TEST
+    assert not hasattr(monkeypatch, "resolver")
+
+
+def test_patch_owner_is_active_from_explicit_patch_context(
+    tmp_path: Path,
+) -> None:
+    execution_id = uuid4()
+    run_id = uuid4()
+    module_path = tmp_path / "test_module.py"
+    context = PatchContext(
+        execution_id=execution_id,
+        module_path=module_path.resolve(),
+        run_id=run_id,
+    )
+
+    assert PatchOwner(
+        scope=Scope.TEST,
+        execution_id=execution_id,
+    ).is_active(context)
+    assert PatchOwner(
+        scope=Scope.MODULE,
+        module_path=module_path.resolve(),
+    ).is_active(context)
+    assert PatchOwner(scope=Scope.RUN, run_id=run_id).is_active(context)
+    assert not PatchOwner(scope=Scope.TEST, execution_id=uuid4()).is_active(
+        context
+    )
+    assert not PatchOwner(
+        scope=Scope.MODULE,
+        module_path=(tmp_path / "other.py").resolve(),
+    ).is_active(context)
+    assert not PatchOwner(scope=Scope.RUN, run_id=uuid4()).is_active(context)
+    assert not PatchOwner(
+        scope=Scope.TEST,
+        execution_id=execution_id,
+    ).is_active(None)
 
 
 @pytest.mark.asyncio

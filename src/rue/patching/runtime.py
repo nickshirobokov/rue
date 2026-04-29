@@ -8,15 +8,10 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
-from rue.context.runtime import CURRENT_RUN_CONTEXT, CURRENT_TEST
 from rue.resources.models import Scope
-
-
-if TYPE_CHECKING:
-    from rue.resources.resolver import ResourceResolver
 
 
 type PatchTargetKind = Literal["attr", "item"]
@@ -32,7 +27,7 @@ class PatchContext:
 
     execution_id: UUID | None
     module_path: Path
-    resources: frozenset[Any]
+    run_id: UUID | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,48 +39,50 @@ class PatchOwner:
     run_id: UUID | None = None
     module_path: Path | None = None
 
-    def is_active(self, _context: PatchContext | None) -> bool:
+    def is_active(self, context: PatchContext | None) -> bool:
         """Return whether this owner applies in the current runtime context."""
+        if context is None:
+            return False
         match self.scope:
             case Scope.TEST:
-                test_ctx = CURRENT_TEST.get()
                 return (
                     self.execution_id is not None
-                    and test_ctx.execution_id == self.execution_id
+                    and context.execution_id == self.execution_id
                 )
             case Scope.MODULE:
-                test_ctx = CURRENT_TEST.get()
                 return (
                     self.module_path is not None
-                    and test_ctx.item.spec.locator.module_path.resolve()
-                    == self.module_path
+                    and context.module_path == self.module_path
                 )
             case Scope.RUN:
-                run_context = CURRENT_RUN_CONTEXT.get(None)
                 return (
                     self.run_id is not None
-                    and run_context is not None
-                    and run_context.run_id == self.run_id
+                    and context.run_id == self.run_id
                 )
 
-    @classmethod
-    def build(cls, scope: Scope) -> PatchOwner:
-        """Build an owner from the current Rue runtime context."""
-        match scope:
-            case Scope.TEST:
-                test_ctx = CURRENT_TEST.get()
-                return cls(
-                    scope=Scope.TEST, execution_id=test_ctx.execution_id
-                )
-            case Scope.MODULE:
-                test_ctx = CURRENT_TEST.get()
-                return cls(
-                    scope=Scope.MODULE,
-                    module_path=test_ctx.item.spec.locator.module_path.resolve(),
-                )
-            case Scope.RUN:
-                run_context = CURRENT_RUN_CONTEXT.get()
-                return cls(scope=Scope.RUN, run_id=run_context.run_id)
+
+class PatchHandleRegistry(Protocol):
+    """Stores patch handles for later lifecycle teardown."""
+
+    def register_patch(self, handle: PatchHandle) -> None:
+        """Attach one patch handle to its owning lifecycle."""
+
+
+@dataclass(frozen=True, slots=True)
+class PatchLifetime:
+    """Owner and storage API for one monkeypatch resource."""
+
+    owner: PatchOwner
+    registry: PatchHandleRegistry
+
+    @property
+    def scope(self) -> Scope:
+        """Return the lifecycle scope for this patch lifetime."""
+        return self.owner.scope
+
+    def register(self, handle: PatchHandle) -> None:
+        """Register a patch handle with this lifetime's storage."""
+        self.registry.register_patch(handle)
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,10 +97,6 @@ class PatchHandle:
     def undo(self) -> None:
         """Remove this patch record from its target dispatcher."""
         self.manager.remove(self)
-
-    def register_to_resolver(self, resolver: ResourceResolver) -> None:
-        """Attach this handle to the resolver that owns its lifetime."""
-        resolver.register_patch(self)
 
 
 @dataclass(slots=True)

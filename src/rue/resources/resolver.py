@@ -1,14 +1,13 @@
 """Resource system for dependency injection."""
 
-import contextlib
 import inspect
-from collections.abc import AsyncGenerator, Generator, Iterator, Sequence
+from collections.abc import AsyncGenerator, Generator, Sequence
 from typing import Any, cast
 from uuid import UUID
 
-from rue.context.runtime import ResourceTransactionContext
+from rue.context.runtime import CURRENT_RUN_CONTEXT, ResourceTransactionContext
 from rue.models import Spec
-from rue.patching.runtime import PatchHandle
+from rue.patching.runtime import PatchLifetime, PatchOwner
 from rue.resources.models import (
     DIGraph,
     LoadedResourceDef,
@@ -71,26 +70,38 @@ class ResourceResolver:
             ),
         )
 
-    @contextlib.contextmanager
-    def open_transaction(
+    def patch_lifetime(
         self,
+        scope: Scope,
         *,
-        consumer_spec: Spec,
-        provider_spec: Spec,
-        direct_dependencies: tuple[ResourceSpec, ...] = (),
-    ) -> Iterator[None]:
-        """Bind consumer/provider attribution for resolver-owned work."""
-        with ResourceTransactionContext(
-            consumer_spec=consumer_spec,
-            provider_spec=provider_spec,
-            resolver=self,
-            direct_dependencies=direct_dependencies,
-        ):
-            yield
-
-    def register_patch(self, handle: PatchHandle) -> None:
-        """Attach a patch handle to the resolver that owns its lifetime."""
-        self.state.register_patch(handle)
+        consumer_spec: Spec | None = None,
+    ) -> PatchLifetime:
+        """Build a patch lifetime owned by this resolver's state."""
+        match scope:
+            case Scope.TEST:
+                if consumer_spec is None:
+                    msg = "Test-scoped patches require a consumer spec."
+                    raise ValueError(msg)
+                context = self._scope_context_for(consumer_spec)
+                owner = PatchOwner(
+                    scope=Scope.TEST,
+                    execution_id=context.execution_id,
+                )
+            case Scope.MODULE:
+                if consumer_spec is None:
+                    msg = "Module-scoped patches require a consumer spec."
+                    raise ValueError(msg)
+                context = self._scope_context_for(consumer_spec)
+                owner = PatchOwner(
+                    scope=Scope.MODULE,
+                    module_path=context.module_path,
+                )
+            case Scope.RUN:
+                owner = PatchOwner(
+                    scope=Scope.RUN,
+                    run_id=CURRENT_RUN_CONTEXT.get().run_id,
+                )
+        return PatchLifetime(owner=owner, registry=self.state)
 
     async def resolve_test_deps(
         self,
@@ -146,9 +157,10 @@ class ResourceResolver:
         if not apply_injection_hook:
             return value
 
-        with self.open_transaction(
+        with ResourceTransactionContext(
             consumer_spec=consumer_spec,
             provider_spec=spec,
+            resolver=self,
             direct_dependencies=direct_dependencies,
         ):
             return await self._apply_hook(
@@ -157,10 +169,21 @@ class ResourceResolver:
                 value,
             )
 
-    async def teardown(self) -> None:
+    async def teardown(self, scope: Scope | None = None) -> None:
         """Tear down resources and patches owned by this resolver."""
         teardown_errors: list[Exception] = []
-        for owner in reversed(tuple(self.state.scope_owners())):
+        if scope is None:
+            owners = tuple(reversed(tuple(self.state.scope_owners())))
+        elif self._scope_context is None:
+            owners = self.state.scope_owners_for(scope)
+        else:
+            owners = (
+                ResolverScopeOwner.for_resource_scope(
+                    scope,
+                    self._scope_context,
+                ),
+            )
+        for owner in owners:
             if self.state.is_shadow:
                 self.state.clear_scope_owner(owner)
                 self._undo_patches(owner)
@@ -172,7 +195,15 @@ class ResourceResolver:
             )
             self.state.clear_scope_owner(owner)
             self._undo_patches(owner)
-        self._raise_teardown_errors(teardown_errors)
+        match teardown_errors:
+            case []:
+                pass
+            case [error]:
+                raise RuntimeError(error)
+            case _:
+                raise ExceptionGroup(
+                    "Teardown errors occurred", teardown_errors
+                )
 
     async def _run_teardowns(
         self,
@@ -182,9 +213,10 @@ class ResourceResolver:
 
         for teardown in reversed(teardowns):
             spec = teardown.key.spec
-            with self.open_transaction(
+            with ResourceTransactionContext(
                 consumer_spec=teardown.consumer_spec,
                 provider_spec=spec,
+                resolver=self,
                 direct_dependencies=teardown.direct_dependencies,
             ):
                 try:
@@ -224,44 +256,6 @@ class ResourceResolver:
                         teardown_errors.append(e)
         return teardown_errors
 
-    @staticmethod
-    def _raise_teardown_errors(teardown_errors: list[Exception]) -> None:
-        match teardown_errors:
-            case []:
-                return
-            case [error]:
-                raise RuntimeError(error)
-            case _:
-                raise ExceptionGroup(
-                    "Teardown errors occurred", teardown_errors
-                )
-
-    async def teardown_scope(self, scope: Scope) -> None:
-        """Teardown only resources matching the given scope."""
-        teardown_errors: list[Exception] = []
-        for owner in self._scope_owners_to_teardown(scope):
-            if self.state.is_shadow:
-                self.state.clear_scope_owner(owner)
-                self._undo_patches(owner)
-                continue
-            teardown_errors.extend(
-                await self._run_teardowns(
-                    self.state.pop_teardown_records(owner)
-                )
-            )
-            self.state.clear_scope_owner(owner)
-            self._undo_patches(owner)
-        self._raise_teardown_errors(teardown_errors)
-
-    def _scope_owners_to_teardown(
-        self, scope: Scope
-    ) -> tuple[ResolverScopeOwner, ...]:
-        if self._scope_context is None:
-            return self.state.scope_owners_for(scope)
-        return (
-            ResolverScopeOwner.for_resource_scope(scope, self._scope_context),
-        )
-
     def _undo_patches(self, owner: ResolverScopeOwner) -> None:
         for handle in reversed(self.state.pop_patch_handles(owner)):
             handle.undo()
@@ -277,9 +271,10 @@ class ResourceResolver:
         spec = key.spec
         definition = self.registry.get_definition(spec)
         direct_dependencies = graph.dependencies_by_resource[spec]
-        with self.open_transaction(
+        with ResourceTransactionContext(
             consumer_spec=consumer_spec,
             provider_spec=spec,
+            resolver=self,
             direct_dependencies=direct_dependencies,
         ):
             kwargs = {
