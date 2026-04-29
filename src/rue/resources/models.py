@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from rue.models import Spec
 from rue.context.scopes import Scope
+from rue.models import Spec
 
 
 @dataclass(slots=True, unsafe_hash=True)
@@ -42,9 +43,36 @@ class LoadedResourceDef:
     is_async: bool
     is_generator: bool
     is_async_generator: bool
-    on_resolve: Callable[[Any], Any] | None = None
-    on_injection: Callable[[Any], Any] | None = None
-    on_teardown: Callable[[Any], Any] | None = None
+    resolve_hook: Callable[[Any], Any] | None = None
+    injection_hook: Callable[[Any], Any] | None = None
+    teardown_hook: Callable[[Any], Any] | None = None
+
+    async def on_resolve(self, value: Any) -> Any:
+        hook = self.resolve_hook
+        if hook is None:
+            return value
+        result = hook(value)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    async def on_injection(self, value: Any) -> Any:
+        hook = self.injection_hook
+        if hook is None:
+            return value
+        result = hook(value)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    async def on_teardown(self, value: Any) -> Any:
+        hook = self.teardown_hook
+        if hook is None:
+            return value
+        result = hook(value)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
 
 
 @dataclass(frozen=True, slots=True)

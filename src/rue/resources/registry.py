@@ -99,19 +99,14 @@ class ResourceRegistry:
                 is_async=is_async or is_async_generator,
                 is_generator=is_generator,
                 is_async_generator=is_async_generator,
-                on_resolve=on_resolve,
-                on_injection=on_injection,
-                on_teardown=on_teardown,
+                resolve_hook=on_resolve,
+                injection_hook=on_injection,
+                teardown_hook=on_teardown,
             )
             spec = definition.spec
             by_scope = self._definitions.setdefault(spec.name, {})
             by_path = by_scope.setdefault(spec.scope, {})
             by_path[spec.module_path] = definition
-            self.roots_by_execution_id.clear()
-            self.autouse_by_execution_id.clear()
-            self.injections_by_execution_id.clear()
-            self.dependencies_by_resource.clear()
-            self.resolution_order_by_execution_id.clear()
             if builtin:
                 builtin_by_scope = self._builtin_definitions.setdefault(
                     spec.name,

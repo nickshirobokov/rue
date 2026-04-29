@@ -2,8 +2,8 @@
 
 from collections.abc import Callable
 
-from rue.context.scopes import Scope
 from rue.context.runtime import CURRENT_RESOURCE_TRANSACTION
+from rue.context.scopes import Scope
 from rue.patching import MonkeyPatch
 from rue.resources.registry import ResourceRegistry
 

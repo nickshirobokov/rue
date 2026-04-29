@@ -6,7 +6,8 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from rue.context.runtime import CURRENT_TEST, current_resource_owner
+from rue.context.runtime import CURRENT_TEST
+from rue.context.scopes import ScopeContext
 from rue.models import Spec
 from rue.resources.models import ResourceSpec, ResourceTransferSnapshot, Scope
 from rue.resources.snapshot import (
@@ -93,7 +94,7 @@ class ResourceTransfer:
                 continue
             key = self.resolver.resources.cache_key_for(
                 spec,
-                current_resource_owner(spec.scope),
+                ScopeContext.current_owner(spec.scope),
             )
             if self.resolver.resources.has_cached_instance(key):
                 continue
@@ -247,7 +248,7 @@ class ResourceTransfer:
             for key, value in (
                 self.resolver.resources.cached_resource_instances().items()
             )
-            if key.owner == current_resource_owner(key.spec.scope)
+            if key.owner == ScopeContext.current_owner(key.spec.scope)
         }
 
     @staticmethod

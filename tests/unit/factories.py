@@ -8,6 +8,7 @@ from uuid import UUID
 
 from rue.config import Config
 from rue.context.runtime import CURRENT_RUN_CONTEXT, RunContext
+from rue.context.scopes import CURRENT_SCOPE_CONTEXT, ScopeContext
 from rue.testing.discovery import TestLoader, TestSpecCollector
 from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import BackendModifier, LoadedTestDef
@@ -95,4 +96,5 @@ def make_run_context(
         else RunContext(config=config, run_id=run_id)
     )
     CURRENT_RUN_CONTEXT.set(context)
+    CURRENT_SCOPE_CONTEXT.set(ScopeContext.for_run(context.run_id))
     return context

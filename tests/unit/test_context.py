@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -8,11 +9,13 @@ from rue.assertions.base import AssertionRepr, AssertionResult
 from rue.context.collectors import (
     CURRENT_ASSERTION_RESULTS,
 )
+from rue.context.process_pool import CURRENT_PROCESS_POOL, LazyProcessPool
 from rue.context.runtime import (
     CURRENT_TEST,
     TestContext as Ctx,
     bind,
 )
+from rue.context.scopes import ScopeContext, ScopeOwner
 from rue.models import Locator
 from rue.resources import ResourceSpec, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata
@@ -153,3 +156,89 @@ async def test_bind_isolates_values_between_tasks():
     assert values == ["left", "right"]
     with pytest.raises(LookupError):
         CURRENT_TEST.get()
+
+
+def test_scope_context_for_run_resolves_only_run_owner():
+    run_id = uuid4()
+
+    with ScopeContext.for_run(run_id):
+        assert ScopeContext.current_owner(Scope.RUN) == ScopeOwner(
+            scope=Scope.RUN,
+            run_id=run_id,
+        )
+        with pytest.raises(RuntimeError, match="open TestContext"):
+            ScopeContext.current_owner(Scope.TEST)
+        with pytest.raises(RuntimeError, match="open TestContext"):
+            ScopeContext.current_owner(Scope.MODULE)
+
+
+def test_scope_context_for_test_resolves_all_scope_owners():
+    run_id = uuid4()
+    execution_id = uuid4()
+    module_path = Path("test_module.py")
+
+    with ScopeContext.for_test(run_id, execution_id, module_path):
+        assert ScopeContext.current_owner(Scope.RUN) == ScopeOwner(
+            scope=Scope.RUN,
+            run_id=run_id,
+        )
+        assert ScopeContext.current_owner(Scope.TEST) == ScopeOwner(
+            scope=Scope.TEST,
+            execution_id=execution_id,
+            run_id=run_id,
+        )
+        assert ScopeContext.current_owner(Scope.MODULE) == ScopeOwner(
+            scope=Scope.MODULE,
+            run_id=run_id,
+            module_path=module_path.resolve(),
+        )
+
+
+def test_scope_context_restores_nested_owner_sets():
+    outer_run_id = uuid4()
+    inner_run_id = uuid4()
+
+    with ScopeContext.for_run(outer_run_id):
+        assert ScopeContext.current_owner(Scope.RUN).run_id == outer_run_id
+        with ScopeContext.for_run(inner_run_id):
+            assert ScopeContext.current_owner(Scope.RUN).run_id == inner_run_id
+        assert ScopeContext.current_owner(Scope.RUN).run_id == outer_run_id
+
+
+def test_scope_context_supports_arbitrary_callers_without_runtime_contexts():
+    run_id = uuid4()
+    execution_id = uuid4()
+
+    with ScopeContext.for_test(run_id, execution_id, Path("direct.py")):
+        assert ScopeContext.current_owner(Scope.TEST).execution_id == (
+            execution_id
+        )
+
+
+def test_lazy_process_pool_binds_current_holder_and_shutdowns_on_exit(
+    monkeypatch,
+):
+    shutdown_calls = 0
+
+    class FakeExecutor:
+        def shutdown(self, *, wait):
+            nonlocal shutdown_calls
+            assert wait is True
+            shutdown_calls += 1
+
+    monkeypatch.setattr(
+        "rue.context.process_pool.ProcessPoolExecutor",
+        lambda **_kwargs: FakeExecutor(),
+    )
+
+    with LazyProcessPool(max_workers=2) as pool:
+        assert LazyProcessPool.current() is pool
+        assert LazyProcessPool.current_executor() is pool.get()
+
+    assert shutdown_calls == 1
+    assert CURRENT_PROCESS_POOL.get() is None
+
+
+def test_lazy_process_pool_requires_active_context():
+    with pytest.raises(RuntimeError, match="No active process pool scope"):
+        LazyProcessPool.current_executor()

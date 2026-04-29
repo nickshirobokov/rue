@@ -552,7 +552,7 @@ async def test_autouse_patch_applies_in_subprocess_worker(
 ):
     pool = ImmediatePool()
     monkeypatch.setattr(
-        "rue.testing.execution.single.get_process_pool",
+        "rue.testing.execution.single.LazyProcessPool.current_executor",
         lambda: pool,
     )
     module_path = tmp_path / "test_remote_autouse_patch.py"

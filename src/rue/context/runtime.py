@@ -21,7 +21,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from rue.config import Config
-from rue.context.scopes import Scope, ScopeOwner
+from rue.context.scopes import ScopeContext
 from rue.models import Spec
 from rue.patching.runtime import PatchContext, patch_manager
 
@@ -53,11 +53,24 @@ class TestContext:
         repr=False,
         compare=False,
     )
+    _scope_contexts: list[ScopeContext] = field(
+        default_factory=list,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __enter__(self) -> TestContext:
         """Bind this test context to the current execution scope."""
         self._tokens.append(CURRENT_TEST.set(self))
         run_context = CURRENT_RUN_CONTEXT.get()
+        scope_context = ScopeContext.for_test(
+            run_id=run_context.run_id,
+            execution_id=self.execution_id,
+            module_path=self.module_path,
+        )
+        scope_context.__enter__()
+        self._scope_contexts.append(scope_context)
         self._patch_tokens.append(
             patch_manager.bind_context(
                 PatchContext(
@@ -84,6 +97,7 @@ class TestContext:
     ) -> None:
         """Restore the previous test context."""
         self._patch_tokens.pop().__exit__(exc_type, exc, traceback)
+        self._scope_contexts.pop().__exit__(exc_type, exc, traceback)
         CURRENT_TEST.reset(self._tokens.pop())
 
 
@@ -198,10 +212,14 @@ class RunContext(BaseModel):
     experiment_setup_chain: tuple[Any, ...] = ()
     _tokens: list[Token[RunContext]] = PrivateAttr(default_factory=list)
     _patch_tokens: list[Any] = PrivateAttr(default_factory=list)
+    _scope_contexts: list[ScopeContext] = PrivateAttr(default_factory=list)
 
     def __enter__(self) -> RunContext:
         """Bind this run context to the current execution scope."""
         self._tokens.append(CURRENT_RUN_CONTEXT.set(self))
+        scope_context = ScopeContext.for_run(self.run_id)
+        scope_context.__enter__()
+        self._scope_contexts.append(scope_context)
         self._patch_tokens.append(
             patch_manager.bind_context(
                 PatchContext(
@@ -221,6 +239,7 @@ class RunContext(BaseModel):
     ) -> None:
         """Restore the previous run context."""
         self._patch_tokens.pop().__exit__(exc_type, exc, traceback)
+        self._scope_contexts.pop().__exit__(exc_type, exc, traceback)
         CURRENT_RUN_CONTEXT.reset(self._tokens.pop())
 
     def __getstate__(self) -> dict[str, Any]:
@@ -228,6 +247,7 @@ class RunContext(BaseModel):
         state = super().__getstate__()
         state["__pydantic_private__"] = {
             "_patch_tokens": [],
+            "_scope_contexts": [],
             "_tokens": [],
         }
         return state
@@ -248,36 +268,6 @@ CURRENT_RESOURCE_TRANSACTION: ContextVar[
 ] = ContextVar(
     "current_resource_transaction",
 )
-
-
-def current_resource_owner(scope: Scope) -> ScopeOwner:
-    """Return the runtime owner for a resource scope."""
-    run_context = CURRENT_RUN_CONTEXT.get()
-    match scope:
-        case Scope.RUN:
-            return ScopeOwner(scope=scope, run_id=run_context.run_id)
-        case Scope.TEST:
-            try:
-                test_context = CURRENT_TEST.get()
-            except LookupError as error:
-                msg = "Test-scoped resources require an open TestContext."
-                raise RuntimeError(msg) from error
-            return ScopeOwner(
-                scope=scope,
-                execution_id=test_context.execution_id,
-                run_id=run_context.run_id,
-            )
-        case Scope.MODULE:
-            try:
-                test_context = CURRENT_TEST.get()
-            except LookupError as error:
-                msg = "Module-scoped resources require an open TestContext."
-                raise RuntimeError(msg) from error
-            return ScopeOwner(
-                scope=scope,
-                run_id=run_context.run_id,
-                module_path=test_context.module_path,
-            )
 
 
 @contextmanager

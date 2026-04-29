@@ -6,11 +6,11 @@ from collections.abc import MutableMapping, MutableSequence
 from pkgutil import resolve_name
 from typing import Any, overload
 
+from rue.context.scopes import Scope
 from rue.patching.runtime import (
     PatchLifetime,
     patch_manager,
 )
-from rue.context.scopes import Scope
 
 
 _UNSET = object()

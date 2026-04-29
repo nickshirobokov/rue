@@ -1,20 +1,16 @@
 """Resource system for dependency injection."""
 
-import inspect
 from collections.abc import AsyncGenerator, Generator, Sequence
 from typing import Any, cast
 
-from rue.context.runtime import (
-    ResourceTransactionContext,
-    current_resource_owner,
-)
-from rue.context.scopes import Scope, ScopeOwner
+from rue.context.runtime import ResourceTransactionContext
+from rue.context.scopes import Scope, ScopeContext, ScopeOwner
 from rue.models import Spec
+from rue.patching.runtime import PatchLifetime, PatchStore
 from rue.resources.models import (
     LoadedResourceDef,
     ResourceSpec,
 )
-from rue.patching.runtime import PatchLifetime, PatchStore
 from rue.resources.registry import ResourceRegistry
 from rue.resources.state import (
     ResourceCacheKey,
@@ -55,7 +51,7 @@ class ResourceResolver:
         scope: Scope,
     ) -> PatchLifetime:
         """Build a patch lifetime owned by this resolver's state."""
-        return self.patches.lifetime(current_resource_owner(scope))
+        return self.patches.lifetime(ScopeContext.current_owner(scope))
 
     async def resolve_graph_deps(
         self,
@@ -95,7 +91,7 @@ class ResourceResolver:
         direct_dependencies = self.registry.dependencies_by_resource[spec]
         key = self.resources.cache_key_for(
             spec,
-            current_resource_owner(spec.scope),
+            ScopeContext.current_owner(spec.scope),
         )
         value = await self.resources.get_or_create_instance(
             key,
@@ -114,11 +110,7 @@ class ResourceResolver:
             resolver=self,
             direct_dependencies=direct_dependencies,
         ):
-            return await self._apply_hook(
-                definition.on_injection,
-                spec.name,
-                value,
-            )
+            return await definition.on_injection(value)
 
     async def teardown(self, scope: Scope | None = None) -> None:
         """Tear down resources and patches owned by this resolver."""
@@ -126,7 +118,7 @@ class ResourceResolver:
         if scope is None:
             owners = tuple(reversed(tuple(self.resources.scope_owners())))
         else:
-            owners = (current_resource_owner(scope),)
+            owners = (ScopeContext.current_owner(scope),)
         for owner in owners:
             if self.resources.is_shadow:
                 self.resources.clear_scope_owner(owner)
@@ -193,12 +185,8 @@ class ResourceResolver:
                 if self.resources.has_cached_instance(teardown.key):
                     value = self.resources.cached_instance(teardown.key)
                     try:
-                        await self._apply_hook(
-                            teardown.definition.on_teardown,
-                            spec.name,
-                            value,
-                        )
-                    except RuntimeError as e:
+                        await teardown.definition.on_teardown(value)
+                    except Exception as e:
                         teardown_errors.append(e)
         return teardown_errors
 
@@ -281,28 +269,6 @@ class ResourceResolver:
                 case _:
                     value = definition.fn(**kwargs)
 
-            value = await self._apply_hook(
-                definition.on_resolve,
-                spec.name,
-                value,
-            )
+            value = await definition.on_resolve(value)
 
-        return value
-
-    async def _apply_hook(
-        self, hook: Any, resource_name: str, value: Any
-    ) -> Any:
-        if hook is None:
-            return value
-
-        try:
-            value = hook(value)
-            if inspect.isawaitable(value):
-                value = await value
-        except Exception as e:
-            msg = (
-                f"Hook {hook.__name__} failed for resource "
-                f"'{resource_name}': {e}"
-            )
-            raise RuntimeError(msg) from e
         return value

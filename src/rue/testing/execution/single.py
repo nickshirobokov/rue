@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from rue.context.process_pool import get_process_pool
+from rue.context.process_pool import LazyProcessPool
 from rue.context.runtime import (
     CURRENT_RUN_CONTEXT,
     CURRENT_TEST,
@@ -66,37 +66,33 @@ class SingleTest(ExecutableTest):
         self,
         resolver: ResourceResolver,
     ) -> ExecutedTest:
-        execution_id = self.execution_id
-        match self:
-            case SingleTest(is_stopped=is_stopped) if is_stopped():
-                return ExecutedTest(
-                    definition=self.definition,
-                    result=TestResult(
-                        status=TestStatus.SKIPPED,
-                        duration_ms=0,
-                        error=Exception("Run stopped early"),
-                    ),
-                    execution_id=execution_id,
-                )
-            case SingleTest(definition=LoadedTestDef(spec=spec)) if (
-                spec.skip_reason
-            ):
-                return ExecutedTest(
-                    definition=self.definition,
-                    result=TestResult(
-                        status=TestStatus.SKIPPED,
-                        duration_ms=0,
-                        error=Exception(spec.skip_reason),
-                    ),
-                    execution_id=execution_id,
-                )
-
-        ctx = TestContext(
+        with TestContext(
             item=self.definition,
-            execution_id=execution_id,
-        )
-        with ctx:
+            execution_id=self.execution_id,
+        ):
             match self:
+                case SingleTest(is_stopped=is_stopped) if is_stopped():
+                    return ExecutedTest(
+                        definition=self.definition,
+                        result=TestResult(
+                            status=TestStatus.SKIPPED,
+                            duration_ms=0,
+                            error=Exception("Run stopped early"),
+                        ),
+                        execution_id=self.execution_id,
+                    )
+                case SingleTest(definition=LoadedTestDef(spec=spec)) if (
+                    spec.skip_reason
+                ):
+                    return ExecutedTest(
+                        definition=self.definition,
+                        result=TestResult(
+                            status=TestStatus.SKIPPED,
+                            duration_ms=0,
+                            error=Exception(spec.skip_reason),
+                        ),
+                        execution_id=self.execution_id,
+                    )
                 case SingleTest(backend=ExecutionBackend.SUBPROCESS):
                     return await self._execute_subprocess(resolver)
                 case SingleTest():
@@ -106,8 +102,7 @@ class SingleTest(ExecutableTest):
         self,
         resolver: ResourceResolver,
     ) -> ExecutedTest:
-        ctx = CURRENT_TEST.get()
-        execution_id = ctx.execution_id
+        execution_id = CURRENT_TEST.get().execution_id
         semaphore = (
             self.semaphore if self.semaphore else contextlib.nullcontext()
         )
@@ -157,10 +152,9 @@ class SingleTest(ExecutableTest):
         self,
         resolver: ResourceResolver,
     ) -> ExecutedTest:
-        ctx = CURRENT_TEST.get()
-        execution_id = ctx.execution_id
+        run_ctx = CURRENT_RUN_CONTEXT.get()
+        execution_id = CURRENT_TEST.get().execution_id
         remote_result: RemoteExecutionResult
-        context = CURRENT_RUN_CONTEXT.get()
 
         try:
             semaphore = (
@@ -184,11 +178,11 @@ class SingleTest(ExecutableTest):
                     setup_chain=self.definition.setup_chain,
                     params=dict(self.params),
                     snapshot=snapshot,
-                    context=context,
+                    context=run_ctx,
                     execution_id=execution_id,
                 )
 
-                future = get_process_pool().submit(
+                future = LazyProcessPool.current_executor().submit(
                     run_remote_test,
                     payload,
                 )

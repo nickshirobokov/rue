@@ -7,7 +7,7 @@ import time
 from datetime import UTC, datetime
 
 from rue.context.collectors import CURRENT_METRIC_RESULTS
-from rue.context.process_pool import process_pool_scope
+from rue.context.process_pool import LazyProcessPool
 from rue.context.runtime import CURRENT_RUN_CONTEXT, TestContext, bind
 from rue.reports.base import Reporter
 from rue.resources import ResourceResolver
@@ -186,7 +186,7 @@ class Runner:
         run: Run,
     ) -> None:
         """Execute the test run with the given items and resolver."""
-        with process_pool_scope(self._concurrency_limit()):
+        with LazyProcessPool(self._concurrency_limit()):
             self._queue = SessionQueue()
             self._factory = DefaultTestFactory(
                 semaphore=self.semaphore,
