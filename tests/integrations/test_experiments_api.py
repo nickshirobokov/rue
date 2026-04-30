@@ -7,7 +7,7 @@ from rue.config import Config
 from rue.experiments import registry as experiment_registry
 from rue.experiments.runner import ExperimentRunner
 from rue.resources import registry
-from rue.testing.discovery import TestSpecCollector
+from rue.testing.discovery import TestLoader, TestSpecCollector
 
 
 @pytest.fixture(autouse=True)
@@ -179,3 +179,53 @@ def test_experiment_runner_executes_four_variants_with_iterated_tests(
     ]
     assert [result.failed for result in results] == [3, 2, 1, 0, 0]
     assert [result.errors for result in results] == [1, 0, 0, 0, 0]
+
+
+def test_experiment_collect_reloads_setup_after_definition_preload(
+    tmp_path: Path,
+):
+    (tmp_path / "confrue_experiments.py").write_text(
+        dedent(
+            """
+            import rue
+
+
+            @rue.experiment(["fast", "grounded"], ids=["fast", "grounded"])
+            def answer_profile(value, monkeypatch):
+                monkeypatch.setattr("builtins.answer_profile", value)
+            """
+        )
+    )
+    module_path = tmp_path / "test_chatbot.py"
+    module_path.write_text(
+        dedent(
+            """
+            import rue
+
+
+            @rue.test
+            def test_chatbot():
+                assert True
+            """
+        )
+    )
+    collection = TestSpecCollector((), (), None).build_spec_collection(
+        (module_path,),
+        explicit_root=tmp_path,
+    )
+    TestLoader(collection.suite_root).load_from_collection(collection)
+    runner = ExperimentRunner(
+        config=Config.model_construct(
+            otel=False,
+            db_enabled=False,
+            concurrency=1,
+            timeout=None,
+            maxfail=None,
+        )
+    )
+
+    experiments = runner.collect(collection)
+
+    assert [experiment.name for experiment in experiments] == [
+        "answer_profile"
+    ]

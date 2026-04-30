@@ -36,7 +36,7 @@ class ExperimentRunner:
         default_experiment_registry.reset()
         loader = TestLoader(collection.suite_root)
         for setup_ref in collection.all_setup_files:
-            loader.prepare_setup(setup_ref.path)
+            loader.prepare_setup(setup_ref.path, reload=True)
         return default_experiment_registry.all()
 
     def run(

@@ -366,14 +366,18 @@ class TestLoader:
         self._session = RueImportSession(self._suite_root)
         self._prepared_paths: set[Path] = set()
 
-    def prepare_setup(self, path: Path) -> None:
+    def prepare_setup(self, path: Path, *, reload: bool = False) -> None:
         """Import one setup file and register any fixtures/resources it defines.
 
         Idempotent: calling this more than once for the same path is safe.
         """
         path = path.resolve()
-        if path in self._prepared_paths:
+        if path in self._prepared_paths and not reload:
             return
+        if reload:
+            module_name = self._session.register_path(path)
+            sys.modules.pop(module_name, None)
+            self._prepared_paths.discard(path)
         self._session.load_module(path)
         self._prepared_paths.add(path)
 
@@ -414,7 +418,7 @@ class TestLoader:
                     )
                 except TestDefinitionIssue as error:
                     issues.append(error)
-                    
+
                 except Exception as error:
                     issues.append(TestDefinitionIssue(spec, str(error)))
 

@@ -73,6 +73,7 @@ def run(
     collection = collector.build_spec_collection(resolved_paths)
     try:
         TestLoader(collection.suite_root).load_from_collection(collection)
+        collection = collector.build_spec_collection(resolved_paths)
         experiment_runner = ExperimentRunner(config=runner_config)
         experiments = experiment_runner.collect(collection)
         if not experiments:
