@@ -8,7 +8,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from rue.context.scopes import ScopeContext, ScopeOwner
-from rue.resources.models import ResourceSpec, ResolverScopeState, ScheduledTeardown
+from rue.resources.models import (
+    ResolverScopeState,
+    ResourceSpec,
+    ScheduledTeardown,
+)
 from rue.resources.snapshot import SyncGraph
 
 
@@ -48,7 +52,11 @@ class ResourceStore:
         scope_state.pending[spec] = asyncio.get_running_loop().create_future()
         return True
 
-    async def wait_resolution(self, spec: ResourceSpec, owner: ScopeOwner) -> Any:
+    async def wait_resolution(
+        self,
+        spec: ResourceSpec,
+        owner: ScopeOwner,
+    ) -> Any:
         """Wait for another caller's resource resolution."""
         pending = self.state_for_owner(owner).pending[spec]
         return await asyncio.shield(pending)
@@ -80,13 +88,6 @@ class ResourceStore:
         """Record a generator teardown for live state."""
         if not self.is_shadow:
             self.state_for_owner(teardown.owner).teardowns.append(teardown)
-
-    def cached_resources_by_spec(self) -> dict[ResourceSpec, Any]:
-        """Return cached values keyed by provider spec."""
-        result: dict[ResourceSpec, Any] = {}
-        for scope_state in self._scopes.values():
-            result.update(scope_state.cache)
-        return result
 
     def set(self, spec: ResourceSpec, owner: ScopeOwner, value: Any) -> None:
         """Set a cached runtime value."""

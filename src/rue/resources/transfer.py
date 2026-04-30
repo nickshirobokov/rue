@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -10,10 +10,9 @@ from rue.context.runtime import CURRENT_TEST
 from rue.context.scopes import ScopeContext
 from rue.models import Spec
 from rue.resources.models import (
-    ResourceGraph,
     ResourceSpec,
-    StateSnapshot,
     Scope,
+    StateSnapshot,
 )
 from rue.resources.snapshot import (
     SnapshotApplier,
@@ -45,20 +44,19 @@ class StateTransfer:
         """Build a CRDT transfer snapshot for the given resource closure."""
         graph = self.resolver.registry.get_graph(execution_id)
         resources = self._syncable_resources(graph.resolution_order)
-        self.flush_live_resources(resources)
-
-        root_keys = [spec.snapshot_key for spec in resources]
-        payload = self.resolver.resources.sync_graph.payload(root_keys)
+        sync_graph = self.resolver.resources.sync_graph
+        sync_graph.sync_live_roots(
+            self._live_snapshot_roots(resources)
+        )
+        payload = sync_graph.payload(
+            self._snapshot_key(spec) for spec in resources
+        )
         export_graph = SyncGraph(actor_id=_MAIN_SYNC_ACTOR_ID)
         export_graph.sync_payload(payload)
         return StateSnapshot(
-            resource_specs=tuple(resources),
+            graph=graph,
             graph_update=export_graph.doc.get_update(None),
             base_state=export_graph.doc.get_state(),
-            autouse=graph.autouse,
-            injections=graph.injections,
-            dependencies=graph.dependencies,
-            resolution_order=graph.resolution_order,
             actor_id=actor_id,
         )
 
@@ -70,64 +68,81 @@ class StateTransfer:
     ) -> None:
         """Hydrate this resolver from a serialized transfer snapshot."""
         execution_id = CURRENT_TEST.get().execution_id
-        graph = ResourceGraph(
-            autouse=snapshot.autouse,
-            injections=dict(snapshot.injections),
-            dependencies=dict(snapshot.dependencies),
-            resolution_order=snapshot.resolution_order,
-        )
+        graph = snapshot.graph
         self.resolver.registry.save_graph(execution_id, graph)
+        sync_specs = self._syncable_resources(graph.resolution_order)
+
+        transfer_graph = SyncGraph.from_update(
+            snapshot.graph_update,
+            actor_id=snapshot.actor_id,
+        )
+        payload = transfer_graph.payload(
+            self._snapshot_key(spec) for spec in sync_specs
+        )
         self.resolver.resources.sync_graph = SyncGraph(
             actor_id=snapshot.actor_id
         )
 
-        for spec in snapshot.resource_specs:
-            await self.resolver.resolve_resource(
-                spec=spec,
-                graph=graph,
-                consumer_spec=consumer_spec,
-                apply_injection_hook=False,
+        for spec in sync_specs:
+            root_key = self._snapshot_key(spec)
+            dependencies = [*graph.dependencies[spec]]
+            seen_dependencies: set[ResourceSpec] = set()
+            needs_factory = root_key in payload["ignored_paths"]
+            while dependencies and not needs_factory:
+                dependency = dependencies.pop()
+                if dependency in seen_dependencies:
+                    continue
+                seen_dependencies.add(dependency)
+                needs_factory = not self.resolver.registry.get_definition(
+                    dependency
+                ).sync
+                dependencies.extend(graph.dependencies[dependency])
+            pending = (
+                []
+                if needs_factory
+                else [payload["root_ids"][root_key]]
             )
-        self.resolver.resources.sync_graph = SyncGraph.from_update(
-            snapshot.graph_update,
-            actor_id=snapshot.actor_id,
-        )
-        payload = self.resolver.resources.sync_graph.payload(
-            spec.snapshot_key for spec in snapshot.resource_specs
-        )
-        self.resolver.resources.sync_graph.set_baseline(payload)
-        self._materialize_payload(payload)
+            seen: set[str] = set()
+            while pending:
+                node_id = pending.pop()
+                if node_id in seen:
+                    continue
+                seen.add(node_id)
+                node = payload["nodes"][node_id]
+                if node["kind"] == "opaque":
+                    needs_factory = True
+                    break
+                pending.extend(SyncGraph._child_ids(node))
 
-    def flush_live_resources(
-        self,
-        resources: Sequence[ResourceSpec],
-    ) -> None:
-        """Push current live Python state into the canonical CRDT graph."""
-        synced = self._syncable_resources(resources)
-        if not synced:
-            return
-        self.resolver.resources.sync_graph.sync_live_roots(
-            self._live_snapshot_roots(synced)
-        )
+            if needs_factory:
+                await self.resolver.resolve_resource(
+                    spec=spec,
+                    graph=graph,
+                    consumer_spec=consumer_spec,
+                    apply_injection_hook=False,
+                )
+        self.resolver.resources.sync_graph = transfer_graph
+        self._materialize_payload(payload, sync_specs)
 
     def flush_visible_shared_resources(self) -> None:
         """Push visible non-test resources into the canonical CRDT graph."""
-        self.flush_live_resources(
-            [
+        store = self.resolver.resources
+        store.sync_graph.sync_live_roots(
+            self._live_snapshot_roots(
                 spec
-                for spec in self.resolver.resources.visible_instances()
+                for spec in store.visible_instances()
                 if spec.scope is not Scope.TEST
-            ]
+            )
         )
 
-    def update_since(
-        self,
-        base_state: bytes,
-        resources: Sequence[ResourceSpec],
-    ) -> bytes:
+    def update_since(self, snapshot: StateSnapshot) -> bytes:
         """Return the CRDT update since ``base_state``."""
-        self.flush_live_resources(resources)
-        return self.resolver.resources.sync_graph.doc.get_update(base_state)
+        resources = self._syncable_resources(snapshot.graph.resolution_order)
+        sync_graph = self.resolver.resources.sync_graph
+        sync_graph.sync_live_roots(
+            self._live_snapshot_roots(resources)
+        )
+        return sync_graph.doc.get_update(snapshot.base_state)
 
     def apply_update(
         self,
@@ -135,121 +150,107 @@ class StateTransfer:
         update: bytes,
     ) -> None:
         """Merge worker CRDT updates onto live objects."""
-        resource_specs = list(snapshot.resource_specs)
-        if not resource_specs:
+        store = self.resolver.resources
+        resources = self._syncable_resources(
+            snapshot.graph.resolution_order
+        )
+        if not resources:
             return
 
-        merge_order = [
-            *[spec for spec in resource_specs if spec.scope is not Scope.TEST],
-            *[spec for spec in resource_specs if spec.scope is Scope.TEST],
-        ]
-        root_keys = [spec.snapshot_key for spec in merge_order]
+        merge_order = (
+            *[spec for spec in resources if spec.scope is not Scope.TEST],
+            *[spec for spec in resources if spec.scope is Scope.TEST],
+        )
+        root_keys = tuple(self._snapshot_key(spec) for spec in merge_order)
 
-        with self.resolver.resources.sync_lock:
+        with store.sync_lock:
+            live_graph = store.sync_graph
             transport = SyncGraph.from_update(
                 snapshot.graph_update,
                 actor_id=_MAIN_SYNC_ACTOR_ID,
             )
-            transport.object_ids = dict(
-                self.resolver.resources.sync_graph.object_ids
-            )
-            transport.path_ids = dict(
-                self.resolver.resources.sync_graph.path_ids
-            )
-            transport.next_local_id = (
-                self.resolver.resources.sync_graph.next_local_id
-            )
+            transport.object_ids = dict(live_graph.object_ids)
+            transport.path_ids = dict(live_graph.path_ids)
+            transport.next_local_id = live_graph.next_local_id
             baseline_payload = transport.payload(root_keys)
             transport.sync_live_roots(self._live_snapshot_roots(merge_order))
             transport.apply_update(update)
             after_payload = transport.payload(root_keys)
-            self._apply_payload_delta(baseline_payload, after_payload)
-            self.resolver.resources.sync_graph.sync_payload(after_payload)
+            self._materialize_payload(
+                after_payload,
+                merge_order,
+                before_payload=baseline_payload,
+            )
+            live_graph.sync_payload(after_payload)
             self._refresh_sync_counter()
 
-    def _materialize_payload(self, payload: dict[str, Any]) -> None:
-        visible = self.resolver.resources.visible_instances()
-        roots = {
-            spec.snapshot_key: value
-            for spec, value in visible.items()
-            if spec.snapshot_key in payload["root_ids"]
-        }
-        applier = SnapshotApplier(
-            payload,
-            object_ids=self.resolver.resources.sync_graph.object_ids,
-        )
-        patched_roots = applier.apply_roots(roots)
-        self.resolver.resources.sync_graph.object_ids = applier.object_ids
-        self.resolver.resources.sync_graph.path_ids = build_path_ids(payload)
-        self.resolver.resources.sync_graph.set_baseline(payload)
-        self._refresh_sync_counter()
-        key_to_spec = {
-            spec.snapshot_key: spec
-            for spec in visible
-        }
-        for root_key, value in patched_roots.items():
-            spec = key_to_spec.get(root_key)
-            if spec is not None:
-                self.resolver.resources.set(
-                    spec,
-                    ScopeContext.current_owner(spec.scope),
-                    value,
-                )
-
-    def _apply_payload_delta(
+    def _materialize_payload(
         self,
-        before_payload: dict[str, Any],
-        after_payload: dict[str, Any],
+        payload: dict[str, Any],
+        resources: Iterable[ResourceSpec],
+        *,
+        before_payload: dict[str, Any] | None = None,
     ) -> None:
+        graph = self.resolver.resources.sync_graph
         visible = self.resolver.resources.visible_instances()
+        resources_by_key = {
+            self._snapshot_key(spec): spec
+            for spec in resources
+        }
         roots = {
-            spec.snapshot_key: value
-            for spec, value in visible.items()
-            if spec.snapshot_key in after_payload["root_ids"]
+            key: visible[spec]
+            for key, spec in resources_by_key.items()
+            if spec in visible
         }
-        applier = SnapshotDeltaApplier(
-            before_payload,
-            after_payload,
-            object_ids=self.resolver.resources.sync_graph.object_ids,
+        applier = (
+            SnapshotApplier(
+                payload,
+                object_ids=graph.object_ids,
+            )
+            if before_payload is None
+            else SnapshotDeltaApplier(
+                before_payload,
+                payload,
+                object_ids=graph.object_ids,
+            )
         )
-        patched_roots = applier.apply_roots(roots)
-        self.resolver.resources.sync_graph.object_ids = applier.object_ids
-        self.resolver.resources.sync_graph.path_ids = build_path_ids(
-            after_payload
-        )
-        key_to_spec = {
-            spec.snapshot_key: spec
-            for spec in visible
-        }
-        for root_key, value in patched_roots.items():
-            spec = key_to_spec.get(root_key)
-            if spec is not None:
-                self.resolver.resources.set(
-                    spec,
-                    ScopeContext.current_owner(spec.scope),
-                    value,
-                )
+        for root_key, value in applier.apply_roots(roots).items():
+            spec = resources_by_key[root_key]
+            self.resolver.resources.set(
+                spec,
+                ScopeContext.current_owner(spec.scope),
+                value,
+            )
+
+        graph.object_ids = applier.object_ids
+        graph.path_ids = build_path_ids(payload)
+        if before_payload is None:
+            graph.set_baseline(payload)
+            self._refresh_sync_counter()
 
     def _live_snapshot_roots(
         self,
-        resources: Sequence[ResourceSpec],
+        resources: Iterable[ResourceSpec],
     ) -> dict[str, Any]:
         visible = self.resolver.resources.visible_instances()
         return {
-            spec.snapshot_key: value
-            for spec, value in visible.items()
-            if spec in resources
+            self._snapshot_key(spec): visible[spec]
+            for spec in resources
         }
 
     def _syncable_resources(
         self,
-        resources: Sequence[ResourceSpec],
-    ) -> list[ResourceSpec]:
-        return [
+        resources: Iterable[ResourceSpec],
+    ) -> tuple[ResourceSpec, ...]:
+        return tuple(
             spec
             for spec in resources
             if self.resolver.registry.get_definition(spec).sync
-        ]
+        )
+
+    @staticmethod
+    def _snapshot_key(spec: ResourceSpec) -> str:
+        return f"{spec.scope.value}|{spec.name}|{spec.module_path or ''}"
 
     def _refresh_sync_counter(self) -> None:
         graph = self.resolver.resources.sync_graph

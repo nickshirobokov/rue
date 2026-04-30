@@ -137,6 +137,7 @@ class TestsStatusBuilder:
 
             resolver = DependencyResolver(default_resource_registry)
             graph = graphs_by_execution_id[execution_id]
+            visible_resources = {}
             try:
                 with TestContext(
                     item=leaf.definition,
@@ -147,13 +148,13 @@ class TestsStatusBuilder:
                         leaf.params,
                         consumer_spec=leaf.definition.spec,
                     )
+                    visible_resources = resolver.resources.visible_instances()
             except Exception as error:
                 self._add_issue(execution_id, "resolve", str(error))
             finally:
                 grouped_resources: dict[str, list[ResourceSpec]] = {}
-                cached_by_spec = resolver.resources.cached_resources_by_spec()
                 for spec in connected:
-                    value = cached_by_spec.get(spec)
+                    value = visible_resources.get(spec)
                     if value is None:
                         continue
                     grouped_resources.setdefault(

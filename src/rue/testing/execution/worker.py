@@ -116,10 +116,7 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
             )
             tracer.record_result(result)
             telemetry_artifacts = tracer.finish()
-            sync_update = resolver.transfer.update_since(
-                payload.snapshot.base_state,
-                list(payload.snapshot.resource_specs),
-            )
+            sync_update = resolver.transfer.update_since(payload.snapshot)
         finally:
             await resolver.teardown()
     return RemoteExecutionResult(

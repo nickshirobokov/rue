@@ -393,7 +393,8 @@ class TestSingleTestSubprocess:
         assert payload.execution_id == execution.execution_id
         assert payload.execution_id == remote.execution_id
         assert [
-            s.locator.function_name for s in payload.snapshot.resolution_order
+            s.locator.function_name
+            for s in payload.snapshot.graph.resolution_order
         ] == [
             "shared_value"
         ]

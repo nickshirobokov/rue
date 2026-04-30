@@ -16,9 +16,10 @@ from pydantic import BaseModel
 from rue.context.runtime import TestContext
 from rue.resources import (
     DependencyResolver,
+    ResourceGraph,
     ResourceStore,
-    StateSnapshot,
     Scope,
+    StateSnapshot,
     registry,
     resource,
 )
@@ -113,9 +114,30 @@ class NestedHolder:
 
 def _snapshot_payload(snapshot: StateSnapshot) -> dict[str, object]:
     graph = SyncGraph.from_update(snapshot.graph_update, actor_id=0)
-    return graph.payload(
-        identity.snapshot_key for identity in snapshot.resource_specs
+    return graph.payload(_snapshot_key(spec) for spec in _sync_specs(snapshot))
+
+
+def _snapshot_key(spec) -> str:
+    module_path = spec.module_path
+    return "|".join(
+        (
+            spec.scope.value,
+            spec.name,
+            "" if module_path is None else str(module_path),
+        )
     )
+
+
+def _sync_specs(snapshot: StateSnapshot):
+    return tuple(
+        spec
+        for spec in snapshot.graph.resolution_order
+        if registry.get_definition(spec).sync
+    )
+
+
+def _root_node(payload, spec):
+    return payload["nodes"][payload["root_ids"][_snapshot_key(spec)]]
 
 
 def _consumer_spec(module_path: Path | None = None):
@@ -187,10 +209,7 @@ def _sync_update(
         module_path=consumer.module_path or "test.py",
     )
     with TestContext(item=item, execution_id=_TEST_GRAPH_KEY):
-        return resolver.transfer.update_since(
-            snapshot.base_state,
-            list(snapshot.resource_specs),
-        )
+        return resolver.transfer.update_since(snapshot)
 
 
 def _apply_worker_update(
@@ -274,13 +293,13 @@ class TestExportSnapshot:
 
         names = {
             identity.locator.function_name
-            for identity in snapshot.resource_specs
+            for identity in _sync_specs(snapshot)
         }
         payload = _snapshot_payload(snapshot)
 
         assert names == {"shared", "per_test"}
         assert set(payload["root_ids"]) == {
-            identity.snapshot_key for identity in snapshot.resource_specs
+            _snapshot_key(identity) for identity in _sync_specs(snapshot)
         }
 
     async def test_records_ignored_runtime_fields(self):
@@ -294,16 +313,16 @@ class TestExportSnapshot:
         snapshot = _snapshot(
             resolver, ("state",), consumer_spec=_consumer_spec()
         )
-        identity = snapshot.resource_specs[0]
+        identity = _sync_specs(snapshot)[0]
         payload = _snapshot_payload(snapshot)
-        root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
+        root_node = _root_node(payload, identity)
         attrs = set(root_node["attrs"])
 
         assert "count" in attrs
         assert "_private" in attrs
         assert "_cache" not in attrs
         assert "lock" not in attrs
-        assert payload["ignored_paths"][identity.snapshot_key] == [
+        assert payload["ignored_paths"][_snapshot_key(identity)] == [
             "_cache",
             "lock",
         ]
@@ -319,12 +338,12 @@ class TestExportSnapshot:
         snapshot = _snapshot(
             resolver, ("state",), consumer_spec=_consumer_spec()
         )
-        identity = snapshot.resource_specs[0]
+        identity = _sync_specs(snapshot)[0]
         payload = _snapshot_payload(snapshot)
-        root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
+        root_node = _root_node(payload, identity)
 
         assert set(root_node["attrs"]) == {"name", "count"}
-        assert set(payload["ignored_paths"][identity.snapshot_key]) == {
+        assert set(payload["ignored_paths"][_snapshot_key(identity)]) == {
             "__runtime__",
             "_cache",
         }
@@ -340,12 +359,12 @@ class TestExportSnapshot:
         snapshot = _snapshot(
             resolver, ("state",), consumer_spec=_consumer_spec()
         )
-        identity = snapshot.resource_specs[0]
+        identity = _sync_specs(snapshot)[0]
         payload = _snapshot_payload(snapshot)
-        root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
+        root_node = _root_node(payload, identity)
 
         assert set(root_node["attrs"]) == {"count", "__helper__"}
-        assert payload["ignored_paths"][identity.snapshot_key] == ["_cache"]
+        assert payload["ignored_paths"][_snapshot_key(identity)] == ["_cache"]
 
     async def test_pydantic_model_syncs_fields_without_package_branches(self):
         class Model(BaseModel):
@@ -362,9 +381,9 @@ class TestExportSnapshot:
         snapshot = _snapshot(
             resolver, ("state",), consumer_spec=_consumer_spec()
         )
-        identity = snapshot.resource_specs[0]
+        identity = _sync_specs(snapshot)[0]
         payload = _snapshot_payload(snapshot)
-        root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
+        root_node = _root_node(payload, identity)
         worker = await _worker_from_snapshot(
             snapshot,
             consumer_spec=_consumer_spec(),
@@ -383,7 +402,7 @@ class TestExportSnapshot:
             "__pydantic_extra__",
             "__pydantic_fields_set__",
             "__pydantic_private__",
-        } <= set(payload["ignored_paths"][identity.snapshot_key])
+        } <= set(payload["ignored_paths"][_snapshot_key(identity)])
         assert live.count == 8
 
     async def test_preserves_shared_reference_nodes(self):
@@ -404,12 +423,12 @@ class TestExportSnapshot:
         payload = _snapshot_payload(snapshot)
         identity_map = {
             identity.locator.function_name: identity
-            for identity in snapshot.resource_specs
+            for identity in _sync_specs(snapshot)
         }
 
         assert (
-            payload["root_ids"][identity_map["shared"].snapshot_key]
-            == payload["root_ids"][identity_map["alias"].snapshot_key]
+            payload["root_ids"][_snapshot_key(identity_map["shared"])]
+            == payload["root_ids"][_snapshot_key(identity_map["alias"])]
         )
 
     async def test_resource_snapshot_fields_and_actor_are_stored(self):
@@ -430,7 +449,7 @@ class TestExportSnapshot:
             sync_actor_id=7,
         )
 
-        assert snapshot.injections["simple"].name == "simple"
+        assert snapshot.graph.injections["simple"].name == "simple"
         assert snapshot.actor_id == 7
 
     async def test_non_sync_resources_are_excluded_by_definition_metadata(
@@ -454,9 +473,9 @@ class TestExportSnapshot:
             consumer_spec=consumer_spec,
         )
 
-        assert snapshot.resource_specs == ()
-        assert snapshot.injections["local_only"].name == "local_only"
-        assert worker.resources.cached_resources_by_spec() == {}
+        assert _sync_specs(snapshot) == ()
+        assert snapshot.graph.injections["local_only"].name == "local_only"
+        assert worker.resources.scope_owners() == ()
 
     async def test_atomic_values_use_tagged_nodes(self):
         class Mode(Enum):
@@ -488,9 +507,9 @@ class TestExportSnapshot:
         snapshot = _snapshot(
             resolver, ("state",), consumer_spec=_consumer_spec()
         )
-        identity = snapshot.resource_specs[0]
+        identity = _sync_specs(snapshot)[0]
         payload = _snapshot_payload(snapshot)
-        root_node = payload["nodes"][payload["root_ids"][identity.snapshot_key]]
+        root_node = _root_node(payload, identity)
         node_kinds = {
             payload["nodes"][value_id]["kind"]
             for key_id, value_id in root_node["entries"]
@@ -517,7 +536,7 @@ class TestExportSnapshot:
 
 
 class TestHydrateTransferSnapshot:
-    async def test_worker_replays_shadow_factories(self):
+    async def test_worker_skips_shadow_factories_for_representable_state(self):
         resolve_count = 0
 
         @resource(scope=Scope.RUN)
@@ -538,10 +557,71 @@ class TestHydrateTransferSnapshot:
             consumer_spec=_consumer_spec(),
         )
 
-        assert resolve_count == 2
+        assert resolve_count == 1
         assert await _resolve(
             worker, "config", consumer_spec=_consumer_spec()
         ) == {"key": "value"}
+
+    async def test_worker_replays_shadow_factories_for_opaque_state(self):
+        resolve_count = 0
+
+        @resource(scope=Scope.RUN)
+        def lock():
+            nonlocal resolve_count
+            resolve_count += 1
+            return threading.Lock()
+
+        resolver = DependencyResolver(registry)
+        await _resolve(resolver, "lock", consumer_spec=_consumer_spec())
+        assert resolve_count == 1
+
+        snapshot = _snapshot(
+            resolver, ("lock",), consumer_spec=_consumer_spec()
+        )
+        worker = await _worker_from_snapshot(
+            snapshot,
+            consumer_spec=_consumer_spec(),
+        )
+
+        assert resolve_count == 2
+        assert hasattr(
+            await _resolve(
+                worker,
+                "lock",
+                consumer_spec=_consumer_spec(),
+            ),
+            "acquire",
+        )
+
+    async def test_worker_replays_factories_with_local_dependencies(self):
+        resolve_count = 0
+
+        @resource(scope=Scope.RUN, sync=False)
+        def local_only():
+            return "local"
+
+        @resource(scope=Scope.RUN)
+        def config(local_only):
+            nonlocal resolve_count
+            resolve_count += 1
+            return {"key": local_only}
+
+        resolver = DependencyResolver(registry)
+        await _resolve(resolver, "config", consumer_spec=_consumer_spec())
+        assert resolve_count == 1
+
+        snapshot = _snapshot(
+            resolver, ("config",), consumer_spec=_consumer_spec()
+        )
+        worker = await _worker_from_snapshot(
+            snapshot,
+            consumer_spec=_consumer_spec(),
+        )
+
+        assert resolve_count == 2
+        assert await _resolve(
+            worker, "config", consumer_spec=_consumer_spec()
+        ) == {"key": "local"}
 
     async def test_worker_applies_parent_state_over_shadow_defaults(self):
         @resource(scope=Scope.RUN)
@@ -597,10 +677,9 @@ class TestHydrateTransferSnapshot:
     async def test_empty_snapshot_hydration(self):
         graph = SyncGraph(actor_id=1)
         snapshot = StateSnapshot(
-            resource_specs=(),
+            graph=ResourceGraph(),
             graph_update=graph.doc.get_update(None),
             base_state=graph.doc.get_state(),
-            resolution_order=(),
             actor_id=1,
         )
         worker = await _worker_from_snapshot(
@@ -608,7 +687,7 @@ class TestHydrateTransferSnapshot:
             consumer_spec=_consumer_spec(),
         )
 
-        assert len(worker.resources.cached_resources_by_spec()) == 0
+        assert worker.resources.scope_owners() == ()
 
 
 class TestSyncRoundTrip:

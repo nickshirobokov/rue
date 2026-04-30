@@ -28,18 +28,6 @@ class ResourceSpec(Spec):
 
     scope: Scope
 
-    @property
-    def snapshot_key(self) -> str:
-        """Return the stable identity used by resource transfer snapshots."""
-        module_path = self.module_path
-        return "|".join(
-            (
-                self.scope.value,
-                self.name,
-                "" if module_path is None else str(module_path),
-            )
-        )
-
 
 @dataclass(slots=True, eq=False)
 class LoadedResourceDef:
@@ -107,15 +95,9 @@ class ResourceGraph:
 class StateSnapshot:
     """CRDT-backed transfer payload for reconstructing resources in a worker."""
 
-    resource_specs: tuple[ResourceSpec, ...]
+    graph: ResourceGraph
     graph_update: bytes
     base_state: bytes
-    autouse: tuple[ResourceSpec, ...] = field(default_factory=tuple)
-    injections: dict[str, ResourceSpec] = field(default_factory=dict)
-    dependencies: dict[ResourceSpec, tuple[ResourceSpec, ...]] = field(
-        default_factory=dict
-    )
-    resolution_order: tuple[ResourceSpec, ...] = field(default_factory=tuple)
     actor_id: int = 0
 
 
