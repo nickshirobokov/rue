@@ -42,7 +42,7 @@ class Runner:
         store: Store | None = None,
         capture_output: bool = True,
     ) -> None:
-        self.capture_output = capture_output
+        self.capture_output = False
         self.reporters = reporters
         self.store = store
         context = CURRENT_RUN_CONTEXT.get()

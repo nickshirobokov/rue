@@ -37,6 +37,10 @@ MAX_STORED_RUNS = 5
 
 MAX_REPR_LENGTH = 2000  # Max length for repr of local variables
 
+
+def _scope_to_storage_value(scope: Scope | str) -> str:
+    return scope.value if isinstance(scope, Scope) else str(scope)
+
 RUN_INSERT_SQL = """
     INSERT INTO runs (
         run_id, start_time, end_time, total_duration_ms,
@@ -317,9 +321,7 @@ class SQLiteStore(Store):
             (
                 str(run_id),
                 ident.locator.function_name,
-                ident.scope.value
-                if isinstance(ident.scope, Scope)
-                else str(ident.scope),
+                _scope_to_storage_value(ident.scope),
                 value_real,
                 value_json,
                 meta.first_item_recorded_at.isoformat()
@@ -330,9 +332,7 @@ class SQLiteStore(Store):
                 else None,
                 self._to_json_consumers(meta.consumers),
                 ident.locator.function_name,
-                ident.scope.value
-                if isinstance(ident.scope, Scope)
-                else str(ident.scope),
+                _scope_to_storage_value(ident.scope),
                 None
                 if ident.locator.module_path is None
                 else str(ident.locator.module_path),
@@ -388,7 +388,7 @@ class SQLiteStore(Store):
             }
             if isinstance(consumer, ResourceSpec):
                 item["kind"] = "resource"
-                item["scope"] = consumer.scope.value
+                item["scope"] = _scope_to_storage_value(consumer.scope)
             elif isinstance(consumer, TestSpec):
                 item["kind"] = "test"
                 item["suffix"] = consumer.suffix
@@ -407,7 +407,7 @@ class SQLiteStore(Store):
             [
                 {
                     "name": item.locator.function_name,
-                    "scope": item.scope.value,
+                    "scope": _scope_to_storage_value(item.scope),
                     "provider_path": None
                     if item.locator.module_path is None
                     else str(item.locator.module_path),
