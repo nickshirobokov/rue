@@ -10,7 +10,6 @@ from itertools import product
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from rue.context.runtime import ResourceTransactionContext
 from rue.models import Spec
 from rue.resources import MonkeyPatch, Scope
 
@@ -33,37 +32,11 @@ class ExperimentSpec(Spec):
     fn: Callable[..., Any] = field(repr=False, compare=False)
     dependencies: tuple[str, ...] = field(default=(), compare=False)
 
-    async def apply(
-        self,
-        value_index: int,
-        *,
-        resolver: DependencyResolver,
-        graph_key: UUID,
-    ) -> None:
+    async def apply(self, kwargs: dict[str, Any]) -> None:
         """Apply this experiment hook to the current run process."""
-        kwargs: dict[str, Any] = {"value": self.values[value_index]}
-        kwargs.update(
-            await resolver.resolve_graph_deps(
-                resolver.registry.get_graph(graph_key),
-                {},
-                consumer_spec=self,
-            )
-        )
-        if "monkeypatch" in self.dependencies:
-            kwargs["monkeypatch"] = MonkeyPatch(
-                lifetime=resolver.patch_lifetime(
-                    Scope.RUN,
-                ),
-            )
-
-        with ResourceTransactionContext(
-            consumer_spec=self,
-            provider_spec=self,
-            resolver=resolver,
-        ):
-            result = self.fn(**kwargs)
-            if inspect.isawaitable(result):
-                await result
+        result = self.fn(**kwargs)
+        if inspect.isawaitable(result):
+            await result
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,12 +98,22 @@ class ExperimentVariant:
                 for name, _value_index, _value_id in self.values
             }
         )
-        for name, value_index, _value_id in self.values:
-            await definitions[name].apply(
-                value_index,
-                resolver=resolver,
-                graph_key=keys_by_name[name],
-            )
+        with resolver.patches:
+            for name, value_index, _value_id in self.values:
+                definition = definitions[name]
+                kwargs: dict[str, Any] = {
+                    "value": definition.values[value_index]
+                }
+                kwargs.update(
+                    await resolver.resolve_graph_deps(
+                        resolver.registry.get_graph(keys_by_name[name]),
+                        {},
+                        consumer_spec=definition,
+                    )
+                )
+                if "monkeypatch" in definition.dependencies:
+                    kwargs["monkeypatch"] = MonkeyPatch.for_scope(Scope.RUN)
+                await definition.apply(kwargs)
 
     @property
     def is_baseline(self) -> bool:

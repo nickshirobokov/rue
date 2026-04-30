@@ -27,7 +27,6 @@ from rue.models import Spec
 
 if TYPE_CHECKING:
     from rue.resources.models import ResourceSpec
-    from rue.resources.resolver import DependencyResolver
     from rue.testing.models.loaded import LoadedTestDef
     from rue.testing.tracing import TestTracer
 
@@ -85,23 +84,22 @@ class TestContext:
 
 
 @dataclass(slots=True)
-class ResourceTransactionContext:
-    """Runtime data owned by one resource resolution transaction."""
+class ResourceHookContext:
+    """Runtime metadata owned by one resource hook application."""
 
     consumer_spec: Spec
-    provider_spec: Spec
-    resolver: DependencyResolver
+    provider_spec: ResourceSpec
     direct_dependencies: tuple[ResourceSpec, ...] = ()
-    _tokens: list[Token[ResourceTransactionContext]] = field(
+    _tokens: list[Token[ResourceHookContext]] = field(
         default_factory=list,
         init=False,
         repr=False,
         compare=False,
     )
 
-    def __enter__(self) -> ResourceTransactionContext:
-        """Bind this transaction to the current resolution scope."""
-        self._tokens.append(CURRENT_RESOURCE_TRANSACTION.set(self))
+    def __enter__(self) -> ResourceHookContext:
+        """Bind this hook metadata to the current hook scope."""
+        self._tokens.append(CURRENT_RESOURCE_HOOK_CONTEXT.set(self))
         return self
 
     def __exit__(
@@ -110,8 +108,8 @@ class ResourceTransactionContext:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Restore the previous resource transaction."""
-        CURRENT_RESOURCE_TRANSACTION.reset(self._tokens.pop())
+        """Restore the previous resource hook metadata."""
+        CURRENT_RESOURCE_HOOK_CONTEXT.reset(self._tokens.pop())
 
 
 class RunEnvironment(BaseModel):
@@ -234,10 +232,10 @@ CURRENT_TEST_TRACER: ContextVar[TestTracer | None] = ContextVar(
 CURRENT_SUT_SPAN_IDS: ContextVar[tuple[int, ...]] = ContextVar(
     "current_sut_span_ids", default=()
 )
-CURRENT_RESOURCE_TRANSACTION: ContextVar[
-    ResourceTransactionContext
+CURRENT_RESOURCE_HOOK_CONTEXT: ContextVar[
+    ResourceHookContext
 ] = ContextVar(
-    "current_resource_transaction",
+    "current_resource_hook_context",
 )
 
 

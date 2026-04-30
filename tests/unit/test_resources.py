@@ -9,14 +9,14 @@ from uuid import UUID
 import pytest
 
 from rue.context.runtime import (
-    CURRENT_RESOURCE_TRANSACTION,
+    CURRENT_RESOURCE_HOOK_CONTEXT,
     TestContext,
 )
 from rue.context.scopes import ScopeOwner
 from rue.resources import (
+    DependencyResolver,
     ResourceFactoryKind,
     ResourceRegistry,
-    DependencyResolver,
     ResourceStore,
     Scope,
     registry,
@@ -759,31 +759,34 @@ class TestDependencyResolver:
     @pytest.mark.asyncio
     async def test_records_direct_dependency_graph(self):
         observed: list[list[str]] = []
+        factory_context_absent = []
+
+        def observe_direct_dependencies(value):
+            hook_context = CURRENT_RESOURCE_HOOK_CONTEXT.get()
+            observed.append(
+                [
+                    identity.name
+                    for identity in hook_context.direct_dependencies
+                ]
+            )
+            return value
 
         @resource
         def leaf():
             return "leaf"
 
-        @resource
+        @resource(on_resolve=observe_direct_dependencies)
         def middle(leaf):
-            transaction = CURRENT_RESOURCE_TRANSACTION.get()
-            observed.append(
-                [
-                    identity.name
-                    for identity in transaction.direct_dependencies
-                ]
-            )
+            with pytest.raises(LookupError):
+                CURRENT_RESOURCE_HOOK_CONTEXT.get()
+            factory_context_absent.append(True)
             return leaf
 
-        @resource
+        @resource(on_resolve=observe_direct_dependencies)
         def root(middle):
-            transaction = CURRENT_RESOURCE_TRANSACTION.get()
-            observed.append(
-                [
-                    identity.name
-                    for identity in transaction.direct_dependencies
-                ]
-            )
+            with pytest.raises(LookupError):
+                CURRENT_RESOURCE_HOOK_CONTEXT.get()
+            factory_context_absent.append(True)
             return middle
 
         resolver = DependencyResolver(registry)
@@ -792,6 +795,7 @@ class TestDependencyResolver:
             == "leaf"
         )
         assert observed == [["leaf"], ["middle"]]
+        assert factory_context_absent == [True, True]
 
     @pytest.mark.asyncio
     async def test_unknown_resource_raises(self):
@@ -1356,10 +1360,9 @@ class TestResourceHooks:
 
         def hook(value):
             nonlocal received_name
-            received_name = (
-                CURRENT_RESOURCE_TRANSACTION.get()
-                .consumer_spec.locator.function_name
-            )
+            hook_context = CURRENT_RESOURCE_HOOK_CONTEXT.get()
+            assert not hasattr(hook_context, "resolver")
+            received_name = hook_context.consumer_spec.locator.function_name
             return value
 
         @resource(on_injection=hook)
@@ -1379,9 +1382,9 @@ class TestResourceHooks:
         history = []
 
         def hook(value):
-            transaction = CURRENT_RESOURCE_TRANSACTION.get()
+            hook_context = CURRENT_RESOURCE_HOOK_CONTEXT.get()
             history.append(
-                (transaction.consumer_spec.locator.function_name, value)
+                (hook_context.consumer_spec.locator.function_name, value)
             )
             return value
 

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
-    CURRENT_RESOURCE_TRANSACTION,
+    CURRENT_RESOURCE_HOOK_CONTEXT,
     bind,
 )
 from rue.resources.models import ResourceSpec, Scope
@@ -80,15 +80,14 @@ def metric[**P](
         return m
 
     def on_injection_hook(m: Metric) -> Metric:
-        transaction = CURRENT_RESOURCE_TRANSACTION.get()
-        consumer = transaction.consumer_spec
+        hook_context = CURRENT_RESOURCE_HOOK_CONTEXT.get()
+        consumer = hook_context.consumer_spec
         if consumer not in m.metadata.consumers:
             m.metadata.consumers.append(consumer)
-        if isinstance(transaction.provider_spec, ResourceSpec):
-            m.metadata.identity = transaction.provider_spec
-            for provider in transaction.direct_dependencies:
-                if provider not in m.metadata.direct_providers:
-                    m.metadata.direct_providers.append(provider)
+        m.metadata.identity = hook_context.provider_spec
+        for provider in hook_context.direct_dependencies:
+            if provider not in m.metadata.direct_providers:
+                m.metadata.direct_providers.append(provider)
         return m
 
     if is_generator:

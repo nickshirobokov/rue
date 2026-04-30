@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 
-from rue.context.runtime import CURRENT_RESOURCE_TRANSACTION
 from rue.context.scopes import Scope
 from rue.patching import MonkeyPatch
 from rue.resources.registry import ResourceRegistry
@@ -13,10 +12,7 @@ def register_builtin_resources(registry: ResourceRegistry) -> None:
 
     def scoped_monkeypatch(scope: Scope) -> Callable[[], MonkeyPatch]:
         def monkeypatch() -> MonkeyPatch:
-            transaction = CURRENT_RESOURCE_TRANSACTION.get()
-            return MonkeyPatch(
-                lifetime=transaction.resolver.patch_lifetime(scope),
-            )
+            return MonkeyPatch.for_scope(scope)
 
         return monkeypatch
 

@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Iterator, MutableMapping, MutableSequence
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from threading import RLock
+from types import TracebackType
 from typing import Any, Literal, NoReturn
 
-from rue.context.scopes import CURRENT_SCOPE_CONTEXT, Scope, ScopeOwner
+from rue.context.scopes import (
+    CURRENT_SCOPE_CONTEXT,
+    Scope,
+    ScopeOwner,
+)
 
 
 type PatchTargetKind = Literal["attr", "item"]
@@ -57,6 +63,30 @@ class PatchStore:
         default_factory=dict
     )
 
+    @classmethod
+    def current(cls) -> PatchStore:
+        """Return the patch store bound to the current resolver flow."""
+        return _CURRENT_PATCH_STORE.get()
+
+    def __enter__(self) -> PatchStore:
+        """Bind this patch store to the current resolver flow."""
+        token = _CURRENT_PATCH_STORE.set(self)
+        _CURRENT_PATCH_STORE_TOKENS.set(
+            (*_CURRENT_PATCH_STORE_TOKENS.get(), token)
+        )
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Restore the previous patch store binding."""
+        tokens = _CURRENT_PATCH_STORE_TOKENS.get()
+        _CURRENT_PATCH_STORE_TOKENS.set(tokens[:-1])
+        _CURRENT_PATCH_STORE.reset(tokens[-1])
+
     def lifetime(self, owner: ScopeOwner) -> PatchLifetime:
         """Build a lifetime API for one patch owner."""
         return PatchLifetime(owner=owner, store=self)
@@ -83,6 +113,14 @@ class PatchStore:
         for owner in tuple(self._handles):
             handles.extend(self.pop_owner(owner))
         return handles
+
+
+_CURRENT_PATCH_STORE: ContextVar[PatchStore] = ContextVar(
+    "current_patch_store"
+)
+_CURRENT_PATCH_STORE_TOKENS: ContextVar[
+    tuple[Token[PatchStore], ...]
+] = ContextVar("current_patch_store_tokens", default=())
 
 
 @dataclass(slots=True)
@@ -114,7 +152,7 @@ class _PatchedTarget:
                 raise KeyError(self.name)
 
     def delete_member(self) -> None:
-        """Remove attribute or mapping/sequence slot (dispatcher) from target."""
+        """Remove the dispatcher from the patched target."""
         match self.kind:
             case "attr":
                 delattr(self.target, self.name)

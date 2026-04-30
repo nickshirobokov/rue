@@ -6,9 +6,10 @@ from collections.abc import MutableMapping, MutableSequence
 from pkgutil import resolve_name
 from typing import Any, overload
 
-from rue.context.scopes import Scope
+from rue.context.scopes import Scope, ScopeContext
 from rue.patching.runtime import (
     PatchLifetime,
+    PatchStore,
     patch_manager,
 )
 
@@ -25,6 +26,15 @@ class MonkeyPatch:
         lifetime: PatchLifetime,
     ) -> None:
         self.lifetime = lifetime
+
+    @classmethod
+    def for_scope(cls, scope: Scope) -> MonkeyPatch:
+        """Create a monkeypatch API for the current resolver patch store."""
+        return cls(
+            lifetime=PatchStore.current().lifetime(
+                ScopeContext.current_owner(scope)
+            )
+        )
 
     @property
     def scope(self) -> Scope:
