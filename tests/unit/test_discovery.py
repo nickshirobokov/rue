@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from rue.context.runtime import TestContext
-from rue.resources import ResourceResolver, Scope, registry
+from rue.resources import DependencyResolver, Scope, registry
 from rue.testing.discovery import (
     KeywordMatcher,
     TestDefinitionErrors,
@@ -462,7 +462,7 @@ async def test_materialize_supports_same_dir_setup_without_pyproject(
 
     run = await make_runner(null_reporter).run(
         items=materialize(tmp_path),
-        resolver=ResourceResolver(registry),
+        resolver=DependencyResolver(registry),
     )
 
     assert run.result.passed == 1
@@ -671,7 +671,7 @@ async def test_materialize_promotes_pytest_fixtures(
 
     run = await make_runner(null_reporter).run(
         items=materialize(tmp_path),
-        resolver=ResourceResolver(registry),
+        resolver=DependencyResolver(registry),
     )
 
     assert run.result.passed == 1

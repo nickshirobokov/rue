@@ -12,7 +12,7 @@ from rue.experiments import registry as experiment_registry
 from rue.experiments.models import ExperimentSpec, ExperimentVariant
 from rue.experiments.runner import ExperimentRunner
 from rue.models import Locator
-from rue.resources import ResourceResolver, registry as resource_registry
+from rue.resources import DependencyResolver, registry as resource_registry
 from rue.testing.discovery import TestSpecCollector
 from tests.unit.factories import make_definition
 
@@ -115,7 +115,7 @@ async def test_experiment_monkeypatch_is_run_scoped():
         config=Config.model_construct(db_enabled=False),
         run_id=uuid4(),
     )
-    resolver = ResourceResolver(resource_registry)
+    resolver = DependencyResolver(resource_registry)
 
     with context:
         await variant.apply(
@@ -146,7 +146,7 @@ async def test_experiment_monkeypatch_does_not_accept_method_scope():
         with pytest.raises(TypeError, match="scope"):
             await variant.apply(
                 experiment_registry.all(),
-                resolver=ResourceResolver(resource_registry),
+                resolver=DependencyResolver(resource_registry),
             )
 
 

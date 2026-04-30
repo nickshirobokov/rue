@@ -10,7 +10,7 @@ from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.process_pool import LazyProcessPool
 from rue.context.runtime import CURRENT_RUN_CONTEXT, TestContext, bind
 from rue.reports.base import Reporter
-from rue.resources import ResourceResolver
+from rue.resources import DependencyResolver
 from rue.resources.metrics.base import MetricResult
 from rue.resources.models import Scope
 from rue.resources.sut.output import SUTOutputCapture
@@ -100,7 +100,7 @@ class Runner:
         self,
         items: list[LoadedTestDef],
         *,
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
     ) -> Run:
         """Run tests and return results.
 
@@ -182,7 +182,7 @@ class Runner:
         self,
         *,
         items: list[LoadedTestDef],
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
         run: Run,
     ) -> None:
         """Execute the test run with the given items and resolver."""
@@ -256,7 +256,7 @@ class Runner:
     async def _run_step(
         self,
         step: RunnerStep,
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
         run: Run,
     ) -> None:
         """Run one queue step."""
@@ -339,7 +339,7 @@ class Runner:
 
     async def _teardown_module_if_complete(
         self,
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
         execution: ExecutedTest,
     ) -> None:
         module_path = execution.definition.spec.locator.module_path

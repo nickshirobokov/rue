@@ -4,7 +4,7 @@ from textwrap import dedent
 
 import pytest
 
-from rue.resources import ResourceResolver, registry
+from rue.resources import DependencyResolver, registry
 from rue.testing.discovery import TestLoader, TestSpecCollector
 from rue.testing.runner import Runner
 from tests.unit.conftest import NullReporter
@@ -138,7 +138,7 @@ async def test_runner_executes_mixed_backends_in_queue_order(
         )
     run = await Runner(
         reporters=[reporter],
-    ).run(items=items, resolver=ResourceResolver(registry))
+    ).run(items=items, resolver=DependencyResolver(registry))
 
     assert run.result.passed == len(expected_order), [
         (
@@ -344,7 +344,7 @@ async def test_runner_executes_multiple_modules_in_queue_order(
         )
     run = await Runner(
         reporters=[reporter],
-    ).run(items=items, resolver=ResourceResolver(registry))
+    ).run(items=items, resolver=DependencyResolver(registry))
 
     assert run.result.passed == len(expected_order), [
         (
@@ -443,7 +443,7 @@ async def test_runner_keeps_global_main_as_absolute_barrier_across_modules(
         )
     run = await Runner(
         reporters=[reporter],
-    ).run(items=items, resolver=ResourceResolver(registry))
+    ).run(items=items, resolver=DependencyResolver(registry))
 
     assert run.result.passed == 4
 
@@ -495,7 +495,7 @@ async def test_module_main_keeps_iterate_children_concurrent(
         )
     run = await Runner(
         reporters=[NullReporter()],
-    ).run(items=items, resolver=ResourceResolver(registry))
+    ).run(items=items, resolver=DependencyResolver(registry))
     duration = time.perf_counter() - start
 
     assert run.result.passed == 1

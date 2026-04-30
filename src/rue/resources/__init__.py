@@ -10,15 +10,13 @@ from rue.resources.models import (
     ResourceFactoryKind,
     ResourceGraph,
     ResourceSpec,
-    ResourceTransferSnapshot,
+    ScheduledTeardown,
+    StateSnapshot,
 )
 from rue.resources.registry import ResourceRegistry, registry, resource
-from rue.resources.resolver import ResourceResolver
-from rue.resources.state import (
-    ResourceStore,
-    ResourceTeardownRecord,
-)
-from rue.resources.transfer import ResourceTransfer
+from rue.resources.resolver import DependencyResolver
+from rue.resources.state import ResourceStore
+from rue.resources.transfer import StateTransfer
 
 
 _register_builtin_resources(registry)
@@ -30,12 +28,12 @@ __all__ = [
     "ResourceFactoryKind",
     "ResourceGraph",
     "ResourceRegistry",
-    "ResourceResolver",
+    "DependencyResolver",
     "ResourceSpec",
     "ResourceStore",
-    "ResourceTeardownRecord",
-    "ResourceTransfer",
-    "ResourceTransferSnapshot",
+    "ScheduledTeardown",
+    "StateTransfer",
+    "StateSnapshot",
     "Scope",
     "registry",
     "resource",

@@ -12,10 +12,12 @@ from rue.context.runtime import (
     CURRENT_RESOURCE_TRANSACTION,
     TestContext,
 )
+from rue.context.scopes import ScopeOwner
 from rue.resources import (
     ResourceFactoryKind,
     ResourceRegistry,
-    ResourceResolver,
+    DependencyResolver,
+    ResourceStore,
     Scope,
     registry,
     resource,
@@ -63,7 +65,7 @@ def _resource_graph(
 
 
 async def _resolve(
-    resolver: ResourceResolver,
+    resolver: DependencyResolver,
     name: str,
     *,
     consumer_spec=None,
@@ -85,7 +87,7 @@ async def _resolve(
 
 
 async def _teardown(
-    resolver: ResourceResolver,
+    resolver: DependencyResolver,
     scope: Scope,
     *,
     consumer_spec=None,
@@ -117,6 +119,18 @@ def _only_definition(
 ):
     by_path = resource_registry._definitions[name][scope]
     return next(reversed(by_path.values()))
+
+
+def _store_target():
+    @resource(scope=Scope.RUN)
+    def store_target():
+        return "target"
+
+    return (
+        ResourceStore.main(),
+        _only_definition(registry, "store_target", Scope.RUN).spec,
+        ScopeOwner(scope=Scope.RUN, run_id=UUID(int=1)),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -583,12 +597,64 @@ class TestResourceRegistry:
             )
 
 
-class TestResourceResolver:
-    """Tests for ResourceResolver."""
+class TestResourceStore:
+    """Tests for scoped cache resolution coordination."""
+
+    @pytest.mark.asyncio
+    async def test_first_miss_can_claim_resolution(self):
+        store, spec, owner = _store_target()
+
+        assert store.claim_resolution(spec, owner)
+        assert not store.claim_resolution(spec, owner)
+
+        store.commit_resolution(spec, owner, "value")
+
+    @pytest.mark.asyncio
+    async def test_commit_resolution_stores_and_wakes_waiter(self):
+        store, spec, owner = _store_target()
+
+        assert store.claim_resolution(spec, owner)
+        waiter = asyncio.create_task(store.wait_resolution(spec, owner))
+        await asyncio.sleep(0)
+
+        store.commit_resolution(spec, owner, "value")
+
+        assert await waiter == "value"
+        assert store.has(spec, owner)
+        assert store.get(spec, owner) == "value"
+
+    @pytest.mark.asyncio
+    async def test_failed_resolution_wakes_waiter_and_allows_retry(self):
+        store, spec, owner = _store_target()
+
+        assert store.claim_resolution(spec, owner)
+        waiter = asyncio.create_task(store.wait_resolution(spec, owner))
+        await asyncio.sleep(0)
+
+        store.fail_resolution(spec, owner, RuntimeError("boom"))
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await waiter
+        assert store.claim_resolution(spec, owner)
+        store.commit_resolution(spec, owner, "retry")
+        assert store.get(spec, owner) == "retry"
+
+    def test_cached_none_is_a_valid_cached_value(self):
+        store, spec, owner = _store_target()
+
+        store.set(spec, owner, None)
+
+        assert store.has(spec, owner)
+        assert store.get(spec, owner) is None
+        assert not store.claim_resolution(spec, owner)
+
+
+class TestDependencyResolver:
+    """Tests for DependencyResolver."""
 
     def test_requires_explicit_registry(self):
         with pytest.raises(TypeError):
-            ResourceResolver()  # type: ignore[call-arg]
+            DependencyResolver()  # type: ignore[call-arg]
 
     @pytest.mark.asyncio
     async def test_resolve_requires_compiled_graph(self):
@@ -596,7 +662,7 @@ class TestResourceResolver:
         def simple():
             return 42
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         identity = _only_definition(registry, "simple").spec
         consumer = _consumer_spec()
         item = _make_item(name=consumer.name, module_path=consumer.module_path)
@@ -613,7 +679,7 @@ class TestResourceResolver:
         def simple():
             return 42
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         consumer = _consumer_spec()
         graph = _resource_graph(registry, ("simple",), consumer_spec=consumer)
 
@@ -650,7 +716,7 @@ class TestResourceResolver:
             async def async_simple():
                 return "async_result"
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         assert (
             await _resolve(resolver, name, consumer_spec=_consumer_spec())
             == expected
@@ -666,7 +732,7 @@ class TestResourceResolver:
             call_count += 1
             return call_count
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         v1 = await _resolve(resolver, "counted", consumer_spec=_consumer_spec())
         v2 = await _resolve(resolver, "counted", consumer_spec=_consumer_spec())
         assert v1 == v2 == 1
@@ -682,7 +748,7 @@ class TestResourceResolver:
         def derived(base_val):
             return base_val * 2
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         value = await _resolve(
             resolver,
             "derived",
@@ -720,7 +786,7 @@ class TestResourceResolver:
             )
             return middle
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         assert (
             await _resolve(resolver, "root", consumer_spec=_consumer_spec())
             == "leaf"
@@ -729,7 +795,7 @@ class TestResourceResolver:
 
     @pytest.mark.asyncio
     async def test_unknown_resource_raises(self):
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         with pytest.raises(ValueError, match="Unknown resource: unknown"):
             await _resolve(resolver, "unknown", consumer_spec=_consumer_spec())
 
@@ -769,7 +835,7 @@ class TestResourceTeardown:
                 nonlocal teardown_called
                 teardown_called = True
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         assert (
             await _resolve(resolver, name, consumer_spec=_consumer_spec())
             == expected
@@ -795,7 +861,7 @@ class TestResourceTeardown:
             nonlocal suite_torn
             suite_torn = True
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(resolver, "case_res", consumer_spec=_consumer_spec())
         await _resolve(resolver, "suite_res", consumer_spec=_consumer_spec())
 
@@ -816,7 +882,7 @@ class TestResourceTeardown:
             call_count += 1
             return call_count
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         v1 = await _resolve(
             resolver,
             "counted_case",
@@ -847,7 +913,7 @@ class TestResolverViews:
             call_count += 1
             return call_count
 
-        parent = ResourceResolver(registry)
+        parent = DependencyResolver(registry)
         parent_val = await _resolve(
             parent,
             "case_val",
@@ -899,7 +965,7 @@ class TestResolverViews:
                 yield f"{scope.value}_{create_count}"
                 teardown_count += 1
 
-        parent = ResourceResolver(registry)
+        parent = DependencyResolver(registry)
         values = await asyncio.gather(
             *[
                 _resolve(
@@ -946,7 +1012,7 @@ class TestHierarchicalProcessResources:
             """,
         )
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
 
         assert (
             await _resolve(
@@ -995,7 +1061,7 @@ class TestHierarchicalProcessResources:
             """,
         )
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         assert (
             await _resolve(
                 resolver,
@@ -1038,7 +1104,7 @@ class TestHierarchicalProcessResources:
             """,
         )
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         assert (
             await _resolve(
                 resolver,
@@ -1077,7 +1143,7 @@ class TestHierarchicalProcessResources:
             """,
         )
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         assert (
             await _resolve(resolver, "shared", consumer_spec=_consumer_spec())
             == "child"
@@ -1120,7 +1186,7 @@ class TestHierarchicalProcessResources:
             """,
         )
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
 
         assert (
             await _resolve(
@@ -1157,7 +1223,8 @@ class TestHierarchicalProcessResources:
 
         cache_keys = [
             spec
-            for _owner, spec in resolver.resources.cached_resource_instances()
+            for owner in resolver.resources.scope_owners()
+            for spec in resolver.resources.state_for_owner(owner).cache
             if spec.scope == Scope.RUN
             and spec.locator.function_name == "shared"
         ]
@@ -1185,7 +1252,7 @@ class TestResourceHooks:
         def doubled():
             return 10
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         value = await _resolve(
             resolver,
             "doubled",
@@ -1206,7 +1273,7 @@ class TestResourceHooks:
         def simple():
             return 42
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(resolver, "simple", consumer_spec=_consumer_spec())
         await _resolve(resolver, "simple", consumer_spec=_consumer_spec())
 
@@ -1224,7 +1291,7 @@ class TestResourceHooks:
             yield "value"
             call_order.append(("generator_teardown",))
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(resolver, "gen_res", consumer_spec=_consumer_spec())
         await resolver.teardown()
 
@@ -1242,7 +1309,7 @@ class TestResourceHooks:
         def case_gen():
             yield "case_value"
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(resolver, "case_gen", consumer_spec=_consumer_spec())
 
         assert not teardown_hook_called
@@ -1270,7 +1337,7 @@ class TestResourceHooks:
         async def async_gen():
             yield "async_value"
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         value = await _resolve(
             resolver,
             "async_gen",
@@ -1299,7 +1366,7 @@ class TestResourceHooks:
         def simple():
             return 42
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(
             resolver,
             "simple",
@@ -1330,7 +1397,7 @@ class TestResourceHooks:
         def top(middle):
             return f"top({middle})"
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(resolver, "top", consumer_spec=_consumer_spec())
 
         assert history == [
@@ -1351,7 +1418,7 @@ class TestResourceHooks:
         def cached_res():
             return "val"
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(resolver, "cached_res", consumer_spec=_consumer_spec())
         await _resolve(resolver, "cached_res", consumer_spec=_consumer_spec())
 
@@ -1442,7 +1509,7 @@ class TestResourceResolutionErrors:
         def resource_with_injection():
             return "value"
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         with pytest.raises(RuntimeError, match="on_injection hook failed"):
             await _resolve(
                 resolver,
@@ -1460,7 +1527,7 @@ class TestResourceResolutionErrors:
             yield "value"
             raise RuntimeError("generator teardown failed")
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         assert (
             await _resolve(
                 resolver,

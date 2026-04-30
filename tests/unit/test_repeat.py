@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from rue.resources import ResourceResolver, registry
+from rue.resources import DependencyResolver, registry
 from rue.testing import Runner, test as t_decorator
 from rue.testing.models import IterateModifier
 from tests.unit.factories import make_definition, make_run_context
@@ -62,7 +62,7 @@ def test_runner_iterate_passes_when_minimum_threshold_is_met(null_reporter):
     run_result = asyncio.run(
         runner.run(
             items=[repeat_item],
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
         )
     )
     execution = run_result.result.executions[0]
@@ -100,7 +100,7 @@ def test_runner_iterate_fails_when_threshold_is_not_met(null_reporter):
     run_result = asyncio.run(
         runner.run(
             items=[repeat_item],
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
         )
     )
     execution = run_result.result.executions[0]

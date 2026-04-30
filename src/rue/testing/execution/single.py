@@ -18,7 +18,7 @@ from rue.context.runtime import (
     TestContext,
     bind,
 )
-from rue.resources import ResourceResolver
+from rue.resources import DependencyResolver
 from rue.resources.models import Scope
 from rue.testing.execution.base import ExecutableTest, ExecutionBackend
 from rue.testing.execution.worker import (
@@ -64,7 +64,7 @@ class SingleTest(ExecutableTest):
 
     async def _execute(
         self,
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
     ) -> ExecutedTest:
         with TestContext(
             item=self.definition,
@@ -100,7 +100,7 @@ class SingleTest(ExecutableTest):
 
     async def _execute_local(
         self,
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
     ) -> ExecutedTest:
         execution_id = CURRENT_TEST.get().execution_id
         semaphore = (
@@ -150,7 +150,7 @@ class SingleTest(ExecutableTest):
 
     async def _execute_subprocess(
         self,
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
     ) -> ExecutedTest:
         run_ctx = CURRENT_RUN_CONTEXT.get()
         execution_id = CURRENT_TEST.get().execution_id
@@ -161,9 +161,11 @@ class SingleTest(ExecutableTest):
                 self.semaphore if self.semaphore else contextlib.nullcontext()
             )
             async with semaphore:
-                await resolver.preload_graph(
+                await resolver.resolve_graph_deps(
                     resolver.registry.get_graph(execution_id),
+                    {},
                     consumer_spec=self.definition.spec,
+                    preload=True,
                 )
                 snapshot = resolver.transfer.export_snapshot(
                     execution_id,

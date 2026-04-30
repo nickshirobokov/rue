@@ -2,7 +2,7 @@
 
 import pytest
 
-from rue.resources import ResourceResolver, registry
+from rue.resources import DependencyResolver, registry
 from rue.testing import TestStatus, fail, skip, xfail
 from rue.testing.models import LoadedTestDef
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
@@ -45,7 +45,7 @@ async def test_imperative_outcome_sets_status_and_reason(
 
     result = await make_runner(null_reporter).run(
         items=[make_item(outcome_test)],
-        resolver=ResourceResolver(registry),
+        resolver=DependencyResolver(registry),
     )
     execution = result.result.executions[0]
 
@@ -75,7 +75,7 @@ async def test_imperative_outcome_without_reason_uses_expected_error_type(
 
     result = await make_runner(null_reporter).run(
         items=[make_item(outcome_test)],
-        resolver=ResourceResolver(registry),
+        resolver=DependencyResolver(registry),
     )
 
     assert getattr(result.result, count_attr) == 1
@@ -97,7 +97,7 @@ async def test_imperative_outcome_stops_execution(
 
     await make_runner(null_reporter).run(
         items=[make_item(outcome_test)],
-        resolver=ResourceResolver(registry),
+        resolver=DependencyResolver(registry),
     )
 
     assert executed == ["before"]

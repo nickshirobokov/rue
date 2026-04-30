@@ -16,7 +16,7 @@ from rue.context.runtime import (
     CURRENT_TEST,
     bind,
 )
-from rue.resources import ResourceResolver
+from rue.resources import DependencyResolver
 from rue.testing.models.result import TestStatus
 from rue.testing.models.spec import SetupFileRef, TestSpec
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
@@ -77,7 +77,7 @@ class LoadedTestDef:
         self,
         *,
         params: dict[str, Any],
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
         run_sync_in_thread: bool,
         is_stopped: Callable[[], bool] | None = None,
     ) -> tuple[

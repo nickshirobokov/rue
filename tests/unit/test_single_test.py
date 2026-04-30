@@ -2,7 +2,7 @@ from uuid import uuid4
 
 import pytest
 
-from rue.resources import ResourceResolver, registry
+from rue.resources import DependencyResolver, registry
 from rue.testing.execution.single import SingleTest
 from rue.testing.models import IterateModifier, LoadedTestDef, TestStatus
 from tests.unit.factories import make_definition, make_run_context
@@ -33,7 +33,7 @@ async def test_single_test_executes_without_runner():
     )
     registry.compile_graphs({test.execution_id: (definition.spec, ())})
 
-    execution = await test.execute(ResourceResolver(registry))
+    execution = await test.execute(DependencyResolver(registry))
 
     assert execution.result.status == TestStatus.PASSED
     assert execution.execution_id == test.execution_id

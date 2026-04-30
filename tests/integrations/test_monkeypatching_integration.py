@@ -3,7 +3,7 @@ from textwrap import dedent
 
 import pytest
 
-from rue.resources import ResourceResolver, registry
+from rue.resources import DependencyResolver, registry
 from rue.testing.models import TestStatus
 from rue.testing.runner import Runner
 from tests.unit.conftest import NullReporter
@@ -46,7 +46,7 @@ async def _run_module(module_path: Path):
         reporters=[NullReporter()],
     ).run(
         items=materialize_tests(module_path),
-        resolver=ResourceResolver(registry),
+        resolver=DependencyResolver(registry),
     )
 
 

@@ -12,7 +12,7 @@ from rue.models import Spec
 from rue.resources.models import (
     ResourceGraph,
     ResourceSpec,
-    ResourceTransferSnapshot,
+    StateSnapshot,
     Scope,
 )
 from rue.resources.snapshot import (
@@ -24,16 +24,16 @@ from rue.resources.snapshot import (
 
 
 if TYPE_CHECKING:
-    from rue.resources.resolver import ResourceResolver
+    from rue.resources.resolver import DependencyResolver
 
 
 _MAIN_SYNC_ACTOR_ID = 0
 
 
-class ResourceTransfer:
+class StateTransfer:
     """Transfers resource state across resolver execution boundaries."""
 
-    def __init__(self, resolver: ResourceResolver) -> None:
+    def __init__(self, resolver: DependencyResolver) -> None:
         self.resolver = resolver
 
     def export_snapshot(
@@ -41,7 +41,7 @@ class ResourceTransfer:
         execution_id: UUID,
         *,
         actor_id: int,
-    ) -> ResourceTransferSnapshot:
+    ) -> StateSnapshot:
         """Build a CRDT transfer snapshot for the given resource closure."""
         graph = self.resolver.registry.get_graph(execution_id)
         resources = self._syncable_resources(graph.resolution_order)
@@ -51,7 +51,7 @@ class ResourceTransfer:
         payload = self.resolver.resources.sync_graph.payload(root_keys)
         export_graph = SyncGraph(actor_id=_MAIN_SYNC_ACTOR_ID)
         export_graph.sync_payload(payload)
-        return ResourceTransferSnapshot(
+        return StateSnapshot(
             resource_specs=tuple(resources),
             graph_update=export_graph.doc.get_update(None),
             base_state=export_graph.doc.get_state(),
@@ -64,7 +64,7 @@ class ResourceTransfer:
 
     async def hydrate(
         self,
-        snapshot: ResourceTransferSnapshot,
+        snapshot: StateSnapshot,
         *,
         consumer_spec: Spec,
     ) -> None:
@@ -82,17 +82,12 @@ class ResourceTransfer:
         )
 
         for spec in snapshot.resource_specs:
-            owner = ScopeContext.current_owner(spec.scope)
-            if self.resolver.resources.has(spec, owner):
-                continue
-            value = await self.resolver._resolve_uncached(
+            await self.resolver.resolve_resource(
                 spec=spec,
                 graph=graph,
-                owner=owner,
                 consumer_spec=consumer_spec,
                 apply_injection_hook=False,
             )
-            self.resolver.resources.set(spec, owner, value)
         self.resolver.resources.sync_graph = SyncGraph.from_update(
             snapshot.graph_update,
             actor_id=snapshot.actor_id,
@@ -136,7 +131,7 @@ class ResourceTransfer:
 
     def apply_update(
         self,
-        snapshot: ResourceTransferSnapshot,
+        snapshot: StateSnapshot,
         update: bytes,
     ) -> None:
         """Merge worker CRDT updates onto live objects."""

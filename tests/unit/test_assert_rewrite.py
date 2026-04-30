@@ -11,7 +11,7 @@ from rue.context.collectors import (
 )
 from rue.context.runtime import TestContext, bind
 from rue.models import Locator
-from rue.resources import ResourceResolver, ResourceSpec, Scope, registry
+from rue.resources import DependencyResolver, ResourceSpec, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
 from tests.unit.factories import make_run_context, materialize_tests
 
@@ -179,7 +179,7 @@ def test_dummy():
 
     try:
         [item] = materialize_tests(mod_path)
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         execution_id = uuid4()
         ctx = TestContext(item=item, execution_id=execution_id)
         metric_results: list[MetricResult] = []

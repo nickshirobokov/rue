@@ -17,7 +17,7 @@ from rue.resources import MonkeyPatch, Scope
 
 if TYPE_CHECKING:
     from rue.resources.metrics.base import MetricResult
-    from rue.resources.resolver import ResourceResolver
+    from rue.resources.resolver import DependencyResolver
     from rue.testing.models import Run
 
 
@@ -37,7 +37,7 @@ class ExperimentSpec(Spec):
         self,
         value_index: int,
         *,
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
         graph_key: UUID,
     ) -> None:
         """Apply this experiment hook to the current run process."""
@@ -102,7 +102,7 @@ class ExperimentVariant:
         self,
         experiments: tuple[ExperimentSpec, ...],
         *,
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
     ) -> None:
         """Apply this variant's selected experiment hooks."""
         definitions = {

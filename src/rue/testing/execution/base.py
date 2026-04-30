@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from rue.resources.resolver import ResourceResolver
+from rue.resources.resolver import DependencyResolver
 from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.result import TestResult, TestStatus
 
@@ -58,7 +58,7 @@ class ExecutableTest(ABC):
 
     async def execute(
         self,
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
     ) -> ExecutedTest:
         """Execute the test and return result."""
         start = time.perf_counter()
@@ -83,6 +83,6 @@ class ExecutableTest(ABC):
     @abstractmethod
     async def _execute(
         self,
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
     ) -> ExecutedTest:
         """Execute the concrete test body and return result."""

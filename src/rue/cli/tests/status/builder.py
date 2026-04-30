@@ -15,7 +15,7 @@ from rue.cli.tests.status.models import (
 )
 from rue.config import Config
 from rue.context.runtime import RunContext, TestContext
-from rue.resources import ResourceResolver, ResourceSpec
+from rue.resources import DependencyResolver, ResourceSpec
 from rue.resources.models import ResourceGraph
 from rue.resources.registry import registry as default_resource_registry
 from rue.storage.sqlite import SQLiteStore
@@ -135,7 +135,7 @@ class TestsStatusBuilder:
                 resources_by_execution_id[execution_id] = {}
                 continue
 
-            resolver = ResourceResolver(default_resource_registry)
+            resolver = DependencyResolver(default_resource_registry)
             graph = graphs_by_execution_id[execution_id]
             try:
                 with TestContext(
@@ -151,8 +151,9 @@ class TestsStatusBuilder:
                 self._add_issue(execution_id, "resolve", str(error))
             finally:
                 grouped_resources: dict[str, list[ResourceSpec]] = {}
+                cached_by_spec = resolver.resources.cached_resources_by_spec()
                 for spec in connected:
-                    value = resolver.cached_resources.get(spec)
+                    value = cached_by_spec.get(spec)
                     if value is None:
                         continue
                     grouped_resources.setdefault(

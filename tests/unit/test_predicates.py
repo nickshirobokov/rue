@@ -8,7 +8,7 @@ import pytest
 from rue.context.collectors import CURRENT_PREDICATE_RESULTS
 from rue.context.runtime import bind
 from rue.predicates import PredicateResult, predicate
-from rue.resources import ResourceResolver, registry
+from rue.resources import DependencyResolver, registry
 from rue.storage import SQLiteStore
 from rue.testing.runner import Runner
 from tests.unit.factories import make_run_context, materialize_tests
@@ -91,7 +91,7 @@ async def _run_module_with_tracing(
         )
         run = await runner.run(
             items=items,
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
         )
         return mod_name, run, trace_reporter.artifacts
     finally:

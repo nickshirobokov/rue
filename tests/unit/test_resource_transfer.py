@@ -15,9 +15,9 @@ from pydantic import BaseModel
 
 from rue.context.runtime import TestContext
 from rue.resources import (
-    ResourceResolver,
+    DependencyResolver,
     ResourceStore,
-    ResourceTransferSnapshot,
+    StateSnapshot,
     Scope,
     registry,
     resource,
@@ -111,7 +111,7 @@ class NestedHolder:
         self.payload = {"items": [Box(1), Box(2)]}
 
 
-def _snapshot_payload(snapshot: ResourceTransferSnapshot) -> dict[str, object]:
+def _snapshot_payload(snapshot: StateSnapshot) -> dict[str, object]:
     graph = SyncGraph.from_update(snapshot.graph_update, actor_id=0)
     return graph.payload(
         identity.snapshot_key for identity in snapshot.resource_specs
@@ -136,7 +136,7 @@ def _resource_graph(
 
 
 async def _resolve(
-    resolver: ResourceResolver,
+    resolver: DependencyResolver,
     name: str,
     *,
     consumer_spec=None,
@@ -156,12 +156,12 @@ async def _resolve(
 
 
 def _snapshot(
-    resolver: ResourceResolver,
+    resolver: DependencyResolver,
     resource_names: tuple[str, ...],
     *,
     consumer_spec=None,
     sync_actor_id: int = 1,
-) -> ResourceTransferSnapshot:
+) -> StateSnapshot:
     consumer = consumer_spec or _consumer_spec()
     _resource_graph(resource_names, consumer_spec=consumer)
     item = make_definition(
@@ -176,8 +176,8 @@ def _snapshot(
 
 
 def _sync_update(
-    resolver: ResourceResolver,
-    snapshot: ResourceTransferSnapshot,
+    resolver: DependencyResolver,
+    snapshot: StateSnapshot,
     *,
     consumer_spec=None,
 ) -> bytes:
@@ -194,9 +194,9 @@ def _sync_update(
 
 
 def _apply_worker_update(
-    parent: ResourceResolver,
-    worker: ResourceResolver,
-    snapshot: ResourceTransferSnapshot,
+    parent: DependencyResolver,
+    worker: DependencyResolver,
+    snapshot: StateSnapshot,
     *,
     consumer_spec=None,
 ) -> None:
@@ -215,12 +215,12 @@ def _apply_worker_update(
 
 
 async def _worker_from_snapshot(
-    snapshot: ResourceTransferSnapshot,
+    snapshot: StateSnapshot,
     *,
     consumer_spec=None,
-) -> ResourceResolver:
+) -> DependencyResolver:
     consumer = consumer_spec or _consumer_spec()
-    resolver = ResourceResolver(
+    resolver = DependencyResolver(
         registry,
         resources=ResourceStore.shadow(sync_actor_id=snapshot.actor_id),
     )
@@ -244,10 +244,10 @@ class TestExportSnapshot:
             "apply_sync_update",
         }
 
-        assert not removed_methods & set(dir(ResourceResolver))
+        assert not removed_methods & set(dir(DependencyResolver))
 
     def test_resolver_does_not_import_transfer_primitives(self):
-        source = inspect.getsource(ResourceResolver)
+        source = inspect.getsource(DependencyResolver)
 
         assert "SnapshotApplier" not in source
         assert "SnapshotDeltaApplier" not in source
@@ -262,7 +262,7 @@ class TestExportSnapshot:
         def shared():
             return {"kind": "run"}
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(resolver, "shared", consumer_spec=_consumer_spec())
         await _resolve(resolver, "per_test", consumer_spec=_consumer_spec())
 
@@ -288,7 +288,7 @@ class TestExportSnapshot:
         def state():
             return SlotsState()
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
         snapshot = _snapshot(
@@ -313,7 +313,7 @@ class TestExportSnapshot:
         def state():
             return FrameworkLike("demo", 3)
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
         snapshot = _snapshot(
@@ -334,7 +334,7 @@ class TestExportSnapshot:
         def state():
             return InheritedHousekeepingState()
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
         snapshot = _snapshot(
@@ -356,7 +356,7 @@ class TestExportSnapshot:
         def state():
             return Model(name="demo", count=3)
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         live = await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
         snapshot = _snapshot(
@@ -395,7 +395,7 @@ class TestExportSnapshot:
         def alias(shared):
             return shared
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(resolver, "alias", consumer_spec=_consumer_spec())
 
         snapshot = _snapshot(
@@ -417,7 +417,7 @@ class TestExportSnapshot:
         def simple():
             return 1
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         consumer_spec = _consumer_spec(
             module_path=Path("/project/tests/test_foo.py")
         )
@@ -440,7 +440,7 @@ class TestExportSnapshot:
         def local_only():
             return {"local": True}
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         consumer_spec = _consumer_spec()
         await _resolve(resolver, "local_only", consumer_spec=consumer_spec)
 
@@ -456,7 +456,7 @@ class TestExportSnapshot:
 
         assert snapshot.resource_specs == ()
         assert snapshot.injections["local_only"].name == "local_only"
-        assert worker.cached_resources == {}
+        assert worker.resources.cached_resources_by_spec() == {}
 
     async def test_atomic_values_use_tagged_nodes(self):
         class Mode(Enum):
@@ -482,7 +482,7 @@ class TestExportSnapshot:
                 "enum": Mode.FAST,
             }
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(resolver, "state", consumer_spec=_consumer_spec())
 
         snapshot = _snapshot(
@@ -507,7 +507,7 @@ class TestExportSnapshot:
         }
 
     def test_export_requires_cached_resources(self):
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         with pytest.raises(ValueError, match="nonexistent"):
             _snapshot(
                 resolver,
@@ -526,7 +526,7 @@ class TestHydrateTransferSnapshot:
             resolve_count += 1
             return {"key": "value"}
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(resolver, "config", consumer_spec=_consumer_spec())
         assert resolve_count == 1
 
@@ -548,7 +548,7 @@ class TestHydrateTransferSnapshot:
         def shared():
             return {"count": 0}
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         shared_state = await _resolve(
             resolver,
             "shared",
@@ -578,7 +578,7 @@ class TestHydrateTransferSnapshot:
         def holder():
             return Holder()
 
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
         await _resolve(resolver, "holder", consumer_spec=_consumer_spec())
 
         snapshot = _snapshot(
@@ -596,7 +596,7 @@ class TestHydrateTransferSnapshot:
 
     async def test_empty_snapshot_hydration(self):
         graph = SyncGraph(actor_id=1)
-        snapshot = ResourceTransferSnapshot(
+        snapshot = StateSnapshot(
             resource_specs=(),
             graph_update=graph.doc.get_update(None),
             base_state=graph.doc.get_state(),
@@ -608,7 +608,7 @@ class TestHydrateTransferSnapshot:
             consumer_spec=_consumer_spec(),
         )
 
-        assert len(worker.cached_resources) == 0
+        assert len(worker.resources.cached_resources_by_spec()) == 0
 
 
 class TestSyncRoundTrip:
@@ -617,7 +617,7 @@ class TestSyncRoundTrip:
         def case_state():
             return {"events": []}
 
-        parent = ResourceResolver(registry)
+        parent = DependencyResolver(registry)
         state = await _resolve(
             parent,
             "case_state",
@@ -649,7 +649,7 @@ class TestSyncRoundTrip:
         def shared():
             return {"values": ["base"]}
 
-        parent = ResourceResolver(registry)
+        parent = DependencyResolver(registry)
         shared_state = await _resolve(
             parent, "shared", consumer_spec=_consumer_spec()
         )
@@ -679,7 +679,7 @@ class TestSyncRoundTrip:
         def shared():
             return {"base": True}
 
-        parent = ResourceResolver(registry)
+        parent = DependencyResolver(registry)
         shared_state = await _resolve(
             parent, "shared", consumer_spec=_consumer_spec()
         )
@@ -708,7 +708,7 @@ class TestSyncRoundTrip:
         def shared():
             return AttrState()
 
-        parent = ResourceResolver(registry)
+        parent = DependencyResolver(registry)
         shared_state = await _resolve(
             parent, "shared", consumer_spec=_consumer_spec()
         )
@@ -738,7 +738,7 @@ class TestSyncRoundTrip:
         def shared():
             return BranchHolder()
 
-        parent = ResourceResolver(registry)
+        parent = DependencyResolver(registry)
         shared_state = await _resolve(
             parent, "shared", consumer_spec=_consumer_spec()
         )
@@ -774,7 +774,7 @@ class TestSyncRoundTrip:
         def alias(shared):
             return shared
 
-        parent = ResourceResolver(registry)
+        parent = DependencyResolver(registry)
         live_shared = await _resolve(
             parent, "shared", consumer_spec=_consumer_spec()
         )
@@ -808,7 +808,7 @@ class TestSyncRoundTrip:
             yield state
             events.append("teardown")
 
-        parent = ResourceResolver(registry)
+        parent = DependencyResolver(registry)
         state = await _resolve(
             parent,
             "case_state",
@@ -846,7 +846,7 @@ class TestSyncRoundTrip:
         def state():
             return SlotsState()
 
-        parent = ResourceResolver(registry)
+        parent = DependencyResolver(registry)
         live = await _resolve(parent, "state", consumer_spec=_consumer_spec())
         snapshot = _snapshot(parent, ("state",), consumer_spec=_consumer_spec())
 
@@ -873,7 +873,7 @@ class TestSyncRoundTrip:
         def holder():
             return {"items": [Box(1), Box(2)]}
 
-        parent = ResourceResolver(registry)
+        parent = DependencyResolver(registry)
         state = await _resolve(parent, "holder", consumer_spec=_consumer_spec())
         items_before = state["items"]
         snapshot = _snapshot(
@@ -901,7 +901,7 @@ class TestSyncRoundTrip:
         def holder():
             return NestedHolder()
 
-        parent = ResourceResolver(registry)
+        parent = DependencyResolver(registry)
         state = await _resolve(parent, "holder", consumer_spec=_consumer_spec())
         payload_before = state.payload
         items_before = state.payload["items"]

@@ -15,7 +15,7 @@ from rue.context.runtime import (
     bind,
 )
 from rue.models import Locator
-from rue.resources import ResourceResolver, ResourceSpec, Scope, registry
+from rue.resources import DependencyResolver, ResourceSpec, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
 from rue.resources.metrics.decorator import metric
 from rue.testing.models import LoadedTestDef
@@ -60,7 +60,7 @@ def _consumer_spec(
 
 
 async def _resolve(
-    resolver: ResourceResolver,
+    resolver: DependencyResolver,
     name: str,
     *,
     consumer_spec=None,
@@ -156,7 +156,7 @@ async def test_metric_on_injection_records_case_id_before_suffix():
     def test_case_metric():
         yield m
 
-    resolver = ResourceResolver(registry)
+    resolver = DependencyResolver(registry)
     with ctx:
         result = await _resolve(
             resolver,
@@ -182,7 +182,7 @@ async def test_metric_on_injection_records_suffix_when_case_id_missing():
     def test_case_suffix_metric():
         yield m
 
-    resolver = ResourceResolver(registry)
+    resolver = DependencyResolver(registry)
     with ctx:
         result = await _resolve(
             resolver,
@@ -264,7 +264,7 @@ async def test_metric_decorator_no_args():
         yield _metric("default")
         return 0
 
-    resolver = ResourceResolver(registry)
+    resolver = DependencyResolver(registry)
     m = await _resolve(
         resolver,
         "default_metric",
@@ -283,7 +283,7 @@ async def test_metric_on_injection_hook_with_context():
         yield _metric("ctx")
         return 0
 
-    resolver = ResourceResolver(registry)
+    resolver = DependencyResolver(registry)
     resource_consumer = _resource_spec("test_ctx_metric")
     ctx = _ctx("my_merit")
     with ctx:
@@ -328,7 +328,7 @@ async def test_metric_decorator_emits_result_with_assertions_and_return():
         yield 123
         return 999  # ignored: metric final value comes from the second yield
 
-    resolver = ResourceResolver(registry)
+    resolver = DependencyResolver(registry)
     metric_results = []
     with _ctx(), bind(
         CURRENT_METRIC_RESULTS, metric_results
@@ -360,7 +360,7 @@ async def test_metric_test_injection_records_test_consumer_spec():
     def sampled_metric():
         yield _metric("sampled")
 
-    resolver = ResourceResolver(registry)
+    resolver = DependencyResolver(registry)
     ctx = _ctx("test_metric")
     with ctx:
         m = await _resolve(
@@ -384,7 +384,7 @@ async def test_metric_resolve_without_injection_hook_skips_consumer_metadata():
     def sampled_metric():
         yield _metric("sampled")
 
-    resolver = ResourceResolver(registry)
+    resolver = DependencyResolver(registry)
     ctx = _ctx("test_metric")
     with ctx:
         m = await _resolve(
@@ -414,7 +414,7 @@ async def test_metric_records_module_and_provider_identity():
         yield metric_instance
         yield metric_instance.mean
 
-    resolver = ResourceResolver(registry)
+    resolver = DependencyResolver(registry)
     metric_results = []
     ctx = _ctx(
         "test_metric",
@@ -456,7 +456,7 @@ async def test_metric_decorator_records_metric_dependencies():
         yield metric_instance
         yield metric_instance.mean
 
-    resolver = ResourceResolver(registry)
+    resolver = DependencyResolver(registry)
     metric_results = []
     with _ctx(), bind(
         CURRENT_METRIC_RESULTS, metric_results

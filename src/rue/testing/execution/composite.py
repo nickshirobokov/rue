@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from rue.resources.resolver import ResourceResolver
+from rue.resources.resolver import DependencyResolver
 from rue.testing.execution.base import ExecutableTest, ExecutionBackend
 from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.loaded import LoadedTestDef
@@ -28,7 +28,7 @@ class CompositeTest(ExecutableTest):
 
     async def _execute(
         self,
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
     ) -> ExecutedTest:
         if self.backend is ExecutionBackend.MAIN:
             sub_executions = []

@@ -14,7 +14,7 @@ from rue.experiments.models import (
     ExperimentVariantResult,
 )
 from rue.experiments.registry import registry as default_experiment_registry
-from rue.resources import ResourceResolver
+from rue.resources import DependencyResolver
 from rue.resources.registry import registry as default_resource_registry
 from rue.testing.discovery import TestLoader
 from rue.testing.models.spec import TestSpecCollection
@@ -103,7 +103,7 @@ async def _run_experiment_variant(
         experiment_variant=variant,
         experiment_setup_chain=collection.all_setup_files,
     )
-    resolver = ResourceResolver(default_resource_registry)
+    resolver = DependencyResolver(default_resource_registry)
     run = None
     with context:
         try:

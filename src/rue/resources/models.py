@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable, Generator
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from typing import Any
 
-from rue.context.scopes import Scope
+from rue.context.scopes import Scope, ScopeOwner
 from rue.models import Spec
 
 
@@ -103,7 +104,7 @@ class ResourceGraph:
 
 
 @dataclass(frozen=True, slots=True)
-class ResourceTransferSnapshot:
+class StateSnapshot:
     """CRDT-backed transfer payload for reconstructing resources in a worker."""
 
     resource_specs: tuple[ResourceSpec, ...]
@@ -116,3 +117,26 @@ class ResourceTransferSnapshot:
     )
     resolution_order: tuple[ResourceSpec, ...] = field(default_factory=tuple)
     actor_id: int = 0
+
+
+@dataclass(slots=True)
+class ScheduledTeardown:
+    """Generator resource teardown record."""
+
+    spec: ResourceSpec
+    owner: ScopeOwner
+    definition: LoadedResourceDef
+    generator: Generator[Any, None, None] | AsyncGenerator[Any, None]
+    consumer_spec: Spec
+    direct_dependencies: tuple[ResourceSpec, ...]
+
+
+@dataclass(slots=True)
+class ResolverScopeState:
+    """Mutable state owned by one resource scope key."""
+
+    cache: dict[ResourceSpec, Any] = field(default_factory=dict)
+    pending: dict[ResourceSpec, asyncio.Future[Any]] = field(
+        default_factory=dict
+    )
+    teardowns: list[ScheduledTeardown] = field(default_factory=list)

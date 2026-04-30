@@ -15,8 +15,8 @@ from rue.context.runtime import (
     bind,
 )
 from rue.experiments.registry import registry as default_experiment_registry
-from rue.resources import ResourceResolver
-from rue.resources.models import ResourceTransferSnapshot
+from rue.resources import DependencyResolver
+from rue.resources.models import StateSnapshot
 from rue.resources.registry import registry as default_resource_registry
 from rue.resources.state import ResourceStore
 from rue.telemetry.base import TelemetryArtifact
@@ -34,7 +34,7 @@ class ExecutorPayload:
     suite_root: Path
     setup_chain: tuple[SetupFileRef, ...]
     params: dict[str, Any]
-    snapshot: ResourceTransferSnapshot
+    snapshot: StateSnapshot
     context: RunContext
     execution_id: UUID
 
@@ -55,7 +55,7 @@ def run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
 
 async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
     loader = TestLoader(payload.suite_root)
-    resolver = ResourceResolver(
+    resolver = DependencyResolver(
         default_resource_registry,
         resources=ResourceStore.shadow(
             sync_actor_id=payload.snapshot.actor_id,

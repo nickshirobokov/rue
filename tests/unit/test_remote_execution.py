@@ -18,7 +18,7 @@ import pytest
 import rue
 from rue.config import Config
 from rue.context.process_pool import CURRENT_PROCESS_POOL
-from rue.resources import ResourceResolver, registry, resource
+from rue.resources import DependencyResolver, registry, resource
 from rue.resources.models import Scope
 from rue.telemetry import OtelTraceArtifact
 from rue.testing.execution.base import ExecutionBackend
@@ -374,7 +374,7 @@ class TestSingleTestSubprocess:
 
         with bind_pool(FakePool(expected)) as pool:
             _resource_graph(remote)
-            execution = await remote.execute(ResourceResolver(registry))
+            execution = await remote.execute(DependencyResolver(registry))
 
         assert execution.definition is definition
         assert execution.result is expected.result
@@ -446,7 +446,7 @@ class TestSingleTestSubprocess:
             sync_update=b"",
         ))) as pool:
             _resource_graph(remote)
-            execution = await remote.execute(ResourceResolver(registry))
+            execution = await remote.execute(DependencyResolver(registry))
 
         assert len(pool.submitted) == 1
         assert len(execution.telemetry_artifacts) == 1
@@ -477,7 +477,7 @@ class TestSingleTestSubprocess:
             )
         ) as pool:
             _resource_graph(remote)
-            execution = await remote.execute(ResourceResolver(registry))
+            execution = await remote.execute(DependencyResolver(registry))
 
         assert execution.status == TestStatus.SKIPPED
         assert pool.submitted == []
@@ -507,7 +507,7 @@ class TestSingleTestSubprocess:
             )
         ) as pool:
             _resource_graph(remote)
-            execution = await remote.execute(ResourceResolver(registry))
+            execution = await remote.execute(DependencyResolver(registry))
 
         assert execution.status == TestStatus.SKIPPED
         assert "no thanks" in str(execution.result.error)
@@ -540,7 +540,7 @@ class TestSingleTestSubprocess:
             )
         ):
             _resource_graph(remote)
-            execution = await remote.execute(ResourceResolver(registry))
+            execution = await remote.execute(DependencyResolver(registry))
 
         on_complete.assert_called_once_with(execution)
 
@@ -572,7 +572,7 @@ class TestSingleTestSubprocess:
         with bind_pool(pool):
             await asyncio.gather(
                 *[
-                    test.execute(ResourceResolver(registry))
+                    test.execute(DependencyResolver(registry))
                     for test in tests
                 ]
             )
@@ -619,7 +619,7 @@ class TestRemoteEndToEnd:
         runner = make_runner(null_reporter)
         run = await runner.run(
             items=items,
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
         )
 
         assert run.result.passed == 1
@@ -679,7 +679,7 @@ class TestRemoteEndToEnd:
         items = materialize_tests(module_path)
         run = await make_runner(trace_reporter).run(
             items=items,
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
         )
 
         execution = run.result.executions[0]
@@ -739,7 +739,7 @@ class TestRemoteEndToEnd:
         runner = make_runner(null_reporter)
         run = await runner.run(
             items=items,
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
         )
 
         assert run.result.passed == 1, run.result.executions[0].result.error
@@ -779,7 +779,7 @@ class TestRemoteEndToEnd:
         runner = make_runner(null_reporter)
         run = await runner.run(
             items=items,
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
         )
 
         assert run.result.passed == 2, [
@@ -827,7 +827,7 @@ class TestRemoteEndToEnd:
         runner = make_runner(null_reporter)
         run = await runner.run(
             items=items,
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
         )
 
         assert run.result.passed == 2, [
@@ -878,7 +878,7 @@ class TestRemoteEndToEnd:
         runner = make_runner(null_reporter)
         run = await runner.run(
             items=items,
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
         )
 
         assert run.result.passed == 2, [

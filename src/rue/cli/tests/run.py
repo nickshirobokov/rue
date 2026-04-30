@@ -25,7 +25,7 @@ from rue.config import load_config
 from rue.context.runtime import RunContext
 from rue.reports.base import Reporter
 from rue.resources import (
-    ResourceResolver,
+    DependencyResolver,
     registry as default_resource_registry,
 )
 from rue.storage import SQLiteStore
@@ -164,7 +164,7 @@ def run(
         run_result = asyncio.run(
             runner.run(
                 items,
-                resolver=ResourceResolver(default_resource_registry),
+                resolver=DependencyResolver(default_resource_registry),
             )
         )
     raise SystemExit(

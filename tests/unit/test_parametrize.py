@@ -1,6 +1,6 @@
 import asyncio
 
-from rue.resources import ResourceResolver, registry, resource
+from rue.resources import DependencyResolver, registry, resource
 from rue.testing import Runner, test as t_decorator
 from rue.testing.models import ParameterSet, ParamsIterateModifier
 from tests.unit.factories import make_definition, make_run_context
@@ -55,7 +55,7 @@ def test_runner_iterate_params_applies_values_and_runs_all_sets(null_reporter):
         run_result = asyncio.run(
             make_runner(null_reporter).run(
                 items=[item],
-                resolver=ResourceResolver(registry),
+                resolver=DependencyResolver(registry),
             )
         )
     finally:
@@ -99,7 +99,7 @@ def test_runner_iterate_params_uses_min_passes_threshold(null_reporter):
     run_result = asyncio.run(
         make_runner(null_reporter).run(
             items=[item],
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
         )
     )
 

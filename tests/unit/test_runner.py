@@ -17,7 +17,7 @@ from rue.config import Config
 from rue.reports import OtelReporter
 from rue.reports.base import Reporter
 from rue.reports.otel import DEFAULT_OTEL_OUTPUT_ROOT, MAX_STORED_OTEL_RUNS
-from rue.resources import ResourceResolver, registry, resource
+from rue.resources import DependencyResolver, registry, resource
 from rue.resources.sut import sut
 from rue.storage import Store
 from rue.telemetry import OtelTraceArtifact
@@ -277,7 +277,7 @@ class TestRunner:
         result = await make_runner(
             reporters=[null_reporter],
             store=store,
-        ).run(resolver=ResourceResolver(registry), items=[make_item(lambda: None)])
+        ).run(resolver=DependencyResolver(registry), items=[make_item(lambda: None)])
 
         assert store.saved_runs == [result]
         assert store.get_run(result.run_id) is result
@@ -290,7 +290,7 @@ class TestRunner:
             await make_runner(
                 reporters=[null_reporter],
                 store=ExplodingStore(),
-            ).run(resolver=ResourceResolver(registry), items=[make_item(lambda: None)])
+            ).run(resolver=DependencyResolver(registry), items=[make_item(lambda: None)])
 
     @pytest.mark.asyncio
     async def test_xfail_strict_fails_on_pass(self, null_reporter):
@@ -301,7 +301,7 @@ class TestRunner:
             strict_xfail_test, xfail_reason="must fail", xfail_strict=True
         )
         runner = make_runner(reporters=[null_reporter])
-        result = await runner.run(resolver=ResourceResolver(registry), items=[item])
+        result = await runner.run(resolver=DependencyResolver(registry), items=[item])
 
         assert result.result.failed == 1
 
@@ -334,7 +334,7 @@ class TestRunner:
         result = await Runner(
             reporters=[null_reporter],
         ).run(
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
             items=materialize_tests(module_path),
         )
 
@@ -351,7 +351,7 @@ class TestRunId:
         runner = make_runner(reporters=[null_reporter], run_id=run_id)
 
         result = await runner.run(
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
             items=[make_item(lambda: None)],
         )
 
@@ -360,7 +360,7 @@ class TestRunId:
     @pytest.mark.asyncio
     async def test_run_generates_uuid_when_not_provided(self, null_reporter):
         runner = make_runner(reporters=[null_reporter])
-        result = await runner.run(resolver=ResourceResolver(registry), items=[make_item(lambda: None)])
+        result = await runner.run(resolver=DependencyResolver(registry), items=[make_item(lambda: None)])
 
         assert isinstance(result.run_id, UUID)
 
@@ -381,7 +381,7 @@ class TestResourceInjection:
 
         item = make_item(test_with_resource, params=["injected"])
         runner = make_runner(reporters=[null_reporter])
-        await runner.run(resolver=ResourceResolver(registry), items=[item])
+        await runner.run(resolver=DependencyResolver(registry), items=[item])
 
         assert captured == ["injected_value"]
 
@@ -397,7 +397,7 @@ class TestResourceInjection:
 
         with pytest.raises(ValueError, match="Unknown resource: otel_trace"):
             await runner.run(
-                resolver=ResourceResolver(registry),
+                resolver=DependencyResolver(registry),
                 items=[item],
             )
 
@@ -411,7 +411,7 @@ class TestResourceInjection:
 
         with pytest.raises(ValueError, match="Unknown resource: unknown_param"):
             await runner.run(
-                resolver=ResourceResolver(registry),
+                resolver=DependencyResolver(registry),
                 items=[item],
             )
 
@@ -440,7 +440,7 @@ class TestResourceInjection:
         result = await make_runner(
             reporters=[null_reporter],
             capture_output=capture_output,
-        ).run(resolver=ResourceResolver(registry), items=[make_item(test_output, params=["agent"])])
+        ).run(resolver=DependencyResolver(registry), items=[make_item(test_output, params=["agent"])])
 
         assert result.result.passed == 1
         assert captured == [("hello from sut\n", "")]
@@ -496,7 +496,7 @@ class TestOpenTelemetry:
         runner = Runner(
             reporters=[reporter],
         )
-        result = await runner.run(resolver=ResourceResolver(registry), items=items)
+        result = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         assert result.result.passed == 2
         assert captured["first"] == {"sut.first_agent.__call__", "first_step"}
@@ -550,7 +550,7 @@ class TestOpenTelemetry:
         result = await Runner(
             reporters=[reporter],
         ).run(
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
             items=[make_item(traced, name="test_trace_session", is_async=True)]
         )
 
@@ -571,7 +571,7 @@ class TestOpenTelemetry:
         make_run_context(db_enabled=False)
         result = await Runner(
             reporters=[reporter],
-        ).run(resolver=ResourceResolver(registry), items=[make_item(lambda: None, name="test_without_otel")])
+        ).run(resolver=DependencyResolver(registry), items=[make_item(lambda: None, name="test_without_otel")])
 
         assert result.result.passed == 1
         assert len(reporter.trace_events) == 1
@@ -584,7 +584,7 @@ class TestOpenTelemetry:
         make_run_context(otel=False, db_enabled=False)
         result = await Runner(
             reporters=[reporter],
-        ).run(resolver=ResourceResolver(registry), items=[make_item(lambda: None, name="test_without_otel")])
+        ).run(resolver=DependencyResolver(registry), items=[make_item(lambda: None, name="test_without_otel")])
 
         assert result.result.passed == 1
         assert reporter.trace_events == []
@@ -617,7 +617,7 @@ class TestOpenTelemetry:
         make_run_context(otel=True, db_enabled=False)
         result = await Runner(
             reporters=[reporter],
-        ).run(resolver=ResourceResolver(registry), items=[item])
+        ).run(resolver=DependencyResolver(registry), items=[item])
 
         execution = result.result.executions[0]
         child_execution_ids = {
@@ -649,7 +649,7 @@ class TestOpenTelemetry:
         result = await Runner(
             reporters=[OtelReporter()],
         ).run(
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
             items=[make_item(traced, name="test_default_trace", is_async=True)]
         )
 
@@ -689,7 +689,7 @@ class TestOpenTelemetry:
         result = await Runner(
             reporters=[OtelReporter()],
         ).run(
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
             items=[make_item(traced, name="test_nested_trace", is_async=True)]
         )
 
@@ -723,7 +723,7 @@ class TestOpenTelemetry:
         make_run_context(otel=True, db_enabled=False)
         result = await Runner(
             reporters=[reporter],
-        ).run(resolver=ResourceResolver(registry), items=[make_item(traced, name="test_flat_trace", is_async=True)])
+        ).run(resolver=DependencyResolver(registry), items=[make_item(traced, name="test_flat_trace", is_async=True)])
 
         execution = result.result.executions[0]
         artifact = reporter.trace_events[0][1]
@@ -760,7 +760,7 @@ class TestOpenTelemetry:
         first_run = await Runner(
             reporters=[OtelReporter()],
         ).run(
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
             items=[
                 make_item(first_trace, name="test_first_trace", is_async=True),
                 make_item(
@@ -777,7 +777,7 @@ class TestOpenTelemetry:
         second_run = await Runner(
             reporters=[OtelReporter()],
         ).run(
-            resolver=ResourceResolver(registry),
+            resolver=DependencyResolver(registry),
             items=[
                 make_item(second_trace, name="test_second_trace", is_async=True)
             ],
@@ -808,7 +808,7 @@ class TestOpenTelemetry:
             result = await Runner(
                 reporters=[OtelReporter()],
             ).run(
-                resolver=ResourceResolver(registry),
+                resolver=DependencyResolver(registry),
                 items=[
                     make_item(traced, name="test_prune_trace", is_async=True)
                 ]
@@ -838,7 +838,7 @@ class TestMaxfail:
         runner = Runner(
             reporters=[null_reporter],
         )
-        result = await runner.run(resolver=ResourceResolver(registry), items=items)
+        result = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         assert result.result.failed == 2
         assert result.result.stopped_early
@@ -854,7 +854,7 @@ class TestMaxfail:
         runner = Runner(
             reporters=[null_reporter],
         )
-        result = await runner.run(resolver=ResourceResolver(registry), items=items)
+        result = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         assert result.result.errors == 1
         assert result.result.stopped_early
@@ -898,7 +898,7 @@ class TestMaxfail:
         runner = Runner(
             reporters=[null_reporter],
         )
-        result = await runner.run(resolver=ResourceResolver(registry), items=items)
+        result = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         assert result.result.stopped_early
         assert started == ["slow_pass", "fail_1", "fail_2"]
@@ -949,7 +949,7 @@ class TestConcurrency:
         runner = Runner(
             reporters=[null_reporter],
         )
-        result = await runner.run(resolver=ResourceResolver(registry), items=items)
+        result = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         assert result.result.passed == 3
         # All should start within a small window (concurrent)
@@ -1102,7 +1102,7 @@ class TestConcurrency:
         runner = Runner(
             reporters=[reporter],
         )
-        await runner.run(resolver=ResourceResolver(registry), items=items)
+        await runner.run(resolver=DependencyResolver(registry), items=items)
 
         complete_times = [
             elapsed
@@ -1129,7 +1129,7 @@ class TestConcurrency:
         runner = Runner(
             reporters=[reporter],
         )
-        await runner.run(resolver=ResourceResolver(registry), items=items)
+        await runner.run(resolver=DependencyResolver(registry), items=items)
 
         started = {
             name for kind, name in reporter.event_order if kind == "start"
@@ -1169,7 +1169,7 @@ class TestConcurrency:
         runner = Runner(
             reporters=[reporter],
         )
-        await runner.run(resolver=ResourceResolver(registry), items=items)
+        await runner.run(resolver=DependencyResolver(registry), items=items)
 
         assert [
             name for kind, name in reporter.event_order if kind == "start"
@@ -1206,7 +1206,7 @@ class TestConcurrency:
         runner = Runner(
             reporters=[reporter],
         )
-        await runner.run(resolver=ResourceResolver(registry), items=items)
+        await runner.run(resolver=DependencyResolver(registry), items=items)
 
         main_start_idx = reporter.event_order.index(("start", "main_barrier"))
         async_completes = [
@@ -1255,7 +1255,7 @@ class TestConcurrency:
         runner = Runner(
             reporters=[reporter],
         )
-        run = await runner.run(resolver=ResourceResolver(registry), items=items)
+        run = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         barrier_start = reporter.event_order.index(("start", "a1_barrier"))
         barrier_complete = reporter.event_order.index(
@@ -1309,7 +1309,7 @@ class TestConcurrency:
         runner = Runner(
             reporters=[reporter],
         )
-        await runner.run(resolver=ResourceResolver(registry), items=items)
+        await runner.run(resolver=DependencyResolver(registry), items=items)
 
         main_start = reporter.event_order.index(("start", "global_main"))
         a2_after_start = reporter.event_order.index(("start", "a2_after"))
@@ -1338,7 +1338,7 @@ class TestConcurrency:
         )
         with pytest.raises(RuntimeError, match="start callback failed"):
             await runner.run(
-                resolver=ResourceResolver(registry),
+                resolver=DependencyResolver(registry),
                 items=[make_item(test_fn, name="test_start", is_async=True)]
             )
 
@@ -1359,7 +1359,7 @@ class TestConcurrency:
         )
         with pytest.raises(RuntimeError, match="complete callback failed"):
             await runner.run(
-                resolver=ResourceResolver(registry),
+                resolver=DependencyResolver(registry),
                 items=[make_item(test_fn, name="test_complete", is_async=True)]
             )
 
@@ -1379,7 +1379,7 @@ class TestConcurrency:
         runner = Runner(
             reporters=[reporter],
         )
-        test_run = await runner.run(resolver=ResourceResolver(registry), items=[item])
+        test_run = await runner.run(resolver=DependencyResolver(registry), items=[item])
 
         assert len(reporter.subtest_event_times) == 3
         parent_complete_elapsed = next(
@@ -1421,7 +1421,7 @@ class TestConcurrency:
         runner = Runner(
             reporters=[null_reporter],
         )
-        result = await runner.run(resolver=ResourceResolver(registry), items=items)
+        result = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         assert result.result.passed == 3
         # Should execute in order
@@ -1453,7 +1453,7 @@ class TestConcurrency:
         runner = Runner(
             reporters=[null_reporter],
         )
-        result = await runner.run(resolver=ResourceResolver(registry), items=items)
+        result = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         assert result.result.stopped_early
         # May have more than 2 due to concurrent execution, but should stop
@@ -1479,7 +1479,7 @@ class TestTimeout:
         runner = Runner(
             reporters=[null_reporter],
         )
-        result = await runner.run(resolver=ResourceResolver(registry), items=items)
+        result = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         assert result.result.stopped_early
         assert result.result.passed == 1
@@ -1499,7 +1499,7 @@ class TestTimeout:
         # timeout is None by default
         assert context.config.timeout is None
 
-        result = await runner.run(resolver=ResourceResolver(registry), items=[item])
+        result = await runner.run(resolver=DependencyResolver(registry), items=[item])
         assert result.result.passed == 1
 
 
@@ -1524,7 +1524,7 @@ class TestResultOrdering:
         runner = Runner(
             reporters=[null_reporter],
         )
-        result = await runner.run(resolver=ResourceResolver(registry), items=items)
+        result = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         # Results should be in discovery order, not completion order
         names = [
@@ -1556,7 +1556,7 @@ class TestResourceTeardown:
         ]
 
         runner = make_runner(reporters=[null_reporter])
-        result = await runner.run(resolver=ResourceResolver(registry), items=items)
+        result = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         assert result.result.passed == 2
         assert teardown_count == 2
@@ -1582,7 +1582,7 @@ class TestResourceTeardown:
         ]
 
         runner = make_runner(reporters=[null_reporter])
-        await runner.run(resolver=ResourceResolver(registry), items=items)
+        await runner.run(resolver=DependencyResolver(registry), items=items)
 
         assert create_count == 1
         assert captured == ["suite_1", "suite_1"]
@@ -1619,7 +1619,7 @@ class TestResourceTeardown:
         runner = Runner(
             reporters=[null_reporter],
         )
-        result = await runner.run(resolver=ResourceResolver(registry), items=items)
+        result = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         assert result.result.passed == len(items)
         assert create_count == 1
@@ -1642,7 +1642,7 @@ class TestResourceResolutionErrors:
             match="Unknown resource: unknown_resource",
         ):
             await runner.run(
-                resolver=ResourceResolver(registry),
+                resolver=DependencyResolver(registry),
                 items=[item],
             )
 
@@ -1664,7 +1664,7 @@ class TestResourceResolutionErrors:
             test_that_fails, params=["resource_with_teardown_error"]
         )
         runner = make_runner(reporters=[null_reporter])
-        result = await runner.run(resolver=ResourceResolver(registry), items=[item])
+        result = await runner.run(resolver=DependencyResolver(registry), items=[item])
 
         # Test should fail due to assertion, not error
         assert result.result.failed == 1
@@ -1694,7 +1694,7 @@ class TestResourceResolutionErrors:
         runner = Runner(
             reporters=[null_reporter],
         )
-        result = await runner.run(resolver=ResourceResolver(registry), items=items)
+        result = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         assert result.result.errors == 1
         assert result.result.executions[0].result.error is not None
@@ -1727,7 +1727,7 @@ class TestResourceResolutionErrors:
         runner = Runner(
             reporters=[null_reporter],
         )
-        result = await runner.run(resolver=ResourceResolver(registry), items=items)
+        result = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         assert result.result.errors == 1
         # Find the errored execution
@@ -1761,7 +1761,7 @@ class TestResourceResolutionErrors:
             ),
         ]
         runner = make_runner(reporters=[null_reporter])
-        result = await runner.run(resolver=ResourceResolver(registry), items=items)
+        result = await runner.run(resolver=DependencyResolver(registry), items=items)
 
         # Both tests should error due to suite resource failure
         assert result.result.errors == 2
