@@ -214,7 +214,7 @@ class Runner:
                 for leaf in leaves
             }
             autouse_keys = frozenset(consumers)
-            resolver.registry.compile_di_graph(
+            resolver.registry.compile_graphs(
                 consumers,
                 autouse_keys=autouse_keys,
             )

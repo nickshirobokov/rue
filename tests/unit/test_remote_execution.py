@@ -111,7 +111,7 @@ def make_runner(reporter) -> Runner:
 
 
 def _resource_graph(*tests: SingleTest):
-    registry.compile_di_graph(
+    registry.compile_graphs(
         {
             test.execution_id: (
                 test.definition.spec,

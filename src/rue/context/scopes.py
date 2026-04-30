@@ -38,33 +38,6 @@ class ScopeOwner:
     run_id: UUID | None = None
     module_path: Path | None = None
 
-    def is_active(
-        self,
-        *,
-        execution_id: UUID | None,
-        run_id: UUID | None,
-        module_path: Path | None,
-    ) -> bool:
-        """Return whether this owner applies in the current runtime context."""
-        match self.scope:
-            case Scope.TEST:
-                return (
-                    self.execution_id is not None
-                    and self.run_id is not None
-                    and execution_id == self.execution_id
-                    and run_id == self.run_id
-                )
-            case Scope.MODULE:
-                return (
-                    self.module_path is not None
-                    and self.run_id is not None
-                    and module_path == self.module_path
-                    and run_id == self.run_id
-                )
-            case Scope.RUN:
-                return self.run_id is not None and run_id == self.run_id
-
-
 @dataclass(frozen=True, slots=True)
 class ScopeContext:
     """Current runtime owners for resolved injected dependencies."""

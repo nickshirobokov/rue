@@ -13,6 +13,7 @@ from rue.context.runtime import (
     TestContext,
 )
 from rue.resources import (
+    ResourceFactoryKind,
     ResourceRegistry,
     ResourceResolver,
     Scope,
@@ -57,8 +58,8 @@ def _resource_graph(
     key: UUID = _TEST_GRAPH_KEY,
 ):
     consumer = consumer_spec or _consumer_spec()
-    resource_registry.compile_di_graph({key: (consumer, resource_names)})
-    return resource_registry.slice_registry(key)
+    resource_registry.compile_graphs({key: (consumer, resource_names)})
+    return resource_registry.get_graph(key)
 
 
 async def _resolve(
@@ -78,7 +79,7 @@ async def _resolve(
     item = _make_item(name=consumer.name, module_path=consumer.module_path)
     with TestContext(item=item, execution_id=execution_id):
         return await resolver.resolve_resource(
-            graph.injections_by_execution_id[execution_id][name],
+            graph.injections[name],
             consumer_spec=consumer,
         )
 
@@ -131,25 +132,17 @@ class TestResourceDecorator:
     """Tests for the @resource decorator."""
 
     @pytest.mark.parametrize(
-        ("name", "kind", "expected_flags"),
+        ("name", "kind", "expected_kind"),
         [
             (
                 "sync_resource",
                 "sync",
-                {
-                    "is_async": False,
-                    "is_generator": False,
-                    "is_async_generator": False,
-                },
+                ResourceFactoryKind.SYNC,
             ),
             (
                 "async_resource",
                 "async",
-                {
-                    "is_async": True,
-                    "is_generator": False,
-                    "is_async_generator": False,
-                },
+                ResourceFactoryKind.ASYNC,
             ),
         ],
     )
@@ -157,7 +150,7 @@ class TestResourceDecorator:
         self,
         name,
         kind,
-        expected_flags,
+        expected_kind,
     ):
         if kind == "sync":
 
@@ -174,30 +167,20 @@ class TestResourceDecorator:
         defn = _only_definition(registry, name)
         assert defn.spec.name == name
         assert defn.spec.scope == Scope.TEST
-        assert defn.is_async == expected_flags["is_async"]
-        assert defn.is_generator == expected_flags["is_generator"]
-        assert defn.is_async_generator == expected_flags["is_async_generator"]
+        assert defn.factory_kind is expected_kind
 
     @pytest.mark.parametrize(
-        ("name", "register", "expected_flags"),
+        ("name", "register", "expected_kind"),
         [
             (
                 "gen_resource",
                 "sync",
-                {
-                    "is_async": False,
-                    "is_generator": True,
-                    "is_async_generator": False,
-                },
+                ResourceFactoryKind.GENERATOR,
             ),
             (
                 "async_gen_resource",
                 "async",
-                {
-                    "is_async": True,
-                    "is_generator": False,
-                    "is_async_generator": True,
-                },
+                ResourceFactoryKind.ASYNC_GENERATOR,
             ),
         ],
     )
@@ -205,7 +188,7 @@ class TestResourceDecorator:
         self,
         name,
         register,
-        expected_flags,
+        expected_kind,
     ):
         if register == "sync":
 
@@ -220,9 +203,7 @@ class TestResourceDecorator:
                 yield "async_gen_value"
 
         defn = _only_definition(registry, name)
-        assert defn.is_async == expected_flags["is_async"]
-        assert defn.is_generator == expected_flags["is_generator"]
-        assert defn.is_async_generator == expected_flags["is_async_generator"]
+        assert defn.factory_kind is expected_kind
 
     @pytest.mark.parametrize(
         ("scope_value", "expected_scope", "name"),
@@ -257,7 +238,7 @@ class TestResourceDecorator:
             return base + other
 
         defn = _only_definition(registry, "dependent")
-        assert defn.spec.dependencies == ("base", "other")
+        assert defn.dependencies == ("base", "other")
 
     def test_ignores_self_and_cls_in_dependencies(self):
         @resource
@@ -265,29 +246,44 @@ class TestResourceDecorator:
             return base + other
 
         defn = _only_definition(registry, "dependent")
-        assert defn.spec.dependencies == ("base", "other")
+        assert defn.dependencies == ("base", "other")
+
+    def test_resource_spec_identity_excludes_provider_metadata(self):
+        @resource(autouse=True, sync=False)
+        def identity_only(base):
+            return base
+
+        defn = _only_definition(registry, "identity_only")
+        same_identity = type(defn.spec)(
+            locator=defn.spec.locator,
+            scope=defn.spec.scope,
+        )
+
+        assert defn.spec == same_identity
+        assert hash(defn.spec) == hash(same_identity)
+        assert defn.dependencies == ("base",)
+        assert defn.autouse is True
+        assert defn.sync is False
 
 
 class TestResourceRegistry:
-    def test_compile_di_graph_single_resource(self):
+    def test_compile_graphs_single_resource(self):
         @resource
         def leaf():
             return "leaf"
 
         graph = _resource_graph(registry, ("leaf",))
 
-        roots = graph.roots_by_execution_id[_TEST_GRAPH_KEY]
-        resolution_order = graph.resolution_order_by_execution_id[
-            _TEST_GRAPH_KEY
-        ]
+        roots = graph.roots
+        resolution_order = graph.resolution_order
         root_names = [identity.name for identity in roots]
         node_names = [identity.name for identity in resolution_order]
         assert root_names == ["leaf"]
         assert node_names == ["leaf"]
         root = roots[0]
-        assert graph.dependencies_by_resource[root] == ()
+        assert graph.dependencies[root] == ()
 
-    def test_compile_di_graph_transitive_dependency_first(self):
+    def test_compile_graphs_transitive_dependency_first(self):
         @resource
         def leaf():
             return "leaf"
@@ -301,14 +297,14 @@ class TestResourceRegistry:
             return middle
 
         graph = _resource_graph(registry, ("root",))
-        nodes = graph.resolution_order_by_execution_id[_TEST_GRAPH_KEY]
+        nodes = graph.resolution_order
 
         node_names = [identity.name for identity in nodes]
         assert node_names == ["leaf", "middle", "root"]
-        assert graph.dependencies_by_resource[nodes[2]] == (nodes[1],)
-        assert graph.dependencies_by_resource[nodes[1]] == (nodes[0],)
+        assert graph.dependencies[nodes[2]] == (nodes[1],)
+        assert graph.dependencies[nodes[1]] == (nodes[0],)
 
-    def test_compile_di_graph_shares_dependency_spec(self):
+    def test_compile_graphs_shares_dependency_spec(self):
         @resource
         def shared():
             return "shared"
@@ -326,20 +322,18 @@ class TestResourceRegistry:
             return left, right
 
         graph = _resource_graph(registry, ("root",))
-        root_spec = graph.roots_by_execution_id[_TEST_GRAPH_KEY][0]
-        left_spec, right_spec = graph.dependencies_by_resource[root_spec]
+        root_spec = graph.roots[0]
+        left_spec, right_spec = graph.dependencies[root_spec]
 
         assert (
-            graph.dependencies_by_resource[left_spec][0]
-            == graph.dependencies_by_resource[right_spec][0]
+            graph.dependencies[left_spec][0]
+            == graph.dependencies[right_spec][0]
         )
-        resolution_order = graph.resolution_order_by_execution_id[
-            _TEST_GRAPH_KEY
-        ]
+        resolution_order = graph.resolution_order
         node_names = [identity.name for identity in resolution_order]
         assert node_names == ["shared", "left", "right", "root"]
 
-    def test_compile_di_graph_preserves_root_order(self):
+    def test_compile_graphs_preserves_root_order(self):
         @resource
         def left():
             return "left"
@@ -350,11 +344,11 @@ class TestResourceRegistry:
 
         graph = _resource_graph(registry, ("right", "left"))
 
-        roots = graph.roots_by_execution_id[_TEST_GRAPH_KEY]
+        roots = graph.roots
         root_names = [identity.name for identity in roots]
         assert root_names == ["right", "left"]
 
-    def test_compile_di_graph_keeps_same_name_run_roots(
+    def test_compile_graphs_keeps_same_name_run_roots(
         self, tmp_path
     ):
         custom_registry = ResourceRegistry()
@@ -385,7 +379,7 @@ class TestResourceRegistry:
 
         child_key = UUID(int=2)
         sibling_key = UUID(int=3)
-        custom_registry.compile_di_graph(
+        custom_registry.compile_graphs(
             {
                 child_key: (
                     _consumer_spec(module_path=child / "rue_child.py"),
@@ -399,7 +393,7 @@ class TestResourceRegistry:
         )
 
         assert {
-            custom_registry.roots_by_execution_id[key][0].module_path.parent
+            custom_registry.get_graph(key).roots[0].module_path.parent
             for key in (child_key, sibling_key)
         } == {child.resolve(), root.resolve()}
 
@@ -451,8 +445,8 @@ class TestResourceRegistry:
         )
 
         assert {
-            root_graph.injections_by_execution_id[_TEST_GRAPH_KEY]["shared"].module_path.parent,
-            child_graph.injections_by_execution_id[_TEST_GRAPH_KEY]["shared"].module_path.parent,
+            root_graph.injections["shared"].module_path.parent,
+            child_graph.injections["shared"].module_path.parent,
         } == {root.resolve(), child.resolve()}
         assert root_selected.spec.scope == Scope.RUN
         assert child_selected.spec.scope == Scope.RUN
@@ -498,13 +492,13 @@ class TestResourceRegistry:
         )
 
         assert (
-            child_graph.injections_by_execution_id[_TEST_GRAPH_KEY][
+            child_graph.injections[
                 "shared"
             ].module_path.parent
             == child.resolve()
         )
         assert (
-            sibling_graph.injections_by_execution_id[_TEST_GRAPH_KEY][
+            sibling_graph.injections[
                 "shared"
             ].module_path.parent
             == root.resolve()
@@ -537,7 +531,7 @@ class TestResourceRegistry:
             consumer_spec=_consumer_spec(module_path=root / "rue_test.py"),
         )
         selected = custom_registry.get_definition(
-            graph.injections_by_execution_id[_TEST_GRAPH_KEY]["shared"]
+            graph.injections["shared"]
         )
 
         assert selected.spec.scope == Scope.MODULE
@@ -584,7 +578,7 @@ class TestResourceRegistry:
         assert builtin_session_def is not None
         assert builtin_session_def.fn() == "builtin-session"
         with pytest.raises(ValueError, match="Unknown resource"):
-            custom_registry.compile_di_graph(
+            custom_registry.compile_graphs(
                 {_TEST_GRAPH_KEY: (_consumer_spec(), ("extra_resource",))}
             )
 
@@ -604,11 +598,14 @@ class TestResourceResolver:
 
         resolver = ResourceResolver(registry)
         identity = _only_definition(registry, "simple").spec
-        with pytest.raises(KeyError):
-            await resolver.resolve_resource(
-                identity,
-                consumer_spec=_consumer_spec(),
-            )
+        consumer = _consumer_spec()
+        item = _make_item(name=consumer.name, module_path=consumer.module_path)
+        with TestContext(item=item, execution_id=_TEST_GRAPH_KEY):
+            with pytest.raises(KeyError):
+                await resolver.resolve_resource(
+                    identity,
+                    consumer_spec=consumer,
+                )
 
     @pytest.mark.asyncio
     async def test_test_scope_requires_open_test_context(self):
@@ -622,7 +619,8 @@ class TestResourceResolver:
 
         with pytest.raises(RuntimeError, match="open TestContext"):
             await resolver.resolve_resource(
-                graph.injections_by_execution_id[_TEST_GRAPH_KEY]["simple"],
+                graph.injections["simple"],
+                graph=graph,
                 consumer_spec=consumer,
             )
 
@@ -1364,9 +1362,9 @@ class TestResourceHooks:
 class TestResourceResolutionErrors:
     """Tests to ensure resource resolution errors are properly surfaced."""
 
-    def test_compile_di_graph_raises_for_unknown_resource(self):
+    def test_compile_graphs_raises_for_unknown_resource(self):
         with pytest.raises(ValueError, match="Unknown resource: unknown"):
-            registry.compile_di_graph(
+            registry.compile_graphs(
                 {
                     _TEST_GRAPH_KEY: (
                         _consumer_spec(module_path=Path("tests/test_sample.py")),
@@ -1388,11 +1386,11 @@ class TestResourceResolutionErrors:
         with pytest.raises(
             RuntimeError, match="Circular resource dependency detected"
         ):
-            registry.compile_di_graph(
+            registry.compile_graphs(
                 {_TEST_GRAPH_KEY: (_consumer_spec(), ("shared_left",))}
             )
 
-    def test_compile_di_graph_raises_for_circular_dependency(self):
+    def test_compile_graphs_raises_for_circular_dependency(self):
         @resource(scope="module")
         def shared_left(shared_right):
             return shared_right
@@ -1404,7 +1402,7 @@ class TestResourceResolutionErrors:
         with pytest.raises(
             RuntimeError, match="Circular resource dependency detected"
         ):
-            registry.compile_di_graph(
+            registry.compile_graphs(
                 {
                     _TEST_GRAPH_KEY: (
                         _consumer_spec(module_path=Path("tests/test_sample.py")),
@@ -1413,7 +1411,7 @@ class TestResourceResolutionErrors:
                 }
             )
 
-    def test_compile_di_graph_rejects_narrower_scope_dependency(self):
+    def test_compile_graphs_rejects_narrower_scope_dependency(self):
         @resource(scope=Scope.TEST)
         def case_value():
             return "case"
@@ -1429,7 +1427,7 @@ class TestResourceResolutionErrors:
                 "test-scoped resource 'case_value'"
             ),
         ):
-            registry.compile_di_graph(
+            registry.compile_graphs(
                 {_TEST_GRAPH_KEY: (_consumer_spec(), ("run_value",))}
             )
 

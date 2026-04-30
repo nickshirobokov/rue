@@ -38,7 +38,7 @@ def test_experiment_uses_function_name_and_ids():
     assert definition.values == ("openai:gpt-5.4",)
     assert definition.dependencies == ()
     with pytest.raises(ValueError, match="Unknown resource"):
-        resource_registry.compile_di_graph(
+        resource_registry.compile_graphs(
             {uuid4(): (make_definition("test_model").spec, ("model",))}
         )
 

@@ -131,8 +131,8 @@ def _resource_graph(
     key: UUID = _TEST_GRAPH_KEY,
 ):
     consumer = consumer_spec or _consumer_spec()
-    registry.compile_di_graph({key: (consumer, resource_names)})
-    return registry.slice_registry(key)
+    registry.compile_graphs({key: (consumer, resource_names)})
+    return registry.get_graph(key)
 
 
 async def _resolve(
@@ -150,7 +150,7 @@ async def _resolve(
     )
     with TestContext(item=item, execution_id=execution_id):
         return await resolver.resolve_resource(
-            graph.injections_by_execution_id[execution_id][name],
+            graph.injections[name],
             consumer_spec=consumer,
         )
 
@@ -430,8 +430,33 @@ class TestExportSnapshot:
             sync_actor_id=7,
         )
 
-        assert snapshot.roots[0].name == "simple"
+        assert snapshot.injections["simple"].name == "simple"
         assert snapshot.actor_id == 7
+
+    async def test_non_sync_resources_are_excluded_by_definition_metadata(
+        self,
+    ):
+        @resource(scope=Scope.RUN, sync=False)
+        def local_only():
+            return {"local": True}
+
+        resolver = ResourceResolver(registry)
+        consumer_spec = _consumer_spec()
+        await _resolve(resolver, "local_only", consumer_spec=consumer_spec)
+
+        snapshot = _snapshot(
+            resolver,
+            ("local_only",),
+            consumer_spec=consumer_spec,
+        )
+        worker = await _worker_from_snapshot(
+            snapshot,
+            consumer_spec=consumer_spec,
+        )
+
+        assert snapshot.resource_specs == ()
+        assert snapshot.injections["local_only"].name == "local_only"
+        assert worker.cached_resources == {}
 
     async def test_atomic_values_use_tagged_nodes(self):
         class Mode(Enum):

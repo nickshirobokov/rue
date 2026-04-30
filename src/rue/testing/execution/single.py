@@ -161,9 +161,8 @@ class SingleTest(ExecutableTest):
                 self.semaphore if self.semaphore else contextlib.nullcontext()
             )
             async with semaphore:
-                await resolver.preload_graph_deps(
-                    execution_id,
-                    self.params,
+                await resolver.preload_graph(
+                    resolver.registry.get_graph(execution_id),
                     consumer_spec=self.definition.spec,
                 )
                 snapshot = resolver.transfer.export_snapshot(

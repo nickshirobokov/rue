@@ -7,6 +7,8 @@ from rue.resources.builtins import (
 )
 from rue.resources.models import (
     LoadedResourceDef,
+    ResourceFactoryKind,
+    ResourceGraph,
     ResourceSpec,
     ResourceTransferSnapshot,
 )
@@ -25,6 +27,8 @@ _register_builtin_resources(registry)
 __all__ = [
     "LoadedResourceDef",
     "MonkeyPatch",
+    "ResourceFactoryKind",
+    "ResourceGraph",
     "ResourceRegistry",
     "ResourceResolver",
     "ResourceSpec",

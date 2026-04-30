@@ -11,6 +11,8 @@ from uuid import UUID
 from rue.models import Locator, Spec
 from rue.resources.models import (
     LoadedResourceDef,
+    ResourceFactoryKind,
+    ResourceGraph,
     ResourceSpec,
     Scope,
 )
@@ -30,17 +32,7 @@ class ResourceRegistry:
     def __init__(self) -> None:
         self._definitions: dict[str, _DefinitionsByScope] = {}
         self._builtin_definitions: dict[str, _DefinitionsByScope] = {}
-        self.roots_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]] = {}
-        self.autouse_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]] = {}
-        self.injections_by_execution_id: dict[
-            UUID, dict[str, ResourceSpec]
-        ] = {}
-        self.dependencies_by_resource: dict[
-            ResourceSpec, tuple[ResourceSpec, ...]
-        ] = {}
-        self.resolution_order_by_execution_id: dict[
-            UUID, tuple[ResourceSpec, ...]
-        ] = {}
+        self._graphs_by_execution_id: dict[UUID, ResourceGraph] = {}
 
     def register_resource[**P, T](
         self,
@@ -71,6 +63,16 @@ class ResourceRegistry:
             is_async = inspect.iscoroutinefunction(fn)
             is_async_generator = inspect.isasyncgenfunction(fn)
             is_generator = inspect.isgeneratorfunction(fn)
+            factory_kind: ResourceFactoryKind
+            match (is_async, is_generator, is_async_generator):
+                case (_, _, True):
+                    factory_kind = ResourceFactoryKind.ASYNC_GENERATOR
+                case (_, True, _):
+                    factory_kind = ResourceFactoryKind.GENERATOR
+                case (True, _, _):
+                    factory_kind = ResourceFactoryKind.ASYNC
+                case _:
+                    factory_kind = ResourceFactoryKind.SYNC
             filename = (origin_fn or fn).__code__.co_filename
             origin_path = (
                 None
@@ -85,14 +87,12 @@ class ResourceRegistry:
                         function_name=fn.__name__,
                     ),
                     scope=scope,
-                    dependencies=tuple(dependencies),
-                    autouse=autouse,
-                    sync=sync,
                 ),
                 fn=fn,
-                is_async=is_async or is_async_generator,
-                is_generator=is_generator,
-                is_async_generator=is_async_generator,
+                factory_kind=factory_kind,
+                dependencies=tuple(dependencies),
+                autouse=autouse,
+                sync=sync,
                 resolve_hook=on_resolve,
                 injection_hook=on_injection,
                 teardown_hook=on_teardown,
@@ -124,11 +124,7 @@ class ResourceRegistry:
             }
             for name, by_scope in self._builtin_definitions.items()
         }
-        self.roots_by_execution_id.clear()
-        self.autouse_by_execution_id.clear()
-        self.injections_by_execution_id.clear()
-        self.dependencies_by_resource.clear()
-        self.resolution_order_by_execution_id.clear()
+        self._graphs_by_execution_id.clear()
 
     def get_definition(self, spec: ResourceSpec) -> LoadedResourceDef:
         """Return the exact registered definition for a resource identity."""
@@ -147,18 +143,17 @@ class ResourceRegistry:
             raise ValueError(msg)
         return definition
 
-    def compile_di_graph(
+    def compile_graphs(
         self,
         consumers: Mapping[UUID, tuple[Spec, tuple[str, ...]]],
         *,
         autouse_keys: frozenset[UUID] = frozenset(),
-    ) -> None:
+    ) -> dict[UUID, ResourceGraph]:
         """Compile a concrete resource graph for known injection consumers."""
-        self.roots_by_execution_id.clear()
-        self.autouse_by_execution_id.clear()
-        self.injections_by_execution_id.clear()
-        self.dependencies_by_resource.clear()
-        self.resolution_order_by_execution_id.clear()
+        dependencies_by_resource: dict[
+            ResourceSpec, tuple[ResourceSpec, ...]
+        ] = {}
+        graphs: dict[UUID, ResourceGraph] = {}
         built: set[ResourceSpec] = set()
         resolving: list[ResourceSpec] = []
         resolving_set: set[ResourceSpec] = set()
@@ -167,7 +162,7 @@ class ResourceRegistry:
                 name
                 for name, by_scope in self._definitions.items()
                 if any(
-                    definition.spec.autouse
+                    definition.autouse
                     for by_path in by_scope.values()
                     for definition in by_path.values()
                 )
@@ -311,7 +306,7 @@ class ResourceRegistry:
                     requested_resource=dependency,
                     scopes=spec.scope.dependency_scopes,
                 )
-                for dependency in spec.dependencies
+                for dependency in definition.dependencies
             )
             dependencies = tuple(
                 compile_definition(dependency)
@@ -319,7 +314,7 @@ class ResourceRegistry:
             )
             resolving.pop()
             resolving_set.remove(spec)
-            self.dependencies_by_resource[spec] = dependencies
+            dependencies_by_resource[spec] = dependencies
             built.add(spec)
             return spec
 
@@ -329,7 +324,7 @@ class ResourceRegistry:
 
             ordered: list[ResourceSpec] = []
             seen: set[ResourceSpec] = set()
-            for dependency in self.dependencies_by_resource[spec]:
+            for dependency in dependencies_by_resource[spec]:
                 for dep_spec in dependency_closure(dependency):
                     if dep_spec in seen:
                         continue
@@ -362,7 +357,7 @@ class ResourceRegistry:
                             consumer=consumer,
                             requested_resource=name,
                         )
-                    ).spec.autouse
+                    ).autouse
                 )
                 if execution_id in autouse_keys
                 else ()
@@ -377,39 +372,32 @@ class ResourceRegistry:
                 for name in resource_names
             }
             roots = (*autouse_specs, *injections.values())
-            self.autouse_by_execution_id[execution_id] = autouse_specs
-            self.injections_by_execution_id[execution_id] = injections
-            self.roots_by_execution_id[execution_id] = roots
             order = resolution_order(roots)
-            self.resolution_order_by_execution_id[execution_id] = order
-
-    def slice_registry(self, execution_id: UUID) -> ResourceRegistry:
-        """Return a registry view with graph fields for one execution."""
-        resolution_order = self.resolution_order_by_execution_id[execution_id]
-        specs = set(resolution_order)
-        registry = ResourceRegistry()
-        registry._definitions = self._definitions
-        registry._builtin_definitions = self._builtin_definitions
-        registry.roots_by_execution_id = {
-            execution_id: self.roots_by_execution_id.get(execution_id, ())
-        }
-        registry.autouse_by_execution_id = {
-            execution_id: self.autouse_by_execution_id.get(execution_id, ())
-        }
-        registry.injections_by_execution_id = {
-            execution_id: dict(
-                self.injections_by_execution_id.get(execution_id, {})
+            specs = set(order)
+            graphs[execution_id] = ResourceGraph(
+                autouse=autouse_specs,
+                injections=injections,
+                dependencies={
+                    spec: dependencies
+                    for spec, dependencies in dependencies_by_resource.items()
+                    if spec in specs
+                },
+                resolution_order=order,
             )
-        }
-        registry.dependencies_by_resource = {
-            spec: dependencies
-            for spec, dependencies in self.dependencies_by_resource.items()
-            if spec in specs
-        }
-        registry.resolution_order_by_execution_id = {
-            execution_id: resolution_order
-        }
-        return registry
+        self._graphs_by_execution_id = graphs
+        return graphs
+
+    def get_graph(self, execution_id: UUID) -> ResourceGraph:
+        """Return the retained compiled graph for one execution."""
+        return self._graphs_by_execution_id[execution_id]
+
+    def save_graph(
+        self,
+        execution_id: UUID,
+        graph: ResourceGraph,
+    ) -> None:
+        """Store a hydrated graph for an execution."""
+        self._graphs_by_execution_id[execution_id] = graph
 
 
 registry = ResourceRegistry()

@@ -9,7 +9,12 @@ from uuid import UUID
 from rue.context.runtime import CURRENT_TEST
 from rue.context.scopes import ScopeContext
 from rue.models import Spec
-from rue.resources.models import ResourceSpec, ResourceTransferSnapshot, Scope
+from rue.resources.models import (
+    ResourceGraph,
+    ResourceSpec,
+    ResourceTransferSnapshot,
+    Scope,
+)
 from rue.resources.snapshot import (
     SnapshotApplier,
     SnapshotDeltaApplier,
@@ -38,11 +43,8 @@ class ResourceTransfer:
         actor_id: int,
     ) -> ResourceTransferSnapshot:
         """Build a CRDT transfer snapshot for the given resource closure."""
-        registry = self.resolver.registry.slice_registry(execution_id)
-        resolution_order = registry.resolution_order_by_execution_id[
-            execution_id
-        ]
-        resources = self._syncable_resources(resolution_order)
+        graph = self.resolver.registry.get_graph(execution_id)
+        resources = self._syncable_resources(graph.resolution_order)
         self.flush_live_resources(resources)
 
         root_keys = [spec.snapshot_key for spec in resources]
@@ -53,11 +55,10 @@ class ResourceTransfer:
             resource_specs=tuple(resources),
             graph_update=export_graph.doc.get_update(None),
             base_state=export_graph.doc.get_state(),
-            roots=registry.roots_by_execution_id[execution_id],
-            autouse=registry.autouse_by_execution_id[execution_id],
-            injections=registry.injections_by_execution_id[execution_id],
-            dependencies=registry.dependencies_by_resource,
-            resolution_order=resolution_order,
+            autouse=graph.autouse,
+            injections=graph.injections,
+            dependencies=graph.dependencies,
+            resolution_order=graph.resolution_order,
             actor_id=actor_id,
         )
 
@@ -69,33 +70,24 @@ class ResourceTransfer:
     ) -> None:
         """Hydrate this resolver from a serialized transfer snapshot."""
         execution_id = CURRENT_TEST.get().execution_id
-        self.resolver.registry.roots_by_execution_id = {
-            execution_id: snapshot.roots
-        }
-        self.resolver.registry.autouse_by_execution_id = {
-            execution_id: snapshot.autouse
-        }
-        self.resolver.registry.injections_by_execution_id = {
-            execution_id: dict(snapshot.injections)
-        }
-        self.resolver.registry.dependencies_by_resource = dict(
-            snapshot.dependencies
+        graph = ResourceGraph(
+            autouse=snapshot.autouse,
+            injections=dict(snapshot.injections),
+            dependencies=dict(snapshot.dependencies),
+            resolution_order=snapshot.resolution_order,
         )
-        self.resolver.registry.resolution_order_by_execution_id = {
-            execution_id: snapshot.resolution_order
-        }
+        self.resolver.registry.save_graph(execution_id, graph)
         self.resolver.resources.sync_graph = SyncGraph(
             actor_id=snapshot.actor_id
         )
 
-        for spec in snapshot.resolution_order:
-            if not spec.sync:
-                continue
+        for spec in snapshot.resource_specs:
             owner = ScopeContext.current_owner(spec.scope)
             if self.resolver.resources.has(spec, owner):
                 continue
             value = await self.resolver._resolve_uncached(
                 spec=spec,
+                graph=graph,
                 owner=owner,
                 consumer_spec=consumer_spec,
                 apply_injection_hook=False,
@@ -254,11 +246,15 @@ class ResourceTransfer:
             if spec in resources
         }
 
-    @staticmethod
     def _syncable_resources(
+        self,
         resources: Sequence[ResourceSpec],
     ) -> list[ResourceSpec]:
-        return [spec for spec in resources if spec.sync]
+        return [
+            spec
+            for spec in resources
+            if self.resolver.registry.get_definition(spec).sync
+        ]
 
     def _refresh_sync_counter(self) -> None:
         graph = self.resolver.resources.sync_graph

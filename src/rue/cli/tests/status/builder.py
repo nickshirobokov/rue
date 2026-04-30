@@ -15,7 +15,8 @@ from rue.cli.tests.status.models import (
 )
 from rue.config import Config
 from rue.context.runtime import RunContext, TestContext
-from rue.resources import ResourceRegistry, ResourceResolver, ResourceSpec
+from rue.resources import ResourceResolver, ResourceSpec
+from rue.resources.models import ResourceGraph
 from rue.resources.registry import registry as default_resource_registry
 from rue.storage.sqlite import SQLiteStore
 from rue.testing.discovery import TestLoader
@@ -88,13 +89,13 @@ class TestsStatusBuilder:
         leaves: list[SingleTest],
     ) -> tuple[
         dict[UUID, tuple[ResourceSpec, ...]],
-        dict[UUID, ResourceRegistry],
+        dict[UUID, ResourceGraph],
     ]:
         connected_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]] = {}
-        registries_by_execution_id: dict[UUID, ResourceRegistry] = {}
+        graphs_by_execution_id: dict[UUID, ResourceGraph] = {}
         for leaf in leaves:
             try:
-                default_resource_registry.compile_di_graph(
+                graphs = default_resource_registry.compile_graphs(
                     {
                         leaf.execution_id: (
                             leaf.definition.spec,
@@ -107,26 +108,21 @@ class TestsStatusBuilder:
                     },
                     autouse_keys=frozenset({leaf.execution_id}),
                 )
-                registries_by_execution_id[
-                    leaf.execution_id
-                ] = default_resource_registry.slice_registry(
-                    leaf.execution_id
+                graph = graphs[leaf.execution_id]
+                graphs_by_execution_id[leaf.execution_id] = graph
+                connected_by_execution_id[leaf.execution_id] = (
+                    graph.resolution_order
                 )
-                connected_by_execution_id[
-                    leaf.execution_id
-                ] = default_resource_registry.resolution_order_by_execution_id[
-                    leaf.execution_id
-                ]
             except Exception as error:
                 self._add_issue(leaf.execution_id, "resolve", str(error))
                 connected_by_execution_id[leaf.execution_id] = ()
-        return connected_by_execution_id, registries_by_execution_id
+        return connected_by_execution_id, graphs_by_execution_id
 
     async def _preflight(
         self,
         leaves: list[SingleTest],
         connected_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]],
-        registries_by_execution_id: dict[UUID, ResourceRegistry],
+        graphs_by_execution_id: dict[UUID, ResourceGraph],
     ) -> dict[UUID, dict[str, tuple[ResourceSpec, ...]]]:
         resources_by_execution_id: dict[
             UUID, dict[str, tuple[ResourceSpec, ...]]
@@ -135,20 +131,19 @@ class TestsStatusBuilder:
         for leaf in leaves:
             execution_id = leaf.execution_id
             connected = connected_by_execution_id[execution_id]
-            if execution_id not in registries_by_execution_id:
+            if execution_id not in graphs_by_execution_id:
                 resources_by_execution_id[execution_id] = {}
                 continue
 
-            resolver = ResourceResolver(
-                registries_by_execution_id[execution_id]
-            )
+            resolver = ResourceResolver(default_resource_registry)
+            graph = graphs_by_execution_id[execution_id]
             try:
                 with TestContext(
                     item=leaf.definition,
                     execution_id=execution_id,
                 ):
                     await resolver.resolve_graph_deps(
-                        execution_id,
+                        graph,
                         leaf.params,
                         consumer_spec=leaf.definition.spec,
                     )

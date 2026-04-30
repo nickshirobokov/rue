@@ -3,12 +3,13 @@
 from collections.abc import AsyncGenerator, Generator, Sequence
 from typing import Any, cast
 
-from rue.context.runtime import ResourceTransactionContext
+from rue.context.runtime import CURRENT_TEST, ResourceTransactionContext
 from rue.context.scopes import Scope, ScopeContext, ScopeOwner
 from rue.models import Spec
 from rue.patching.runtime import PatchLifetime, PatchStore
 from rue.resources.models import (
-    LoadedResourceDef,
+    ResourceFactoryKind,
+    ResourceGraph,
     ResourceSpec,
 )
 from rue.resources.registry import ResourceRegistry
@@ -54,71 +55,69 @@ class ResourceResolver:
 
     async def resolve_graph_deps(
         self,
-        graph_key: Any,
+        graph: ResourceGraph,
         params: dict[str, Any],
         *,
         consumer_spec: Spec,
     ) -> dict[str, Any]:
         """Resolve all resources needed by one compiled dependency graph."""
         kwargs = dict(params)
-        for spec in self.registry.autouse_by_execution_id[graph_key]:
-            await self.resolve_resource(spec, consumer_spec=consumer_spec)
-        for name, spec in self.registry.injections_by_execution_id[
-            graph_key
-        ].items():
+        for spec in graph.autouse:
+            await self.resolve_resource(
+                spec,
+                graph=graph,
+                consumer_spec=consumer_spec,
+            )
+        for name, spec in graph.injections.items():
             kwargs[name] = await self.resolve_resource(
-                spec, consumer_spec=consumer_spec
+                spec,
+                graph=graph,
+                consumer_spec=consumer_spec,
             )
         return kwargs
 
-    async def preload_graph_deps(
+    async def preload_graph(
         self,
-        graph_key: Any,
-        params: dict[str, Any],
+        graph: ResourceGraph,
         *,
         consumer_spec: Spec,
-    ) -> dict[str, Any]:
+    ) -> None:
         """Resolve graph dependencies without injection metadata mutation."""
-        kwargs = dict(params)
-        for spec in self.registry.autouse_by_execution_id[graph_key]:
-            await self._resolve_resource(spec, consumer_spec=consumer_spec)
-        for name, spec in self.registry.injections_by_execution_id[
-            graph_key
-        ].items():
-            kwargs[name] = await self._resolve_resource(
-                spec, consumer_spec=consumer_spec
+        for spec in graph.autouse:
+            await self.resolve_resource(
+                spec,
+                graph=graph,
+                consumer_spec=consumer_spec,
+                apply_injection_hook=False,
             )
-        return kwargs
+        for spec in graph.injections.values():
+            await self.resolve_resource(
+                spec,
+                graph=graph,
+                consumer_spec=consumer_spec,
+                apply_injection_hook=False,
+            )
 
     async def resolve_resource(
         self,
         spec: ResourceSpec,
         *,
+        graph: ResourceGraph | None = None,
         consumer_spec: Spec,
+        apply_injection_hook: bool = True,
     ) -> Any:
         """Resolve one concrete resource identity from a compiled graph."""
-        return await self._resolve_resource(
-            spec,
-            consumer_spec=consumer_spec,
-            apply_injection_hook=True,
-        )
-
-    async def _resolve_resource(
-        self,
-        spec: ResourceSpec,
-        *,
-        consumer_spec: Spec,
-        apply_injection_hook: bool = False,
-    ) -> Any:
-        """Resolve one concrete resource with optional injection hooks."""
+        if graph is None:
+            graph = self.registry.get_graph(CURRENT_TEST.get().execution_id)
         definition = self.registry.get_definition(spec)
-        direct_dependencies = self.registry.dependencies_by_resource[spec]
+        direct_dependencies = graph.dependencies[spec]
         owner = ScopeContext.current_owner(spec.scope)
         value = await self.resources.get_or_create(
             spec,
             owner,
             lambda: self._resolve_uncached(
                 spec=spec,
+                graph=graph,
                 owner=owner,
                 consumer_spec=consumer_spec,
                 apply_injection_hook=apply_injection_hook,
@@ -182,7 +181,10 @@ class ResourceResolver:
                 direct_dependencies=teardown.direct_dependencies,
             ):
                 try:
-                    if teardown.definition.is_async_generator:
+                    if (
+                        teardown.definition.factory_kind
+                        is ResourceFactoryKind.ASYNC_GENERATOR
+                    ):
                         await anext(
                             cast(
                                 "AsyncGenerator[Any, None]",
@@ -238,12 +240,13 @@ class ResourceResolver:
         self,
         *,
         spec: ResourceSpec,
+        graph: ResourceGraph,
         owner: ScopeOwner,
         consumer_spec: Spec,
         apply_injection_hook: bool,
     ) -> Any:
         definition = self.registry.get_definition(spec)
-        direct_dependencies = self.registry.dependencies_by_resource[spec]
+        direct_dependencies = graph.dependencies[spec]
         with ResourceTransactionContext(
             consumer_spec=consumer_spec,
             provider_spec=spec,
@@ -251,22 +254,17 @@ class ResourceResolver:
             direct_dependencies=direct_dependencies,
         ):
             kwargs = {
-                dependency.name: (
-                    await self.resolve_resource(
-                        dependency,
-                        consumer_spec=spec,
-                    )
-                    if apply_injection_hook
-                    else await self._resolve_resource(
-                        dependency,
-                        consumer_spec=spec,
-                    )
+                dependency.name: await self.resolve_resource(
+                    dependency,
+                    graph=graph,
+                    consumer_spec=spec,
+                    apply_injection_hook=apply_injection_hook,
                 )
                 for dependency in direct_dependencies
             }
 
-            match definition:
-                case LoadedResourceDef(is_async_generator=True):
+            match definition.factory_kind:
+                case ResourceFactoryKind.ASYNC_GENERATOR:
                     async_generator = cast(
                         "AsyncGenerator[Any, None]", definition.fn(**kwargs)
                     )
@@ -281,7 +279,7 @@ class ResourceResolver:
                             direct_dependencies=direct_dependencies,
                         )
                     )
-                case LoadedResourceDef(is_generator=True):
+                case ResourceFactoryKind.GENERATOR:
                     generator = cast(
                         "Generator[Any, None, None]", definition.fn(**kwargs)
                     )
@@ -296,9 +294,9 @@ class ResourceResolver:
                             direct_dependencies=direct_dependencies,
                         )
                     )
-                case LoadedResourceDef(is_async=True):
+                case ResourceFactoryKind.ASYNC:
                     value = await definition.fn(**kwargs)
-                case _:
+                case ResourceFactoryKind.SYNC:
                     value = definition.fn(**kwargs)
 
             value = await definition.on_resolve(value)

@@ -31,7 +31,7 @@ async def test_single_test_executes_without_runner():
         params={},
         execution_id=uuid4(),
     )
-    registry.compile_di_graph({test.execution_id: (definition.spec, ())})
+    registry.compile_graphs({test.execution_id: (definition.spec, ())})
 
     execution = await test.execute(ResourceResolver(registry))
 

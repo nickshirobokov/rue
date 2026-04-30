@@ -44,7 +44,7 @@ class ExperimentSpec(Spec):
         kwargs: dict[str, Any] = {"value": self.values[value_index]}
         kwargs.update(
             await resolver.resolve_graph_deps(
-                graph_key,
+                resolver.registry.get_graph(graph_key),
                 {},
                 consumer_spec=self,
             )
@@ -112,7 +112,7 @@ class ExperimentVariant:
         keys_by_name = {
             name: uuid4() for name, _value_index, _value_id in self.values
         }
-        resolver.registry.compile_di_graph(
+        resolver.registry.compile_graphs(
             {
                 keys_by_name[name]: (
                     definitions[name],

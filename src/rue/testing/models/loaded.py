@@ -95,7 +95,9 @@ class LoadedTestDef:
         with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
             try:
                 kwargs = await resolver.resolve_graph_deps(
-                    CURRENT_TEST.get().execution_id,
+                    resolver.registry.get_graph(
+                        CURRENT_TEST.get().execution_id
+                    ),
                     params,
                     consumer_spec=self.spec,
                 )

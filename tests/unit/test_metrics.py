@@ -67,22 +67,16 @@ async def _resolve(
     apply_injection_hook: bool = True,
 ):
     consumer = consumer_spec or _consumer_spec()
-    resolver.registry.compile_di_graph(
+    graphs = resolver.registry.compile_graphs(
         {_TEST_GRAPH_KEY: (consumer, (name,))}
     )
+    graph = graphs[_TEST_GRAPH_KEY]
     async def resolve() -> object:
-        if apply_injection_hook:
-            return await resolver.resolve_resource(
-                resolver.registry.injections_by_execution_id[_TEST_GRAPH_KEY][
-                    name
-                ],
-                consumer_spec=consumer,
-            )
-        return await resolver._resolve_resource(
-            resolver.registry.injections_by_execution_id[_TEST_GRAPH_KEY][
-                name
-            ],
+        return await resolver.resolve_resource(
+            graph.injections[name],
+            graph=graph,
             consumer_spec=consumer,
+            apply_injection_hook=apply_injection_hook,
         )
 
     try:
@@ -98,8 +92,8 @@ async def _resolve(
 
 def _resource_spec(name: str, *, consumer_spec=None) -> ResourceSpec:
     consumer = consumer_spec or _consumer_spec()
-    registry.compile_di_graph({_TEST_GRAPH_KEY: (consumer, (name,))})
-    return registry.injections_by_execution_id[_TEST_GRAPH_KEY][name]
+    graphs = registry.compile_graphs({_TEST_GRAPH_KEY: (consumer, (name,))})
+    return graphs[_TEST_GRAPH_KEY].injections[name]
 
 
 def _ctx(
