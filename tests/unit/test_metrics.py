@@ -71,12 +71,18 @@ async def _resolve(
         {_TEST_GRAPH_KEY: (consumer, (name,))}
     )
     async def resolve() -> object:
-        return await resolver.resolve_resource(
+        if apply_injection_hook:
+            return await resolver.resolve_resource(
+                resolver.registry.injections_by_execution_id[_TEST_GRAPH_KEY][
+                    name
+                ],
+                consumer_spec=consumer,
+            )
+        return await resolver._resolve_resource(
             resolver.registry.injections_by_execution_id[_TEST_GRAPH_KEY][
                 name
             ],
             consumer_spec=consumer,
-            apply_injection_hook=apply_injection_hook,
         )
 
     try:
@@ -470,10 +476,6 @@ async def test_metric_decorator_records_metric_dependencies():
     }
     assert "accuracy" in by_name
     clock_spec = _resource_spec("clock")
-    assert by_name["accuracy"].dependencies == [
-        by_name["overall_quality"].metadata.identity,
-        clock_spec,
-    ]
     assert by_name["accuracy"].metadata.direct_providers == [
         by_name["overall_quality"].metadata.identity,
         clock_spec,

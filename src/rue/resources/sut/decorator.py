@@ -33,7 +33,8 @@ def sut(
 
     def on_resolve(sut_instance: Any) -> SUT:
         if not isinstance(sut_instance, SUT):
-            raise TypeError("@sut factories must return or yield a SUT.")
+            error = TypeError("@sut factories must return or yield a SUT.")
+            raise RuntimeError(error) from error
 
         sut_instance.name = factory_name
         return sut_instance

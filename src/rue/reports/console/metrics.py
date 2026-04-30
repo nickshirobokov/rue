@@ -258,9 +258,7 @@ class MetricsRenderer:
 
         for group in self._groups:
             for metric in group.metrics:
-                for dep in (
-                    metric.metadata.direct_providers or metric.dependencies
-                ):
+                for dep in metric.metadata.direct_providers:
                     if dep not in self._group_lookup:
                         continue
                     parents.setdefault(group.key, set()).add(dep)

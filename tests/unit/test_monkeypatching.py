@@ -9,10 +9,9 @@ from uuid import uuid4
 
 import pytest
 
-from rue.context.scopes import Scope, ScopeOwner
+from rue.context.scopes import Scope, ScopeContext, ScopeOwner
 from rue.patching import MonkeyPatch
 from rue.patching.runtime import (
-    PatchContext,
     PatchLifetime,
     PatchStore,
 )
@@ -59,69 +58,44 @@ def test_monkeypatch_stores_lifetime_not_resolver() -> None:
     assert not hasattr(monkeypatch, "resolver")
 
 
-def test_patch_owner_is_active_from_explicit_patch_context(
+def test_patch_owner_is_resolved_from_scope_context(
     tmp_path: Path,
 ) -> None:
     execution_id = uuid4()
     run_id = uuid4()
     module_path = tmp_path / "test_module.py"
-    context = PatchContext(
-        execution_id=execution_id,
-        module_path=module_path.resolve(),
+    context = ScopeContext.for_test(
         run_id=run_id,
+        execution_id=execution_id,
+        module_path=module_path,
     )
 
-    assert ScopeOwner(
+    assert context.owner(Scope.TEST) == ScopeOwner(
         scope=Scope.TEST,
         execution_id=execution_id,
         run_id=run_id,
-    ).is_active(
-        execution_id=context.execution_id,
-        run_id=context.run_id,
-        module_path=context.module_path,
     )
-    assert ScopeOwner(
+    assert context.owner(Scope.MODULE) == ScopeOwner(
         scope=Scope.MODULE,
         run_id=run_id,
         module_path=module_path.resolve(),
-    ).is_active(
-        execution_id=context.execution_id,
-        run_id=context.run_id,
-        module_path=context.module_path,
     )
-    assert ScopeOwner(scope=Scope.RUN, run_id=run_id).is_active(
-        execution_id=context.execution_id,
-        run_id=context.run_id,
-        module_path=context.module_path,
+    assert context.owner(Scope.RUN) == ScopeOwner(
+        scope=Scope.RUN, run_id=run_id
     )
-    assert not ScopeOwner(
+    assert context.owner(Scope.TEST) != ScopeOwner(
         scope=Scope.TEST,
         execution_id=uuid4(),
         run_id=run_id,
-    ).is_active(
-        execution_id=context.execution_id,
-        run_id=context.run_id,
-        module_path=context.module_path,
     )
-    assert not ScopeOwner(
+    assert context.owner(Scope.MODULE) != ScopeOwner(
         scope=Scope.MODULE,
         run_id=run_id,
         module_path=(tmp_path / "other.py").resolve(),
-    ).is_active(
-        execution_id=context.execution_id,
-        run_id=context.run_id,
-        module_path=context.module_path,
     )
-    assert not ScopeOwner(scope=Scope.RUN, run_id=uuid4()).is_active(
-        execution_id=context.execution_id,
-        run_id=context.run_id,
-        module_path=context.module_path,
+    assert context.owner(Scope.RUN) != ScopeOwner(
+        scope=Scope.RUN, run_id=uuid4()
     )
-    assert not ScopeOwner(
-        scope=Scope.TEST,
-        execution_id=execution_id,
-        run_id=run_id,
-    ).is_active(execution_id=None, run_id=None, module_path=None)
 
 
 @pytest.mark.asyncio

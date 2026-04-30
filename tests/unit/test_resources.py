@@ -13,7 +13,6 @@ from rue.context.runtime import (
     TestContext,
 )
 from rue.resources import (
-    ResourceCacheKey,
     ResourceRegistry,
     ResourceResolver,
     Scope,
@@ -1159,14 +1158,13 @@ class TestHierarchicalProcessResources:
         )
 
         cache_keys = [
-            key
-            for key in resolver.resources.cached_resource_instances()
-            if isinstance(key, ResourceCacheKey)
-            and key.spec.scope == Scope.RUN
-            and key.spec.locator.function_name == "shared"
+            spec
+            for _owner, spec in resolver.resources.cached_resource_instances()
+            if spec.scope == Scope.RUN
+            and spec.locator.function_name == "shared"
         ]
         assert len(cache_keys) == 2
-        assert {key.spec.locator.module_path.parent for key in cache_keys} == {
+        assert {spec.locator.module_path.parent for spec in cache_keys} == {
             root.resolve(),
             child.resolve(),
         }

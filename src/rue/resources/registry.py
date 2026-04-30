@@ -17,12 +17,6 @@ from rue.resources.models import (
 
 
 _RECEIVER_PARAMETER_NAMES = {"self", "cls"}
-RESOURCE_PROVIDER_SCOPE_PRIORITY = (Scope.TEST, Scope.MODULE, Scope.RUN)
-RESOURCE_DEPENDENCY_SCOPES = {
-    Scope.TEST: frozenset({Scope.TEST, Scope.MODULE, Scope.RUN}),
-    Scope.MODULE: frozenset({Scope.MODULE, Scope.RUN}),
-    Scope.RUN: frozenset({Scope.RUN}),
-}
 type _DefinitionsByScope = dict[Scope, dict[Path | None, LoadedResourceDef]]
 type _ProviderSelectionPlan = tuple[
     tuple[tuple[Path, LoadedResourceDef], ...],
@@ -247,7 +241,7 @@ class ResourceRegistry:
                 raise ValueError(msg)
             return tuple(
                 scope
-                for scope in RESOURCE_PROVIDER_SCOPE_PRIORITY
+                for scope in Scope.provider_priority()
                 if by_scope.get(scope)
             )
 
@@ -259,7 +253,7 @@ class ResourceRegistry:
         ) -> LoadedResourceDef:
             directory = consumer_dir(consumer)
             allowed_scopes = (
-                frozenset(RESOURCE_PROVIDER_SCOPE_PRIORITY)
+                frozenset(Scope.provider_priority())
                 if scopes is None
                 else scopes
             )
@@ -315,7 +309,7 @@ class ResourceRegistry:
                 select_definition(
                     consumer=spec,
                     requested_resource=dependency,
-                    scopes=RESOURCE_DEPENDENCY_SCOPES[spec.scope],
+                    scopes=spec.scope.dependency_scopes,
                 )
                 for dependency in spec.dependencies
             )

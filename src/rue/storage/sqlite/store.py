@@ -340,7 +340,7 @@ class SQLiteStore(Store):
                 if ident.locator.module_path is None
                 else str(ident.locator.module_path.parent),
                 self._to_json_resource_identities(
-                    meta.direct_providers or metric.dependencies
+                    meta.direct_providers
                 ),
             ),
         )
@@ -659,7 +659,6 @@ class SQLiteStore(Store):
             metadata=metadata,
             assertion_results=[],
             value=value,
-            dependencies=direct_providers,
         )
 
     def _from_json_consumers(self, json_str: str | None) -> list[Spec]:

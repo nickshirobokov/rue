@@ -13,7 +13,6 @@ from rue.resources.models import (
 )
 from rue.resources.registry import ResourceRegistry
 from rue.resources.state import (
-    ResourceCacheKey,
     ResourceStore,
     ResourceTeardownRecord,
 )
@@ -59,23 +58,35 @@ class ResourceResolver:
         params: dict[str, Any],
         *,
         consumer_spec: Spec,
-        apply_injection_hook: bool = True,
     ) -> dict[str, Any]:
         """Resolve all resources needed by one compiled dependency graph."""
         kwargs = dict(params)
         for spec in self.registry.autouse_by_execution_id[graph_key]:
-            await self.resolve_resource(
-                spec,
-                consumer_spec=consumer_spec,
-                apply_injection_hook=apply_injection_hook,
-            )
+            await self.resolve_resource(spec, consumer_spec=consumer_spec)
         for name, spec in self.registry.injections_by_execution_id[
             graph_key
         ].items():
             kwargs[name] = await self.resolve_resource(
-                spec,
-                consumer_spec=consumer_spec,
-                apply_injection_hook=apply_injection_hook,
+                spec, consumer_spec=consumer_spec
+            )
+        return kwargs
+
+    async def preload_graph_deps(
+        self,
+        graph_key: Any,
+        params: dict[str, Any],
+        *,
+        consumer_spec: Spec,
+    ) -> dict[str, Any]:
+        """Resolve graph dependencies without injection metadata mutation."""
+        kwargs = dict(params)
+        for spec in self.registry.autouse_by_execution_id[graph_key]:
+            await self._resolve_resource(spec, consumer_spec=consumer_spec)
+        for name, spec in self.registry.injections_by_execution_id[
+            graph_key
+        ].items():
+            kwargs[name] = await self._resolve_resource(
+                spec, consumer_spec=consumer_spec
             )
         return kwargs
 
@@ -84,20 +95,33 @@ class ResourceResolver:
         spec: ResourceSpec,
         *,
         consumer_spec: Spec,
-        apply_injection_hook: bool = True,
     ) -> Any:
         """Resolve one concrete resource identity from a compiled graph."""
+        return await self._resolve_resource(
+            spec,
+            consumer_spec=consumer_spec,
+            apply_injection_hook=True,
+        )
+
+    async def _resolve_resource(
+        self,
+        spec: ResourceSpec,
+        *,
+        consumer_spec: Spec,
+        apply_injection_hook: bool = False,
+    ) -> Any:
+        """Resolve one concrete resource with optional injection hooks."""
         definition = self.registry.get_definition(spec)
         direct_dependencies = self.registry.dependencies_by_resource[spec]
-        key = self.resources.cache_key_for(
+        owner = ScopeContext.current_owner(spec.scope)
+        value = await self.resources.get_or_create(
             spec,
-            ScopeContext.current_owner(spec.scope),
-        )
-        value = await self.resources.get_or_create_instance(
-            key,
+            owner,
             lambda: self._resolve_uncached(
-                key=key,
+                spec=spec,
+                owner=owner,
                 consumer_spec=consumer_spec,
+                apply_injection_hook=apply_injection_hook,
             ),
         )
 
@@ -121,7 +145,7 @@ class ResourceResolver:
             owners = (ScopeContext.current_owner(scope),)
         for owner in owners:
             if self.resources.is_shadow:
-                self.resources.clear_scope_owner(owner)
+                self.resources.clear(owner)
                 self.undo_patches(owner=owner)
                 continue
             teardown_errors.extend(
@@ -129,7 +153,7 @@ class ResourceResolver:
                     self.resources.pop_teardown_records(owner)
                 )
             )
-            self.resources.clear_scope_owner(owner)
+            self.resources.clear(owner)
             self.undo_patches(owner=owner)
         if scope is None:
             self.undo_patches()
@@ -150,7 +174,7 @@ class ResourceResolver:
         teardown_errors: list[Exception] = []
 
         for teardown in reversed(teardowns):
-            spec = teardown.key.spec
+            spec = teardown.spec
             with ResourceTransactionContext(
                 consumer_spec=teardown.consumer_spec,
                 provider_spec=spec,
@@ -182,8 +206,8 @@ class ResourceResolver:
                         )
                     )
 
-                if self.resources.has_cached_instance(teardown.key):
-                    value = self.resources.cached_instance(teardown.key)
+                if self.resources.has(spec, teardown.owner):
+                    value = self.resources.get(spec, teardown.owner)
                     try:
                         await teardown.definition.on_teardown(value)
                     except Exception as e:
@@ -213,10 +237,11 @@ class ResourceResolver:
     async def _resolve_uncached(
         self,
         *,
-        key: ResourceCacheKey,
+        spec: ResourceSpec,
+        owner: ScopeOwner,
         consumer_spec: Spec,
+        apply_injection_hook: bool,
     ) -> Any:
-        spec = key.spec
         definition = self.registry.get_definition(spec)
         direct_dependencies = self.registry.dependencies_by_resource[spec]
         with ResourceTransactionContext(
@@ -228,6 +253,11 @@ class ResourceResolver:
             kwargs = {
                 dependency.name: (
                     await self.resolve_resource(
+                        dependency,
+                        consumer_spec=spec,
+                    )
+                    if apply_injection_hook
+                    else await self._resolve_resource(
                         dependency,
                         consumer_spec=spec,
                     )
@@ -243,7 +273,8 @@ class ResourceResolver:
                     value = await anext(async_generator)
                     self.resources.record_teardown(
                         ResourceTeardownRecord(
-                            key=key,
+                            spec=spec,
+                            owner=owner,
                             definition=definition,
                             generator=async_generator,
                             consumer_spec=consumer_spec,
@@ -257,7 +288,8 @@ class ResourceResolver:
                     value = next(generator)
                     self.resources.record_teardown(
                         ResourceTeardownRecord(
-                            key=key,
+                            spec=spec,
+                            owner=owner,
                             definition=definition,
                             generator=generator,
                             consumer_spec=consumer_spec,

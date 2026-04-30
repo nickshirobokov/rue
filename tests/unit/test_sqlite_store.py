@@ -84,12 +84,7 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
                 scope=Scope.RUN,
             ),
         ],
-    )
-    metric_result = MetricResult(
-        metadata=metric_metadata,
-        assertion_results=[],
-        value=12.5,
-        dependencies=[
+        direct_providers=[
             ResourceSpec(
                 locator=Locator(
                     module_path=Path("/tmp/project/confrue_root.py"),
@@ -98,6 +93,11 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
                 scope=Scope.RUN,
             )
         ],
+    )
+    metric_result = MetricResult(
+        metadata=metric_metadata,
+        assertion_results=[],
+        value=12.5,
     )
 
     environment = make_environment(
@@ -172,16 +172,6 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
             scope=Scope.RUN,
         )
     ]
-    assert loaded.result.metric_results[0].dependencies == [
-        ResourceSpec(
-            locator=Locator(
-                module_path=Path("/tmp/project/confrue_root.py"),
-                function_name="overall_latency",
-            ),
-            scope=Scope.RUN,
-        )
-    ]
-
 
 def test_sqlite_store_list_runs(sqlite_store: SQLiteStore) -> None:
     run_one = Run(

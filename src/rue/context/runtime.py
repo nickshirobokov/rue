@@ -23,7 +23,6 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from rue.config import Config
 from rue.context.scopes import ScopeContext
 from rue.models import Spec
-from rue.patching.runtime import PatchContext, patch_manager
 
 
 if TYPE_CHECKING:
@@ -47,12 +46,6 @@ class TestContext:
         repr=False,
         compare=False,
     )
-    _patch_tokens: list[Any] = field(
-        default_factory=list,
-        init=False,
-        repr=False,
-        compare=False,
-    )
     _scope_contexts: list[ScopeContext] = field(
         default_factory=list,
         init=False,
@@ -71,15 +64,6 @@ class TestContext:
         )
         scope_context.__enter__()
         self._scope_contexts.append(scope_context)
-        self._patch_tokens.append(
-            patch_manager.bind_context(
-                PatchContext(
-                    execution_id=self.execution_id,
-                    module_path=self.module_path,
-                    run_id=run_context.run_id,
-                )
-            )
-        )
         return self
 
     @property
@@ -96,7 +80,6 @@ class TestContext:
         traceback: TracebackType | None,
     ) -> None:
         """Restore the previous test context."""
-        self._patch_tokens.pop().__exit__(exc_type, exc, traceback)
         self._scope_contexts.pop().__exit__(exc_type, exc, traceback)
         CURRENT_TEST.reset(self._tokens.pop())
 
@@ -211,7 +194,6 @@ class RunContext(BaseModel):
     experiment_variant: Any | None = None
     experiment_setup_chain: tuple[Any, ...] = ()
     _tokens: list[Token[RunContext]] = PrivateAttr(default_factory=list)
-    _patch_tokens: list[Any] = PrivateAttr(default_factory=list)
     _scope_contexts: list[ScopeContext] = PrivateAttr(default_factory=list)
 
     def __enter__(self) -> RunContext:
@@ -220,15 +202,6 @@ class RunContext(BaseModel):
         scope_context = ScopeContext.for_run(self.run_id)
         scope_context.__enter__()
         self._scope_contexts.append(scope_context)
-        self._patch_tokens.append(
-            patch_manager.bind_context(
-                PatchContext(
-                    execution_id=None,
-                    module_path=Path.cwd(),
-                    run_id=self.run_id,
-                )
-            )
-        )
         return self
 
     def __exit__(
@@ -238,7 +211,6 @@ class RunContext(BaseModel):
         traceback: TracebackType | None,
     ) -> None:
         """Restore the previous run context."""
-        self._patch_tokens.pop().__exit__(exc_type, exc, traceback)
         self._scope_contexts.pop().__exit__(exc_type, exc, traceback)
         CURRENT_RUN_CONTEXT.reset(self._tokens.pop())
 
@@ -246,7 +218,6 @@ class RunContext(BaseModel):
         """Serialize run data without process-local contextvar tokens."""
         state = super().__getstate__()
         state["__pydantic_private__"] = {
-            "_patch_tokens": [],
             "_scope_contexts": [],
             "_tokens": [],
         }

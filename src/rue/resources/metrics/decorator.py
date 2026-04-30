@@ -117,7 +117,6 @@ def metric[**P](
                         )
                         MetricResult(
                             metadata=metric_instance.metadata,
-                            dependencies=metric_instance.metadata.direct_providers,
                             assertion_results=assertions_results,
                             value=value,
                         )
@@ -159,7 +158,6 @@ def metric[**P](
                         )
                         MetricResult(
                             metadata=metric_instance.metadata,
-                            dependencies=metric_instance.metadata.direct_providers,
                             assertion_results=assertions_results,
                             value=value,
                         )

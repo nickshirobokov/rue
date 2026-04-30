@@ -173,12 +173,12 @@ def make_metric_result(
             scope=scope,
         ),
         consumers=consumers,
+        direct_providers=depends_on or [],
     )
     return MetricResult(
         metadata=metadata,
         assertion_results=assertion_results or [],
         value=value,
-        dependencies=depends_on or [],
     )
 
 

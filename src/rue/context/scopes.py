@@ -17,6 +17,17 @@ class Scope(StrEnum):
     MODULE = auto()  # Shared across tests in same file
     RUN = auto()  # Shared across entire test run
 
+    @classmethod
+    def provider_priority(cls) -> tuple[Scope, ...]:
+        """Return provider lookup order from narrowest to broadest scope."""
+        return tuple(cls)
+
+    @property
+    def dependency_scopes(self) -> frozenset[Scope]:
+        """Return scopes this scope may depend on."""
+        scopes = tuple(type(self))
+        return frozenset(scopes[scopes.index(self) :])
+
 
 @dataclass(frozen=True, slots=True)
 class ScopeOwner:

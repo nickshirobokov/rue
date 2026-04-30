@@ -172,6 +172,17 @@ def test_scope_context_for_run_resolves_only_run_owner():
             ScopeContext.current_owner(Scope.MODULE)
 
 
+def test_scope_models_resource_provider_policy():
+    assert Scope.provider_priority() == (Scope.TEST, Scope.MODULE, Scope.RUN)
+    assert Scope.TEST.dependency_scopes == frozenset(
+        {Scope.TEST, Scope.MODULE, Scope.RUN}
+    )
+    assert Scope.MODULE.dependency_scopes == frozenset(
+        {Scope.MODULE, Scope.RUN}
+    )
+    assert Scope.RUN.dependency_scopes == frozenset({Scope.RUN})
+
+
 def test_scope_context_for_test_resolves_all_scope_owners():
     run_id = uuid4()
     execution_id = uuid4()

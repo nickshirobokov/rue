@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Iterator, MutableMapping, MutableSequence
-from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
-from pathlib import Path
 from threading import RLock
-from typing import Any, Literal
-from uuid import UUID
+from typing import Any, Literal, NoReturn
 
-from rue.context.scopes import Scope, ScopeOwner
+from rue.context.scopes import CURRENT_SCOPE_CONTEXT, Scope, ScopeOwner
 
 
 type PatchTargetKind = Literal["attr", "item"]
@@ -19,15 +16,6 @@ type PatchTargetKey = tuple[PatchTargetKind, int, Any]
 
 
 _MISSING = object()
-
-
-@dataclass(frozen=True, slots=True)
-class PatchContext:
-    """Context used by dispatchers while one test body is running."""
-
-    execution_id: UUID | None
-    module_path: Path
-    run_id: UUID | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +100,35 @@ class _PatchedTarget:
     dispatcher: Any
     records: list[_PatchRecord]
 
+    def raise_missing_member_error(self) -> NoReturn:
+        """Raise AttributeError / KeyError / IndexError for absent binding."""
+        match self.kind:
+            case "attr":
+                msg = (
+                    f"{self.target!r} has no attribute {self.name!r}"
+                )
+                raise AttributeError(msg)
+            case "item":
+                if isinstance(self.target, MutableSequence):
+                    raise IndexError(self.name)
+                raise KeyError(self.name)
+
+    def delete_member(self) -> None:
+        """Remove attribute or mapping/sequence slot (dispatcher) from target."""
+        match self.kind:
+            case "attr":
+                delattr(self.target, self.name)
+            case "item":
+                del self.target[self.name]
+
+    def restore_original(self) -> None:
+        """Restore the value captured before patching."""
+        match self.kind:
+            case "attr":
+                setattr(self.target, self.name, self.original)
+            case "item":
+                self.target[self.name] = self.original
+
 
 class _AttributeDispatcher:
     """Descriptor/proxy installed once per patched attribute."""
@@ -181,22 +198,6 @@ class PatchManager:
     def __init__(self) -> None:
         self._patched: dict[PatchTargetKey, _PatchedTarget] = {}
         self._lock = RLock()
-        self._context: ContextVar[PatchContext | None] = ContextVar(
-            "rue_patch_context",
-            default=None,
-        )
-
-    @property
-    def context(self) -> PatchContext | None:
-        """Return the patch context active in this execution context."""
-        return self._context.get()
-
-    def bind_context(
-        self,
-        context: PatchContext | None,
-    ) -> _PatchContextToken:
-        """Bind a patch context for one test body."""
-        return _PatchContextToken(self, self._context.set(context))
 
     def setattr(
         self,
@@ -364,18 +365,21 @@ class PatchManager:
         """Return the currently visible value for a patched target."""
         with self._lock:
             patched = self._patched[target_key]
-            context = self._context.get()
+            context = CURRENT_SCOPE_CONTEXT.get()
             for record in reversed(patched.records):
-                if context is not None and record.owner.is_active(
-                    execution_id=context.execution_id,
-                    run_id=context.run_id,
-                    module_path=context.module_path,
-                ):
+                match record.owner.scope:
+                    case Scope.RUN:
+                        active_owner = context.run
+                    case Scope.TEST:
+                        active_owner = context.test
+                    case Scope.MODULE:
+                        active_owner = context.module
+                if active_owner == record.owner:
                     if record.value is _MISSING:
-                        self._raise_missing(patched)
+                        patched.raise_missing_member_error()
                     return record.value
             if patched.original is _MISSING:
-                self._raise_missing(patched)
+                patched.raise_missing_member_error()
             return patched.original
 
     def remove(self, handle: PatchHandle) -> None:
@@ -389,55 +393,10 @@ class PatchManager:
             if patched.records:
                 return
             if patched.original is _MISSING:
-                self._delete_target(patched)
+                patched.delete_member()
             else:
-                self._restore_target(patched)
+                patched.restore_original()
             del self._patched[handle.target_key]
-
-    @staticmethod
-    def _raise_missing(patched: _PatchedTarget) -> None:
-        match patched.kind:
-            case "attr":
-                msg = (
-                    f"{patched.target!r} has no attribute {patched.name!r}"
-                )
-                raise AttributeError(msg)
-            case "item":
-                if isinstance(patched.target, MutableSequence):
-                    raise IndexError(patched.name)
-                raise KeyError(patched.name)
-
-    @staticmethod
-    def _delete_target(patched: _PatchedTarget) -> None:
-        match patched.kind:
-            case "attr":
-                delattr(patched.target, patched.name)
-            case "item":
-                del patched.target[patched.name]
-
-    @staticmethod
-    def _restore_target(patched: _PatchedTarget) -> None:
-        match patched.kind:
-            case "attr":
-                setattr(patched.target, patched.name, patched.original)
-            case "item":
-                patched.target[patched.name] = patched.original
-
-
-class _PatchContextToken:
-    def __init__(
-        self,
-        manager: PatchManager,
-        token: Token[PatchContext | None],
-    ) -> None:
-        self._manager = manager
-        self._token = token
-
-    def __enter__(self) -> None:
-        return None
-
-    def __exit__(self, *exc_info: object) -> None:
-        self._manager._context.reset(self._token)
 
 
 patch_manager = PatchManager()

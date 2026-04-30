@@ -29,7 +29,6 @@ class ResourceSpec(Spec):
                 self.scope.value,
                 self.name,
                 "" if module_path is None else str(module_path),
-                "" if module_path is None else str(module_path.parent),
             )
         )
 

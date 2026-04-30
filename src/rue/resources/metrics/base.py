@@ -454,8 +454,6 @@ class MetricResult:
     metadata : MetricMetadata
         Snapshot of metadata describing where/when the metric was recorded
         (identity, consumers, direct providers, timestamps).
-    dependencies : list[ResourceSpec]
-        Direct resource dependencies for the metric provider.
     assertion_results : list[AssertionResult]
         Assertion results collected while the metric resource was running.
     value : CalculatedValue
@@ -465,7 +463,6 @@ class MetricResult:
     metadata: MetricMetadata
     assertion_results: list[AssertionResult]
     value: CalculatedValue
-    dependencies: list[ResourceSpec] = field(default_factory=list)
 
     @property
     def primary_case_id(self) -> str:
@@ -490,10 +487,6 @@ class MetricResult:
         return any(not assertion.passed for assertion in self.assertion_results)
 
     def __post_init__(self) -> None:
-        if self.dependencies and not self.metadata.direct_providers:
-            self.metadata.direct_providers = list(self.dependencies)
-        if self.metadata.direct_providers and not self.dependencies:
-            self.dependencies = list(self.metadata.direct_providers)
         collector = CURRENT_METRIC_RESULTS.get()
         if collector is not None:
             collector.append(self)
