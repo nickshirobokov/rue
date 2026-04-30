@@ -23,7 +23,7 @@ from rue.testing.models import (
     TestSpec,
 )
 from rue.testing.runner import Runner
-from tests.unit.factories import make_run_context
+from tests.helpers import make_run_context
 
 
 @pytest.fixture(autouse=True)

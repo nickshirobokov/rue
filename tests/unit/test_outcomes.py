@@ -7,7 +7,7 @@ from rue.testing import TestStatus, fail, skip, xfail
 from rue.testing.models import LoadedTestDef
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
 from rue.testing.runner import Runner
-from tests.unit.factories import make_definition, make_run_context
+from tests.helpers import make_definition, make_run_context
 
 
 def make_item(

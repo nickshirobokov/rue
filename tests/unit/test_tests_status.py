@@ -19,7 +19,7 @@ from rue.testing.discovery import TestDefinitionErrors, TestSpecCollector
 from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import TestStatus
 from rue.testing.models.modifiers import IterateModifier
-from tests.unit.factories import make_definition
+from tests.helpers import make_definition
 
 
 def write_files(root: Path, files: dict[str, str]) -> None:

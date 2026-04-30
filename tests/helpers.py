@@ -1,4 +1,4 @@
-"""Shared test factories for unit tests."""
+"""Shared helpers for tests that exercise Rue through public APIs."""
 
 from collections.abc import Callable
 from itertools import count
@@ -9,6 +9,8 @@ from uuid import UUID
 from rue.config import Config
 from rue.context.runtime import CURRENT_RUN_CONTEXT, RunContext
 from rue.context.scopes import CURRENT_SCOPE_CONTEXT, ScopeContext
+from rue.reports.base import Reporter
+from rue.telemetry import OtelTraceArtifact
 from rue.testing.discovery import TestLoader, TestSpecCollector
 from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import BackendModifier, LoadedTestDef
@@ -17,6 +19,45 @@ from rue.testing.models.spec import Locator, SetupFileRef, TestSpec
 
 
 _COLLECTION_INDEX = count()
+
+
+class NullReporter(Reporter):
+    """Silent reporter for integration tests."""
+
+    def configure(self, config) -> None:
+        _ = config
+
+    async def on_no_tests_found(self) -> None:
+        pass
+
+    async def on_collection_complete(self, items, run) -> None:
+        pass
+
+    async def on_test_start(self, item) -> None:
+        pass
+
+    async def on_execution_complete(self, execution) -> None:
+        pass
+
+    async def on_run_complete(self, test_run) -> None:
+        pass
+
+    async def on_run_stopped_early(self, failure_count: int) -> None:
+        pass
+
+
+class TraceCollectorReporter(NullReporter):
+    """Reporter that keeps collected OpenTelemetry artifacts."""
+
+    def __init__(self) -> None:
+        self.artifacts: list[OtelTraceArtifact] = []
+
+    async def on_execution_complete(self, execution) -> None:
+        self.artifacts.extend(
+            artifact
+            for artifact in execution.telemetry_artifacts
+            if isinstance(artifact, OtelTraceArtifact)
+        )
 
 
 def make_definition(
@@ -39,7 +80,7 @@ def make_definition(
     setup_chain: tuple[SetupFileRef, ...] = (),
     collection_index: int | None = None,
 ) -> LoadedTestDef:
-    """Build a LoadedTestDef without needing a real module."""
+    """Build a LoadedTestDef without importing a temporary module."""
     module_path = Path(module_path)
     all_modifiers = list(modifiers)
     if backend is not ExecutionBackend.ASYNCIO:
@@ -75,9 +116,7 @@ def make_definition(
     )
 
 
-def materialize_tests(
-    path: str | Path,
-) -> list[LoadedTestDef]:
+def materialize_tests(path: str | Path) -> list[LoadedTestDef]:
     collection = TestSpecCollector((), (), None).build_spec_collection((path,))
     return TestLoader(collection.suite_root).load_from_collection(collection)
 

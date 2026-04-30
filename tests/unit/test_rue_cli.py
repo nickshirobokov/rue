@@ -20,7 +20,7 @@ from rue.testing import LoadedTestDef
 from rue.testing.discovery import TestDefinitionErrors, TestDefinitionIssue
 from rue.testing.models.run import Run, RunEnvironment, RunResult
 from rue.testing.models.spec import TestSpecCollection
-from tests.unit.factories import make_definition
+from tests.helpers import make_definition
 
 
 runner = CliRunner()

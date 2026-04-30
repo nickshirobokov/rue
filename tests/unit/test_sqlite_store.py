@@ -18,7 +18,7 @@ from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.modifiers import IterateModifier
 from rue.testing.models.result import TestResult, TestStatus
 from rue.testing.models.run import Run, RunEnvironment, RunResult
-from tests.unit.factories import make_definition, make_run_context
+from tests.helpers import make_definition, make_run_context
 
 
 def make_environment(**updates) -> RunEnvironment:

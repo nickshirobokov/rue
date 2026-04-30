@@ -11,7 +11,7 @@ from rue.predicates import PredicateResult, predicate
 from rue.resources import DependencyResolver, registry
 from rue.storage import SQLiteStore
 from rue.testing.runner import Runner
-from tests.unit.factories import make_run_context, materialize_tests
+from tests.helpers import make_run_context, materialize_tests
 
 
 @predicate

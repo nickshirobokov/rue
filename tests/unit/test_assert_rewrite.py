@@ -13,7 +13,7 @@ from rue.context.runtime import TestContext, bind
 from rue.models import Locator
 from rue.resources import DependencyResolver, ResourceSpec, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
-from tests.unit.factories import make_run_context, materialize_tests
+from tests.helpers import make_run_context, materialize_tests
 
 
 def test_rewritten_assert_collects_predicate_results(tmp_path):

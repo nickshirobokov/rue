@@ -6,8 +6,7 @@ import pytest
 from rue.resources import DependencyResolver, registry
 from rue.testing.models import TestStatus
 from rue.testing.runner import Runner
-from tests.unit.conftest import NullReporter
-from tests.unit.factories import make_run_context, materialize_tests
+from tests.helpers import NullReporter, make_run_context, materialize_tests
 
 
 @pytest.mark.asyncio
@@ -183,7 +182,10 @@ async def test_local_and_subprocess_nested_updates_merge_without_replacing_root(
             @rue.test
             def test_after(shared_state):
                 deadline = time.time() + 10
-                while len(shared_state.branch.right) < 1 and time.time() < deadline:
+                while (
+                    len(shared_state.branch.right) < 1
+                    and time.time() < deadline
+                ):
                     time.sleep(0.05)
                 assert shared_state.meta["root_id"] == id(shared_state)
                 assert shared_state.meta["branch_id"] == id(shared_state.branch)

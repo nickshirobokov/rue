@@ -9,7 +9,7 @@ import pytest
 
 from rue.resources import DependencyResolver, registry
 from rue.testing.runner import Runner
-from tests.unit.factories import make_run_context, materialize_tests
+from tests.helpers import make_run_context, materialize_tests
 
 
 def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
