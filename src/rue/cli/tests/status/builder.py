@@ -15,6 +15,7 @@ from rue.cli.tests.status.models import (
 )
 from rue.config import Config
 from rue.context.runtime import RunContext, TestContext
+from rue.events.receiver import RunEventsReceiver
 from rue.resources import DependencyResolver, ResourceSpec
 from rue.resources.models import ResourceGraph
 from rue.resources.registry import registry as default_resource_registry
@@ -49,7 +50,7 @@ class TestsStatusBuilder:
             collection
         )
         context = RunContext(config=self.config)
-        with context:
+        with context, RunEventsReceiver([]):
             factory = DefaultTestFactory()
             tests = [factory.build(item, enqueue=False) for item in items]
 

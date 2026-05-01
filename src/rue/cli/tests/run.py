@@ -23,6 +23,7 @@ from rue.cli.tests.options import (
 )
 from rue.config import load_config
 from rue.context.runtime import RunContext
+from rue.events.receiver import RunEventsReceiver
 from rue.reports.base import Reporter
 from rue.resources import (
     DependencyResolver,
@@ -155,7 +156,7 @@ def run(
         if run_id is None
         else RunContext(config=runner_config, run_id=run_id)
     )
-    with context:
+    with context, RunEventsReceiver([]):
         runner = Runner(
             reporters=reporters,
             store=store,
