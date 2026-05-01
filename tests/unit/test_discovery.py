@@ -45,11 +45,9 @@ def materialize(path):
     return TestLoader(plan.suite_root).load_from_collection(plan)
 
 
-def make_runner(null_reporter) -> Runner:
+def make_runner() -> Runner:
     make_run_context(db_enabled=False)
-    return Runner(
-        reporters=[null_reporter],
-    )
+    return Runner()
 
 
 def test_spec_labels_are_bounded_and_keep_full_case_id():
@@ -430,7 +428,6 @@ def test_load_from_collection_raises_non_callable_target(tmp_path):
 @pytest.mark.asyncio
 async def test_materialize_supports_same_dir_setup_without_pyproject(
     tmp_path,
-    null_reporter,
 ):
     write_files(
         tmp_path,
@@ -460,7 +457,7 @@ async def test_materialize_supports_same_dir_setup_without_pyproject(
         },
     )
 
-    run = await make_runner(null_reporter).run(
+    run = await make_runner().run(
         items=materialize(tmp_path),
         resolver=DependencyResolver(registry),
     )
@@ -632,7 +629,6 @@ def test_materialize_uses_single_session_for_selected_modules(
 @pytest.mark.parametrize("fixture_location", ["module", "conftest"])
 async def test_materialize_promotes_pytest_fixtures(
     tmp_path,
-    null_reporter,
     fixture_location,
 ):
     files = {
@@ -669,7 +665,7 @@ async def test_materialize_promotes_pytest_fixtures(
 
     write_files(tmp_path, files)
 
-    run = await make_runner(null_reporter).run(
+    run = await make_runner().run(
         items=materialize(tmp_path),
         resolver=DependencyResolver(registry),
     )

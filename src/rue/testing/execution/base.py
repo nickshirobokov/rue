@@ -8,14 +8,13 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from rue.events import RunEventsReceiver
 from rue.resources.resolver import DependencyResolver
 from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.result import TestResult, TestStatus
 
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     from rue.testing.models.loaded import LoadedTestDef
 
 
@@ -35,7 +34,6 @@ class ExecutableTest(ABC):
     backend: ExecutionBackend
     execution_id: UUID
     children: list[ExecutableTest]
-    on_complete: Callable[[ExecutedTest], Awaitable[None]] | None = None
 
     def walk(self) -> list[ExecutableTest]:
         """Return this execution node and every descendant."""
@@ -75,9 +73,7 @@ class ExecutableTest(ABC):
                 execution_id=self.execution_id,
             )
 
-        if self.on_complete is not None:
-            await self.on_complete(execution)
-
+        await RunEventsReceiver.current().on_execution_complete(execution)
         return execution
 
     @abstractmethod

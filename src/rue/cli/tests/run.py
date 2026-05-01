@@ -23,8 +23,8 @@ from rue.cli.tests.options import (
 )
 from rue.config import load_config
 from rue.context.runtime import RunContext
+from rue.events.processor import RunEventsProcessor
 from rue.events.receiver import RunEventsReceiver
-from rue.reports.base import Reporter
 from rue.resources import (
     DependencyResolver,
     registry as default_resource_registry,
@@ -90,11 +90,14 @@ def run(
         bool,
         Option("--no-db", help="Disable writing run data to SQLite"),
     ] = False,
-    reporter: Annotated[
+    processor: Annotated[
         list[str] | None,
         Option(
-            "--reporter",
-            help="Reporter to use (can be specified multiple times)",
+            "--processor",
+            help=(
+                "Run events processor to use "
+                "(can be specified multiple times)"
+            ),
         ),
     ] = None,
 ) -> None:
@@ -114,20 +117,20 @@ def run(
         timeout=timeout if timeout and timeout > 0 else None,
         otel=otel,
         db_enabled=False if no_db else None,
-        reporters=reporter,
+        processors=processor,
     )
 
     _ = console_reports, otel_reports
-    if not runner_config.reporters:
-        reporters = list(Reporter.REGISTRY.values())
+    if not runner_config.processors:
+        processors = list(RunEventsProcessor.REGISTRY.values())
     else:
-        reporters = []
-        for name in runner_config.reporters:
-            if name not in Reporter.REGISTRY:
-                available = ", ".join(sorted(Reporter.REGISTRY))
-                msg = f"Unknown reporter: {name}. Available: {available}"
+        processors = []
+        for name in runner_config.processors:
+            if name not in RunEventsProcessor.REGISTRY:
+                available = ", ".join(sorted(RunEventsProcessor.REGISTRY))
+                msg = f"Unknown processor: {name}. Available: {available}"
                 raise ValueError(msg)
-            reporters.append(Reporter.REGISTRY[name])
+            processors.append(RunEventsProcessor.REGISTRY[name])
     store = (
         None
         if not runner_config.db_enabled
@@ -156,9 +159,8 @@ def run(
         if run_id is None
         else RunContext(config=runner_config, run_id=run_id)
     )
-    with context, RunEventsReceiver([]):
+    with context, RunEventsReceiver(processors):
         runner = Runner(
-            reporters=reporters,
             store=store,
             capture_output=not show_output,
         )

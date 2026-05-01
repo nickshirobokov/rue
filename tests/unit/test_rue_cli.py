@@ -9,6 +9,7 @@ from rue.cli import app
 from rue.cli.tests.status import TestsStatusReport
 from rue.config import Config
 from rue.context.runtime import CURRENT_RUN_CONTEXT
+from rue.events import RunEventsReceiver
 from rue.experiments.models import (
     ExperimentSpec,
     ExperimentVariant,
@@ -61,21 +62,21 @@ def make_environment(**updates) -> RunEnvironment:
     )
 
 
-class TestResolveReporters:
-    """Tests for reporter resolution via CLI and Config."""
+class TestResolveProcessors:
+    """Tests for processor configuration."""
 
-    def test_default_no_reporters(self):
+    def test_default_no_processors(self):
         config = Config()
-        assert config.reporters == []
+        assert config.processors == []
 
-    def test_config_reporters(self):
-        config = Config(reporters=["ConsoleReporter"])
-        assert config.reporters == ["ConsoleReporter"]
+    def test_config_processors(self):
+        config = Config(processors=["ConsoleReporter"])
+        assert config.processors == ["ConsoleReporter"]
 
     def test_cli_overrides_config(self):
-        config = Config(reporters=["OtelReporter"])
-        overridden = config.with_overrides(reporters=["ConsoleReporter"])
-        assert overridden.reporters == ["ConsoleReporter"]
+        config = Config(processors=["OtelReporter"])
+        overridden = config.with_overrides(processors=["ConsoleReporter"])
+        assert overridden.processors == ["ConsoleReporter"]
 
 
 def test_top_level_help_lists_tests_command():
@@ -219,21 +220,20 @@ def test_run_tests_returns_2_when_definition_errors(
     assert "broken" in result.stdout
 
 
-def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
+def test_cli_resolves_processors_and_injects_store(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
 
     class FakeRunner:
         def __init__(
             self,
             *,
-            reporters,
             store=None,
             capture_output=True,
         ) -> None:
             context = CURRENT_RUN_CONTEXT.get()
             captured["context"] = context
             captured["config"] = context.config
-            captured["reporters"] = reporters
+            captured["processors"] = RunEventsReceiver.current().processors
             captured["store"] = store
             captured["capture_output"] = capture_output
 
@@ -259,7 +259,7 @@ def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
             "run",
             "--db-path",
             str(tmp_path / "rue.db"),
-            "--reporter",
+            "--processor",
             "ConsoleReporter",
             "--fail-fast",
             "--show-output",
@@ -267,9 +267,9 @@ def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
     )
 
     assert result.exit_code == 0
-    assert captured["config"].reporters == ["ConsoleReporter"]
+    assert captured["config"].processors == ["ConsoleReporter"]
     assert captured["config"].fail_fast is True
-    assert [type(r).__name__ for r in captured["reporters"]] == [
+    assert [type(p).__name__ for p in captured["processors"]] == [
         "ConsoleReporter"
     ]
     assert isinstance(captured["store"], SQLiteStore)
@@ -306,14 +306,12 @@ def test_tests_without_subcommand_defaults_to_run(monkeypatch):
         def __init__(
             self,
             *,
-            reporters,
             store=None,
             capture_output=True,
         ) -> None:
             context = CURRENT_RUN_CONTEXT.get()
             captured["context"] = context
             captured["config"] = context.config
-            captured["reporters"] = reporters
             captured["store"] = store
             captured["capture_output"] = capture_output
 
@@ -514,7 +512,7 @@ def test_experiments_run_shares_selection_and_forces_no_db(
     assert captured["keyword"] == "smoke"
     assert captured["config"].db_enabled is False
     assert captured["config"].maxfail is None
-    assert captured["config"].reporters == []
+    assert captured["config"].processors == []
     assert captured["experiments"] == (experiment,)
     assert "model=mini" in cli_result.stdout
 

@@ -36,7 +36,7 @@ exclude-tags = ["slow"]
 keyword = "chatbot"
 fail-fast = true
 otel = false
-reporters = ["ConsoleReporter", "OtelReporter"]
+processors = ["ConsoleReporter", "OtelReporter"]
 db-path = ".rue/custom.db"
 db-enabled = false
 """.strip()
@@ -54,7 +54,7 @@ db-enabled = false
     assert config.addopts == ["-q"]
     assert config.otel is False
     assert not hasattr(config, "otel_content")
-    assert config.reporters == ["ConsoleReporter", "OtelReporter"]
+    assert config.processors == ["ConsoleReporter", "OtelReporter"]
     assert config.db_path == ".rue/custom.db"
     assert config.db_enabled is False
 

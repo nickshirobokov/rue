@@ -24,7 +24,6 @@ class CompositeTest(ExecutableTest):
     min_passes: int
     execution_id: UUID
     children: list[ExecutableTest] = field(default_factory=list)
-    on_complete: Callable | None = None
 
     async def _execute(
         self,

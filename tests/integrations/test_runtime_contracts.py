@@ -6,7 +6,7 @@ import pytest
 from rue.resources import DependencyResolver, registry
 from rue.testing.models import TestStatus
 from rue.testing.runner import Runner
-from tests.helpers import NullReporter, make_run_context, materialize_tests
+from tests.helpers import make_run_context, materialize_tests
 
 
 @pytest.fixture(autouse=True)
@@ -46,9 +46,7 @@ async def _run_module(
         db_enabled=False,
         concurrency=concurrency,
     )
-    return await Runner(
-        reporters=[NullReporter()],
-    ).run(
+    return await Runner().run(
         items=materialize_tests(module_path),
         resolver=DependencyResolver(registry),
     )

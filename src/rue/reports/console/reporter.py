@@ -15,7 +15,7 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
-from rue.reports.base import Reporter
+from rue.events import RunEventsProcessor
 from rue.testing.models import TestStatus
 
 from .assertions import AssertionRenderer
@@ -34,7 +34,9 @@ if TYPE_CHECKING:
     from rue.testing.models.run import Run, RunEnvironment
 
 
-class ConsoleReporter(Reporter):
+class ConsoleReporter(RunEventsProcessor):
+    """Rich console processor for Rue test runs."""
+
     _PROGRESS_STAT_ORDER: tuple[tuple[TestStatus, str], ...] = (
         (TestStatus.PASSED, "passed"),
         (TestStatus.FAILED, "failed"),
@@ -71,6 +73,7 @@ class ConsoleReporter(Reporter):
         self.completed_modules: set[Path] = set()
 
     def configure(self, config: Config) -> None:
+        """Apply runtime console settings."""
         self.verbosity = config.verbosity
         self._mode = make_mode(self.verbosity, self.console)
         self._assertions = AssertionRenderer()
@@ -129,7 +132,9 @@ class ConsoleReporter(Reporter):
             parts.append(f"[magenta]{result.xpassed} xpassed[/magenta]")
 
         summary = ", ".join(parts) if parts else "[dim]0 tests[/dim]"
-        duration_line = f"{summary} [dim]in {result.total_duration_ms:.0f}ms[/dim]"
+        duration_line = (
+            f"{summary} [dim]in {result.total_duration_ms:.0f}ms[/dim]"
+        )
         run_id_line = f"[dim]run_id: {run.run_id}[/dim]"
         return Group(
             Rule(Text("SUMMARY", style="bold cyan"), characters="="),
@@ -182,20 +187,24 @@ class ConsoleReporter(Reporter):
         return item.spec.collection_index
 
     def is_top_level_definition(self, item: LoadedTestDef) -> bool:
+        """Return whether the definition is a collected top-level item."""
         return (
             self._top_level_key(item) in self.item_keys
             and item.spec.suffix is None
             and item.spec.case_id is None
         )
 
-    # ── Reporter hooks ────────────────────────────────────────────────────────
+    # ── Run event hooks ───────────────────────────────────────────────────────
 
-    async def on_no_tests_found(self) -> None:
+    async def on_no_tests_found(self, run: Run) -> None:
+        """Print the empty-run message."""
+        _ = run
         self.console.print("[yellow]No tests found.[/yellow]")
 
     async def on_collection_complete(
         self, items: list[LoadedTestDef], run: Run
     ) -> None:
+        """Initialize display state after collection."""
         if self._live is not None:
             self._live.stop()
             self._live = None
@@ -236,16 +245,26 @@ class ConsoleReporter(Reporter):
             self._live.start()
         self._stderr_capture.start()
 
-    async def on_tests_ready(self, tests: list[ExecutableTest]) -> None:
+    async def on_tests_ready(
+        self, tests: list[ExecutableTest], run: Run
+    ) -> None:
+        """Cache top-level executable tests for rendering."""
+        _ = run
         for test in tests:
             if self.is_top_level_definition(test.definition):
                 self.tests[self._top_level_key(test.definition)] = test
 
-    async def on_test_start(self, item: LoadedTestDef) -> None:
+    async def on_test_start(self, test: ExecutableTest, run: Run) -> None:
+        """Refresh live output before a test starts."""
+        _ = test, run
         if self._live is not None:
             self._live.update(self._build_live_display(), refresh=True)
 
-    async def on_execution_complete(self, execution: ExecutedTest) -> None:
+    async def on_execution_complete(
+        self, execution: ExecutedTest, run: Run
+    ) -> None:
+        """Record and render one completed execution."""
+        _ = run
         async with self._lock:
             self.all_executions[id(execution.definition)] = execution
 
@@ -281,6 +300,7 @@ class ConsoleReporter(Reporter):
             self._mode.print_test(execution, self)
 
     async def on_run_complete(self, run: Run) -> None:
+        """Render the final run summary."""
         self._stderr_capture.stop()
 
         if self._live is not None:
@@ -319,7 +339,11 @@ class ConsoleReporter(Reporter):
         self.console.print()
         self.console.print(self._build_summary(run))
 
-    async def on_run_stopped_early(self, failure_count: int) -> None:
+    async def on_run_stopped_early(
+        self, failure_count: int, run: Run
+    ) -> None:
+        """Print maxfail early-stop notice."""
+        _ = run
         self.console.print(
             f"\n\n[red]Stopping early after {failure_count} failure(s).[/red]"
         )

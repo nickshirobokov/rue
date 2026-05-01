@@ -39,18 +39,18 @@ Use `--no-otel` to opt out for a run:
 uv run rue tests run --no-otel
 ```
 
-In the usual fresh-process setup, `uv run rue tests run` also writes local JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set. Those files are separate from SQLite storage.
+In the usual fresh-process setup, `uv run rue tests run` also writes local JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default processor set. Those files are separate from SQLite storage.
 
-If you override the reporter list, keep `OtelReporter` attached when you still want local trace files:
+If you override the processor list, keep `OtelReporter` attached when you still want local trace files:
 
 ```bash
-uv run rue tests run --reporter ConsoleReporter --reporter OtelReporter
+uv run rue tests run --processor ConsoleReporter --processor OtelReporter
 ```
 
-If you override reporters and omit `OtelReporter`, Rue still captures trace data for the run, but it does not persist local `.rue/traces/...` files.
+If you override processors and omit `OtelReporter`, Rue still captures trace data for the run, but it does not persist local `.rue/traces/...` files.
 
 <Note>
-During test execution, Rue exposes OpenTelemetry data only through `SUT` instances. When execution completes, reporters receive finished telemetry artifacts on `ExecutedTest.telemetry_artifacts`.
+During test execution, Rue exposes OpenTelemetry data only through `SUT` instances. When execution completes, run event processors receive finished telemetry artifacts on `ExecutedTest.telemetry_artifacts`.
 </Note>
 
 ## Basic Usage

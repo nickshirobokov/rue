@@ -1,4 +1,4 @@
-"""Reporter that persists OpenTelemetry traces to the local Rue directory."""
+"""Processor that persists OpenTelemetry traces to the local Rue directory."""
 
 from __future__ import annotations
 
@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from rue.reports.base import Reporter
+from rue.events import RunEventsProcessor
 from rue.telemetry import OtelTraceArtifact
+
 
 if TYPE_CHECKING:
     from rue.config import Config
@@ -26,26 +27,34 @@ UUID_STRING_PATTERN = re.compile(
 )
 
 
-class OtelReporter(Reporter):
+class OtelReporter(RunEventsProcessor):
     """Stores OpenTelemetry trace payloads under `.rue/traces`."""
 
     def __init__(self) -> None:
         self._prepared_run_ids: set[UUID] = set()
 
     def configure(self, config: Config) -> None:
+        """Accept runtime configuration."""
         _ = config
 
-    async def on_no_tests_found(self) -> None:
+    async def on_no_tests_found(self, run: Run) -> None:
+        """Ignore empty runs."""
+        _ = run
         return None
 
     async def on_collection_complete(
         self, items: list[LoadedTestDef], run: Run
     ) -> None:
+        """Reset per-run trace directory tracking."""
         _ = items, run
         self._prepared_run_ids.clear()
         return None
 
-    async def on_execution_complete(self, execution: ExecutedTest) -> None:
+    async def on_execution_complete(
+        self, execution: ExecutedTest, run: Run
+    ) -> None:
+        """Persist the execution OpenTelemetry trace artifact."""
+        _ = run
         artifacts = [
             artifact
             for artifact in execution.telemetry_artifacts
@@ -69,12 +78,16 @@ class OtelReporter(Reporter):
         return None
 
     async def on_run_complete(self, run: Run) -> None:
+        """Prune old run trace directories."""
         _ = run
         self._prune_run_directories()
         return None
 
-    async def on_run_stopped_early(self, failure_count: int) -> None:
-        _ = failure_count
+    async def on_run_stopped_early(
+        self, failure_count: int, run: Run
+    ) -> None:
+        """Ignore early-stop notifications."""
+        _ = failure_count, run
         return None
 
     def _serialize_trace_artifact(

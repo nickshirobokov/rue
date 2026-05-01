@@ -68,7 +68,7 @@ def _artifact_payload(artifact) -> dict[str, object]:
 async def _run_module_with_tracing(
     *,
     tmp_path: Path,
-    trace_reporter,
+    trace_processor,
     monkeypatch: pytest.MonkeyPatch,
     source: str,
     db_enabled: bool = False,
@@ -81,19 +81,19 @@ async def _run_module_with_tracing(
         items = materialize_tests(mod_path)
         store = SQLiteStore(db_path) if db_enabled else None
         make_run_context(
-                otel=True,
-                db_enabled=db_enabled,
-                db_path=db_path,
-            )
+            otel=True,
+            db_enabled=db_enabled,
+            db_path=db_path,
+            processors=(trace_processor,),
+        )
         runner = Runner(
-            reporters=[trace_reporter],
             store=store,
         )
         run = await runner.run(
             items=items,
             resolver=DependencyResolver(registry),
         )
-        return mod_name, run, trace_reporter.artifacts
+        return mod_name, run, trace_processor.artifacts
     finally:
         sys.modules.pop(mod_name, None)
 
@@ -198,7 +198,7 @@ def test_sample():
 )
 async def test_predicate_writes_trace_attributes(
     tmp_path: Path,
-    trace_reporter,
+    trace_processor,
     monkeypatch: pytest.MonkeyPatch,
     source: str,
     span_name: str,
@@ -206,7 +206,7 @@ async def test_predicate_writes_trace_attributes(
 ):
     mod_name, run, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
-        trace_reporter=trace_reporter,
+        trace_processor=trace_processor,
         monkeypatch=monkeypatch,
         source=source,
     )
@@ -252,13 +252,13 @@ def test_predicate_accepts_keyword_only_actual_reference_parameters():
 @pytest.mark.asyncio
 async def test_runner_collects_predicate_results_and_trace_data_into_db(
     tmp_path: Path,
-    trace_reporter,
+    trace_processor,
     monkeypatch: pytest.MonkeyPatch,
 ):
     db_path = tmp_path / "rue.db"
     mod_name, run, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
-        trace_reporter=trace_reporter,
+        trace_processor=trace_processor,
         monkeypatch=monkeypatch,
         db_enabled=True,
         db_path=db_path,
@@ -334,14 +334,14 @@ def test_sample():
 
 
 @pytest.mark.asyncio
-async def test_predicate_does_not_trace_outside_runner_even_after_runtime_configured(
+async def test_predicate_does_not_trace_after_runner_configured(
     tmp_path: Path,
-    trace_reporter,
+    trace_processor,
     monkeypatch: pytest.MonkeyPatch,
 ):
     _, _, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
-        trace_reporter=trace_reporter,
+        trace_processor=trace_processor,
         monkeypatch=monkeypatch,
         source="""
 from rue import test
@@ -362,12 +362,12 @@ def test_sample():
 @pytest.mark.asyncio
 async def test_predicate_trace_always_records_content_attributes(
     tmp_path: Path,
-    trace_reporter,
+    trace_processor,
     monkeypatch: pytest.MonkeyPatch,
 ):
     _, run, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
-        trace_reporter=trace_reporter,
+        trace_processor=trace_processor,
         monkeypatch=monkeypatch,
         source="""
 from rue import test
@@ -387,7 +387,16 @@ def equals(
 
 @test
 def test_sample():
-    assert equals("abc", "xyz", strict=False, confidence=0.25, message="secret") is False
+    assert (
+        equals(
+            "abc",
+            "xyz",
+            strict=False,
+            confidence=0.25,
+            message="secret",
+        )
+        is False
+    )
 """,
     )
 

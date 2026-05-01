@@ -6,7 +6,7 @@ import pytest
 from rue.resources import DependencyResolver, registry
 from rue.testing.models import TestStatus
 from rue.testing.runner import Runner
-from tests.helpers import NullReporter, make_run_context, materialize_tests
+from tests.helpers import make_run_context, materialize_tests
 
 
 @pytest.mark.asyncio
@@ -49,9 +49,7 @@ async def test_iterated_subprocess_children_keep_distinct_process_updates(
             db_enabled=False,
             concurrency=4,
         )
-    run = await Runner(
-        reporters=[NullReporter()],
-    ).run(items=items, resolver=DependencyResolver(registry))
+    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
 
     after_execution = next(
         execution
@@ -118,9 +116,7 @@ async def test_local_and_subprocess_updates_preserve_process_identity(
             db_enabled=False,
             concurrency=2,
         )
-    run = await Runner(
-        reporters=[NullReporter()],
-    ).run(items=items, resolver=DependencyResolver(registry))
+    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
 
     after_execution = next(
         execution
@@ -201,9 +197,7 @@ async def test_local_and_subprocess_nested_updates_merge_without_replacing_root(
             db_enabled=False,
             concurrency=2,
         )
-    run = await Runner(
-        reporters=[NullReporter()],
-    ).run(items=items, resolver=DependencyResolver(registry))
+    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
 
     after_execution = next(
         execution
@@ -271,9 +265,7 @@ async def test_local_and_subprocess_shared_sut_trace_state_stays_isolated(
             db_enabled=False,
             concurrency=2,
         )
-    run = await Runner(
-        reporters=[NullReporter()],
-    ).run(items=items, resolver=DependencyResolver(registry))
+    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
 
     assert run.result.passed == 2, [
         (
@@ -334,9 +326,7 @@ async def test_main_backend_waits_for_local_and_subprocess_stage(
             db_enabled=False,
             concurrency=3,
         )
-    run = await Runner(
-        reporters=[NullReporter()],
-    ).run(items=items, resolver=DependencyResolver(registry))
+    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
 
     assert run.result.passed == 4, [
         (

@@ -5,35 +5,30 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from rue.reports.base import Reporter
+from rue.events import RunEventsProcessor
 from rue.reports.console import ConsoleReporter
 from rue.reports.otel import OtelReporter
 from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.migrations import MigrationRunner
-from tests.helpers import NullReporter, TraceCollectorReporter
+from tests.helpers import TraceCollectorProcessor
 
 
-def _reset_reporters() -> None:
-    Reporter.REGISTRY.clear()
+def _reset_processors() -> None:
+    RunEventsProcessor.REGISTRY.clear()
     ConsoleReporter()
     OtelReporter()
 
 
 @pytest.fixture(autouse=True)
-def clear_reporter_instances():
-    _reset_reporters()
+def clear_processor_instances():
+    _reset_processors()
     yield
-    _reset_reporters()
+    _reset_processors()
 
 
 @pytest.fixture
-def null_reporter() -> NullReporter:
-    return NullReporter()
-
-
-@pytest.fixture
-def trace_reporter() -> TraceCollectorReporter:
-    return TraceCollectorReporter()
+def trace_processor() -> TraceCollectorProcessor:
+    return TraceCollectorProcessor()
 
 
 @pytest.fixture

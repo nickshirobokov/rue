@@ -127,7 +127,7 @@ class Config(BaseSettings):
     otel: bool = True
     db_path: str | None = None
     db_enabled: bool = True
-    reporters: list[str] = Field(default_factory=list)
+    processors: list[str] = Field(default_factory=list)
     predicates: PredicateSettings = Field(default_factory=PredicateSettings)
 
     @model_validator(mode="after")

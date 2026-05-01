@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from rue.config import Config
 from rue.context.runtime import RunContext
+from rue.events.processor import RunEventsProcessor
 from rue.events.receiver import RunEventsReceiver
 from rue.experiments.models import (
     ExperimentSpec,
@@ -106,7 +107,7 @@ async def _run_experiment_variant(
     )
     resolver = DependencyResolver(default_resource_registry)
     run = None
-    with context, RunEventsReceiver([]):
+    with context, RunEventsReceiver([RunEventsProcessor()]):
         try:
             await variant.apply(
                 default_experiment_registry.all(),
@@ -114,7 +115,6 @@ async def _run_experiment_variant(
             )
             items = loader.load_from_collection(collection)
             runner = Runner(
-                reporters=[],
                 capture_output=capture_output,
             )
             run = await runner.run(items, resolver=resolver)

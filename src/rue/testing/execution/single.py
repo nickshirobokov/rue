@@ -49,7 +49,6 @@ class SingleTest(ExecutableTest):
     )
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
-    on_complete: Callable | None = None
     tracer: TestTracer = field(init=False)
 
     def __post_init__(self) -> None:

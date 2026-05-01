@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.process_pool import LazyProcessPool
 from rue.context.runtime import CURRENT_RUN_CONTEXT, TestContext, bind
-from rue.reports.base import Reporter
+from rue.events import RunEventsReceiver
 from rue.resources import DependencyResolver
 from rue.resources.metrics.base import MetricResult
 from rue.resources.models import Scope
@@ -29,7 +29,6 @@ class Runner:
     """Executes discovered tests with resource injection.
 
     Args:
-        reporters: Reporter instances for lifecycle notifications.
         store: Optional persistence backend for completed runs.
     """
 
@@ -38,16 +37,11 @@ class Runner:
     def __init__(
         self,
         *,
-        reporters: list[Reporter],
         store: Store | None = None,
         capture_output: bool = True,
     ) -> None:
         self.capture_output = False
-        self.reporters = reporters
         self.store = store
-        context = CURRENT_RUN_CONTEXT.get()
-        for reporter in self.reporters:
-            reporter.configure(context.config)
 
         self.semaphore: asyncio.Semaphore | None = None
         self.stop_flag: bool = False
@@ -65,35 +59,6 @@ class Runner:
             config.concurrency
             if config.concurrency > 0
             else self.DEFAULT_MAX_CONCURRENCY
-        )
-
-    async def _notify_no_tests_found(self) -> None:
-        await asyncio.gather(*[r.on_no_tests_found() for r in self.reporters])
-
-    async def _notify_collection_complete(
-        self, items: list[LoadedTestDef], run: Run
-    ) -> None:
-        await asyncio.gather(
-            *[r.on_collection_complete(items, run) for r in self.reporters]
-        )
-
-    async def _notify_test_start(self, item: LoadedTestDef) -> None:
-        await asyncio.gather(*[r.on_test_start(item) for r in self.reporters])
-
-    async def _on_execution_complete(self, execution: ExecutedTest) -> None:
-        await asyncio.gather(
-            *[r.on_execution_complete(execution) for r in self.reporters]
-        )
-
-    async def _notify_run_complete(self, run: Run) -> None:
-        await asyncio.gather(*[r.on_run_complete(run) for r in self.reporters])
-
-    async def _notify_tests_ready(self, tests: list) -> None:
-        await asyncio.gather(*[r.on_tests_ready(tests) for r in self.reporters])
-
-    async def _notify_run_stopped_early(self, failure_count: int) -> None:
-        await asyncio.gather(
-            *[r.on_run_stopped_early(failure_count) for r in self.reporters]
         )
 
     async def run(
@@ -118,13 +83,15 @@ class Runner:
             run_id=context.run_id,
             environment=context.environment,
         )
+        receiver = RunEventsReceiver.current()
+        await receiver.on_run_start(self.current_run)
 
         if config.otel:
             otel_runtime.configure()
 
         if not items:
             try:
-                await self._notify_no_tests_found()
+                await receiver.on_no_tests_found()
                 self.current_run.end_time = datetime.now(UTC)
                 return self.current_run
             finally:
@@ -138,7 +105,7 @@ class Runner:
             bind(CURRENT_METRIC_RESULTS, metric_results),
         ):
             try:
-                await self._notify_collection_complete(items, self.current_run)
+                await receiver.on_collection_complete(items)
 
                 self.semaphore = asyncio.Semaphore(self._concurrency_limit())
                 self.stop_flag = False
@@ -171,7 +138,7 @@ class Runner:
         self.current_run.result.metric_results = metric_results.copy()
         self.current_run.end_time = datetime.now(UTC)
 
-        await self._notify_run_complete(self.current_run)
+        await receiver.on_run_complete()
 
         if self.store is not None:
             self.store.save_run(self.current_run)
@@ -191,7 +158,6 @@ class Runner:
             self._factory = DefaultTestFactory(
                 semaphore=self.semaphore,
                 is_stopped=lambda: self.stop_flag,
-                on_complete=self._on_execution_complete,
                 queue=self._queue,
             )
             for item in items:
@@ -214,10 +180,11 @@ class Runner:
                 for leaf in leaves
             }
             autouse_keys = frozenset(consumers)
-            resolver.registry.compile_graphs(
+            graphs = resolver.registry.compile_graphs(
                 consumers,
                 autouse_keys=autouse_keys,
             )
+            await RunEventsReceiver.current().on_di_graphs_compiled(graphs)
             self._remaining_module_leaves = {}
             for leaf in leaves:
                 module_path = leaf.definition.spec.locator.module_path
@@ -229,7 +196,7 @@ class Runner:
                 self._remaining_module_leaves[module_key] = (
                     self._remaining_module_leaves.get(module_key, 0) + 1
                 )
-            await self._notify_tests_ready(self._queue.tests)
+            await RunEventsReceiver.current().on_tests_ready(self._queue.tests)
             self._completed_executions = {}
             context = CURRENT_RUN_CONTEXT.get()
             config = context.config
@@ -239,7 +206,9 @@ class Runner:
                         break
                     await self._run_step(step, resolver, run)
                     if run.result.stopped_early and config.maxfail:
-                        await self._notify_run_stopped_early(config.maxfail)
+                        await RunEventsReceiver.current().on_run_stopped_early(
+                            config.maxfail
+                        )
                         break
             finally:
                 run.result.executions = [
@@ -267,7 +236,7 @@ class Runner:
             for test in batch.tests:
                 if self.stop_flag:
                     break
-                await self._notify_test_start(test.definition)
+                await RunEventsReceiver.current().on_test_start(test)
                 execution = await test.execute(resolver)
                 self._record_execution(run, execution)
                 await self._teardown_module_if_complete(
@@ -291,7 +260,7 @@ class Runner:
                             return
                         await condition.wait()
                     mq, batch, test = queued
-                    await self._notify_test_start(test.definition)
+                    await RunEventsReceiver.current().on_test_start(test)
 
                 execution = await test.execute(resolver)
                 self._record_execution(run, execution)
