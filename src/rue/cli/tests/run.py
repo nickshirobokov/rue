@@ -9,8 +9,8 @@ from uuid import UUID
 from rich.console import Console
 from typer import Option
 
-import rue.reports.console as console_reports
-import rue.reports.otel as otel_reports
+import rue.cli.console as console_reports
+import rue.telemetry.otel.reporter as otel_reports
 from rue.cli.errors import print_definition_errors
 from rue.cli.tests.options import (
     DBPathOpt,

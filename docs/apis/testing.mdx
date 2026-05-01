@@ -635,7 +635,8 @@ await runner.run(
 from rue.config import Config
 from rue.context.runtime import RunContext
 from rue.events import RunEventsReceiver
-from rue.reports import ConsoleReporter, OtelReporter
+from rue.cli.console import ConsoleReporter
+from rue.telemetry.otel import OtelReporter
 from rue.resources import DependencyResolver, registry
 from rue.testing import Runner
 

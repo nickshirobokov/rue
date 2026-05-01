@@ -5,11 +5,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rue.cli.console import ConsoleReporter
 from rue.events import RunEventsProcessor
-from rue.reports.console import ConsoleReporter
-from rue.reports.otel import OtelReporter
 from rue.storage.sqlite import SQLiteStore
 from rue.storage.sqlite.migrations import MigrationRunner
+from rue.telemetry.otel import OtelReporter
 from tests.helpers import TraceCollectorProcessor
 
 

@@ -43,7 +43,8 @@ CLI flags override config and environment.
 from rue.config import Config
 from rue.context.runtime import RunContext
 from rue.events import RunEventsReceiver
-from rue.reports import ConsoleReporter, OtelReporter
+from rue.cli.console import ConsoleReporter
+from rue.telemetry.otel import OtelReporter
 from rue.testing import Runner
 
 with RunContext(config=Config()), RunEventsReceiver([

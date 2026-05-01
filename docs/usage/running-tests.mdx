@@ -223,7 +223,7 @@ from uuid import UUID
 from rue.config import Config
 from rue.context.runtime import RunContext
 from rue.events import RunEventsReceiver
-from rue.reports import ConsoleReporter
+from rue.cli.console import ConsoleReporter
 from rue.testing import Runner
 
 with RunContext(
@@ -366,7 +366,7 @@ In a normal fresh process, Rue's default processor set includes `ConsoleReporter
 **ConsoleReporter**: Outputs to terminal with Rich formatting.
 
 ```python
-from rue.reports import ConsoleReporter
+from rue.cli.console import ConsoleReporter
 
 processor = ConsoleReporter(verbosity=1)
 ```
@@ -374,7 +374,7 @@ processor = ConsoleReporter(verbosity=1)
 **OtelReporter**: Persists OpenTelemetry traces under `.rue/traces`.
 
 ```python
-from rue.reports import OtelReporter
+from rue.telemetry.otel import OtelReporter
 
 processor = OtelReporter()
 ```
@@ -474,7 +474,8 @@ from rue.config import Config
 from rue.context.runtime import RunContext
 from rue.events import RunEventsReceiver
 from rue.testing import Runner
-from rue.reports import ConsoleReporter, OtelReporter
+from rue.cli.console import ConsoleReporter
+from rue.telemetry.otel import OtelReporter
 from my_processors import JsonFileProcessor, SlackProcessor
 
 async def main():

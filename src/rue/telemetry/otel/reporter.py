@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from rue.events import RunEventsProcessor
-from rue.telemetry import OtelTraceArtifact
+from rue.telemetry.otel.backend import OtelTraceArtifact
 
 
 if TYPE_CHECKING:
