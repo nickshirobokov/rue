@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
-from rue.context.runtime import CURRENT_TEST
+from rue.context.runtime import CURRENT_RUN_CONTEXT
 from rue.resources.metrics.scope import ACTIVE_ASSERTION_METRICS
 
 
@@ -74,14 +74,13 @@ class AssertionResult:
             for metric in metrics:
                 metric.add_record(self.passed)
 
-        test_ctx = CURRENT_TEST.get()
-        if test_ctx is not None:
-            if test_ctx.item.fail_fast and not self.passed:
-                msg = (
-                    self.error_message
-                    or f"Assertion failed: {self.expression_repr.expr}"
-                )
-                raise AssertionError(msg)
+        run_context = CURRENT_RUN_CONTEXT.get()
+        if run_context.config.fail_fast and not self.passed:
+            msg = (
+                self.error_message
+                or f"Assertion failed: {self.expression_repr.expr}"
+            )
+            raise AssertionError(msg)
 
 
 def capture_var(values: dict[str, str], name: str, value: object) -> object:

@@ -79,7 +79,7 @@ Thread-safe class for recording data and computing statistical properties.
 | Name | Type | Description |
 |------|------|-------------|
 | `name` | `str \| None` | Metric name (auto-set by decorator) |
-| `metadata` | `MetricMetadata` | Collection metadata (scope, contributors, timestamps) |
+| `metadata` | `MetricMetadata` | Lifecycle metadata (identity, consumers, timestamps) |
 
 **Methods:**
 
@@ -153,7 +153,7 @@ def test_quality_check(input, expected, response_quality: Metric):
 
 ### MetricMetadata
 
-Metadata tracking metric lifecycle and contributors.
+Metadata tracking metric lifecycle, provider identity, and injected consumers.
 
 **Attributes:**
 
@@ -161,10 +161,9 @@ Metadata tracking metric lifecycle and contributors.
 |------|------|-------------|
 | `last_item_recorded_at` | `datetime \| None` | Timestamp of most recent value |
 | `first_item_recorded_at` | `datetime \| None` | Timestamp of first value |
-| `scope` | `Scope` | Lifecycle scope (PROCESS, MODULE, TEST) |
-| `collected_from_tests` | `set[str]` | Names of test functions that contributed |
-| `collected_from_resources` | `set[str]` | Names of resources that contributed |
-| `collected_from_cases` | `set[str]` | Case IDs that contributed, falling back to case labels when IDs are unavailable |
+| `identity` | `ResourceSpec` | Metric provider identity, including locator and scope |
+| `consumers` | `list[Spec]` | Test/resource specs that consumed the metric through injection |
+| `direct_providers` | `list[ResourceSpec]` | Resource providers directly used by this metric provider |
 
 **Example:**
 ```python
@@ -175,9 +174,10 @@ def my_metric():
 
     # Inspect metadata
     meta = metric.metadata
-    print(f"Scope: {meta.scope}")
-    print(f"Contributing tests: {meta.collected_from_tests}")
-    print(f"Case count: {len(meta.collected_from_cases)}")
+    print(f"Provider: {meta.identity.locator.function_name}")
+    print(f"Scope: {meta.identity.scope}")
+    print(f"Consumers: {[spec.locator.function_name for spec in meta.consumers]}")
+    print(f"Providers: {[spec.locator.function_name for spec in meta.direct_providers]}")
     print(f"First recorded: {meta.first_item_recorded_at}")
     print(f"Last recorded: {meta.last_item_recorded_at}")
 ```

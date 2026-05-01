@@ -16,6 +16,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
+from rue.models import Spec
 from rue.resources import ResourceSpec, Scope
 
 from .shared import (
@@ -25,16 +26,15 @@ from .shared import (
     truncate,
 )
 
-if TYPE_CHECKING:
-    from uuid import UUID
 
+if TYPE_CHECKING:
     from rue.assertions import AssertionResult
     from rue.resources.metrics.base import MetricResult
     from rue.testing.models.executed import ExecutedTest
 
 
 _SCOPE_ORDER = {
-    Scope.PROCESS: 0,
+    Scope.RUN: 0,
     Scope.MODULE: 1,
     Scope.TEST: 2,
 }
@@ -92,17 +92,67 @@ class MetricGroup:
         return (
             self.has_failures
             or len(self.metrics) > 1
-            or len(self.contributors("collected_from_modules")) > 1
-            or len(self.contributors("collected_from_resources")) > 1
+            or len(self.consumer_modules()) > 1
+            or len(self.resource_consumers()) > 1
             or self.key in parents
             or self.key in children
         )
 
-    def contributors(self, attr: str) -> set[str]:
-        values: set[str] = set()
+    def consumers(self) -> list[Spec]:
+        values: list[Spec] = []
         for metric in self.metrics:
-            values.update(getattr(metric.metadata, attr))
+            values.extend(metric.metadata.consumers)
         return values
+
+    def consumer_modules(self) -> set[str]:
+        return self._consumer_modules(self.consumers())
+
+    def test_consumers(self) -> set[str]:
+        return self._test_consumers(self.consumers())
+
+    def resource_consumers(self) -> set[str]:
+        return self._resource_consumers(self.consumers())
+
+    def consumer_cases(self) -> set[str]:
+        return self._consumer_cases(self.consumers())
+
+    @staticmethod
+    def _consumer_modules(consumers: list[Spec]) -> set[str]:
+        return {
+            str(consumer.locator.module_path)
+            for consumer in consumers
+            if consumer.locator.module_path is not None
+        }
+
+    @staticmethod
+    def _test_consumers(consumers: list[Spec]) -> set[str]:
+        return {
+            consumer.locator.function_name
+            for consumer in consumers
+            if not isinstance(consumer, ResourceSpec)
+        }
+
+    @staticmethod
+    def _resource_consumers(consumers: list[Spec]) -> set[str]:
+        return {
+            consumer.locator.function_name
+            for consumer in consumers
+            if isinstance(consumer, ResourceSpec)
+        }
+
+    @staticmethod
+    def _consumer_cases(consumers: list[Spec]) -> set[str]:
+        cases = {
+            str(case_id)
+            for consumer in consumers
+            if (case_id := getattr(consumer, "case_id", None)) is not None
+        }
+        cases.update(
+            suffix
+            for consumer in consumers
+            if (suffix := getattr(consumer, "suffix", None))
+        )
+        return cases
 
     def value_summary(self) -> str:
         values = [MetricValue.from_result(m).value_str for m in self.metrics]
@@ -125,7 +175,6 @@ class MetricGroup:
 class MetricsRenderer:
     def __init__(self) -> None:
         self._groups: list[MetricGroup] = []
-        self._execution_lookup: dict[UUID, ExecutedTest] = {}
         self._group_lookup: dict[ResourceSpec, MetricGroup] = {}
         self._parents: dict[ResourceSpec, set[ResourceSpec]] = {}
         self._children: dict[ResourceSpec, set[ResourceSpec]] = {}
@@ -141,16 +190,12 @@ class MetricsRenderer:
 
         self._groups = self._build_groups(metric_results)
         self._group_lookup = {g.key: g for g in self._groups}
-        lookup: dict[UUID, ExecutedTest] = {}
-        stack = list(executions or [])
-        while stack:
-            execution = stack.pop()
-            lookup[execution.execution_id] = execution
-            stack.extend(execution.sub_executions)
-        self._execution_lookup = lookup
-        self._parents, self._children = self._build_graph()
+        _ = executions
+        self._parents, self._children = self._build_relationships()
 
-        renderables: list[RenderableType] = [Rule("METRICS", characters="=")]
+        renderables: list[RenderableType] = [
+            Rule(Text("METRICS", style="bold cyan"), characters="=")
+        ]
         if not self._groups:
             return renderables
 
@@ -176,30 +221,33 @@ class MetricsRenderer:
 
         name_counts: dict[str, int] = {}
         for key in grouped:
-            name_counts[key.name] = name_counts.get(key.name, 0) + 1
+            name = key.locator.function_name
+            name_counts[name] = name_counts.get(name, 0) + 1
 
         groups = sorted(
             grouped.values(),
             key=lambda g: (
                 not g.has_failures,
                 _SCOPE_ORDER.get(g.key.scope, 99),
-                g.display_name or g.key.name,
+                g.display_name or g.key.locator.function_name,
             ),
         )
         for group in groups:
-            path_str = group.key.provider_path or group.key.provider_dir
+            origin = group.key.locator.module_path
+            path_str = None if origin is None else str(origin)
             provider = (
                 safe_relative_path(Path(path_str)).as_posix()
                 if path_str
                 else None
             )
-            if name_counts[group.key.name] > 1 and provider:
-                group.display_name = f"{group.key.name} @ {provider}"
+            name = group.key.locator.function_name
+            if name_counts[name] > 1 and provider:
+                group.display_name = f"{name} @ {provider}"
             else:
-                group.display_name = group.key.name
+                group.display_name = name
         return groups
 
-    def _build_graph(
+    def _build_relationships(
         self,
     ) -> tuple[
         dict[ResourceSpec, set[ResourceSpec]],
@@ -210,7 +258,7 @@ class MetricsRenderer:
 
         for group in self._groups:
             for metric in group.metrics:
-                for dep in metric.dependencies:
+                for dep in metric.metadata.direct_providers:
                     if dep not in self._group_lookup:
                         continue
                     parents.setdefault(group.key, set()).add(dep)
@@ -258,13 +306,16 @@ class MetricsRenderer:
         for group in self._groups:
             match len(group.metrics):
                 case 1:
-                    scope_cell = group.key.scope.value
+                    scope_cell = Text(group.key.scope.value, style="dim")
                 case n:
-                    scope_cell = f"{group.key.scope.value} ×{n}"
+                    scope_text = Text(group.key.scope.value, style="dim")
+                    scope_text.append(f" ×{n}")
+                    scope_cell = scope_text
+            name_style = "bold red" if group.has_failures else "bold"
             table.add_row(
-                group.display_name,
+                Text(group.display_name, style=name_style),
                 scope_cell,
-                group.value_summary(),
+                Text(group.value_summary(), style="bold"),
                 self._assertion_summary(group),
                 self._contributor_counts(group),
             )
@@ -297,9 +348,10 @@ class MetricsRenderer:
             self._append_section(renderables, "Assertions", assertions)
 
         border_style = "red" if group.has_failures else "cyan"
+        title_style = "bold red" if group.has_failures else "bold"
         return Panel(
             Group(*renderables),
-            title=group.display_name,
+            title=Text(group.display_name, style=title_style),
             title_align="left",
             border_style=border_style,
             expand=True,
@@ -310,13 +362,20 @@ class MetricsRenderer:
         table = Table.grid(padding=(0, 1))
         table.add_column(style="bold", no_wrap=True)
         table.add_column()
-        table.add_row("Scope", group.key.scope.value)
+        table.add_row("Scope", Text(group.key.scope.value, style="dim"))
         table.add_row("Instances", str(len(group.metrics)))
-        table.add_row("Value", group.value_summary())
+        table.add_row("Value", Text(group.value_summary(), style="bold"))
 
-        path_str = group.key.provider_path or group.key.provider_dir
+        origin = group.key.locator.module_path
+        path_str = None if origin is None else str(origin)
         if path_str:
-            table.add_row("Path", safe_relative_path(Path(path_str)).as_posix())
+            table.add_row(
+                "Path",
+                Text(
+                    safe_relative_path(Path(path_str)).as_posix(),
+                    style="dim",
+                ),
+            )
 
         return table
 
@@ -376,25 +435,19 @@ class MetricsRenderer:
         rows = [
             (
                 "Modules",
-                self._format_values(
-                    group.contributors("collected_from_modules"), path=True
-                ),
+                self._format_values(group.consumer_modules(), path=True),
             ),
             (
                 "Tests",
-                self._format_values(group.contributors("collected_from_tests")),
+                self._format_values(group.test_consumers()),
             ),
             (
                 "Resources",
-                self._format_values(
-                    group.contributors("collected_from_resources")
-                ),
+                self._format_values(group.resource_consumers()),
             ),
             (
                 "Cases",
-                self._format_values(
-                    group.contributors("collected_from_cases"), case=True
-                ),
+                self._format_values(group.consumer_cases(), case=True),
             ),
         ]
         rows = [(label, value) for label, value in rows if value]
@@ -423,12 +476,17 @@ class MetricsRenderer:
             table.add_row(
                 self._instance_label(metric),
                 self._format_values(
-                    metric.metadata.collected_from_modules, path=True
+                    MetricGroup._consumer_modules(
+                        metric.metadata.consumers
+                    ),
+                    path=True,
                 )
                 or "—",
-                self._format_values(metric.metadata.collected_from_tests)
+                self._format_values(
+                    MetricGroup._test_consumers(metric.metadata.consumers)
+                )
                 or "—",
-                mv.value_str,
+                Text(mv.value_str, style="bold"),
                 self._instance_assertions(metric),
             )
         return table
@@ -513,28 +571,27 @@ class MetricsRenderer:
 
     def _contributor_counts(self, group: MetricGroup) -> Text:
         text = Text()
-        for i, (label, attr) in enumerate(
+        for i, (label, count) in enumerate(
             [
-                ("M", "collected_from_modules"),
-                ("T", "collected_from_tests"),
-                ("R", "collected_from_resources"),
-                ("C", "collected_from_cases"),
+                ("M", len(group.consumer_modules())),
+                ("T", len(group.test_consumers())),
+                ("R", len(group.resource_consumers())),
+                ("C", len(group.consumer_cases())),
             ]
         ):
             if i:
                 text.append(" ")
             text.append(label, style="bold")
-            text.append(str(len(group.contributors(attr))), style="dim")
+            text.append(str(count), style="dim")
         return text
 
     def _instance_label(self, metric: MetricResult) -> str:
         case_id = metric.primary_case_id
         if case_id:
             return f"[{case_id}]"
-        if metric.execution_id is not None:
-            return str(metric.execution_id)[:8]
         ident = metric.metadata.identity
-        p = ident.provider_path or ident.provider_dir
+        origin = ident.locator.module_path
+        p = None if origin is None else str(origin)
         label = safe_relative_path(Path(p)).as_posix() if p else None
         return truncate(label or "metric", 28)
 
@@ -552,7 +609,8 @@ class MetricsRenderer:
 
     def _metric_sort_key(self, metric: MetricResult) -> tuple[str, str]:
         ident = metric.metadata.identity
-        p = ident.provider_path or ident.provider_dir
+        origin = ident.locator.module_path
+        p = None if origin is None else str(origin)
         provider = safe_relative_path(Path(p)).as_posix() if p else ""
         return (metric.primary_case_id, provider)
 
@@ -579,7 +637,9 @@ class MetricsRenderer:
 
     @staticmethod
     def _tree_label(group: MetricGroup, *, current: bool) -> Text:
-        text = Text(group.display_name, style="bold" if current else "")
+        text = Text(
+            group.display_name, style="bold cyan" if current else ""
+        )
         if group.key.scope:
             text.append(f" [{group.key.scope.value}]", style="dim")
         return text

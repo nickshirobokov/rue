@@ -1,12 +1,14 @@
+"""Composite test execution."""
+
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
-from uuid import uuid4
+from uuid import UUID
 
-from rue.resources.resolver import ResourceResolver
+from rue.resources.resolver import DependencyResolver
 from rue.testing.execution.base import ExecutableTest, ExecutionBackend
 from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.loaded import LoadedTestDef
@@ -20,10 +22,14 @@ class CompositeTest(ExecutableTest):
     definition: LoadedTestDef
     backend: ExecutionBackend
     min_passes: int
+    execution_id: UUID
     children: list[ExecutableTest] = field(default_factory=list)
     on_complete: Callable | None = None
 
-    async def _execute(self, resolver: ResourceResolver) -> ExecutedTest:
+    async def _execute(
+        self,
+        resolver: DependencyResolver,
+    ) -> ExecutedTest:
         if self.backend is ExecutionBackend.MAIN:
             sub_executions = []
             for child in self.children:
@@ -36,18 +42,22 @@ class CompositeTest(ExecutableTest):
 
             sub_executions = await self._run_children(run_child)
         passed = sum(
-            1 for execution in sub_executions if execution.status is TestStatus.PASSED
+            1
+            for execution in sub_executions
+            if execution.status is TestStatus.PASSED
         )
         status = (
             TestStatus.PASSED
             if passed >= self.min_passes
             else TestStatus.FAILED
         )
-        duration = sum(execution.result.duration_ms for execution in sub_executions)
+        duration = sum(
+            execution.result.duration_ms for execution in sub_executions
+        )
         return ExecutedTest(
             definition=self.definition,
             result=TestResult(status=status, duration_ms=duration),
-            execution_id=uuid4(),
+            execution_id=self.execution_id,
             sub_executions=sub_executions,
         )
 
@@ -72,4 +82,8 @@ class CompositeTest(ExecutableTest):
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             raise
-        return [execution for execution in sub_executions if execution is not None]
+        return [
+            execution
+            for execution in sub_executions
+            if execution is not None
+        ]

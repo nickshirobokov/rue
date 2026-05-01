@@ -2,12 +2,12 @@
 
 import pytest
 
-from rue.config import Config
+from rue.resources import DependencyResolver, registry
 from rue.testing import TestStatus, fail, skip, xfail
 from rue.testing.models import LoadedTestDef
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
 from rue.testing.runner import Runner
-from tests.unit.factories import make_definition
+from tests.helpers import make_definition, make_run_context
 
 
 def make_item(
@@ -17,8 +17,8 @@ def make_item(
 
 
 def make_runner(null_reporter) -> Runner:
+    make_run_context(db_enabled=False)
     return Runner(
-        config=Config.model_construct(db_enabled=False),
         reporters=[null_reporter],
     )
 
@@ -44,7 +44,8 @@ async def test_imperative_outcome_sets_status_and_reason(
         outcome_fn(reason)
 
     result = await make_runner(null_reporter).run(
-        items=[make_item(outcome_test)]
+        items=[make_item(outcome_test)],
+        resolver=DependencyResolver(registry),
     )
     execution = result.result.executions[0]
 
@@ -73,7 +74,8 @@ async def test_imperative_outcome_without_reason_uses_expected_error_type(
         outcome_fn()
 
     result = await make_runner(null_reporter).run(
-        items=[make_item(outcome_test)]
+        items=[make_item(outcome_test)],
+        resolver=DependencyResolver(registry),
     )
 
     assert getattr(result.result, count_attr) == 1
@@ -93,6 +95,9 @@ async def test_imperative_outcome_stops_execution(
         outcome_fn("stopping")
         executed.append("after")
 
-    await make_runner(null_reporter).run(items=[make_item(outcome_test)])
+    await make_runner(null_reporter).run(
+        items=[make_item(outcome_test)],
+        resolver=DependencyResolver(registry),
+    )
 
     assert executed == ["before"]

@@ -33,14 +33,15 @@ def sut(
 
     def on_resolve(sut_instance: Any) -> SUT:
         if not isinstance(sut_instance, SUT):
-            raise TypeError("@sut factories must return or yield a SUT.")
+            error = TypeError("@sut factories must return or yield a SUT.")
+            raise RuntimeError(error) from error
 
         sut_instance.name = factory_name
         return sut_instance
 
     def on_injection(sut_instance: SUT) -> SUT:
         test_ctx = CURRENT_TEST.get()
-        execution_id = None if test_ctx is None else test_ctx.execution_id
+        execution_id = test_ctx.execution_id
         sut_instance.reset_output_state(execution_id)
         sut_instance.reset_trace_state(execution_id)
         tracer = CURRENT_TEST_TRACER.get()

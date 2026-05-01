@@ -1,502 +1,159 @@
-# RFC: Resource Registration and Injection
+# Resource DI SPEC
 
 **Status:** Draft
-**Intended use:** Normative foundation for Rue resource registration, lookup, injection, and lifecycle management
-**Version:** 1.0
+**Intended use:** Short map of Rue's dependency injection runtime
 
-## Abstract
+Rue resources are named providers selected at graph-compile time and owned at
+runtime by `ScopeOwner`. Resolution returns kwargs for a consumer, caches
+created values by scope owner, and tears generator resources down when that
+owner ends.
 
-This document specifies the `rue.resources` API.
+## User Story
 
-It defines:
-
-* resource registration through `ResourceRegistry`
-* the default singleton registry `registry`
-* decorator-based registration through `resource(...)`
-* runtime resolution through `ResourceResolver`
-* lifecycle scopes through `Scope`
-* hierarchical `PROCESS` lookup anchored to the requesting test module path
-
-This RFC is normative for the `rue.resources` package itself.
-
-Convenience re-exports from other packages, such as `rue.testing.resource` or `rue.resource`, are outside the primary API specified here. They MAY exist, but they do not define additional semantics.
-
----
-
-## 1. Conventions and Normative Language
-
-The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are normative.
-
-Unless otherwise stated:
-
-* "resource name" means the registered function name
-* "request path" means the current test module path used to anchor hierarchical `PROCESS` lookup
-* "provider" means the selected `ResourceDef` chosen for one resolution request
-
-This RFC specifies public behavior. It does not freeze private attribute names or internal data structures.
-
----
-
-## 2. Goals
-
-The goals of the resources API are:
-
-* register injectable dependencies by function name
-* support sync, async, generator, and async-generator resources
-* provide explicit registry ownership
-* provide deterministic scope-aware caching and teardown
-* support conftest-style hierarchical `PROCESS` resources
-* keep decorator ergonomics for normal test authoring
-
----
-
-## 3. Non-Goals
-
-This RFC does not define:
-
-* arbitrary service-locator behavior
-* type-based dependency lookup
-* named scopes beyond `TEST`, `MODULE`, and `PROCESS`
-* automatic registry isolation across threads or processes
-* post-`teardown()` resolver reuse semantics
-* any API for unregistering one resource by name
-
----
-
-## 4. Public API Surface
-
-The canonical package surface is:
+Resources are Rue's mirror of pytest fixtures. Users define named setup units
+once and tests ask for them by parameter name. Rue also rewrites supported
+top-level `pytest.fixture` declarations into resources while loading test
+modules, so fixture-shaped setup can enter the same runtime.
 
 ```python
-from rue.resources import (
-    ResourceDef,
-    ResourceRegistry,
-    ResourceResolver,
-    Scope,
-    registry,
-    resource,
-)
+import rue
+
+
+@rue.resource(scope="module")
+def client():
+    return APIClient()
+
+
+@rue.test
+def test_health(client):
+    assert client.get("/health").ok
 ```
 
-### 4.1 `Scope`
+Users pick scope to express lifetime:
 
-`Scope` is an enum with exactly three values:
+- `test`: fresh value per execution; best for mutable or isolated state
+- `module`: one value per test file; best for medium-cost shared setup
+- `run`: one value per active provider; best for expensive shared setup
 
-* `Scope.TEST`
-* `Scope.MODULE`
-* `Scope.PROCESS`
-
-Their string values are `"test"`, `"module"`, and `"process"` respectively.
-
-### 4.2 `ResourceDef`
-
-`ResourceDef` is the public definition record for a registered resource.
-
-It contains:
-
-* `name`
-* `fn`
-* `scope`
-* `is_async`
-* `is_generator`
-* `is_async_generator`
-* `dependencies`
-* `on_resolve`
-* `on_injection`
-* `on_teardown`
-* `origin_path`
-* `origin_dir`
-
-### 4.3 `ResourceRegistry`
-
-`ResourceRegistry` is the canonical registration and selection object.
-
-Its public methods are:
-
-* `resource(...)`
-* `get(name)`
-* `select(name, request_path)`
-* `mark_builtin(name)`
-* `reset()`
-
-### 4.4 `registry`
-
-`registry` is the default singleton `ResourceRegistry`.
-
-### 4.5 `resource(...)`
-
-`resource(...)` is decorator sugar for `registry.resource(...)`.
-
-### 4.6 `ResourceResolver`
-
-`ResourceResolver(resource_registry)` resolves and caches resources for execution.
-
-Its public methods are:
-
-* `resolve(name)`
-* `fork_for_test()`
-* `teardown()`
-* `teardown_scope(scope)`
-
-The resolver constructor MUST be passed a `ResourceRegistry`. There is no implicit default.
-
----
-
-## 5. Registration Model
-
-### 5.1 Naming
-
-Resources are registered by decorated function name.
-
-For example:
+Generator resources give users teardown without a second API:
 
 ```python
-@resource
-def db():
-    ...
+@rue.resource
+def database():
+    conn = connect()
+    yield conn
+    conn.close()
 ```
 
-registers the resource name `db`.
-
-The API does not provide a separate explicit `name=` override.
-
-### 5.2 Dependency discovery
-
-Dependencies are discovered from the function signature.
-
-All parameter names except `self` and `cls` become dependency names.
-
-This rule applies uniformly to:
-
-* sync functions
-* async functions
-* generator functions
-* async-generator functions
-
-### 5.3 Resource kinds
-
-The registry MUST classify each resource as one of:
-
-* sync function
-* async function
-* generator function
-* async-generator function
-
-This classification controls runtime creation and teardown behavior.
-
-### 5.4 Origin metadata
-
-On registration, the registry MUST derive:
-
-* `origin_path`
-* `origin_dir`
-
-from `fn.__code__.co_filename`.
-
-If the filename is synthetic, such as `<string>`, both fields MUST be `None`.
-
-### 5.5 Decorator options
-
-The `resource(...)` decorator and `ResourceRegistry.resource(...)` support:
-
-* `scope`
-* `on_resolve`
-* `on_injection`
-* `on_teardown`
-
-`scope` MAY be passed as either `Scope` or its string value.
-
----
-
-## 6. Registry Semantics
-
-### 6.1 `get(name)`
-
-`get(name)` returns the flat definition currently registered under `name`, or `None`.
-
-It does not perform hierarchical lookup.
-
-### 6.2 Registration precedence
-
-The registry maintains both:
-
-* a flat definition map
-* a process-only hierarchical index
-
-Registration rules are:
-
-* non-`PROCESS` resources replace the flat definition for their name
-* `PROCESS` resources are appended to the process index for their name
-* a `PROCESS` resource replaces the flat definition only when the current flat definition is absent or also `PROCESS`
-
-As a result:
-
-* `TEST` and `MODULE` resources win over same-name `PROCESS` resources for direct DI selection
-* multiple `PROCESS` resources with the same name can coexist in the hierarchical index
-
-### 6.3 `select(name, request_path)`
-
-`select(name, request_path)` chooses the active provider for dependency injection.
-
-It returns a selected provider object containing:
-
-* `definition`
-* `provider_dir`
-
-Selection rules are:
-
-* if a flat non-`PROCESS` definition exists, it MUST be selected immediately
-* otherwise, `PROCESS` selection MUST use hierarchical lookup
-* if no name exists in either flat or process indexes, `ValueError("Unknown resource: <name>")` MUST be raised
-
-### 6.4 Hierarchical `PROCESS` lookup
-
-Hierarchical `PROCESS` lookup is anchored to `request_path.parent`.
-
-A `PROCESS` definition is eligible if:
-
-* it has `origin_dir`
-* `request_path.parent` is inside that `origin_dir`
-
-Among eligible candidates, the registry MUST pick the deepest ancestor.
-
-If multiple eligible `PROCESS` definitions exist at the same depth, the latest registered definition wins.
-
-If no eligible hierarchical match exists, the registry MUST fall back to the flat definition for that name.
-
-Consequences:
-
-* child tests see the nearest ancestor `PROCESS` resource
-* sibling branches do not see unrelated child overrides
-* mixed-scope clashes still prefer non-`PROCESS` resources
-* without a request path, `PROCESS` lookup falls back to flat latest-registration behavior
-
-### 6.5 Builtin preservation
-
-`mark_builtin(name)` snapshots the currently active resource under `name` into the builtin baseline.
-
-`reset()` MUST:
-
-* clear all non-builtin definitions
-* restore builtin flat definitions
-* restore builtin `PROCESS` indexes
-
-The default singleton registry uses this mechanism for framework-provided resources.
-
----
-
-## 7. Scope Semantics
-
-### 7.1 General
-
-Scope controls sharing and teardown ownership inside a resolver tree.
-
-The API itself defines resolver-relative semantics. Rue's runner builds on top of those semantics to deliver run-level behavior.
-
-### 7.2 `TEST`
-
-`TEST` resources are owned by the current resolver instance.
-
-They are:
-
-* cached per resolver
-* not shared upward to parent resolvers
-* torn down by `teardown_scope(Scope.TEST)` or `teardown()`
-
-### 7.3 `MODULE`
-
-`MODULE` resources are flat by name.
-
-Within a resolver family:
-
-* they are owned by the nearest parent owner resolver
-* child resolvers reuse the parent's cached value
-* teardown is delegated to the owner resolver
-
-### 7.4 `PROCESS`
-
-`PROCESS` resources are selected hierarchically, then cached by provider identity.
-
-The cache identity includes:
-
-* scope
-* resource name
-* selected provider directory
-
-This means two same-name `PROCESS` resources from different directories MUST produce distinct cached instances.
-
----
-
-## 8. Resolver Semantics
-
-### 8.1 `resolve(name)`
-
-`resolve(name)` MUST:
-
-* ask the registry to select the active provider using the current request path
-* compute a cache key from scope, name, and selected provider directory
-* detect circular dependencies
-* create or reuse the value according to scope ownership
-* apply `on_injection` before returning
-
-### 8.2 Request path source
-
-When used inside Rue execution, the resolver derives `request_path` from the current test context.
-
-If no current test context exists, the resolver passes `None`, which causes `PROCESS` selection to use flat fallback behavior.
-
-### 8.3 Dependency resolution
-
-Dependencies are resolved recursively by parameter name.
-
-During dependency resolution, the runtime binds the direct consumer resource name as the current resource consumer context.
-
-This means dependency hooks MAY observe which resource requested them.
-
-### 8.4 `on_resolve`
-
-`on_resolve` runs after the underlying resource value is created and before it is cached.
-
-It therefore runs once per created instance, not once per injection.
-
-### 8.5 `on_injection`
-
-`on_injection` runs on every successful `resolve(name)` return path, including cached values.
-
-It MAY transform the returned value.
-
-### 8.6 `fork_for_test()`
-
-`fork_for_test()` creates a child resolver that:
-
-* shares `MODULE` and `PROCESS` cache entries from its parent
-* keeps `TEST` scope isolated
-* delegates `MODULE` and `PROCESS` teardown registration to the correct owner
-
----
-
-## 9. Generator and Teardown Semantics
-
-### 9.1 Generator resources
-
-For generator and async-generator resources:
-
-* the first yielded value is the injected value
-* the generator instance is retained for teardown
-
-### 9.2 `teardown()`
-
-`teardown()` runs all registered teardowns in reverse registration order.
-
-For generator resources:
-
-* the generator is resumed once to perform finalization
-* after generator finalization, `on_teardown` runs, if present
-
-If multiple teardown errors occur, the resolver MAY raise an `ExceptionGroup`.
-
-### 9.3 `teardown_scope(scope)`
-
-`teardown_scope(scope)` tears down only resources matching the specified scope.
-
-It MUST:
-
-* execute matching teardowns in reverse registration order
-* remove matching cache entries from the owner resolver
-* leave other scopes intact
-
-### 9.4 Post-teardown reuse
-
-Resolvers are not intended for continued reuse after full `teardown()`.
-
-This RFC does not specify post-`teardown()` cache behavior.
-
----
-
-## 10. Error Semantics
-
-### 10.1 Unknown resource
-
-Resolving an unknown resource MUST raise:
-
-* `ValueError("Unknown resource: <name>")`
-
-### 10.2 Circular dependency
-
-If dependency resolution revisits the same cache key in the active resolution path, the resolver MUST raise a `RuntimeError` describing the cycle.
-
-For hierarchical `PROCESS` resources, the cycle label includes the selected provider directory.
-
-### 10.3 Resource body failures
-
-If the underlying resource function raises during creation, that exception propagates.
-
-### 10.4 Hook failures
-
-If `on_resolve`, `on_injection`, or `on_teardown` fails, the resolver MUST wrap the failure in `RuntimeError` naming the hook and resource.
-
-### 10.5 Generator finalization failures
-
-If a generator raises during teardown, the teardown error MUST surface from `teardown()` or `teardown_scope(...)`.
-
----
-
-## 11. Default Singleton Registry
-
-The default singleton registry is exported as `rue.resources.registry`.
-
-The default decorator `rue.resources.resource(...)` registers into that singleton.
-
-The package import also registers builtin resources into that singleton and marks them builtin so they survive `registry.reset()`.
-
-Builtin resources currently include none.
-
-`registry.reset()` MUST preserve those builtins.
-
----
-
-## 12. Recommended Usage
-
-### 12.1 Application and test authoring
-
-Most user code SHOULD use the default decorator:
-
-```python
-from rue.resources import resource
-
-@resource(scope="process")
-def db():
-    return connect()
+Setup files (`conftest.py`, `confrue_*.py`) let users provide shared resources
+for a directory tree. Same-name providers may coexist; Rue selects the provider
+nearest to the requesting test module.
+
+Resources can cross subprocess boundaries. Syncable values are snapshotted
+before a subprocess test runs, hydrated in the worker, and merged back into the
+parent after execution. Non-syncable resources are resolved in the process that
+needs them.
+
+Specialized user-facing APIs are still resources: `@rue.metric` records quality
+signals, `@rue.sut` wraps systems under test with tracing/output capture, and
+the built-in `monkeypatch` resource scopes patches to the active Rue owner.
+
+## Hooks
+
+Resource hooks are registered through `resource(..., on_resolve=...,
+on_injection=..., on_teardown=...)`. They run with `ResourceHookContext` bound,
+so hook code can see the consumer spec, provider spec, and direct provider
+dependencies.
+
+- `on_resolve(value)` fires after direct dependencies are resolved and the
+  selected factory returns or yields its first value. It runs before the value is
+  committed to `ResourceStore`, once per `(ResourceSpec, ScopeOwner)`.
+- `on_injection(value)` fires after a cached or newly materialized value is
+  selected for a consumer, just before it is returned in kwargs. It can run many
+  times for the same cached value and is skipped when `preload=True`.
+- `on_teardown(value)` fires during owner teardown for generator resources,
+  after the generator's post-yield cleanup path runs and before the value leaves
+  the store.
+
+## Sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User as Test/setup module
+    participant Loader as TestLoader / AST rewrite
+    participant Registry as ResourceRegistry
+    participant Runner as Runner
+    participant Resolver as DependencyResolver
+    participant Store as ResourceStore
+    participant Transfer as StateTransfer
+    participant Test as LoadedTestDef
+
+    Loader->>User: import setup + test modules
+    User->>Registry: decorators register LoadedResourceDef
+    Runner->>Registry: compile_graphs(execution_id -> consumer params)
+    Registry-->>Runner: ResourceGraph(autouse, injections, dependencies)
+    Runner->>Test: run_loaded_test(resolver)
+    Test->>Resolver: resolve_graph_deps(graph, params, consumer_spec)
+    Resolver->>Resolver: bind PatchStore
+    loop autouse + injected resource roots
+        Resolver->>Registry: get_definition(ResourceSpec)
+        Resolver->>Store: owner = ScopeContext.current_owner(spec.scope)
+        alt cached
+            Store-->>Resolver: value
+        else another task resolving
+            Store-->>Resolver: wait_resolution(spec, owner)
+        else first resolver
+            Resolver->>Store: claim_resolution(spec, owner)
+            Resolver->>Resolver: resolve direct dependencies first
+            Resolver->>Resolver: call selected factory
+            Resolver-->>Resolver: sync / async / generator value
+            Resolver->>Store: record generator teardown if needed
+            Resolver->>Store: commit_resolution(spec, owner, value)
+        end
+        Resolver-->>Test: kwarg value
+    end
+    Test->>User: call test function(**kwargs)
+    alt subprocess backend
+        Runner->>Resolver: preload shared graph deps
+        Resolver->>Transfer: export_snapshot(execution_id)
+        Transfer-->>Runner: StateSnapshot
+        Runner->>Transfer: worker hydrate(snapshot)
+        Transfer->>Resolver: resolve missing/opaque resources
+        Transfer-->>Runner: update_since(snapshot)
+        Runner->>Transfer: apply_update(snapshot, update)
+    end
+    Runner->>Resolver: teardown(Scope.TEST / MODULE / all)
+    Resolver->>Resolver: close generator teardowns
+    Resolver->>Store: clear(owner)
+    Resolver->>Resolver: undo PatchStore handles
 ```
 
-### 12.2 Explicit registry ownership
+## API Map
 
-Framework code, tests, and advanced embedding code SHOULD pass a specific registry object explicitly:
+| API | Role |
+| --- | --- |
+| `resource()` / `ResourceRegistry.register_resource()` | Register one provider function as a `LoadedResourceDef`. |
+| `ResourceSpec` | Provider identity: locator plus `Scope`. |
+| `ResourceGraph` | Per-execution concrete graph: autouse roots, injection roots, dependency edges, resolution order. |
+| `DependencyResolver` | Runtime resolver, teardown owner, and patch-store binder. |
+| `ResourceStore` | Cache, pending futures, teardown records, and sync graph per `ScopeOwner`. |
+| `StateTransfer` | Snapshot/hydrate/update path for subprocess execution. |
+| `ResourceHookContext` | Ambient metadata while resource hooks run. |
 
-```python
-resource_registry = ResourceRegistry()
-resolver = ResourceResolver(resource_registry)
-```
+## Core Rules
 
-### 12.3 Hierarchical `PROCESS` resources
-
-Directory-scoped `PROCESS` overrides SHOULD be defined in files whose source path reflects the intended hierarchy, such as Rue `confrue_*` modules.
-
-The request path used during resolution determines which ancestor `PROCESS` provider is active.
-
----
-
-## 13. Summary of Normative Invariants
-
-The following invariants are required:
-
-* resource names come from function names
-* dependency names come from parameters except `self` and `cls`
-* resolver construction is explicit and requires a registry
-* non-`PROCESS` resources win over same-name `PROCESS` resources
-* `PROCESS` selection is nearest-ancestor by request path
-* same-name `PROCESS` resources from different provider directories do not share cache entries
-* `on_resolve` runs once per created instance
-* `on_injection` runs on every injection, including cached values
-* `on_teardown` runs after generator finalization
-* `registry.reset()` restores builtin resources only
+- Registration happens while setup/test modules are imported; graph compilation
+  happens after executable leaves and their params are known.
+- Provider selection is concrete before execution: by requested name, allowed
+  scope, and nearest provider directory to the consumer module.
+- Wider scopes cannot depend on narrower scopes. The current rule is encoded by
+  `Scope.dependency_scopes`.
+- Runtime ownership is not the provider path. Values are cached under
+  `ScopeContext.current_owner(spec.scope)`.
+- Only the first resolver task materializes a `(ResourceSpec, ScopeOwner)`;
+  concurrent callers wait on the pending future.
+- `PatchStore` is bound for resolution and teardown so `monkeypatch` resources
+  can register handles against the active resource owner.
+- Shadow stores hydrate subprocess state and skip live teardown; the parent
+  applies worker updates back onto visible live resources.

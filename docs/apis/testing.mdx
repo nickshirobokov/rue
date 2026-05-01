@@ -356,8 +356,8 @@ class TestSupportBot:
 
 **CLI Usage:**
 ```bash
-rue test --tag smoke    # Only smoke tests
-rue test --tag slow     # Only slow tests
+rue tests run --tag smoke    # Only smoke tests
+rue tests run --tag slow     # Only slow tests
 ```
 
 ---
@@ -605,7 +605,6 @@ Execute discovered tests and return a `Run`.
 **Common constructor parameters:**
 - `config: Config | None = None`
 - `reporters: list[Reporter] | None = None`
-- `fail_fast: bool = False`
 - `capture_output: bool = True`
 - `run_id: UUID | str | None = None`
 
@@ -621,7 +620,7 @@ runner.run_id_exists(run_id: UUID | str) -> bool
 ```
 
 **Constructor behavior:**
-- `Runner` is config-driven. OpenTelemetry, DB, timeout, concurrency, verbosity, and reporter-name settings come from `Config`.
+- `Runner` is config-driven. OpenTelemetry, DB, timeout, fail-fast, concurrency, verbosity, and reporter-name settings come from `Config`.
 - If `config.reporters` contains names, `Runner` uses those named reporters and ignores any `reporters=[...]` instances you pass in.
 - If `config.reporters` is empty and `reporters=[...]` is provided, `Runner` uses those instances.
 - If both are omitted, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`.

@@ -84,24 +84,31 @@ line-length = 80
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["ALL",]
+select = [
+    "A",
+    "ANN",
+    "B",
+    "D",
+    "E",
+    "F",
+    "I",
+    "N",
+    "PT",
+    "RUF",
+    "UP",
+    "W",
+    "PLC0415",
+]
 ignore = [
-    "COM812", # conflicts with fomatters
-    "RUF012", # Conflicts with Pydantic
-    "TC001",  # Conflicts with Pydantic
-    "TC002",  # Conflicts with Pydantic
-    "TC003",  # Conflicts with Pydantic
+    "ANN401", # Allow Any when the boundary is intentionally dynamic
     "D107",   # Missing docstring in __init__
+    "RUF012", # Conflicts with Pydantic
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = [
     "D",
-    "S",
-    "PLR2004",
     "ANN", # TODO: Relax type annotations in tests
-    "T201", # Allow print statements in tests
-    "INP001", # __init__ not required in tests
 ]
 
 [tool.ruff.format]

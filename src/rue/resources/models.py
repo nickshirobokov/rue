@@ -1,52 +1,32 @@
 """Resource model types."""
 
-from collections.abc import Callable
+from __future__ import annotations
+
+import asyncio
+import inspect
+from collections.abc import AsyncGenerator, Callable, Generator
 from dataclasses import dataclass, field
-from enum import Enum
-from pathlib import Path
+from enum import StrEnum, auto
 from typing import Any
 
-
-class Scope(Enum):
-    """Resource lifecycle scope."""
-
-    TEST = "test"  # Fresh instance per test
-    MODULE = "module"  # Shared across tests in same file
-    PROCESS = "process"  # Shared across entire test run
+from rue.context.scopes import Scope, ScopeOwner
+from rue.models import Spec
 
 
-@dataclass(frozen=True, slots=True)
-class ResourceSpec:
+class ResourceFactoryKind(StrEnum):
+    """Resource factory execution kind."""
+
+    SYNC = auto()
+    ASYNC = auto()
+    GENERATOR = auto()
+    ASYNC_GENERATOR = auto()
+
+
+@dataclass(slots=True, unsafe_hash=True)
+class ResourceSpec(Spec):
     """Canonical spec for one resolved resource provider."""
 
-    name: str
     scope: Scope
-    provider_path: str | None = None
-    provider_dir: str | None = None
-    dependencies: tuple[str, ...] = field(default=(), compare=False)
-
-    @property
-    def origin_path(self) -> Path | None:
-        if self.provider_path is None:
-            return None
-        return Path(self.provider_path)
-
-    @property
-    def origin_dir(self) -> Path | None:
-        if self.provider_dir is None:
-            return None
-        return Path(self.provider_dir)
-
-    @property
-    def snapshot_key(self) -> str:
-        return "|".join(
-            (
-                self.scope.value,
-                self.name,
-                self.provider_path or "",
-                self.provider_dir or "",
-            )
-        )
 
 
 @dataclass(slots=True, eq=False)
@@ -55,28 +35,90 @@ class LoadedResourceDef:
 
     spec: ResourceSpec
     fn: Callable[..., Any]
-    is_async: bool
-    is_generator: bool
-    is_async_generator: bool
-    on_resolve: Callable[[Any], Any] | None = None
-    on_injection: Callable[[Any], Any] | None = None
-    on_teardown: Callable[[Any], Any] | None = None
+    factory_kind: ResourceFactoryKind
+    dependencies: tuple[str, ...] = ()
+    autouse: bool = False
+    sync: bool = True
+    resolve_hook: Callable[[Any], Any] | None = None
+    injection_hook: Callable[[Any], Any] | None = None
+    teardown_hook: Callable[[Any], Any] | None = None
+
+    async def on_resolve(self, value: Any) -> Any:
+        """Apply the resolve hook to a freshly created resource value."""
+        hook = self.resolve_hook
+        if hook is None:
+            return value
+        result = hook(value)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    async def on_injection(self, value: Any) -> Any:
+        """Apply the injection hook before a resource reaches a consumer."""
+        hook = self.injection_hook
+        if hook is None:
+            return value
+        result = hook(value)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    async def on_teardown(self, value: Any) -> Any:
+        """Apply the teardown hook before a resource leaves its owner."""
+        hook = self.teardown_hook
+        if hook is None:
+            return value
+        result = hook(value)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
 
 
 @dataclass(frozen=True, slots=True)
-class SelectedResource:
-    """Selected resource provider for one resolution request."""
+class ResourceGraph:
+    """Compiled resource graph for one execution consumer."""
 
-    definition: LoadedResourceDef
+    autouse: tuple[ResourceSpec, ...] = ()
+    injections: dict[str, ResourceSpec] = field(default_factory=dict)
+    dependencies: dict[ResourceSpec, tuple[ResourceSpec, ...]] = field(
+        default_factory=dict
+    )
+    resolution_order: tuple[ResourceSpec, ...] = ()
+
+    @property
+    def roots(self) -> tuple[ResourceSpec, ...]:
+        """Return provider roots for this graph."""
+        return (*self.autouse, *self.injections.values())
 
 
 @dataclass(frozen=True, slots=True)
-class ResolverSyncSnapshot:
+class StateSnapshot:
     """CRDT-backed transfer payload for reconstructing resources in a worker."""
 
-    res_specs: tuple[ResourceSpec, ...]
-    request_path: str | None
+    graph: ResourceGraph
     graph_update: bytes
     base_state: bytes
-    resolution_order: tuple[ResourceSpec, ...] = field(default_factory=tuple)
-    sync_actor_id: int = 0
+    actor_id: int = 0
+
+
+@dataclass(slots=True)
+class ScheduledTeardown:
+    """Generator resource teardown record."""
+
+    spec: ResourceSpec
+    owner: ScopeOwner
+    definition: LoadedResourceDef
+    generator: Generator[Any, None, None] | AsyncGenerator[Any, None]
+    consumer_spec: Spec
+    direct_dependencies: tuple[ResourceSpec, ...]
+
+
+@dataclass(slots=True)
+class ResolverScopeState:
+    """Mutable state owned by one resource scope key."""
+
+    cache: dict[ResourceSpec, Any] = field(default_factory=dict)
+    pending: dict[ResourceSpec, asyncio.Future[Any]] = field(
+        default_factory=dict
+    )
+    teardowns: list[ScheduledTeardown] = field(default_factory=list)

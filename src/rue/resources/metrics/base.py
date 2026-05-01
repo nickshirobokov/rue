@@ -14,12 +14,11 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 from pydantic import validate_call
 
 from rue.context.collectors import CURRENT_METRIC_RESULTS
-from rue.context.runtime import CURRENT_TEST
+from rue.models import Locator, Spec
 from rue.resources.models import ResourceSpec, Scope
 
 
@@ -52,23 +51,22 @@ class MetricMetadata:
         Timestamp of the first recorded value.
     identity : ResourceSpec
         Name, scope, and provider origin for the metric.
-    collected_from_tests : set of str
-        Names of tests that contributed to this metric.
-    collected_from_resources : set of str
-        Names of resources that contributed to this metric.
-    collected_from_cases : set of str
-        Identifiers of test cases that contributed to this metric.
+    consumers : list of Spec
+        Specs that consumed this metric through resource injection.
+    direct_providers : list of ResourceSpec
+        Resource providers directly used by this metric provider.
     """
 
     last_item_recorded_at: datetime | None = None
     first_item_recorded_at: datetime | None = None
     identity: ResourceSpec = field(
-        default=ResourceSpec(name="", scope=Scope.PROCESS)
+        default_factory=lambda: ResourceSpec(
+            locator=Locator(module_path=None, function_name=""),
+            scope=Scope.RUN,
+        )
     )
-    collected_from_tests: set[str] = field(default_factory=set)
-    collected_from_resources: set[str] = field(default_factory=set)
-    collected_from_cases: set[str] = field(default_factory=set)
-    collected_from_modules: set[str] = field(default_factory=set)
+    consumers: list[Spec] = field(default_factory=list)
+    direct_providers: list[ResourceSpec] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -153,6 +151,17 @@ class Metric:
     )
     _cache: MetricState = field(default_factory=MetricState, repr=False)
 
+    @property
+    def _identity_name(self) -> str:
+        return self.metadata.identity.locator.function_name or "unnamed metric"
+
+    def _warn_not_enough_values(self, statistic: str) -> None:
+        warnings.warn(
+            f"Cannot compute {statistic} for {self._identity_name} - "
+            "not enough values. Returning NaN.",
+            stacklevel=2,
+        )
+
     @validate_call
     def add_record(self, value: CalculatedValue) -> None:
         """Record one or more new data points.
@@ -163,25 +172,6 @@ class Metric:
             The value(s) to add to the metric.
         """
         with self._values_lock:
-            test_ctx = CURRENT_TEST.get()
-            if test_ctx is not None:
-                if test_ctx.item.spec.name:
-                    self.metadata.collected_from_tests.add(
-                        test_ctx.item.spec.name
-                    )
-                if test_ctx.item.spec.module_path:
-                    self.metadata.collected_from_modules.add(
-                        str(test_ctx.item.spec.module_path)
-                    )
-                if test_ctx.item.spec.case_id:
-                    self.metadata.collected_from_cases.add(
-                        str(test_ctx.item.spec.case_id)
-                    )
-                elif test_ctx.item.spec.suffix:
-                    self.metadata.collected_from_cases.add(
-                        test_ctx.item.spec.suffix
-                    )
-
             if self.metadata.first_item_recorded_at is None:
                 self.metadata.first_item_recorded_at = datetime.now(UTC)
             self.metadata.last_item_recorded_at = datetime.now(UTC)
@@ -198,7 +188,8 @@ class Metric:
                             items.append(v)
                         else:
                             raise TypeError(
-                                "add_record only supports scalar or sequences of int|float|bool."
+                                "add_record only supports scalar or "
+                                "sequences of int|float|bool."
                             )
                     self._raw_values.extend(items)
                     self._float_values.extend(float(v) for v in items)
@@ -209,7 +200,8 @@ class Metric:
 
                 case _:
                     raise TypeError(
-                        "add_record only supports scalar or sequences of int|float|bool."
+                        "add_record only supports scalar or "
+                        "sequences of int|float|bool."
                     )
 
     @property
@@ -239,10 +231,7 @@ class Metric:
         with self._values_lock:
             if self._cache.min is None:
                 if self.len == 0:
-                    warnings.warn(
-                        f"Cannot compute min for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
-                        stacklevel=2,
-                    )
+                    self._warn_not_enough_values("min")
                     self._cache.min = math.nan
                 else:
                     self._cache.min = min(self._float_values)
@@ -254,10 +243,7 @@ class Metric:
         with self._values_lock:
             if self._cache.max is None:
                 if self.len == 0:
-                    warnings.warn(
-                        f"Cannot compute max for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
-                        stacklevel=2,
-                    )
+                    self._warn_not_enough_values("max")
                     value = math.nan
                     self._cache.max = value
                 else:
@@ -270,10 +256,7 @@ class Metric:
         with self._values_lock:
             if self._cache.median is None:
                 if self.len == 0:
-                    warnings.warn(
-                        f"Cannot compute median for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
-                        stacklevel=2,
-                    )
+                    self._warn_not_enough_values("median")
                     self._cache.median = math.nan
                 else:
                     self._cache.median = statistics.median(self._float_values)
@@ -285,10 +268,7 @@ class Metric:
         with self._values_lock:
             if self._cache.mean is None:
                 if self.len == 0:
-                    warnings.warn(
-                        f"Cannot compute mean for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
-                        stacklevel=2,
-                    )
+                    self._warn_not_enough_values("mean")
                     self._cache.mean = math.nan
                 else:
                     self._cache.mean = statistics.mean(self._float_values)
@@ -300,10 +280,7 @@ class Metric:
         with self._values_lock:
             if self._cache.variance is None:
                 if self.len < 2:
-                    warnings.warn(
-                        f"Cannot compute variance for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
-                        stacklevel=2,
-                    )
+                    self._warn_not_enough_values("variance")
                     self._cache.variance = math.nan
                 else:
                     self._cache.variance = statistics.variance(
@@ -317,10 +294,7 @@ class Metric:
         with self._values_lock:
             if self._cache.std is None:
                 if self.len < 2:
-                    warnings.warn(
-                        f"Cannot compute std for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
-                        stacklevel=2,
-                    )
+                    self._warn_not_enough_values("std")
                     self._cache.std = math.nan
                 else:
                     self._cache.std = statistics.stdev(
@@ -334,10 +308,7 @@ class Metric:
         with self._values_lock:
             if self._cache.pvariance is None:
                 if self.len == 0:
-                    warnings.warn(
-                        f"Cannot compute pvariance for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
-                        stacklevel=2,
-                    )
+                    self._warn_not_enough_values("pvariance")
                     self._cache.pvariance = math.nan
                 else:
                     self._cache.pvariance = statistics.pvariance(
@@ -351,10 +322,7 @@ class Metric:
         with self._values_lock:
             if self._cache.pstd is None:
                 if self.len == 0:
-                    warnings.warn(
-                        f"Cannot compute pstd for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
-                        stacklevel=2,
-                    )
+                    self._warn_not_enough_values("pstd")
                     self._cache.pstd = math.nan
                 else:
                     self._cache.pstd = statistics.pstdev(
@@ -368,10 +336,7 @@ class Metric:
         with self._values_lock:
             if self._cache.ci_90 is None:
                 if self.len == 0:
-                    warnings.warn(
-                        f"Cannot compute ci_90 for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
-                        stacklevel=2,
-                    )
+                    self._warn_not_enough_values("ci_90")
                     self._cache.ci_90 = (math.nan, math.nan)
                 else:
                     half = 1.645 * self.std / math.sqrt(self.len)
@@ -384,10 +349,7 @@ class Metric:
         with self._values_lock:
             if self._cache.ci_95 is None:
                 if self.len == 0:
-                    warnings.warn(
-                        f"Cannot compute ci_95 for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
-                        stacklevel=2,
-                    )
+                    self._warn_not_enough_values("ci_95")
                     self._cache.ci_95 = (math.nan, math.nan)
                 else:
                     half = 1.96 * self.std / math.sqrt(self.len)
@@ -400,10 +362,7 @@ class Metric:
         with self._values_lock:
             if self._cache.ci_99 is None:
                 if self.len == 0:
-                    warnings.warn(
-                        f"Cannot compute ci_99 for {self.metadata.identity.name or 'unnamed metric'} - not enough values. Returning NaN.",
-                        stacklevel=2,
-                    )
+                    self._warn_not_enough_values("ci_99")
                     self._cache.ci_99 = (math.nan, math.nan)
                 else:
                     half = 2.576 * self.std / math.sqrt(self.len)
@@ -417,7 +376,8 @@ class Metric:
             if self._cache.percentiles is None:
                 if self.len < 2:
                     warnings.warn(
-                        f"Metric '{self.metadata.identity.name or 'unnamed'}' has less than 2 values. Cannot compute percentiles.",
+                        f"Metric '{self._identity_name}' has less "
+                        "than 2 values. Cannot compute percentiles.",
                         stacklevel=2,
                     )
                     self._cache.percentiles = [math.nan] * 99
@@ -493,28 +453,33 @@ class MetricResult:
     ----------
     metadata : MetricMetadata
         Snapshot of metadata describing where/when the metric was recorded
-        (identity, contributors, timestamps).
-    dependencies : list[ResourceSpec]
-        Direct resource dependencies for the metric provider.
+        (identity, consumers, direct providers, timestamps).
     assertion_results : list[AssertionResult]
         Assertion results collected while the metric resource was running.
     value : CalculatedValue
         The last yielded value from the metric generator. NaN if no value was yielded.
-    execution_id : UUID, optional
-        The test execution that produced this metric result.
     """
 
     metadata: MetricMetadata
     assertion_results: list[AssertionResult]
     value: CalculatedValue
-    dependencies: list[ResourceSpec] = field(default_factory=list)
-    execution_id: UUID | None = None
 
     @property
     def primary_case_id(self) -> str:
-        cases = sorted(self.metadata.collected_from_cases)
+        cases = sorted(
+            str(case_id)
+            for consumer in self.metadata.consumers
+            if (case_id := getattr(consumer, "case_id", None)) is not None
+        )
         if cases:
             return cases[0]
+        suffixes = sorted(
+            suffix
+            for consumer in self.metadata.consumers
+            if (suffix := getattr(consumer, "suffix", None))
+        )
+        if suffixes:
+            return suffixes[0]
         return ""
 
     @property
@@ -522,10 +487,6 @@ class MetricResult:
         return any(not assertion.passed for assertion in self.assertion_results)
 
     def __post_init__(self) -> None:
-        if self.execution_id is None:
-            test_ctx = CURRENT_TEST.get()
-            if test_ctx is not None:
-                self.execution_id = test_ctx.execution_id
         collector = CURRENT_METRIC_RESULTS.get()
         if collector is not None:
             collector.append(self)

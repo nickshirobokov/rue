@@ -5,36 +5,30 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import UTC, datetime
-from uuid import UUID
 
-from rue.config import Config
 from rue.context.collectors import CURRENT_METRIC_RESULTS
-from rue.context.process_pool import process_pool_scope
-from rue.context.runtime import bind
+from rue.context.process_pool import LazyProcessPool
+from rue.context.runtime import CURRENT_RUN_CONTEXT, TestContext, bind
 from rue.reports.base import Reporter
-from rue.resources import (
-    ResourceResolver,
-    registry as default_resource_registry,
-)
+from rue.resources import DependencyResolver
 from rue.resources.metrics.base import MetricResult
+from rue.resources.models import Scope
 from rue.resources.sut.output import SUTOutputCapture
 from rue.storage import Store
 from rue.telemetry.otel.runtime import otel_runtime
-from rue.testing.execution import DefaultTestFactory
+from rue.testing.execution import DefaultTestFactory, SingleTest
+from rue.testing.execution.queue import RunnerStep, SessionQueue
 from rue.testing.models import (
     ExecutedTest,
     LoadedTestDef,
     Run,
-    RunEnvironment,
 )
-from rue.testing.execution.queue import RunnerStep, SessionQueue
 
 
 class Runner:
     """Executes discovered tests with resource injection.
 
     Args:
-        config: Runner configuration values.
         reporters: Reporter instances for lifecycle notifications.
         store: Optional persistence backend for completed runs.
     """
@@ -44,32 +38,32 @@ class Runner:
     def __init__(
         self,
         *,
-        config: Config,
         reporters: list[Reporter],
         store: Store | None = None,
-        fail_fast: bool = False,
         capture_output: bool = True,
     ) -> None:
-        self.config = config
-        self.fail_fast = fail_fast
-        self.capture_output = capture_output
+        self.capture_output = False
         self.reporters = reporters
         self.store = store
+        context = CURRENT_RUN_CONTEXT.get()
         for reporter in self.reporters:
-            reporter.configure(self.config)
+            reporter.configure(context.config)
 
         self.semaphore: asyncio.Semaphore | None = None
         self.stop_flag: bool = False
         self._failure_count: int = 0
         self._queue = SessionQueue()
         self._completed_executions: dict[int, ExecutedTest] = {}
+        self._remaining_module_leaves: dict[str, int] = {}
 
         self.current_run: Run | None = None
 
     def _concurrency_limit(self) -> int:
+        context = CURRENT_RUN_CONTEXT.get()
+        config = context.config
         return (
-            self.config.concurrency
-            if self.config.concurrency > 0
+            config.concurrency
+            if config.concurrency > 0
             else self.DEFAULT_MAX_CONCURRENCY
         )
 
@@ -106,35 +100,35 @@ class Runner:
         self,
         items: list[LoadedTestDef],
         *,
-        run_id: UUID | None = None,
+        resolver: DependencyResolver,
     ) -> Run:
         """Run tests and return results.
 
         Args:
             items: Test definitions to execute. Discover them with
                 TestSpecCollector and TestLoader before calling.
-            run_id: Optional UUID for this run.
+            resolver: Resource resolver for this run. The runner owns teardown.
 
         Returns:
             Run with environment, results, and test executions.
         """
-        environment = RunEnvironment.build_from_current()
-        if run_id is None:
-            self.current_run = Run(environment=environment)
-        else:
-            self.current_run = Run(environment=environment, run_id=run_id)
+        context = CURRENT_RUN_CONTEXT.get()
+        config = context.config
+        self.current_run = Run(
+            run_id=context.run_id,
+            environment=context.environment,
+        )
 
-        if self.config.otel:
+        if config.otel:
             otel_runtime.configure()
 
         if not items:
-            await self._notify_no_tests_found()
-            self.current_run.end_time = datetime.now(UTC)
-            return self.current_run
-
-        if self.fail_fast:
-            for item in items:
-                item.fail_fast = True
+            try:
+                await self._notify_no_tests_found()
+                self.current_run.end_time = datetime.now(UTC)
+                return self.current_run
+            finally:
+                await resolver.teardown()
 
         metric_results: list[MetricResult] = []
         start = time.perf_counter()
@@ -143,32 +137,33 @@ class Runner:
             SUTOutputCapture.sys_capture(swallow=self.capture_output),
             bind(CURRENT_METRIC_RESULTS, metric_results),
         ):
-            await self._notify_collection_complete(items, self.current_run)
-
-            resolver = ResourceResolver(default_resource_registry)
-
-            self.semaphore = asyncio.Semaphore(self._concurrency_limit())
-            self.stop_flag = False
-            self._failure_count = 0
-
-            execution = self._execute_run(
-                items=items,
-                resolver=resolver,
-                run=self.current_run,
-            )
-
-            run_task = asyncio.create_task(execution)
-
             try:
-                if self.config.timeout is not None:
-                    await asyncio.wait_for(
-                        run_task, timeout=self.config.timeout
-                    )
-                else:
-                    await run_task
-            except TimeoutError:
-                self.current_run.result.stopped_early = True
-                self.stop_flag = True
+                await self._notify_collection_complete(items, self.current_run)
+
+                self.semaphore = asyncio.Semaphore(self._concurrency_limit())
+                self.stop_flag = False
+                self._failure_count = 0
+
+                execution = self._execute_run(
+                    items=items,
+                    resolver=resolver,
+                    run=self.current_run,
+                )
+
+                run_task = asyncio.create_task(execution)
+
+                try:
+                    if config.timeout is not None:
+                        await asyncio.wait_for(
+                            run_task, timeout=config.timeout
+                        )
+                    else:
+                        await run_task
+                except TimeoutError:
+                    self.current_run.result.stopped_early = True
+                    self.stop_flag = True
+            finally:
+                await resolver.teardown()
 
         self.current_run.result.total_duration_ms = (
             time.perf_counter() - start
@@ -187,15 +182,13 @@ class Runner:
         self,
         *,
         items: list[LoadedTestDef],
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
         run: Run,
     ) -> None:
         """Execute the test run with the given items and resolver."""
-        with process_pool_scope(self._concurrency_limit()):
+        with LazyProcessPool(self._concurrency_limit()):
             self._queue = SessionQueue()
             self._factory = DefaultTestFactory(
-                config=self.config,
-                run_id=run.run_id,
                 semaphore=self.semaphore,
                 is_stopped=lambda: self.stop_flag,
                 on_complete=self._on_execution_complete,
@@ -203,17 +196,50 @@ class Runner:
             )
             for item in items:
                 self._factory.build(item)
+            leaves = [
+                leaf
+                for test in self._queue.tests
+                for leaf in test.leaves()
+                if isinstance(leaf, SingleTest)
+            ]
+            consumers = {
+                leaf.execution_id: (
+                    leaf.definition.spec,
+                    tuple(
+                        param
+                        for param in leaf.definition.spec.params
+                        if param not in leaf.params
+                    ),
+                )
+                for leaf in leaves
+            }
+            autouse_keys = frozenset(consumers)
+            resolver.registry.compile_graphs(
+                consumers,
+                autouse_keys=autouse_keys,
+            )
+            self._remaining_module_leaves = {}
+            for leaf in leaves:
+                module_path = leaf.definition.spec.locator.module_path
+                module_key = (
+                    str(module_path.resolve())
+                    if module_path is not None
+                    else "<unknown>"
+                )
+                self._remaining_module_leaves[module_key] = (
+                    self._remaining_module_leaves.get(module_key, 0) + 1
+                )
             await self._notify_tests_ready(self._queue.tests)
             self._completed_executions = {}
+            context = CURRENT_RUN_CONTEXT.get()
+            config = context.config
             try:
                 for step in self._queue.steps:
                     if self.stop_flag:
                         break
                     await self._run_step(step, resolver, run)
-                    if run.result.stopped_early and self.config.maxfail:
-                        await self._notify_run_stopped_early(
-                            self.config.maxfail
-                        )
+                    if run.result.stopped_early and config.maxfail:
+                        await self._notify_run_stopped_early(config.maxfail)
                         break
             finally:
                 run.result.executions = [
@@ -226,15 +252,14 @@ class Runner:
                     )
                     is not None
                 ]
-                await resolver.teardown()
 
     async def _run_step(
         self,
         step: RunnerStep,
-        resolver: ResourceResolver,
+        resolver: DependencyResolver,
         run: Run,
     ) -> None:
-        """Run one queue step: sequential main batch or parallel module queues."""
+        """Run one queue step."""
         if step.is_main:
             batch = step.main_batch
             if batch is None:
@@ -245,6 +270,10 @@ class Runner:
                 await self._notify_test_start(test.definition)
                 execution = await test.execute(resolver)
                 self._record_execution(run, execution)
+                await self._teardown_module_if_complete(
+                    resolver,
+                    execution,
+                )
             return
 
         condition = asyncio.Condition()
@@ -266,6 +295,10 @@ class Runner:
 
                 execution = await test.execute(resolver)
                 self._record_execution(run, execution)
+                await self._teardown_module_if_complete(
+                    resolver,
+                    execution,
+                )
 
                 async with condition:
                     step.finish(mq, batch)
@@ -298,6 +331,29 @@ class Runner:
         if not execution.result.status.is_failure:
             return
         self._failure_count += 1
-        if self.config.maxfail and self._failure_count >= self.config.maxfail:
+        context = CURRENT_RUN_CONTEXT.get()
+        maxfail = context.config.maxfail
+        if maxfail and self._failure_count >= maxfail:
             self.stop_flag = True
             run.result.stopped_early = True
+
+    async def _teardown_module_if_complete(
+        self,
+        resolver: DependencyResolver,
+        execution: ExecutedTest,
+    ) -> None:
+        module_path = execution.definition.spec.locator.module_path
+        module_key = (
+            str(module_path.resolve())
+            if module_path is not None
+            else "<unknown>"
+        )
+        remaining = self._remaining_module_leaves[module_key] - 1
+        self._remaining_module_leaves[module_key] = remaining
+        if remaining:
+            return
+        with TestContext(
+            item=execution.definition,
+            execution_id=execution.execution_id,
+        ):
+            await resolver.teardown(Scope.MODULE)

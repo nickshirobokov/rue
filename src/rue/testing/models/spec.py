@@ -17,31 +17,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
+from rue.models import Locator, Spec
+
+
 if TYPE_CHECKING:
     from rue.testing.decorators.tag import TagData
     from rue.testing.models.modifiers import Modifier
 
 
-@dataclass(frozen=True)
-class TestLocator:
-    """Uniquely identifies a test function. Fully serializable.
-
-    Sufficient to find the function in any process that has access to the
-    filesystem and can import the module via a TestLoader.
-    """
-
-    module_path: Path
-    function_name: str
-    class_name: str | None = None
-
-    def __str__(self) -> str:
-        if self.class_name:
-            return f"{self.module_path.stem}::{self.class_name}::{self.function_name}"
-        return f"{self.module_path.stem}::{self.function_name}"
-
-
 @dataclass
-class TestSpec:
+class TestSpec(Spec):
     """Fully serializable test specification produced during discovery.
 
     Contains every piece of metadata needed to understand and schedule a
@@ -50,7 +35,7 @@ class TestSpec:
     ``TestLoader.load_definition()`` to obtain a runnable ``LoadedTestDef``.
     """
 
-    locator: TestLocator
+    locator: Locator
     is_async: bool
     params: tuple[str, ...]
     modifiers: tuple[Modifier, ...]
@@ -58,33 +43,43 @@ class TestSpec:
     skip_reason: str | None = None
     xfail_reason: str | None = None
     xfail_strict: bool = False
-    definition_error: str | None = None
     suffix: str | None = None
     case_id: UUID | None = None
     collection_index: int = -1
-
-    # --- Convenience accessors derived from locator / case fields ---
-
-    @property
-    def name(self) -> str:
-        return self.locator.function_name
-
-    @property
-    def module_path(self) -> Path:
-        return self.locator.module_path
-
-    @property
-    def class_name(self) -> str | None:
-        return self.locator.class_name
 
     @property
     def full_name(self) -> str:
         return str(self.locator)
 
     @property
-    def label(self) -> str | None:
+    def local_name(self) -> str:
+        if self.locator.class_name:
+            return (
+                f"{self.locator.class_name}::"
+                f"{self.locator.function_name}"
+            )
+        return self.locator.function_name
+
+    def get_label(
+        self,
+        *,
+        full: bool = False,
+        length: int = 50,
+        separator: str = " | ",
+    ) -> str | None:
+        if self.suffix and self.case_id and full:
+            case_id = str(self.case_id)
+            suffix_length = length - len(case_id) - len(separator)
+            if suffix_length <= 0:
+                return case_id
+            suffix = self.suffix
+            if len(suffix) > suffix_length:
+                suffix = f"{suffix[: suffix_length - 1]}…"
+            return f"{suffix}{separator}{case_id}"
         if self.suffix:
-            return self.suffix
+            if len(self.suffix) <= length:
+                return self.suffix
+            return f"{self.suffix[: length - 1]}…"
         if self.case_id:
             return str(self.case_id)
         return None
@@ -101,7 +96,6 @@ class TestSpec:
             name for name in inspect.signature(fn).parameters if name != "self"
         )
         self.modifiers = tuple(reversed(getattr(fn, "__rue_modifiers__", ())))
-        self.definition_error = getattr(fn, "__rue_definition_error__", None)
 
 
 @dataclass(frozen=True)

@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
 from enum import StrEnum
-import time
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID
 
-from rue.resources.resolver import ResourceResolver
+from rue.resources.resolver import DependencyResolver
 from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.result import TestResult, TestStatus
+
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -32,34 +33,47 @@ class ExecutableTest(ABC):
 
     definition: LoadedTestDef
     backend: ExecutionBackend
+    execution_id: UUID
+    children: list[ExecutableTest]
     on_complete: Callable[[ExecutedTest], Awaitable[None]] | None = None
 
-    async def execute(self, resolver: ResourceResolver) -> ExecutedTest:
+    def walk(self) -> list[ExecutableTest]:
+        """Return this execution node and every descendant."""
+        nodes: list[ExecutableTest] = [self]
+        for child in self.children:
+            for node in child.walk():
+                nodes.append(node)
+        return nodes
+
+    def leaves(self) -> list[ExecutableTest]:
+        """Return executable leaves below this node."""
+        if not self.children:
+            return [self]
+
+        leaves: list[ExecutableTest] = []
+        for child in self.children:
+            for leaf in child.leaves():
+                leaves.append(leaf)
+        return leaves
+
+    async def execute(
+        self,
+        resolver: DependencyResolver,
+    ) -> ExecutedTest:
         """Execute the test and return result."""
-        if self.definition.spec.definition_error:
+        start = time.perf_counter()
+        try:
+            execution = await self._execute(resolver)
+        except Exception as error:
             execution = ExecutedTest(
                 definition=self.definition,
                 result=TestResult(
                     status=TestStatus.ERROR,
-                    duration_ms=0,
-                    error=ValueError(self.definition.spec.definition_error),
+                    duration_ms=(time.perf_counter() - start) * 1000,
+                    error=error,
                 ),
-                execution_id=uuid4(),
+                execution_id=self.execution_id,
             )
-        else:
-            start = time.perf_counter()
-            try:
-                execution = await self._execute(resolver)
-            except Exception as error:  # noqa: BLE001
-                execution = ExecutedTest(
-                    definition=self.definition,
-                    result=TestResult(
-                        status=TestStatus.ERROR,
-                        duration_ms=(time.perf_counter() - start) * 1000,
-                        error=error,
-                    ),
-                    execution_id=uuid4(),
-                )
 
         if self.on_complete is not None:
             await self.on_complete(execution)
@@ -67,5 +81,8 @@ class ExecutableTest(ABC):
         return execution
 
     @abstractmethod
-    async def _execute(self, resolver: ResourceResolver) -> ExecutedTest:
+    async def _execute(
+        self,
+        resolver: DependencyResolver,
+    ) -> ExecutedTest:
         """Execute the concrete test body and return result."""

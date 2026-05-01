@@ -32,6 +32,27 @@ TFunction = TypeVar("TFunction", ast.FunctionDef, ast.AsyncFunctionDef)
 RUE_DISCOVERY_PACKAGE = "rue_discovery"
 
 
+class TestDefinitionIssue(Exception):  # noqa: N818
+    """Invalid selected test definition."""
+
+    def __init__(self, spec: TestSpec, message: str) -> None:
+        self.spec = spec
+        super().__init__(message)
+
+    @property
+    def message(self) -> str:
+        """Return the issue message without the test label."""
+        return str(self.args[0])
+
+    def __str__(self) -> str:
+        """Return a CLI-friendly issue label."""
+        return f"{self.spec.full_name}: {self.message}"
+
+
+class TestDefinitionErrors(ExceptionGroup):
+    """Selected tests contain invalid definitions."""
+
+
 class RuePackageLoader(importlib.abc.Loader):
     """Loader for synthetic package nodes in the discovery namespace."""
 
@@ -345,16 +366,20 @@ class TestLoader:
         self._session = RueImportSession(self._suite_root)
         self._prepared_paths: set[Path] = set()
 
-    def prepare_setup(self, path: Path) -> None:
+    def prepare_setup(self, path: Path, *, reload: bool = False) -> None:
         """Import one setup file and register any fixtures/resources it defines.
 
         Idempotent: calling this more than once for the same path is safe.
         """
         path = path.resolve()
-        if path in self._prepared_paths:
+        if path in self._prepared_paths and not reload:
             return
-        self._prepared_paths.add(path)
+        if reload:
+            module_name = self._session.register_path(path)
+            sys.modules.pop(module_name, None)
+            self._prepared_paths.discard(path)
         self._session.load_module(path)
+        self._prepared_paths.add(path)
 
     def load_from_collection(
         self, collection: TestSpecCollection
@@ -365,23 +390,40 @@ class TestLoader:
 
         by_module: dict[Path, list[TestSpec]] = {}
         for spec in collection.specs:
-            by_module.setdefault(spec.module_path, []).append(spec)
+            by_module.setdefault(spec.locator.module_path, []).append(spec)
 
         items: list[LoadedTestDef] = []
+        issues: list[TestDefinitionIssue] = []
         for module_path, requested_specs in by_module.items():
             setup_chain = collection.setup_chain_for(module_path)
-            for setup_ref in setup_chain:
-                self.prepare_setup(setup_ref.path)
-
-            module = self._session.load_module(module_path.resolve())
-            for spec in requested_specs:
-                items.append(
-                    self.load_definition(
-                        spec,
-                        module=module,
-                        setup_chain=setup_chain,
-                    )
+            try:
+                for setup_ref in setup_chain:
+                    self.prepare_setup(setup_ref.path)
+                module = self._session.load_module(module_path.resolve())
+            except Exception as error:
+                issues.extend(
+                    TestDefinitionIssue(spec, str(error))
+                    for spec in requested_specs
                 )
+                continue
+
+            for spec in requested_specs:
+                try:
+                    items.append(
+                        self.load_definition(
+                            spec,
+                            module=module,
+                            setup_chain=setup_chain,
+                        )
+                    )
+                except TestDefinitionIssue as error:
+                    issues.append(error)
+
+                except Exception as error:
+                    issues.append(TestDefinitionIssue(spec, str(error)))
+
+        if issues:
+            raise TestDefinitionErrors("test definition errors", tuple(issues))
 
         return items
 
@@ -399,7 +441,7 @@ class TestLoader:
         inside the module or class namespace.
         """
         if module is None:
-            module = self._session.load_module(spec.module_path.resolve())
+            module = self._session.load_module(spec.locator.module_path.resolve())
 
         match spec.locator.class_name:
             case str() as class_name:
@@ -421,6 +463,9 @@ class TestLoader:
                         f"not a function or method: {module.__name__}:{spec.locator.function_name}"
                     )
                 parent_tags = None
+
+        if definition_error := getattr(fn, "__rue_definition_error__", None):
+            raise TestDefinitionIssue(spec, definition_error)
 
         combined_tags = merge_tag_data(parent_tags, get_tag_data(fn))
         spec.update_tags(combined_tags)

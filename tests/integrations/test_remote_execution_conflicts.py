@@ -3,11 +3,10 @@ from textwrap import dedent
 
 import pytest
 
-from rue.config import Config
+from rue.resources import DependencyResolver, registry
 from rue.testing.models import TestStatus
 from rue.testing.runner import Runner
-from tests.unit.conftest import NullReporter
-from tests.unit.factories import materialize_tests
+from tests.helpers import NullReporter, make_run_context, materialize_tests
 
 
 @pytest.mark.asyncio
@@ -24,7 +23,7 @@ async def test_iterated_subprocess_children_keep_distinct_process_updates(
             from rue.resources import resource
             from rue.resources.models import Scope
 
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared_events():
                 return []
 
@@ -45,14 +44,14 @@ async def test_iterated_subprocess_children_keep_distinct_process_updates(
     )
 
     items = materialize_tests(module_path)
-    run = await Runner(
-        config=Config.model_construct(
+    make_run_context(
             otel=False,
             db_enabled=False,
             concurrency=4,
-        ),
+        )
+    run = await Runner(
         reporters=[NullReporter()],
-    ).run(items=items)
+    ).run(items=items, resolver=DependencyResolver(registry))
 
     after_execution = next(
         execution
@@ -83,11 +82,11 @@ async def test_local_and_subprocess_updates_preserve_process_identity(
             from rue.resources import resource
             from rue.resources.models import Scope
 
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared_events():
                 return []
 
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared_meta():
                 return {}
 
@@ -114,14 +113,14 @@ async def test_local_and_subprocess_updates_preserve_process_identity(
     )
 
     items = materialize_tests(module_path)
-    run = await Runner(
-        config=Config.model_construct(
+    make_run_context(
             otel=False,
             db_enabled=False,
             concurrency=2,
-        ),
+        )
+    run = await Runner(
         reporters=[NullReporter()],
-    ).run(items=items)
+    ).run(items=items, resolver=DependencyResolver(registry))
 
     after_execution = next(
         execution
@@ -162,7 +161,7 @@ async def test_local_and_subprocess_nested_updates_merge_without_replacing_root(
                     self.branch = Branch()
                     self.meta = {}
 
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def shared_state():
                 return SharedState()
 
@@ -183,7 +182,10 @@ async def test_local_and_subprocess_nested_updates_merge_without_replacing_root(
             @rue.test
             def test_after(shared_state):
                 deadline = time.time() + 10
-                while len(shared_state.branch.right) < 1 and time.time() < deadline:
+                while (
+                    len(shared_state.branch.right) < 1
+                    and time.time() < deadline
+                ):
                     time.sleep(0.05)
                 assert shared_state.meta["root_id"] == id(shared_state)
                 assert shared_state.meta["branch_id"] == id(shared_state.branch)
@@ -194,14 +196,14 @@ async def test_local_and_subprocess_nested_updates_merge_without_replacing_root(
     )
 
     items = materialize_tests(module_path)
-    run = await Runner(
-        config=Config.model_construct(
+    make_run_context(
             otel=False,
             db_enabled=False,
             concurrency=2,
-        ),
+        )
+    run = await Runner(
         reporters=[NullReporter()],
-    ).run(items=items)
+    ).run(items=items, resolver=DependencyResolver(registry))
 
     after_execution = next(
         execution
@@ -238,7 +240,7 @@ async def test_local_and_subprocess_shared_sut_trace_state_stays_isolated(
                     with otel_runtime.start_as_current_span(f"{label}_step"):
                         return label
 
-            @rue.resource.sut(scope=Scope.PROCESS)
+            @rue.resource.sut(scope=Scope.RUN)
             def shared_pipeline():
                 return rue.SUT(SharedPipeline(), methods=["run"])
 
@@ -264,14 +266,14 @@ async def test_local_and_subprocess_shared_sut_trace_state_stays_isolated(
     )
 
     items = materialize_tests(module_path)
-    run = await Runner(
-        config=Config.model_construct(
+    make_run_context(
             otel=True,
             db_enabled=False,
             concurrency=2,
-        ),
+        )
+    run = await Runner(
         reporters=[NullReporter()],
-    ).run(items=items)
+    ).run(items=items, resolver=DependencyResolver(registry))
 
     assert run.result.passed == 2, [
         (
@@ -298,7 +300,7 @@ async def test_main_backend_waits_for_local_and_subprocess_stage(
             from rue.resources import resource
             from rue.resources.models import Scope
 
-            @resource(scope=Scope.PROCESS)
+            @resource(scope=Scope.RUN)
             def events():
                 return []
 
@@ -327,14 +329,14 @@ async def test_main_backend_waits_for_local_and_subprocess_stage(
     )
 
     items = materialize_tests(module_path)
-    run = await Runner(
-        config=Config.model_construct(
+    make_run_context(
             otel=False,
             db_enabled=False,
             concurrency=3,
-        ),
+        )
+    run = await Runner(
         reporters=[NullReporter()],
-    ).run(items=items)
+    ).run(items=items, resolver=DependencyResolver(registry))
 
     assert run.result.passed == 4, [
         (

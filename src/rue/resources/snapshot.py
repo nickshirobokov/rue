@@ -1398,35 +1398,6 @@ class SyncGraph:
             graph.doc.apply_update(update)
         return graph
 
-    def clone(self) -> SyncGraph:
-        """Clone the graph and its cached identity state."""
-        clone = SyncGraph.from_update(
-            self.doc.get_update(None),
-            actor_id=self.actor_id,
-        )
-        clone.object_ids = dict(self.object_ids)
-        clone.path_ids = dict(self.path_ids)
-        clone.next_local_id = self.next_local_id
-        object.__setattr__(
-            clone,
-            "_baseline_root_ids",
-            dict(self._baseline_root_ids),
-        )
-        object.__setattr__(
-            clone,
-            "_baseline_nodes",
-            dict(self._baseline_nodes),
-        )
-        object.__setattr__(
-            clone,
-            "_baseline_ignored",
-            {
-                root_key: list(attrs)
-                for root_key, attrs in self._baseline_ignored.items()
-            },
-        )
-        return clone
-
     def payload(
         self,
         root_keys: Iterable[str] | None = None,

@@ -1,10 +1,10 @@
 """Examples showing how to inspect OpenTelemetry spans through SUTs.
 
 Run with default OpenTelemetry capture:
-    uv run rue test examples/test_example_otel_trace.py
+    uv run rue tests run examples/test_example_otel_trace.py
 
 Persist local trace files too:
-    uv run rue test examples/test_example_otel_trace.py --reporter ConsoleReporter --reporter OtelReporter
+    uv run rue tests run examples/test_example_otel_trace.py --reporter ConsoleReporter --reporter OtelReporter
 """
 
 import rue

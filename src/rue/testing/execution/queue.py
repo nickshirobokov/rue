@@ -131,7 +131,7 @@ class RunnerStep:
             self.main_batch.append(test)
             return
 
-        module_path = test.definition.spec.module_path
+        module_path = test.definition.spec.locator.module_path
         mq = self._module_index.get(module_path)
         if mq is None:
             mq = ModuleQueue(module_path=module_path)

@@ -10,6 +10,7 @@ from typing import cast
 from uuid import UUID
 
 from rue.assertions.base import AssertionResult
+from rue.models import Locator, Spec
 from rue.predicates.models import PredicateResult
 from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.base import (
@@ -19,17 +20,26 @@ from rue.resources.metrics.base import (
 )
 from rue.storage.base import Store
 from rue.storage.sqlite.migrations import MigrationError, MigrationRunner
-from rue.testing.models.loaded import LoadedTestDef
-from rue.testing.models.executed import ExecutedTest
-from rue.testing.models.result import TestResult, TestStatus
-from rue.testing.models.run import Run, RunEnvironment, RunResult
-from rue.testing.models.spec import TestLocator, TestSpec
+from rue.testing.models import (
+    ExecutedTest,
+    LoadedTestDef,
+    Run,
+    RunEnvironment,
+    RunResult,
+    TestStatus,
+)
+from rue.testing.models.result import TestResult
+from rue.testing.models.spec import TestSpec
 
 
 DEFAULT_DB_NAME = ".rue/rue.db"
 MAX_STORED_RUNS = 5
 
 MAX_REPR_LENGTH = 2000  # Max length for repr of local variables
+
+
+def _scope_to_storage_value(scope: Scope | str) -> str:
+    return scope.value if isinstance(scope, Scope) else str(scope)
 
 RUN_INSERT_SQL = """
     INSERT INTO runs (
@@ -49,12 +59,11 @@ EXECUTION_INSERT_SQL = """
 
 METRIC_INSERT_SQL = """
     INSERT INTO metrics (
-        run_id, test_execution_id, name, scope, value, value_json,
-        first_recorded_at, last_recorded_at,
-        collected_from_tests_json, collected_from_resources_json, collected_from_cases_json,
-        collected_from_modules_json, provider_name, provider_scope, provider_path,
+        run_id, name, scope, value, value_json,
+        first_recorded_at, last_recorded_at, consumers_json,
+        provider_name, provider_scope, provider_path,
         provider_dir, depends_on_metrics_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 ASSERTION_INSERT_SQL = """
@@ -196,49 +205,12 @@ class SQLiteStore(Store):
             )
 
             execution_rows: list[tuple[object, ...]] = []
-            stack: list[tuple[ExecutedTest, str | None]] = [
-                (execution, None) for execution in run.result.executions
-            ]
-            while stack:
-                execution, parent_id = stack.pop()
-                defn = execution.definition
-                spec = defn.spec
-                error = execution.result.error
-                error_msg = str(error) if error else None
-                error_tb = self._format_traceback(error) if error else None
-                test_name = spec.name
-                module_path = spec.module_path
-                file_path = str(module_path) if module_path else None
-                class_name = spec.class_name
-                suffix = spec.suffix
-                tags: set[str] = set(spec.tags)
-                skip_reason = spec.skip_reason
-                xfail_reason = spec.xfail_reason
-                case_id = spec.case_id
-                execution_id = str(execution.execution_id)
-
-                execution_rows.append(
-                    (
-                        execution_id,
-                        run_id,
-                        parent_id,
-                        test_name,
-                        file_path,
-                        class_name,
-                        str(case_id) if case_id else None,
-                        suffix,
-                        json.dumps(list(tags)) if tags else None,
-                        skip_reason,
-                        xfail_reason,
-                        execution.status.value,
-                        execution.duration_ms,
-                        error_msg,
-                        error_tb,
-                    )
-                )
-
-                stack.extend(
-                    (sub, execution_id) for sub in execution.sub_executions
+            for execution in run.result.executions:
+                self._append_execution_rows(
+                    execution_rows,
+                    execution,
+                    run_id=run_id,
+                    parent_id=None,
                 )
 
             if execution_rows:
@@ -348,11 +320,8 @@ class SQLiteStore(Store):
             METRIC_INSERT_SQL,
             (
                 str(run_id),
-                str(metric.execution_id) if metric.execution_id else None,
-                ident.name,
-                ident.scope.value
-                if isinstance(ident.scope, Scope)
-                else str(ident.scope),
+                ident.locator.function_name,
+                _scope_to_storage_value(ident.scope),
                 value_real,
                 value_json,
                 meta.first_item_recorded_at.isoformat()
@@ -361,17 +330,18 @@ class SQLiteStore(Store):
                 meta.last_item_recorded_at.isoformat()
                 if meta.last_item_recorded_at
                 else None,
-                self._to_json_list(meta.collected_from_tests),
-                self._to_json_list(meta.collected_from_resources),
-                self._to_json_list(meta.collected_from_cases),
-                self._to_json_list(meta.collected_from_modules),
-                ident.name,
-                ident.scope.value
-                if isinstance(ident.scope, Scope)
-                else str(ident.scope),
-                ident.provider_path,
-                ident.provider_dir,
-                self._to_json_resource_identities(metric.dependencies),
+                self._to_json_consumers(meta.consumers),
+                ident.locator.function_name,
+                _scope_to_storage_value(ident.scope),
+                None
+                if ident.locator.module_path is None
+                else str(ident.locator.module_path),
+                None
+                if ident.locator.module_path is None
+                else str(ident.locator.module_path.parent),
+                self._to_json_resource_identities(
+                    meta.direct_providers
+                ),
             ),
         )
         return cast("int", cursor.lastrowid)
@@ -400,8 +370,33 @@ class SQLiteStore(Store):
                     predicate=predicate,
                 )
 
-    def _to_json_list(self, items: set[str]) -> str | None:
-        return json.dumps(list(items)) if items else None
+    def _to_json_consumers(self, consumers: list[Spec]) -> str | None:
+        if not consumers:
+            return None
+
+        data: list[dict[str, object]] = []
+        for consumer in consumers:
+            locator = consumer.locator
+            module_path = locator.module_path
+            item: dict[str, object] = {
+                "kind": "spec",
+                "name": locator.function_name,
+                "module_path": (
+                    None if module_path is None else str(module_path)
+                ),
+                "class_name": locator.class_name,
+            }
+            if isinstance(consumer, ResourceSpec):
+                item["kind"] = "resource"
+                item["scope"] = _scope_to_storage_value(consumer.scope)
+            elif isinstance(consumer, TestSpec):
+                item["kind"] = "test"
+                item["suffix"] = consumer.suffix
+                item["case_id"] = (
+                    None if consumer.case_id is None else str(consumer.case_id)
+                )
+            data.append(item)
+        return json.dumps(data)
 
     def _to_json_resource_identities(
         self, items: list[ResourceSpec]
@@ -411,14 +406,63 @@ class SQLiteStore(Store):
         return json.dumps(
             [
                 {
-                    "name": item.name,
-                    "scope": item.scope.value,
-                    "provider_path": item.provider_path,
-                    "provider_dir": item.provider_dir,
+                    "name": item.locator.function_name,
+                    "scope": _scope_to_storage_value(item.scope),
+                    "provider_path": None
+                    if item.locator.module_path is None
+                    else str(item.locator.module_path),
+                    "provider_dir": None
+                    if item.locator.module_path is None
+                    else str(item.locator.module_path.parent),
                 }
                 for item in items
             ]
         )
+
+    def _append_execution_rows(
+        self,
+        rows: list[tuple[object, ...]],
+        execution: ExecutedTest,
+        *,
+        run_id: str,
+        parent_id: str | None,
+    ) -> None:
+        spec = execution.definition.spec
+        error = execution.result.error
+        error_msg = str(error) if error else None
+        error_tb = self._format_traceback(error) if error else None
+        module_path = spec.locator.module_path
+        file_path = str(module_path) if module_path else None
+        tags: set[str] = set(spec.tags)
+        execution_id = str(execution.execution_id)
+
+        rows.append(
+            (
+                execution_id,
+                run_id,
+                parent_id,
+                spec.locator.function_name,
+                file_path,
+                spec.locator.class_name,
+                str(spec.case_id) if spec.case_id else None,
+                spec.suffix,
+                json.dumps(list(tags)) if tags else None,
+                spec.skip_reason,
+                spec.xfail_reason,
+                execution.status.value,
+                execution.duration_ms,
+                error_msg,
+                error_tb,
+            )
+        )
+
+        for child in execution.sub_executions:
+            self._append_execution_rows(
+                rows,
+                child,
+                run_id=run_id,
+                parent_id=execution_id,
+            )
 
     def get_run(self, run_id: UUID) -> Run | None:
         """Retrieve a test run by ID."""
@@ -440,17 +484,6 @@ class SQLiteStore(Store):
             ).fetchall()
 
             return [self._row_to_run(conn, row) for row in rows]
-
-    def get_metrics_for_execution(
-        self, execution_id: UUID
-    ) -> list[MetricResult]:
-        """Get all metrics for a specific test execution."""
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM metrics WHERE test_execution_id = ?",
-                (str(execution_id),),
-            ).fetchall()
-            return [self._row_to_metric(row) for row in rows]
 
     def get_assertions_for_execution(self, execution_id: UUID) -> list[dict]:
         """Get all assertions for a specific test execution."""
@@ -541,7 +574,7 @@ class SQLiteStore(Store):
 
         definition = LoadedTestDef(
             spec=TestSpec(
-                locator=TestLocator(
+                locator=Locator(
                     module_path=Path(row["file_path"])
                     if row["file_path"]
                     else Path(),
@@ -590,20 +623,23 @@ class SQLiteStore(Store):
         scope = (
             Scope(scope_str)
             if scope_str in {s.value for s in Scope}
-            else Scope.PROCESS
+            else Scope.RUN
         )
 
         first_at = row["first_recorded_at"]
         last_at = row["last_recorded_at"]
+        provider_path = row["provider_path"] if "provider_path" in keys else None
         identity = ResourceSpec(
-            name=row["name"],
+            locator=Locator(
+                module_path=Path(provider_path) if provider_path else None,
+                function_name=row["name"],
+            ),
             scope=scope,
-            provider_path=row["provider_path"]
-            if "provider_path" in keys
-            else None,
-            provider_dir=row["provider_dir"]
-            if "provider_dir" in keys
-            else None,
+        )
+        direct_providers = self._from_json_resource_identities(
+            row["depends_on_metrics_json"]
+            if "depends_on_metrics_json" in keys
+            else None
         )
         metadata = MetricMetadata(
             first_item_recorded_at=datetime.fromisoformat(first_at)
@@ -613,37 +649,55 @@ class SQLiteStore(Store):
             if last_at
             else None,
             identity=identity,
-            collected_from_tests=self._from_json_set(
-                row["collected_from_tests_json"]
+            consumers=self._from_json_consumers(
+                row["consumers_json"] if "consumers_json" in keys else None
             ),
-            collected_from_resources=self._from_json_set(
-                row["collected_from_resources_json"]
-            ),
-            collected_from_cases=self._from_json_set(
-                row["collected_from_cases_json"]
-            ),
-            collected_from_modules=self._from_json_set(
-                row["collected_from_modules_json"]
-                if "collected_from_modules_json" in keys
-                else None
-            ),
+            direct_providers=direct_providers,
         )
 
-        exec_id = row["test_execution_id"]
         return MetricResult(
             metadata=metadata,
             assertion_results=[],
             value=value,
-            dependencies=self._from_json_resource_identities(
-                row["depends_on_metrics_json"]
-                if "depends_on_metrics_json" in keys
-                else None
-            ),
-            execution_id=UUID(exec_id) if exec_id else None,
         )
 
-    def _from_json_set(self, json_str: str | None) -> set[str]:
-        return set(json.loads(json_str)) if json_str else set()
+    def _from_json_consumers(self, json_str: str | None) -> list[Spec]:
+        if not json_str:
+            return []
+
+        consumers: list[Spec] = []
+        for item in json.loads(json_str):
+            module_path = item.get("module_path")
+            locator = Locator(
+                module_path=Path(module_path) if module_path else None,
+                function_name=item["name"],
+                class_name=item.get("class_name"),
+            )
+            match item.get("kind"):
+                case "resource":
+                    consumers.append(
+                        ResourceSpec(
+                            locator=locator,
+                            scope=Scope(item["scope"]),
+                        )
+                    )
+                case "test":
+                    case_id = item.get("case_id")
+                    consumers.append(
+                        TestSpec(
+                            locator=locator,
+                            is_async=False,
+                            params=(),
+                            modifiers=(),
+                            tags=frozenset(),
+                            suffix=item.get("suffix"),
+                            case_id=UUID(case_id) if case_id else None,
+                            collection_index=0,
+                        )
+                    )
+                case _:
+                    consumers.append(Spec(locator=locator))
+        return consumers
 
     def _from_json_resource_identities(
         self, json_str: str | None
@@ -652,10 +706,13 @@ class SQLiteStore(Store):
             return []
         return [
             ResourceSpec(
-                name=item["name"],
+                locator=Locator(
+                    module_path=Path(item["provider_path"])
+                    if item.get("provider_path")
+                    else None,
+                    function_name=item["name"],
+                ),
                 scope=Scope(item["scope"]),
-                provider_path=item.get("provider_path"),
-                provider_dir=item.get("provider_dir"),
             )
             for item in json.loads(json_str)
         ]

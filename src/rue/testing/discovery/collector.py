@@ -9,7 +9,7 @@ from pathlib import Path
 
 from rue.testing.models.spec import (
     SetupFileRef,
-    TestLocator,
+    Locator,
     TestSpec,
     TestSpecCollection,
 )
@@ -68,7 +68,7 @@ class _StaticSpecVisitor(ast.NodeVisitor):
 
         self.specs.append(
             TestSpec(
-                locator=TestLocator(
+                locator=Locator(
                     module_path=self._path,
                     function_name=node.name,
                     class_name=self._class_name,

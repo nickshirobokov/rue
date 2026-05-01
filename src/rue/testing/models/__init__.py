@@ -1,5 +1,8 @@
 """Testing models."""
 
+from rue.context.runtime import RunContext, RunEnvironment
+from rue.testing.models.case import Case, CaseGroup
+from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.modifiers import (
     BackendModifier,
@@ -10,37 +13,36 @@ from rue.testing.models.modifiers import (
     ParameterSet,
     ParamsIterateModifier,
 )
-from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.result import TestResult, TestStatus
-from rue.testing.models.run import Run, RunEnvironment, RunResult
-from rue.testing.models.case import Case, CaseGroup
+from rue.testing.models.run import Run, RunResult
 from rue.testing.models.spec import (
+    Locator,
     SetupFileRef,
-    TestLocator,
     TestSpec,
     TestSpecCollection,
 )
 
 
 __all__ = [
+    "BackendModifier",
     "Case",
     "CaseGroup",
-    "GroupsIterateModifier",
-    "Run",
-    "RunEnvironment",
-    "RunResult",
-    "SetupFileRef",
-    "LoadedTestDef",
-    "TestLocator",
-    "TestSpec",
-    "TestSpecCollection",
-    "BackendModifier",
     "CasesIterateModifier",
+    "ExecutedTest",
+    "GroupsIterateModifier",
     "IterateModifier",
+    "LoadedTestDef",
+    "Locator",
     "Modifier",
     "ParameterSet",
     "ParamsIterateModifier",
-    "ExecutedTest",
+    "Run",
+    "RunContext",
+    "RunEnvironment",
+    "RunResult",
+    "SetupFileRef",
     "TestResult",
+    "TestSpec",
+    "TestSpecCollection",
     "TestStatus",
 ]

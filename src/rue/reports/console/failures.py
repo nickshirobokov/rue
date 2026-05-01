@@ -13,6 +13,7 @@ from rich.traceback import Traceback
 
 from .shared import STATUS_STYLES
 
+
 if TYPE_CHECKING:
     from rue.testing.models.executed import ExecutedTest
 
@@ -37,27 +38,39 @@ class ExceptionRenderer:
             return True
         return any(cls._has_exception(s) for s in execution.sub_executions)
 
-    def render(self, failures: list[ExecutedTest]) -> list[RenderableType]:
+    def render(
+        self, failures: list[ExecutedTest], verbosity: int
+    ) -> list[RenderableType]:
         relevant = [f for f in failures if self._has_exception(f)]
         if not relevant:
             return []
         renderables: list[RenderableType] = [
             Text(""),
-            Rule("ERRORS", characters="="),
+            Rule(
+                Text("ERRORS", style="bold red"),
+                characters="=",
+                style="red",
+            ),
         ]
         for index, failure in enumerate(relevant):
             if index:
                 renderables.append(Text(""))
             renderables.append(
                 self.render_panel(
-                    failure, title=failure.definition.spec.full_name
+                    failure,
+                    title=failure.definition.spec.full_name,
+                    verbosity=verbosity,
                 )
             )
         renderables.append(Text(""))
         return renderables
 
     def render_panel(
-        self, execution: ExecutedTest, *, title: str | None = None
+        self,
+        execution: ExecutedTest,
+        *,
+        title: str | None = None,
+        verbosity: int,
     ) -> Panel:
         result = execution.result
         style = STATUS_STYLES[result.status]
@@ -80,7 +93,7 @@ class ExceptionRenderer:
                 renderables.append(escape(f"{type(err).__name__}: {err}"))
 
         renderables.extend(
-            self.render_panel(sub)
+            self.render_panel(sub, verbosity=verbosity)
             for sub in execution.sub_executions
             if self._has_exception(sub)
         )
@@ -93,9 +106,15 @@ class ExceptionRenderer:
             case _:
                 panel_content = Group(*renderables)
 
+        fallback_title = execution.definition.spec.get_label(
+            full=verbosity >= 2
+        )
         return Panel(
             panel_content,
-            title=title or execution.label,
+            title=Text(
+                title or fallback_title or execution.label,
+                style=f"bold {style.color}",
+            ),
             title_align="left",
             border_style=style.color,
             expand=True,

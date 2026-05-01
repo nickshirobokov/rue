@@ -6,29 +6,26 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
-from uuid import UUID
+from uuid import uuid4
 
-from rue.config import Config
-from rue.testing.execution.composite import CompositeTest
 from rue.testing.execution.base import ExecutableTest, ExecutionBackend
+from rue.testing.execution.composite import CompositeTest
+from rue.testing.execution.queue import SessionQueue
 from rue.testing.execution.single import SingleTest
 from rue.testing.models import (
     BackendModifier,
     CasesIterateModifier,
     GroupsIterateModifier,
     IterateModifier,
-    ParamsIterateModifier,
     LoadedTestDef,
+    ParamsIterateModifier,
 )
-from rue.testing.execution.queue import SessionQueue
 
 
 @dataclass
 class DefaultTestFactory:
     """Creates test instances with shared collaborators."""
 
-    config: Config
-    run_id: UUID
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     on_complete: Callable | None = None
@@ -64,9 +61,8 @@ class DefaultTestFactory:
                     test = SingleTest(
                         definition=definition,
                         params=params,
+                        execution_id=uuid4(),
                         backend=backend,
-                        config=self.config,
-                        run_id=self.run_id,
                         sync_actor_id=sync_actor_id,
                         semaphore=self.semaphore,
                         is_stopped=self.is_stopped,
@@ -100,7 +96,7 @@ class DefaultTestFactory:
                             spec=replace(
                                 definition.spec,
                                 modifiers=rest_tuple,
-                                suffix=f"iterate={i}",
+                                suffix=f"i={i}",
                             ),
                         ),
                         params,
@@ -113,6 +109,7 @@ class DefaultTestFactory:
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
+                    execution_id=uuid4(),
                     children=children,
                     on_complete=self.on_complete,
                 )
@@ -141,6 +138,7 @@ class DefaultTestFactory:
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
+                    execution_id=uuid4(),
                     children=children,
                     on_complete=self.on_complete,
                 )
@@ -174,6 +172,7 @@ class DefaultTestFactory:
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
+                    execution_id=uuid4(),
                     children=children,
                     on_complete=self.on_complete,
                 )
@@ -203,6 +202,7 @@ class DefaultTestFactory:
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
+                    execution_id=uuid4(),
                     children=children,
                     on_complete=self.on_complete,
                 )

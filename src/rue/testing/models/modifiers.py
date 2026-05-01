@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from rue.testing.models.case import Case, CaseGroup
 
+
 if TYPE_CHECKING:
     from rue.testing.execution.base import ExecutionBackend
 
@@ -25,7 +26,11 @@ class IterateModifier:
 
     count: int
     min_passes: int
-    display_name: str = "iterate"
+    display_name: str = "iterations"
+
+    @property
+    def display_summary(self) -> str:
+        return f"x {self.count} {self.display_name}"
 
 
 @dataclass(frozen=True)
@@ -34,7 +39,11 @@ class ParamsIterateModifier:
 
     parameter_sets: tuple[ParameterSet, ...]
     min_passes: int
-    display_name: str = "params"
+    display_name: str = "parameter sets"
+
+    @property
+    def display_summary(self) -> str:
+        return f"x {len(self.parameter_sets)} {self.display_name}"
 
 
 @dataclass(frozen=True)
@@ -45,6 +54,10 @@ class CasesIterateModifier:
     min_passes: int
     display_name: str = "cases"
 
+    @property
+    def display_summary(self) -> str:
+        return f"x {len(self.cases)} {self.display_name}"
+
 
 @dataclass(frozen=True)
 class GroupsIterateModifier:
@@ -54,13 +67,21 @@ class GroupsIterateModifier:
     min_passes: int
     display_name: str = "groups"
 
+    @property
+    def display_summary(self) -> str:
+        return f"x {len(self.groups)} {self.display_name}"
+
 
 @dataclass(frozen=True)
 class BackendModifier:
     """Select the execution backend for the test subtree."""
 
     backend: ExecutionBackend
-    display_name: str = "backend"
+    display_name: str = "backend changed"
+
+    @property
+    def display_summary(self) -> str:
+        return ""
 
 
 Modifier = (

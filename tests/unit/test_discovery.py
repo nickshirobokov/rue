@@ -1,21 +1,29 @@
 import builtins
+from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
+from uuid import UUID, uuid4
 
 import pytest
 
-from rue.config import Config
-from rue.resources import Scope, registry
-from rue.testing.discovery import KeywordMatcher, TestLoader, TestSpecCollector
+from rue.context.runtime import TestContext
+from rue.resources import DependencyResolver, Scope, registry
+from rue.testing.discovery import (
+    KeywordMatcher,
+    TestDefinitionErrors,
+    TestLoader,
+    TestSpecCollector,
+)
 from rue.testing.execution.base import ExecutionBackend
 from rue.testing.models import (
     BackendModifier,
+    Locator,
     ParameterSet,
     ParamsIterateModifier,
-    TestLocator,
     TestSpec,
 )
 from rue.testing.runner import Runner
+from tests.helpers import make_run_context
 
 
 @pytest.fixture(autouse=True)
@@ -38,23 +46,49 @@ def materialize(path):
 
 
 def make_runner(null_reporter) -> Runner:
+    make_run_context(db_enabled=False)
     return Runner(
-        config=Config.model_construct(db_enabled=False),
         reporters=[null_reporter],
     )
+
+
+def test_spec_labels_are_bounded_and_keep_full_case_id():
+    case_id = UUID("00000000-0000-0000-0000-000000000001")
+    spec = TestSpec(
+        locator=Locator(Path("test_sample.py"), "test_case"),
+        is_async=False,
+        params=(),
+        modifiers=(),
+        tags=frozenset(),
+        suffix="case-with-very-long-metadata-slug-that-needs-trimming",
+        case_id=case_id,
+    )
+
+    assert (
+        spec.get_label()
+        == "case-with-very-long-metadata-slug-that-needs-trim…"
+    )
+    assert spec.get_label(full=True) == f"case-with-… | {case_id}"
+    assert spec.get_label(full=True, length=44, separator=" / ") == (
+        f"case… / {case_id}"
+    )
+    assert spec.get_label(full=True, length=36) == str(case_id)
+    assert len(spec.get_label()) == 50
+    assert len(spec.get_label(full=True)) == 50
+    assert str(case_id) in spec.get_label(full=True)
 
 
 def test_selector_filters_by_tags_and_keyword():
     items = [
         TestSpec(
-            locator=TestLocator(Path("test_sample.py"), "test_fast"),
+            locator=Locator(Path("test_sample.py"), "test_fast"),
             is_async=False,
             params=(),
             modifiers=(),
             tags=frozenset({"fast", "smoke"}),
         ),
         TestSpec(
-            locator=TestLocator(Path("test_sample.py"), "test_slow"),
+            locator=Locator(Path("test_sample.py"), "test_slow"),
             is_async=False,
             params=(),
             modifiers=(),
@@ -69,7 +103,7 @@ def test_selector_filters_by_tags_and_keyword():
         items
     )
 
-    assert [item.name for item in selected] == ["test_fast"]
+    assert [item.locator.function_name for item in selected] == ["test_fast"]
 
 
 def test_selector_plan_discovers_rue_tests_and_static_tags(tmp_path):
@@ -182,7 +216,7 @@ def test_selector_skips_unselected_modules_before_import(tmp_path):
     )
     items = TestLoader(plan.suite_root).load_from_collection(plan)
 
-    assert [item.spec.name for item in items] == ["test_good"]
+    assert [item.spec.locator.function_name for item in items] == ["test_good"]
 
 
 def test_load_from_collection_skips_unselected_invalid_tests_in_same_module(
@@ -210,7 +244,7 @@ def test_load_from_collection_skips_unselected_invalid_tests_in_same_module(
     )
     items = TestLoader(plan.suite_root).load_from_collection(plan)
 
-    assert [item.spec.name for item in items] == ["test_good"]
+    assert [item.spec.locator.function_name for item in items] == ["test_good"]
 
 
 def test_load_from_collection_enriches_runtime_metadata(tmp_path):
@@ -245,16 +279,23 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
     plan = TestSpecCollector((), (), None).build_spec_collection(
         (tmp_path / "test_metadata.py",)
     )
-    planned_specs = {spec.name: spec for spec in plan.specs}
+    planned_specs = {spec.locator.function_name: spec for spec in plan.specs}
 
     assert planned_specs["test_main_skip"].params == ()
     assert planned_specs["test_main_skip"].skip_reason is None
     assert planned_specs["test_main_skip"].modifiers == ()
     assert planned_specs["test_expected_failure"].xfail_reason is None
-    assert planned_specs["test_bad"].definition_error is None
-
-    items = TestLoader(plan.suite_root).load_from_collection(plan)
-    items_by_name = {item.spec.name: item for item in items}
+    valid_plan = replace(
+        plan,
+        specs=tuple(
+            spec
+            for spec in plan.specs
+            if spec.locator.function_name
+            in {"test_main_skip", "test_expected_failure"}
+        ),
+    )
+    items = TestLoader(valid_plan.suite_root).load_from_collection(valid_plan)
+    items_by_name = {item.spec.locator.function_name: item for item in items}
     backend_modifier, params_modifier = items_by_name[
         "test_main_skip"
     ].spec.modifiers
@@ -268,14 +309,122 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
     )
     assert items_by_name["test_expected_failure"].spec.xfail_reason == "known"
     assert items_by_name["test_expected_failure"].spec.xfail_strict is True
-    assert (
-        items_by_name["test_bad"].spec.definition_error
-        == "iterate.params() requires at least one value set"
+    with pytest.raises(TestDefinitionErrors) as raised:
+        TestLoader(plan.suite_root).load_from_collection(plan)
+    messages = {str(issue) for issue in raised.value.exceptions}
+    assert any(
+        "test_bad" in message
+        and "iterate.params() requires at least one value set" in message
+        for message in messages
     )
-    assert (
-        items_by_name["test_duplicate_backend"].spec.definition_error
-        == "Multiple @rue.test.backend(...) decorators are not supported."
+    assert any(
+        "test_duplicate_backend" in message
+        and "Multiple @rue.test.backend(...) decorators are not supported."
+        in message
+        for message in messages
     )
+
+
+def test_load_from_collection_raises_setup_failures(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "bad/conftest.py": 'raise RuntimeError("bad setup")\n',
+            "bad/test_bad.py": """
+                import rue
+
+                @rue.test
+                def test_bad():
+                    pass
+            """,
+        },
+    )
+
+    plan = TestSpecCollector((), (), None).build_spec_collection((tmp_path,))
+
+    with pytest.raises(TestDefinitionErrors) as raised:
+        TestLoader(plan.suite_root).load_from_collection(plan)
+
+    [issue] = raised.value.exceptions
+    assert issue.spec.full_name == "test_bad::test_bad"
+    assert issue.message == "bad setup"
+
+
+def test_load_from_collection_raises_missing_callable(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "test_sample.py": """
+                import rue
+
+                @rue.test
+                def test_good():
+                    pass
+
+                @rue.test
+                def test_bad():
+                    pass
+            """,
+        },
+    )
+
+    original_plan = TestSpecCollector((), (), None).build_spec_collection(
+        (tmp_path,)
+    )
+    bad_spec = replace(
+        original_plan.specs[1],
+        locator=Locator(
+            module_path=original_plan.specs[1].locator.module_path,
+            function_name="missing_test",
+        ),
+    )
+    plan = replace(
+        original_plan,
+        specs=(original_plan.specs[0], bad_spec),
+    )
+
+    with pytest.raises(TestDefinitionErrors) as raised:
+        TestLoader(plan.suite_root).load_from_collection(plan)
+
+    [issue] = raised.value.exceptions
+    assert issue.spec.locator.function_name == "missing_test"
+    assert "missing_test" in issue.message
+
+
+def test_load_from_collection_raises_non_callable_target(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "test_sample.py": """
+                import rue
+
+                not_callable = 1
+
+                @rue.test
+                def test_good():
+                    pass
+            """,
+        },
+    )
+
+    original_plan = TestSpecCollector((), (), None).build_spec_collection(
+        (tmp_path,)
+    )
+    bad_spec = replace(
+        original_plan.specs[0],
+        locator=Locator(
+            module_path=original_plan.specs[0].locator.module_path,
+            function_name="not_callable",
+        ),
+    )
+    plan = replace(original_plan, specs=(bad_spec,))
+
+    with pytest.raises(TestDefinitionErrors) as raised:
+        TestLoader(plan.suite_root).load_from_collection(plan)
+
+    [issue] = raised.value.exceptions
+    assert issue.spec.locator.function_name == "not_callable"
+    assert "not a function or method" in issue.message
 
 
 @pytest.mark.asyncio
@@ -311,7 +460,10 @@ async def test_materialize_supports_same_dir_setup_without_pyproject(
         },
     )
 
-    run = await make_runner(null_reporter).run(items=materialize(tmp_path))
+    run = await make_runner(null_reporter).run(
+        items=materialize(tmp_path),
+        resolver=DependencyResolver(registry),
+    )
 
     assert run.result.passed == 1
     assert run.result.failed == 0
@@ -380,9 +532,13 @@ def test_materialize_imports_nested_setup_chain_in_order(tmp_path, monkeypatch):
     [item] = TestLoader(plan.suite_root).load_from_collection(plan)
 
     assert item.suite_root == plan.suite_root
-    assert item.setup_chain == plan.setup_chain_for(item.spec.module_path)
+    assert item.setup_chain == plan.setup_chain_for(
+        item.spec.locator.module_path
+    )
 
-    item.fn()
+    make_run_context(db_enabled=False)
+    with TestContext(item=item, execution_id=uuid4()):
+        item.fn()
 
 
 def test_materialize_collects_class_based_and_method_marked_tests(tmp_path):
@@ -465,7 +621,10 @@ def test_materialize_uses_single_session_for_selected_modules(
     )
     items = TestLoader(plan.suite_root).load_from_collection(plan)
 
-    assert [item.spec.name for item in items] == ["test_good", "test_good_two"]
+    assert [item.spec.locator.function_name for item in items] == [
+        "test_good",
+        "test_good_two",
+    ]
     assert builtins.confrue_counter == 1
 
 
@@ -510,7 +669,10 @@ async def test_materialize_promotes_pytest_fixtures(
 
     write_files(tmp_path, files)
 
-    run = await make_runner(null_reporter).run(items=materialize(tmp_path))
+    run = await make_runner(null_reporter).run(
+        items=materialize(tmp_path),
+        resolver=DependencyResolver(registry),
+    )
 
     assert run.result.passed == 1
     assert run.result.failed == 0
@@ -559,6 +721,11 @@ def test_materialize_rewrites_pytest_fixture_aliases_to_resources(tmp_path):
 
     [item] = materialize(tmp_path)
 
-    assert item.spec.name == "test_uses_fixture"
-    assert registry.get("greeting") is not None
-    assert registry.get("greeting").spec.scope == Scope.MODULE
+    assert item.spec.locator.function_name == "test_uses_fixture"
+    execution_id = uuid4()
+    graphs = registry.compile_graphs({execution_id: (item.spec, ("greeting",))})
+    graph = graphs[execution_id]
+    greeting = registry.get_definition(
+        graph.injections["greeting"]
+    )
+    assert greeting.spec.scope == Scope.MODULE

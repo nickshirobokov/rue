@@ -54,8 +54,8 @@ class OtelTelemetryBackend(TelemetryBackend):
         span = scope.__enter__()
         self._root_span_scope = scope
         self._root_span = span
-        span.set_attribute("test.name", definition.spec.name)
-        span.set_attribute("test.module", str(definition.spec.module_path))
+        span.set_attribute("test.name", definition.spec.locator.function_name)
+        span.set_attribute("test.module", str(definition.spec.locator.module_path))
         if definition.spec.tags:
             span.set_attribute("test.tags", list(definition.spec.tags))
         if definition.spec.suffix:

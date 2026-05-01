@@ -9,10 +9,11 @@ from rue.context.collectors import (
     CURRENT_ASSERTION_RESULTS,
     CURRENT_METRIC_RESULTS,
 )
-from rue.context.runtime import CURRENT_TEST, TestContext, bind
-from rue.resources import ResourceSpec, ResourceResolver, Scope, registry
+from rue.context.runtime import TestContext, bind
+from rue.models import Locator
+from rue.resources import DependencyResolver, ResourceSpec, Scope, registry
 from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
-from tests.unit.factories import materialize_tests
+from tests.helpers import make_run_context, materialize_tests
 
 
 def test_rewritten_assert_collects_predicate_results(tmp_path):
@@ -21,6 +22,7 @@ def test_rewritten_assert_collects_predicate_results(tmp_path):
     mod_path.write_text(
         """
 from rue import test
+from rue.models import Locator
 from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.base import Metric, MetricMetadata
 from rue.predicates import predicate
@@ -31,7 +33,7 @@ def equals(actual, reference):
 
 @test
 def test_sample():
-    m = Metric(metadata=MetricMetadata(identity=ResourceSpec(name="m", scope=Scope.PROCESS)))
+    m = Metric(metadata=MetricMetadata(identity=ResourceSpec(locator=Locator(module_path=None, function_name="m"), scope=Scope.RUN)))
     m.add_record([1, 2, 3])
     assert equals(1, 1) and (m.len == 3)
 """.lstrip()
@@ -40,9 +42,10 @@ def test_sample():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
-        ctx = TestContext(item=item)
+        make_run_context()
+        ctx = TestContext(item=item, execution_id=uuid4())
         with (
-            bind(CURRENT_TEST, ctx),
+            ctx,
             bind(CURRENT_ASSERTION_RESULTS, assertion_results),
         ):
             item.fn()
@@ -80,9 +83,10 @@ def test_fail():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
-        ctx = TestContext(item=item)
+        make_run_context()
+        ctx = TestContext(item=item, execution_id=uuid4())
         with (
-            bind(CURRENT_TEST, ctx),
+            ctx,
             bind(CURRENT_ASSERTION_RESULTS, assertion_results),
         ):
             item.fn()
@@ -118,23 +122,28 @@ def test_metric_capture_multi():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
-        ctx = TestContext(item=item)
+        make_run_context()
+        ctx = TestContext(item=item, execution_id=uuid4())
         m = Metric(
             metadata=MetricMetadata(
                 identity=ResourceSpec(
-                    name="assert_outcomes", scope=Scope.PROCESS
+                    locator=Locator(
+                        module_path=None,
+                        function_name="assert_outcomes",
+                    ),
+                    scope=Scope.RUN,
                 )
             )
         )
         with (
-            bind(CURRENT_TEST, ctx),
+            ctx,
             metrics_scope_ctx(m),
             bind(CURRENT_ASSERTION_RESULTS, assertion_results),
         ):
             item.fn()
 
         assert m.raw_values == [True, False]
-        assert m.metadata.collected_from_tests == {"test_metric_capture_multi"}
+        assert m.metadata.consumers == []
         assert len(assertion_results) == 2
         assert assertion_results[0].passed is True
         assert assertion_results[1].passed is False
@@ -152,12 +161,13 @@ async def test_rewritten_asserts_inside_metric_functions_are_collected(
     mod_path.write_text(
         """
 import rue
+from rue.models import Locator
 from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.base import Metric, MetricMetadata
 
 @rue.resource.metric
 def my_metric():
-    m = Metric(metadata=MetricMetadata(identity=ResourceSpec(name="m", scope=Scope.PROCESS)))
+    m = Metric(metadata=MetricMetadata(identity=ResourceSpec(locator=Locator(module_path=None, function_name="m"), scope=Scope.RUN)))
     yield m
     assert False, "nope"
 
@@ -169,10 +179,20 @@ def test_dummy():
 
     try:
         [item] = materialize_tests(mod_path)
-        resolver = ResourceResolver(registry)
+        resolver = DependencyResolver(registry)
+        execution_id = uuid4()
+        ctx = TestContext(item=item, execution_id=execution_id)
         metric_results: list[MetricResult] = []
-        with bind(CURRENT_METRIC_RESULTS, metric_results):
-            await resolver.resolve("my_metric")
+        with ctx, bind(CURRENT_METRIC_RESULTS, metric_results):
+            graphs = registry.compile_graphs(
+                {execution_id: (item.spec, ("my_metric",))}
+            )
+            graph = graphs[execution_id]
+            await resolver.resolve_resource(
+                graph.injections["my_metric"],
+                graph=graph,
+                consumer_spec=item.spec,
+            )
             await resolver.teardown()
 
         assert len(metric_results) == 1
@@ -220,7 +240,10 @@ def test_repr_cases():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
-        with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
+        with TestContext(item=item, execution_id=uuid4()), bind(
+            CURRENT_ASSERTION_RESULTS,
+            assertion_results,
+        ):
             item.fn()
 
         assert len(assertion_results) == 5
@@ -267,7 +290,10 @@ def test_multiline_assert():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
-        with bind(CURRENT_ASSERTION_RESULTS, assertion_results):
+        with TestContext(item=item, execution_id=uuid4()), bind(
+            CURRENT_ASSERTION_RESULTS,
+            assertion_results,
+        ):
             item.fn()
 
         assert len(assertion_results) == 1

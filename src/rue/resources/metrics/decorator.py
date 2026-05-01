@@ -1,3 +1,5 @@
+"""Metric resource decorator."""
+
 from __future__ import annotations
 
 import functools
@@ -5,14 +7,11 @@ import inspect
 import math
 from collections.abc import AsyncGenerator, Callable, Generator
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, ParamSpec, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
-    CURRENT_RESOURCE_CONSUMER,
-    CURRENT_RESOURCE_CONSUMER_KIND,
-    CURRENT_RESOURCE_PROVIDER,
-    CURRENT_RESOURCE_RESOLVER,
+    CURRENT_RESOURCE_HOOK_CONTEXT,
     bind,
 )
 from rue.resources.models import ResourceSpec, Scope
@@ -25,47 +24,15 @@ if TYPE_CHECKING:
     from rue.assertions.base import AssertionResult
 
 
-P = ParamSpec("P")
 type MetricYield = Metric | CalculatedValue
 
 
-def _finalize_metric_result(
-    metric_instance: Metric,
-    assertions_results: list[AssertionResult],
-    value: CalculatedValue,
-) -> None:
-    provider = CURRENT_RESOURCE_PROVIDER.get()
-    resolver = CURRENT_RESOURCE_RESOLVER.get()
-    metadata = replace(metric_instance.metadata)
-    if provider is not None:
-        ident = metadata.identity
-        metadata = replace(
-            metadata,
-            identity=replace(
-                ident,
-                provider_path=provider.spec.provider_path,
-                provider_dir=provider.spec.provider_dir,
-            ),
-        )
-    dependencies = (
-        resolver.direct_dependencies_for(provider.spec)
-        if provider is not None and resolver is not None
-        else []
-    )
-    MetricResult(
-        metadata=metadata,
-        dependencies=dependencies,
-        assertion_results=assertions_results,
-        value=value,
-    )
-
-
-def metric(
+def metric[**P](
     fn: Callable[P, Generator[MetricYield, Any, Any]]
     | Callable[P, AsyncGenerator[MetricYield, Any]]
     | None = None,
     *,
-    scope: Scope | str = Scope.PROCESS,
+    scope: Scope | str = Scope.RUN,
 ) -> Any:
     """Register a metric resource and capture its final result.
 
@@ -84,9 +51,9 @@ def metric(
     fn : callable, optional
         The generator/async-generator function to register. If None, returns a
         decorator.
-    scope : Scope or str, default Scope.PROCESS
+    scope : Scope or str, default Scope.RUN
         The lifecycle scope of the metric resource. Can be "test", "module",
-        or "process".
+        or "run".
     """
     if fn is None:
 
@@ -107,17 +74,20 @@ def metric(
         scope_val = scope if isinstance(scope, Scope) else Scope(scope)
         ident = m.metadata.identity
         m.metadata.identity = ResourceSpec(
-            name=name,
+            locator=replace(ident.locator, function_name=name),
             scope=scope_val,
-            provider_path=ident.provider_path,
-            provider_dir=ident.provider_dir,
         )
         return m
 
     def on_injection_hook(m: Metric) -> Metric:
-        consumer_name = CURRENT_RESOURCE_CONSUMER.get()
-        if consumer_name and CURRENT_RESOURCE_CONSUMER_KIND.get() == "resource":
-            m.metadata.collected_from_resources.add(consumer_name)
+        hook_context = CURRENT_RESOURCE_HOOK_CONTEXT.get()
+        consumer = hook_context.consumer_spec
+        if consumer not in m.metadata.consumers:
+            m.metadata.consumers.append(consumer)
+        m.metadata.identity = hook_context.provider_spec
+        for provider in hook_context.direct_dependencies:
+            if provider not in m.metadata.direct_providers:
+                m.metadata.direct_providers.append(provider)
         return m
 
     if is_generator:
@@ -144,10 +114,10 @@ def metric(
                         value: CalculatedValue = (
                             math.nan if final_value is None else final_value
                         )
-                        _finalize_metric_result(
-                            metric_instance,
-                            assertions_results,
-                            value,
+                        MetricResult(
+                            metadata=metric_instance.metadata,
+                            assertion_results=assertions_results,
+                            value=value,
                         )
                         break
 
@@ -185,10 +155,10 @@ def metric(
                         value: CalculatedValue = (
                             math.nan if final_value is None else final_value
                         )
-                        _finalize_metric_result(
-                            metric_instance,
-                            assertions_results,
-                            value,
+                        MetricResult(
+                            metadata=metric_instance.metadata,
+                            assertion_results=assertions_results,
+                            value=value,
                         )
                         break
 
@@ -200,8 +170,9 @@ def metric(
             origin_fn=fn,
         )
 
-    msg = f"""
-        {fn.__name__} is not a generator or async generator and can't be wrapped as a Rue metric.
-        To fix: yield a Metric instance and optionally yield a final calculated value.
-        """
+    msg = (
+        f"{fn.__name__} is not a generator or async generator and can't be "
+        "wrapped as a Rue metric. To fix: yield a Metric instance and "
+        "optionally yield a final calculated value."
+    )
     raise ValueError(msg)
