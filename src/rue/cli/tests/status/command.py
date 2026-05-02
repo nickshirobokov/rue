@@ -17,7 +17,7 @@ from rue.cli.tests.options import (
 from rue.cli.tests.status.builder import TestsStatusBuilder
 from rue.cli.tests.status.render import StatusRenderer
 from rue.config import load_config
-from rue.storage.sqlite import SQLiteStore
+from rue.storage import DBManager
 from rue.testing.discovery import TestDefinitionErrors
 
 
@@ -45,8 +45,8 @@ def status(
     collection = collector.build_spec_collection(resolved_paths)
     builder = TestsStatusBuilder(status_config)
     store = None
-    if status_config.resolved_db_path.exists():
-        store = SQLiteStore(status_config.resolved_db_path)
+    if status_config.db_path.exists():
+        store = DBManager(status_config.db_path)
     try:
         report = builder.build(collection, store=store)
     except TestDefinitionErrors as errors:

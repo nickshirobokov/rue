@@ -83,9 +83,7 @@ class OtelReporter(RunEventsProcessor):
         self._prune_run_directories()
         return None
 
-    async def on_run_stopped_early(
-        self, failure_count: int, run: Run
-    ) -> None:
+    async def on_run_stopped_early(self, failure_count: int, run: Run) -> None:
         """Ignore early-stop notifications."""
         _ = failure_count, run
         return None
@@ -140,6 +138,3 @@ class OtelReporter(RunEventsProcessor):
         )
         for run_dir in run_dirs[MAX_STORED_OTEL_RUNS:]:
             shutil.rmtree(run_dir)
-
-
-otel_reporter = OtelReporter()

@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from rue.assertions.base import AssertionRepr, AssertionResult
+from rue.config import Config
 from rue.context.runtime import TestContext
 from rue.models import Locator
 from rue.predicates.models import PredicateResult
@@ -12,8 +13,8 @@ from rue.resources.metrics.base import (
     MetricMetadata,
     MetricResult,
 )
-from rue.storage.sqlite import SQLiteStore
-from rue.storage.sqlite.store import MAX_STORED_RUNS
+from rue.storage import DBManager, DBWriter
+from rue.storage.manager import MAX_STORED_RUNS
 from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.modifiers import IterateModifier
 from rue.testing.models.result import TestResult, TestStatus
@@ -32,7 +33,43 @@ def make_environment(**updates) -> RunEnvironment:
     )
 
 
-def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
+def stream_run(manager: DBManager, run: Run) -> None:
+    writer = DBWriter()
+    writer.configure(Config(db_path=manager.path))
+    writer.start_run(run)
+    for execution in run.result.executions:
+        stream_execution(writer, run.run_id, execution)
+    writer.finish_run(run)
+
+
+def stream_execution(
+    writer: DBWriter,
+    run_id,
+    execution: ExecutedTest,
+) -> None:
+    for child in execution.sub_executions:
+        stream_execution(writer, run_id, child)
+    writer.record_execution(run_id, execution)
+    writer.link_executions(
+        execution.execution_id,
+        [child.execution_id for child in execution.sub_executions],
+    )
+
+
+def test_sqlite_db_manager_initialize_creates_db(tmp_path: Path) -> None:
+    db_path = tmp_path / "rue.db"
+    manager = DBManager(db_path)
+
+    assert not db_path.exists()
+
+    manager.initialize()
+
+    assert db_path.exists()
+
+
+def test_sqlite_db_manager_streams_and_gets_run(
+    sqlite_db_manager: DBManager,
+) -> None:
     case_id = uuid4()
     execution_id = uuid4()
     sub_execution_id = uuid4()
@@ -119,8 +156,8 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         ),
     )
 
-    sqlite_store.save_run(run)
-    loaded = sqlite_store.get_run(run.run_id)
+    stream_run(sqlite_db_manager, run)
+    loaded = sqlite_db_manager.get_run(run.run_id)
 
     assert loaded is not None
     assert loaded.run_id == run.run_id
@@ -145,8 +182,7 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     )
     assert len(loaded.result.metric_results) == 1
     assert (
-        loaded.result.metric_results[0]
-        .metadata.identity.locator.function_name
+        loaded.result.metric_results[0].metadata.identity.locator.function_name
         == "latency_ms"
     )
     assert loaded.result.metric_results[0].value == 12.5
@@ -159,9 +195,10 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
     )
     assert test_consumer.locator.module_path == Path("tests/test_sample.py")
     assert test_consumer.case_id == case_id
-    assert (
-        loaded.result.metric_results[0].metadata.identity.locator.module_path
-        == Path("/tmp/project/confrue_root.py")
+    assert loaded.result.metric_results[
+        0
+    ].metadata.identity.locator.module_path == Path(
+        "/tmp/project/confrue_root.py"
     )
     assert loaded.result.metric_results[0].metadata.direct_providers == [
         ResourceSpec(
@@ -173,7 +210,10 @@ def test_sqlite_store_save_and_get_run(sqlite_store: SQLiteStore) -> None:
         )
     ]
 
-def test_sqlite_store_list_runs(sqlite_store: SQLiteStore) -> None:
+
+def test_sqlite_db_manager_list_runs(
+    sqlite_db_manager: DBManager,
+) -> None:
     run_one = Run(
         run_id=uuid4(),
         start_time=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
@@ -189,17 +229,17 @@ def test_sqlite_store_list_runs(sqlite_store: SQLiteStore) -> None:
         result=RunResult(),
     )
 
-    sqlite_store.save_run(run_one)
-    sqlite_store.save_run(run_two)
+    stream_run(sqlite_db_manager, run_one)
+    stream_run(sqlite_db_manager, run_two)
 
-    runs = sqlite_store.list_runs(limit=1)
+    runs = sqlite_db_manager.list_runs(limit=1)
 
     assert len(runs) == 1
     assert runs[0].run_id == run_two.run_id
 
 
-def test_sqlite_store_assertions_and_predicates(
-    sqlite_store: SQLiteStore,
+def test_sqlite_db_manager_assertions_and_predicates(
+    sqlite_db_manager: DBManager,
 ) -> None:
     execution_id = uuid4()
     predicate_result = PredicateResult(
@@ -212,7 +252,7 @@ def test_sqlite_store_assertions_and_predicates(
         message="nope",
     )
     definition = make_definition("test_one", module_path="tests/test_sample.py")
-    make_run_context(db_enabled=False)
+    make_run_context()
     with TestContext(item=definition, execution_id=execution_id):
         assertion = AssertionResult(
             expression_repr=AssertionRepr(
@@ -269,18 +309,29 @@ def test_sqlite_store_assertions_and_predicates(
         ),
     )
 
-    sqlite_store.save_run(run)
+    writer = DBWriter()
+    writer.configure(Config(db_path=sqlite_db_manager.path))
+    writer.start_run(run)
+    writer.record_execution(run.run_id, execution)
 
-    assertions = sqlite_store.get_assertions_for_execution(execution_id)
+    loaded = sqlite_db_manager.get_run(run.run_id)
+    assert loaded is not None
+    assert loaded.result.executions[0].execution_id == execution_id
+
+    writer.finish_run(run)
+
+    assertions = sqlite_db_manager.get_assertions_for_execution(execution_id)
     assert len(assertions) == 1
     assertion_repr = json.loads(assertions[0]["expression_repr"])
     assert assertion_repr["expr"] == "x == y"
 
-    predicates = sqlite_store.get_predicates_for_assertion(assertions[0]["id"])
+    predicates = sqlite_db_manager.get_predicates_for_assertion(
+        assertions[0]["id"]
+    )
     assert len(predicates) == 1
     assert predicates[0]["predicate_name"] == "equals"
 
-    run_assertions = sqlite_store.get_assertions_for_run(run.run_id)
+    run_assertions = sqlite_db_manager.get_assertions_for_run(run.run_id)
     assert any(row["metric_id"] is not None for row in run_assertions)
     assert any(
         row["test_execution_id"] == str(execution_id) for row in run_assertions
@@ -291,8 +342,10 @@ def test_sqlite_store_assertions_and_predicates(
     )
 
 
-def test_sqlite_store_prunes_old_runs(sqlite_store: SQLiteStore) -> None:
-    """Store should keep only MAX_STORED_RUNS most recent runs."""
+def test_sqlite_db_manager_prunes_old_runs(
+    sqlite_db_manager: DBManager,
+) -> None:
+    """Manager should keep only MAX_STORED_RUNS most recent runs."""
     runs_to_create = MAX_STORED_RUNS + 3
     created_run_ids = []
 
@@ -305,9 +358,9 @@ def test_sqlite_store_prunes_old_runs(sqlite_store: SQLiteStore) -> None:
             result=RunResult(),
         )
         created_run_ids.append(run.run_id)
-        sqlite_store.save_run(run)
+        stream_run(sqlite_db_manager, run)
 
-    stored_runs = sqlite_store.list_runs(limit=100)
+    stored_runs = sqlite_db_manager.list_runs(limit=100)
 
     assert len(stored_runs) == MAX_STORED_RUNS
 

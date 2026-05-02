@@ -27,7 +27,7 @@ from pydantic_settings import (
 
 
 class PredicateConfig(BaseModel):
-    """Config for a single predicate — model name plus optional ModelSettings fields."""
+    """Config for a single predicate."""
 
     model_config = ConfigDict(
         protected_namespaces=(), arbitrary_types_allowed=True
@@ -56,7 +56,7 @@ class PredicateConfig(BaseModel):
 
 
 class PredicateSettings(BaseSettings):
-    """Built-in predicate config from `[tool.rue.predicates]` (also merged under `[tool.rue]`)."""
+    """Built-in predicate config from `[tool.rue.predicates]`."""
 
     model_config = SettingsConfigDict(
         extra="forbid",
@@ -91,7 +91,7 @@ class PredicateSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """Load order: init, env, dotenv, secrets, then ``[tool.rue.predicates]``."""
+        """Load predicate settings after standard settings sources."""
         return (
             init_settings,
             env_settings,
@@ -125,8 +125,7 @@ class Config(BaseSettings):
     concurrency: Annotated[int, Field(ge=0)] = 1
     timeout: Annotated[float, Field(gt=0)] | None = None
     otel: bool = True
-    db_path: str | None = None
-    db_enabled: bool = True
+    db_path: Path = Path(".rue/rue.db")
     processors: list[str] = Field(default_factory=list)
     predicates: PredicateSettings = Field(default_factory=PredicateSettings)
 
@@ -138,19 +137,11 @@ class Config(BaseSettings):
         return self
 
     def with_overrides(self, **kwargs: Any) -> Config:
-        """Return a copy with non-None kwargs applied on top of current values."""
-        return self.model_copy(
-            update={k: v for k, v in kwargs.items() if v is not None}
-        )
-
-    @property
-    def resolved_db_path(self) -> Path:
-        """Resolve the database path from config or project root default."""
-        if self.db_path:
-            return Path(self.db_path)
-        from rue.storage.sqlite.store import DEFAULT_DB_NAME, find_project_root
-
-        return find_project_root() / DEFAULT_DB_NAME
+        """Return a copy with non-None kwargs applied."""
+        data = self.model_dump(exclude={"predicates"})
+        data["predicates"] = self.predicates
+        data.update({k: v for k, v in kwargs.items() if v is not None})
+        return type(self)(**data)
 
     @classmethod
     def settings_customise_sources(
@@ -158,10 +149,10 @@ class Config(BaseSettings):
         settings_cls: type[BaseSettings],
         init_settings: PydanticBaseSettingsSource,
         env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
-        file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """Load order: init, env, ``rue.toml``, ``[tool.rue]``, then field defaults."""
+        """Load config from init, env, ``rue.toml``, and ``[tool.rue]``."""
         return (
             init_settings,
             env_settings,
@@ -172,10 +163,7 @@ class Config(BaseSettings):
 
 @lru_cache(maxsize=1)
 def load_config() -> Config:
-    """Load configuration from pyproject.toml, rue.toml, and environment.
-
-    Cached for the process. Call ``reset_load_config_cache()`` after cwd/env changes.
-    """
+    """Load configuration from pyproject.toml, rue.toml, and environment."""
     return Config()
 
 
@@ -189,5 +177,4 @@ __all__ = [
     "PredicateConfig",
     "load_config",
     "reset_load_config_cache",
-    "with_overrides",
 ]

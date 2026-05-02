@@ -38,7 +38,6 @@ fail-fast = true
 otel = false
 processors = ["ConsoleReporter", "OtelReporter"]
 db-path = ".rue/custom.db"
-db-enabled = false
 """.strip()
     )
 
@@ -55,8 +54,7 @@ db-enabled = false
     assert config.otel is False
     assert not hasattr(config, "otel_content")
     assert config.processors == ["ConsoleReporter", "OtelReporter"]
-    assert config.db_path == ".rue/custom.db"
-    assert config.db_enabled is False
+    assert config.db_path == Path(".rue/custom.db")
 
 
 def test_load_config_defaults_when_missing(
@@ -74,5 +72,20 @@ def test_load_config_defaults_when_missing(
     assert config.addopts == []
     assert config.otel is True
     assert not hasattr(config, "otel_content")
-    assert config.db_path is None
-    assert config.db_enabled is True
+    assert config.db_path == Path(".rue/rue.db")
+
+
+def test_config_db_path_override_is_parsed_to_path() -> None:
+    config = load_config().with_overrides(db_path=".rue/override.db")
+
+    assert config.db_path == Path(".rue/override.db")
+
+
+def test_config_db_path_env_override_is_parsed_to_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RUE_DB_PATH", ".rue/env.db")
+
+    config = load_config()
+
+    assert config.db_path == Path(".rue/env.db")

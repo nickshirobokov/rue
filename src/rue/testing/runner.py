@@ -14,7 +14,6 @@ from rue.resources import DependencyResolver
 from rue.resources.metrics.base import MetricResult
 from rue.resources.models import Scope
 from rue.resources.sut.output import SUTOutputCapture
-from rue.storage import Store
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.execution import DefaultTestFactory, SingleTest
 from rue.testing.execution.queue import RunnerStep, SessionQueue
@@ -26,22 +25,16 @@ from rue.testing.models import (
 
 
 class Runner:
-    """Executes discovered tests with resource injection.
-
-    Args:
-        store: Optional persistence backend for completed runs.
-    """
+    """Executes discovered tests with resource injection."""
 
     DEFAULT_MAX_CONCURRENCY = 10
 
     def __init__(
         self,
         *,
-        store: Store | None = None,
         capture_output: bool = True,
     ) -> None:
         self.capture_output = False
-        self.store = store
 
         self.semaphore: asyncio.Semaphore | None = None
         self.stop_flag: bool = False
@@ -93,6 +86,7 @@ class Runner:
             try:
                 await receiver.on_no_tests_found()
                 self.current_run.end_time = datetime.now(UTC)
+                await receiver.on_run_complete()
                 return self.current_run
             finally:
                 await resolver.teardown()
@@ -139,9 +133,6 @@ class Runner:
         self.current_run.end_time = datetime.now(UTC)
 
         await receiver.on_run_complete()
-
-        if self.store is not None:
-            self.store.save_run(self.current_run)
 
         return self.current_run
 

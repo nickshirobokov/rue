@@ -17,7 +17,7 @@ def make_item(
 
 
 def make_runner() -> Runner:
-    make_run_context(db_enabled=False)
+    make_run_context()
     return Runner()
 
 

@@ -41,7 +41,6 @@ async def _run_module_with_tracing(
         items = materialize_tests(mod_path)
         make_run_context(
             otel=True,
-            db_enabled=False,
             processors=(trace_processor,),
         )
         runner = Runner()

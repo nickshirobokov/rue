@@ -43,7 +43,6 @@ async def _run_module(
 ):
     make_run_context(
         otel=otel,
-        db_enabled=False,
         concurrency=concurrency,
     )
     return await Runner().run(

@@ -135,7 +135,6 @@ async def test_runner_executes_mixed_backends_in_queue_order(
 
     make_run_context(
         otel=False,
-        db_enabled=False,
         concurrency=4,
         processors=(processor,),
     )
@@ -340,7 +339,6 @@ async def test_runner_executes_multiple_modules_in_queue_order(
 
     make_run_context(
         otel=False,
-        db_enabled=False,
         concurrency=4,
         processors=(processor,),
     )
@@ -438,7 +436,6 @@ async def test_runner_keeps_global_main_as_absolute_barrier_across_modules(
 
     make_run_context(
         otel=False,
-        db_enabled=False,
         concurrency=2,
         processors=(processor,),
     )
@@ -489,7 +486,6 @@ async def test_module_main_keeps_iterate_children_concurrent(
     start = time.perf_counter()
     make_run_context(
         otel=False,
-        db_enabled=False,
         concurrency=3,
     )
     run = await Runner().run(items=items, resolver=DependencyResolver(registry))

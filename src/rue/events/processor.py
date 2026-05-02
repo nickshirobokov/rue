@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from abc import ABCMeta
 from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import UUID
 
@@ -16,15 +15,15 @@ if TYPE_CHECKING:
     from rue.testing.models.run import Run
 
 
-class RunEventsProcessorMeta(ABCMeta):
-    """Registers processor instances after successful initialization."""
+class RunEventsProcessorMeta(type):
+    """Registers processor instances after initialization."""
 
-    def __call__(
-        cls, *args: Any, **kwargs: Any
-    ) -> RunEventsProcessor:
+    def __call__(cls, *args: Any, **kwargs: Any) -> RunEventsProcessor:
         """Create and register a run event processor."""
         processor = super().__call__(*args, **kwargs)
-        if cls is not RunEventsProcessor:
+        if cls is not RunEventsProcessor and not cls.__module__.startswith(
+            "rue."
+        ):
             RunEventsProcessor.REGISTRY[cls.__name__] = processor
         return processor
 
@@ -81,9 +80,7 @@ class RunEventsProcessor(metaclass=RunEventsProcessorMeta):
         _ = execution, run
         return None
 
-    async def on_run_stopped_early(
-        self, failure_count: int, run: Run
-    ) -> None:
+    async def on_run_stopped_early(self, failure_count: int, run: Run) -> None:
         """Called when run stops early due to maxfail limit."""
         _ = failure_count, run
         return None

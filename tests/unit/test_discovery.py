@@ -46,7 +46,7 @@ def materialize(path):
 
 
 def make_runner() -> Runner:
-    make_run_context(db_enabled=False)
+    make_run_context()
     return Runner()
 
 
@@ -533,7 +533,7 @@ def test_materialize_imports_nested_setup_chain_in_order(tmp_path, monkeypatch):
         item.spec.locator.module_path
     )
 
-    make_run_context(db_enabled=False)
+    make_run_context()
     with TestContext(item=item, execution_id=uuid4()):
         item.fn()
 

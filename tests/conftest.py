@@ -5,18 +5,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from rue.cli.console import ConsoleReporter
 from rue.events import RunEventsProcessor
-from rue.storage.sqlite import SQLiteStore
+from rue.storage import DBManager
 from rue.storage.sqlite.migrations import MigrationRunner
-from rue.telemetry.otel import OtelReporter
 from tests.helpers import TraceCollectorProcessor
 
 
 def _reset_processors() -> None:
     RunEventsProcessor.REGISTRY.clear()
-    ConsoleReporter()
-    OtelReporter()
 
 
 @pytest.fixture(autouse=True)
@@ -37,8 +33,10 @@ def sqlite_db_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def sqlite_store(sqlite_db_path: Path) -> SQLiteStore:
-    return SQLiteStore(sqlite_db_path)
+def sqlite_db_manager(sqlite_db_path: Path) -> DBManager:
+    manager = DBManager(sqlite_db_path)
+    manager.initialize()
+    return manager
 
 
 @pytest.fixture

@@ -121,7 +121,8 @@ class TestDbBackup:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute(
             "INSERT INTO runs (run_id, start_time, total_duration_ms, "
-            "passed, failed, errors, skipped, xfailed, xpassed, total, stopped_early) "
+            "passed, failed, errors, skipped, xfailed, xpassed, total, "
+            "stopped_early) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 "wal-test-run",
@@ -175,7 +176,8 @@ class TestDbReset:
         conn = sqlite3.connect(migrated_sqlite_db_path)
         conn.execute(
             "INSERT INTO runs (run_id, start_time, total_duration_ms, "
-            "passed, failed, errors, skipped, xfailed, xpassed, total, stopped_early) "
+            "passed, failed, errors, skipped, xfailed, xpassed, total, "
+            "stopped_early) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             ("run-1", "2024-01-01T00:00:00", 100.0, 1, 0, 0, 0, 0, 0, 1, 0),
         )

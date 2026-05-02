@@ -38,7 +38,6 @@ def _failed_executions(run):
 async def _run_module(module_path: Path):
     make_run_context(
             otel=False,
-            db_enabled=False,
             concurrency=6,
         )
     return await Runner().run(

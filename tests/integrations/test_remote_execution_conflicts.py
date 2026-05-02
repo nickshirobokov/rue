@@ -46,7 +46,6 @@ async def test_iterated_subprocess_children_keep_distinct_process_updates(
     items = materialize_tests(module_path)
     make_run_context(
             otel=False,
-            db_enabled=False,
             concurrency=4,
         )
     run = await Runner().run(items=items, resolver=DependencyResolver(registry))
@@ -113,7 +112,6 @@ async def test_local_and_subprocess_updates_preserve_process_identity(
     items = materialize_tests(module_path)
     make_run_context(
             otel=False,
-            db_enabled=False,
             concurrency=2,
         )
     run = await Runner().run(items=items, resolver=DependencyResolver(registry))
@@ -194,7 +192,6 @@ async def test_local_and_subprocess_nested_updates_merge_without_replacing_root(
     items = materialize_tests(module_path)
     make_run_context(
             otel=False,
-            db_enabled=False,
             concurrency=2,
         )
     run = await Runner().run(items=items, resolver=DependencyResolver(registry))
@@ -262,7 +259,6 @@ async def test_local_and_subprocess_shared_sut_trace_state_stays_isolated(
     items = materialize_tests(module_path)
     make_run_context(
             otel=True,
-            db_enabled=False,
             concurrency=2,
         )
     run = await Runner().run(items=items, resolver=DependencyResolver(registry))
@@ -323,7 +319,6 @@ async def test_main_backend_waits_for_local_and_subprocess_stage(
     items = materialize_tests(module_path)
     make_run_context(
             otel=False,
-            db_enabled=False,
             concurrency=3,
         )
     run = await Runner().run(items=items, resolver=DependencyResolver(registry))

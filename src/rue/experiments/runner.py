@@ -8,7 +8,6 @@ from dataclasses import dataclass
 
 from rue.config import Config
 from rue.context.runtime import RunContext
-from rue.events.processor import RunEventsProcessor
 from rue.events.receiver import RunEventsReceiver
 from rue.experiments.models import (
     ExperimentSpec,
@@ -18,6 +17,7 @@ from rue.experiments.models import (
 from rue.experiments.registry import registry as default_experiment_registry
 from rue.resources import DependencyResolver
 from rue.resources.registry import registry as default_resource_registry
+from rue.storage import DBManager, DBWriter
 from rue.testing.discovery import TestLoader
 from rue.testing.models.spec import TestSpecCollection
 from rue.testing.runner import Runner
@@ -105,9 +105,11 @@ async def _run_experiment_variant(
         experiment_variant=variant,
         experiment_setup_chain=collection.all_setup_files,
     )
+    db_manager = DBManager(config.db_path)
+    db_manager.initialize()
     resolver = DependencyResolver(default_resource_registry)
     run = None
-    with context, RunEventsReceiver([RunEventsProcessor()]):
+    with context, RunEventsReceiver([DBWriter()]):
         try:
             await variant.apply(
                 default_experiment_registry.all(),

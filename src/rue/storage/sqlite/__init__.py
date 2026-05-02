@@ -1,6 +1,3 @@
-"""SQLite storage package."""
+"""SQLite migration internals."""
 
-from rue.storage.sqlite.store import SQLiteStore
-
-
-__all__ = ["SQLiteStore"]
+__all__: list[str] = []

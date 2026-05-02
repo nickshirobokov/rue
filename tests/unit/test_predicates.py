@@ -5,11 +5,12 @@ from uuid import uuid4
 
 import pytest
 
+from rue.config import Config
 from rue.context.collectors import CURRENT_PREDICATE_RESULTS
 from rue.context.runtime import bind
 from rue.predicates import PredicateResult, predicate
 from rue.resources import DependencyResolver, registry
-from rue.storage import SQLiteStore
+from rue.storage import DBManager, DBWriter
 from rue.testing.runner import Runner
 from tests.helpers import make_run_context, materialize_tests
 
@@ -71,7 +72,6 @@ async def _run_module_with_tracing(
     trace_processor,
     monkeypatch: pytest.MonkeyPatch,
     source: str,
-    db_enabled: bool = False,
     db_path: Path | None = None,
 ):
     mod_name, mod_path = _write_temp_module(tmp_path, source)
@@ -79,16 +79,17 @@ async def _run_module_with_tracing(
     try:
         monkeypatch.chdir(tmp_path)
         items = materialize_tests(mod_path)
-        store = SQLiteStore(db_path) if db_enabled else None
-        make_run_context(
-            otel=True,
-            db_enabled=db_enabled,
-            db_path=db_path,
-            processors=(trace_processor,),
-        )
-        runner = Runner(
-            store=store,
-        )
+        processors = [trace_processor]
+        if db_path is not None:
+            manager = DBManager(db_path)
+            manager.initialize()
+            writer = DBWriter()
+            processors.append(writer)
+        config = Config(otel=True)
+        if db_path is not None:
+            config = Config(otel=True, db_path=db_path)
+        make_run_context(config=config, processors=tuple(processors))
+        runner = Runner()
         run = await runner.run(
             items=items,
             resolver=DependencyResolver(registry),
@@ -260,7 +261,6 @@ async def test_runner_collects_predicate_results_and_trace_data_into_db(
         tmp_path=tmp_path,
         trace_processor=trace_processor,
         monkeypatch=monkeypatch,
-        db_enabled=True,
         db_path=db_path,
         source="""
 from rue import test

@@ -31,7 +31,7 @@ def write_files(root: Path, files: dict[str, str]) -> None:
 
 def build_report(path: Path) -> TestsStatusReport:
     collection = TestSpecCollector((), (), None).build_spec_collection((path,))
-    builder = TestsStatusBuilder(Config.model_construct(db_enabled=False))
+    builder = TestsStatusBuilder(Config.model_construct())
     return builder.build(collection, store=None)
 
 
@@ -129,7 +129,7 @@ def test_status_builder_raises_definition_errors(tmp_path):
     collection = TestSpecCollector((), (), None).build_spec_collection(
         (tmp_path,)
     )
-    builder = TestsStatusBuilder(Config.model_construct(db_enabled=False))
+    builder = TestsStatusBuilder(Config.model_construct())
     with pytest.raises(TestDefinitionErrors) as raised:
         builder.build(collection, store=None)
 

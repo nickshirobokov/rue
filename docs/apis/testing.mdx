@@ -603,7 +603,6 @@ If multiple `PROCESS` resources share the same name, Rue keeps them side by side
 Execute discovered tests and return a `Run`.
 
 **Common constructor parameters:**
-- `store: Store | None = None`
 - `capture_output: bool = True`
 
 **Run methods:**
@@ -619,6 +618,7 @@ await runner.run(
 - `Runner` requires an active `RunContext`.
 - Run event processors are provided by the active `RunEventsReceiver`, not by `Runner`.
 - CLI `--processor` flags replace `config.processors`; if neither is set, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`.
+- Official CLI entrypoints append `DBWriter`; programmatic runs attach `DBWriter` when they want SQLite persistence.
 
 **Timeout behavior (`timeout`):**
 - `timeout` is a run-level limit (not per-test).
@@ -638,11 +638,19 @@ from rue.events import RunEventsReceiver
 from rue.cli.console import ConsoleReporter
 from rue.telemetry.otel import OtelReporter
 from rue.resources import DependencyResolver, registry
+from rue.storage import DBWriter
+from rue.storage import DBManager
 from rue.testing import Runner
 
-with RunContext(config=Config(db_path=".rue/rue.db")), RunEventsReceiver([
+config = Config(db_path=".rue/rue.db")
+db = DBManager(config.db_path)
+db.initialize()
+db_writer = DBWriter()
+
+with RunContext(config=config), RunEventsReceiver([
     ConsoleReporter(),
     OtelReporter(),
+    db_writer,
 ]):
     result = await Runner().run(
         items=items,

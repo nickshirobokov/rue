@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 from contextvars import Context
 from pathlib import Path
 from textwrap import dedent
@@ -6,10 +7,13 @@ from uuid import UUID
 
 import pytest
 
+from rue.config import Config
 from rue.events import RunEventsProcessor, RunEventsReceiver
 from rue.resources import DependencyResolver, registry
+from rue.storage import DBManager, DBWriter
+from rue.testing.models import ExecutedTest, Run, TestResult, TestStatus
 from rue.testing.runner import Runner
-from tests.helpers import make_run_context, materialize_tests
+from tests.helpers import make_definition, make_run_context, materialize_tests
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +29,7 @@ class CapturingProcessor(RunEventsProcessor):
         self.run_id: UUID | None = None
 
     def configure(self, config) -> None:
-        self.events.append(("configure", config.db_enabled))
+        self.events.append(("configure", config.otel))
 
     async def on_run_start(self, run) -> None:
         self.run_id = run.run_id
@@ -60,9 +64,27 @@ class CapturingProcessor(RunEventsProcessor):
         assert run.run_id == self.run_id
 
 
+class RaisingProcessor(RunEventsProcessor):
+    async def on_execution_complete(self, execution, run) -> None:
+        _ = execution, run
+        raise RuntimeError("processor failed")
+
+
 def test_run_events_receiver_requires_processor():
     with pytest.raises(ValueError, match="requires at least one processor"):
         RunEventsReceiver([])
+
+
+def test_db_writer_is_not_selectable_processor():
+    writer = DBWriter()
+    _ = writer
+    assert "DBWriter" not in RunEventsProcessor.REGISTRY
+
+
+def test_custom_processor_autoregisters():
+    processor = CapturingProcessor()
+
+    assert RunEventsProcessor.REGISTRY["CapturingProcessor"] is processor
 
 
 @pytest.mark.asyncio
@@ -89,7 +111,6 @@ async def test_runner_publishes_run_events_through_current_receiver(
     processor = CapturingProcessor()
     make_run_context(
         otel=False,
-        db_enabled=False,
         concurrency=2,
         processors=(processor,),
     )
@@ -108,22 +129,21 @@ async def test_runner_publishes_run_events_through_current_receiver(
         ("tests_ready", 2),
     ]
     assert [
-        event
-        for event in processor.events
-        if event[0] == "test_start"
+        event for event in processor.events if event[0] == "test_start"
     ] == [
         ("test_start", "test_iterated"),
         ("test_start", "test_plain"),
     ]
-    assert sum(
-        1
-        for event in processor.events
-        if event[0] == "child_execution_complete"
-    ) == 2
+    assert (
+        sum(
+            1
+            for event in processor.events
+            if event[0] == "child_execution_complete"
+        )
+        == 2
+    )
     assert sorted(
-        event
-        for event in processor.events
-        if event[0] == "execution_complete"
+        event for event in processor.events if event[0] == "execution_complete"
     ) == [
         ("execution_complete", "test_iterated"),
         ("execution_complete", "test_plain"),
@@ -149,7 +169,7 @@ async def test_runner_crashes_without_current_run_events_receiver(
     )
 
     async def run_without_receiver() -> None:
-        make_run_context(otel=False, db_enabled=False, bind_events=False)
+        make_run_context(otel=False, bind_events=False)
         await Runner().run(
             items=materialize_tests(module_path),
             resolver=DependencyResolver(registry),
@@ -158,3 +178,101 @@ async def test_runner_crashes_without_current_run_events_receiver(
     task = Context().run(asyncio.create_task, run_without_receiver())
     with pytest.raises(LookupError):
         await task
+
+
+@pytest.mark.asyncio
+async def test_db_writer_records_execution_before_run_finishes(
+    sqlite_db_path: Path,
+):
+    manager = DBManager(sqlite_db_path)
+    manager.initialize()
+    writer = DBWriter()
+    writer.configure(Config(db_path=sqlite_db_path))
+    run = Run()
+    execution = ExecutedTest(
+        definition=make_definition("test_streamed"),
+        result=TestResult(status=TestStatus.PASSED, duration_ms=1.0),
+        execution_id=UUID("00000000-0000-0000-0000-000000000001"),
+    )
+
+    await writer.on_run_start(run)
+    await writer.on_execution_complete(execution, run)
+
+    with sqlite3.connect(sqlite_db_path) as conn:
+        row = conn.execute(
+            "SELECT status FROM test_executions WHERE execution_id = ?",
+            (str(execution.execution_id),),
+        ).fetchone()
+
+    assert row == ("passed",)
+
+
+@pytest.mark.asyncio
+async def test_db_writer_links_child_after_parent_is_persisted(
+    sqlite_db_path: Path,
+):
+    manager = DBManager(sqlite_db_path)
+    manager.initialize()
+    writer = DBWriter()
+    writer.configure(Config(db_path=sqlite_db_path))
+    run = Run()
+    child = ExecutedTest(
+        definition=make_definition("test_child"),
+        result=TestResult(status=TestStatus.PASSED, duration_ms=1.0),
+        execution_id=UUID("00000000-0000-0000-0000-000000000002"),
+    )
+    parent = ExecutedTest(
+        definition=make_definition("test_parent"),
+        result=TestResult(status=TestStatus.PASSED, duration_ms=1.0),
+        execution_id=UUID("00000000-0000-0000-0000-000000000003"),
+        sub_executions=[child],
+    )
+
+    await writer.on_run_start(run)
+    await writer.on_execution_complete(child, run)
+
+    with sqlite3.connect(sqlite_db_path) as conn:
+        parent_id = conn.execute(
+            "SELECT parent_id FROM test_executions WHERE execution_id = ?",
+            (str(child.execution_id),),
+        ).fetchone()[0]
+    assert parent_id is None
+
+    await writer.on_execution_complete(parent, run)
+
+    with sqlite3.connect(sqlite_db_path) as conn:
+        linked_parent_id = conn.execute(
+            "SELECT parent_id FROM test_executions WHERE execution_id = ?",
+            (str(child.execution_id),),
+        ).fetchone()[0]
+    assert linked_parent_id == str(parent.execution_id)
+
+
+@pytest.mark.asyncio
+async def test_db_writer_keeps_execution_when_later_processor_fails(
+    sqlite_db_path: Path,
+):
+    manager = DBManager(sqlite_db_path)
+    manager.initialize()
+    writer = DBWriter()
+    run = Run()
+    execution = ExecutedTest(
+        definition=make_definition("test_before_failure"),
+        result=TestResult(status=TestStatus.PASSED, duration_ms=1.0),
+        execution_id=UUID("00000000-0000-0000-0000-000000000004"),
+    )
+    make_run_context(
+        db_path=sqlite_db_path,
+        processors=(writer, RaisingProcessor()),
+    )
+
+    await RunEventsReceiver.current().on_run_start(run)
+    with pytest.raises(RuntimeError, match="processor failed"):
+        await RunEventsReceiver.current().on_execution_complete(execution)
+
+    with sqlite3.connect(sqlite_db_path) as conn:
+        row = conn.execute(
+            "SELECT status FROM test_executions WHERE execution_id = ?",
+            (str(execution.execution_id),),
+        ).fetchone()
+    assert row == ("passed",)

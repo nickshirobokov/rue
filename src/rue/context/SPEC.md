@@ -39,7 +39,7 @@ block-beta
   user_call["User test call<br/>LoadedTestDef<br/>.call_test_fn"]
   test_done["Test cleanup<br/>DependencyResolver<br/>.teardown(Scope.TEST)"]
   module_done["Module cleanup<br/>Runner<br/>._teardown_module_if_complete"]
-  final["Run result<br/>DependencyResolver.teardown()<br/>Store.save_run"]
+  final["Run result<br/>DependencyResolver.teardown()<br/>DBWriter.on_run_complete"]
 
   space:3
   run_ctx["RunContext<br/>CURRENT_RUN_CONTEXT<br/>config, run_id, environment"]:9
