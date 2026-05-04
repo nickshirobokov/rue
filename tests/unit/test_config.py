@@ -37,7 +37,7 @@ keyword = "chatbot"
 fail-fast = true
 otel = false
 processors = ["ConsoleReporter", "OtelReporter"]
-db-path = ".rue/custom.db"
+database-path = ".rue/custom.turso.db"
 """.strip()
     )
 
@@ -54,7 +54,7 @@ db-path = ".rue/custom.db"
     assert config.otel is False
     assert not hasattr(config, "otel_content")
     assert config.processors == ["ConsoleReporter", "OtelReporter"]
-    assert config.db_path == Path(".rue/custom.db")
+    assert config.database_path == Path(".rue/custom.turso.db")
 
 
 def test_load_config_defaults_when_missing(
@@ -72,20 +72,22 @@ def test_load_config_defaults_when_missing(
     assert config.addopts == []
     assert config.otel is True
     assert not hasattr(config, "otel_content")
-    assert config.db_path == Path(".rue/rue.db")
+    assert config.database_path == Path(".rue/rue.turso.db")
 
 
-def test_config_db_path_override_is_parsed_to_path() -> None:
-    config = load_config().with_overrides(db_path=".rue/override.db")
+def test_config_database_path_override_is_parsed_to_path() -> None:
+    config = load_config().with_overrides(
+        database_path=".rue/override.turso.db"
+    )
 
-    assert config.db_path == Path(".rue/override.db")
+    assert config.database_path == Path(".rue/override.turso.db")
 
 
-def test_config_db_path_env_override_is_parsed_to_path(
+def test_config_database_path_env_override_is_parsed_to_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("RUE_DB_PATH", ".rue/env.db")
+    monkeypatch.setenv("RUE_DATABASE_PATH", ".rue/env.turso.db")
 
     config = load_config()
 
-    assert config.db_path == Path(".rue/env.db")
+    assert config.database_path == Path(".rue/env.turso.db")

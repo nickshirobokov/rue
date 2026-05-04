@@ -125,7 +125,7 @@ class Config(BaseSettings):
     concurrency: Annotated[int, Field(ge=0)] = 1
     timeout: Annotated[float, Field(gt=0)] | None = None
     otel: bool = True
-    db_path: Path = Path(".rue/rue.db")
+    database_path: Path = Path(".rue/rue.turso.db")
     processors: list[str] = Field(default_factory=list)
     predicates: PredicateSettings = Field(default_factory=PredicateSettings)
 

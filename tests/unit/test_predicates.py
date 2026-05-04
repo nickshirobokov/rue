@@ -1,4 +1,3 @@
-import sqlite3
 import sys
 from pathlib import Path
 from uuid import uuid4
@@ -10,7 +9,7 @@ from rue.context.collectors import CURRENT_PREDICATE_RESULTS
 from rue.context.runtime import bind
 from rue.predicates import PredicateResult, predicate
 from rue.resources import DependencyResolver, registry
-from rue.storage import DBManager, DBWriter
+from rue.storage import TursoRunRecorder, TursoRunStore
 from rue.testing.runner import Runner
 from tests.helpers import make_run_context, materialize_tests
 
@@ -72,7 +71,7 @@ async def _run_module_with_tracing(
     trace_processor,
     monkeypatch: pytest.MonkeyPatch,
     source: str,
-    db_path: Path | None = None,
+    database_path: Path | None = None,
 ):
     mod_name, mod_path = _write_temp_module(tmp_path, source)
 
@@ -80,14 +79,14 @@ async def _run_module_with_tracing(
         monkeypatch.chdir(tmp_path)
         items = materialize_tests(mod_path)
         processors = [trace_processor]
-        if db_path is not None:
-            manager = DBManager(db_path)
-            manager.initialize()
-            writer = DBWriter()
-            processors.append(writer)
+        if database_path is not None:
+            store = TursoRunStore(database_path)
+            store.initialize()
+            recorder = TursoRunRecorder()
+            processors.append(recorder)
         config = Config(otel=True)
-        if db_path is not None:
-            config = Config(otel=True, db_path=db_path)
+        if database_path is not None:
+            config = Config(otel=True, database_path=database_path)
         make_run_context(config=config, processors=tuple(processors))
         runner = Runner()
         run = await runner.run(
@@ -256,12 +255,12 @@ async def test_runner_collects_predicate_results_and_trace_data_into_db(
     trace_processor,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    db_path = tmp_path / "rue.db"
+    database_path = tmp_path / "rue.turso.db"
     mod_name, run, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
         trace_processor=trace_processor,
         monkeypatch=monkeypatch,
-        db_path=db_path,
+        database_path=database_path,
         source="""
 from rue import test
 from rue.predicates import predicate
@@ -301,17 +300,17 @@ def test_sample():
         "message": "db-message",
     }
 
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+    store = TursoRunStore(database_path)
+    with store.connection() as conn:
         assertion = conn.execute(
-            "SELECT * FROM assertions WHERE test_execution_id = ?",
+            "SELECT * FROM assertions WHERE execution_id = ?",
             (str(execution.execution_id),),
         ).fetchone()
         assert assertion is not None
 
         predicate_rows = conn.execute(
             "SELECT * FROM predicates WHERE assertion_id = ?",
-            (assertion["id"],),
+            (assertion["assertion_id"],),
         ).fetchall()
 
     assert len(predicate_rows) == 1

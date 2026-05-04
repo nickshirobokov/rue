@@ -89,3 +89,7 @@ class RunEventsProcessor(metaclass=RunEventsProcessorMeta):
         """Called after all tests complete."""
         _ = run
         return None
+
+    def close(self) -> None:
+        """Release processor resources."""
+        return None

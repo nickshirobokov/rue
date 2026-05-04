@@ -18,7 +18,7 @@ from rue.context.runtime import RunContext, TestContext
 from rue.resources import DependencyResolver, ResourceSpec
 from rue.resources.models import ResourceGraph
 from rue.resources.registry import registry as default_resource_registry
-from rue.storage import DBManager
+from rue.storage import TursoRunStore
 from rue.testing.discovery import TestLoader
 from rue.testing.execution.base import ExecutableTest
 from rue.testing.execution.factory import DefaultTestFactory
@@ -39,7 +39,7 @@ class TestsStatusBuilder:
         self,
         collection: TestSpecCollection,
         *,
-        store: DBManager | None,
+        store: TursoRunStore | None,
     ) -> TestsStatusReport:
         """Return the current test status report for a collection."""
         default_resource_registry.reset()

@@ -27,7 +27,7 @@ from rue.resources import (
     DependencyResolver,
     registry as default_resource_registry,
 )
-from rue.storage import DBManager, DBWriter
+from rue.storage import TursoRunRecorder, TursoRunStore
 from rue.telemetry.otel import OtelReporter
 from rue.testing.discovery import TestDefinitionErrors, TestLoader
 from rue.testing.runner import Runner
@@ -120,8 +120,8 @@ def run(
             msg = f"Unknown processor: {name}. Available: {available}"
             raise ValueError(msg)
         processors.append(RunEventsProcessor.REGISTRY[name])
-    db_manager = DBManager(runner_config.db_path)
-    db_manager.initialize()
+    store = TursoRunStore(runner_config.database_path)
+    store.initialize()
 
     collection = collector.build_spec_collection(resolved_paths)
     try:
@@ -132,7 +132,7 @@ def run(
         print_definition_errors(errors)
         raise SystemExit(2) from errors
 
-    if run_id is not None and db_manager.run_exists(run_id):
+    if run_id is not None and store.run_exists(run_id):
         Console().print(f"[red]run_id '{run_id}' already exists[/red]")
         raise SystemExit(2)
 
@@ -141,7 +141,7 @@ def run(
         if run_id is None
         else RunContext(config=runner_config, run_id=run_id)
     )
-    events_receiver = RunEventsReceiver([*processors, DBWriter()])
+    events_receiver = RunEventsReceiver([*processors, TursoRunRecorder()])
     with run_context, events_receiver:
         runner = Runner(
             capture_output=not show_output,

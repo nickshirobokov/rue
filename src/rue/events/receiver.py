@@ -53,6 +53,8 @@ class RunEventsReceiver:
         traceback: TracebackType | None,
     ) -> None:
         """Restore the previous run events receiver."""
+        for processor in self.processors:
+            processor.close()
         CURRENT_RUN_EVENTS_RECEIVER.reset(self._tokens.pop())
 
     async def on_run_start(self, run: Run) -> None:

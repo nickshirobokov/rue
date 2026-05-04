@@ -16,7 +16,7 @@ from rue.experiments.models import (
     ExperimentVariantResult,
 )
 from rue.models import Locator
-from rue.storage import DBManager, DBWriter
+from rue.storage import TursoRunRecorder, TursoRunStore
 from rue.testing import LoadedTestDef
 from rue.testing.discovery import TestDefinitionErrors, TestDefinitionIssue
 from rue.testing.models.run import Run, RunEnvironment, RunResult
@@ -29,7 +29,7 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def _isolate_cli_db(tmp_path: Path, monkeypatch):
-    config = Config(db_path=str(tmp_path / "rue.db"))
+    config = Config(database_path=str(tmp_path / "rue.turso.db"))
     monkeypatch.setattr("rue.cli.tests.run.load_config", lambda: config)
     monkeypatch.setattr(
         "rue.cli.tests.status.command.load_config",
@@ -126,7 +126,7 @@ def test_experiments_run_help_exposes_experiment_options():
 def test_tests_status_help_exposes_status_options():
     result = runner.invoke(app, ["tests", "status", "--help"])
     assert result.exit_code == 0
-    assert "--db-path" in result.stdout
+    assert "--database-path" in result.stdout
     assert "--keyword" in result.stdout
     assert "--run-id" not in result.stdout
     assert "--no-db" not in result.stdout
@@ -156,24 +156,25 @@ def test_cli_rejects_invalid_run_id():
 )
 def test_run_tests_returns_2_when_run_id_already_exists(
     command: list[str],
-    sqlite_db_path: Path,
-    sqlite_db_manager: DBManager,
+    database_path: Path,
+    turso_store: TursoRunStore,
     monkeypatch,
 ):
     existing_run_id = uuid4()
 
-    writer = DBWriter()
-    writer.configure(Config(db_path=sqlite_db_manager.path))
-    writer.start_run(
+    recorder = TursoRunRecorder()
+    recorder.configure(Config(database_path=turso_store.path))
+    recorder.start_run(
         Run(
             run_id=existing_run_id,
             environment=make_environment(),
             result=RunResult(),
         )
     )
+    recorder.close()
     monkeypatch.setattr(
         "rue.cli.tests.run.load_config",
-        lambda: Config(db_path=str(sqlite_db_path)),
+        lambda: Config(database_path=str(database_path)),
     )
 
     planned = False
@@ -238,11 +239,15 @@ def test_run_tests_returns_2_when_definition_errors(
     assert "broken" in result.stdout
 
 
-def test_cli_resolves_processors_and_injects_db_writer(tmp_path, monkeypatch):
+def test_cli_resolves_processors_and_injects_turso_recorder(
+    tmp_path, monkeypatch
+):
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         "rue.cli.tests.run.load_config",
-        lambda: Config(db_path=str(tmp_path / "rue.db"), otel=False),
+        lambda: Config(
+            database_path=str(tmp_path / "rue.turso.db"), otel=False
+        ),
     )
 
     class CustomProcessor(RunEventsProcessor):
@@ -295,12 +300,12 @@ def test_cli_resolves_processors_and_injects_db_writer(tmp_path, monkeypatch):
     assert [type(p).__name__ for p in captured["processors"]] == [
         "ConsoleReporter",
         "CustomProcessor",
-        "DBWriter",
+        "TursoRunRecorder",
     ]
     assert captured["processors"][1] is custom
-    assert isinstance(captured["processors"][-1], DBWriter)
-    assert captured["processors"][-1].path == tmp_path / "rue.db"
-    assert "DBWriter" not in RunEventsProcessor.REGISTRY
+    assert isinstance(captured["processors"][-1], TursoRunRecorder)
+    assert captured["processors"][-1].path == tmp_path / "rue.turso.db"
+    assert "TursoRunRecorder" not in RunEventsProcessor.REGISTRY
     assert captured["capture_output"] is False
 
 
@@ -351,7 +356,9 @@ def test_tests_without_subcommand_defaults_to_run(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(
         "rue.cli.tests.run.load_config",
-        lambda: Config(db_path=str(tmp_path / "rue.db"), fail_fast=True),
+        lambda: Config(
+            database_path=str(tmp_path / "rue.turso.db"), fail_fast=True
+        ),
     )
     monkeypatch.setattr(
         "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
@@ -627,7 +634,7 @@ def test_tests_status_does_not_create_missing_db(tmp_path, monkeypatch):
 
     result = runner.invoke(
         app,
-        ["tests", "status", "--db-path", str(missing_db)],
+        ["tests", "status", "--database-path", str(missing_db)],
     )
 
     assert result.exit_code == 0

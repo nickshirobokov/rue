@@ -1,5 +1,4 @@
 import asyncio
-import sqlite3
 from contextvars import Context
 from pathlib import Path
 from textwrap import dedent
@@ -10,7 +9,7 @@ import pytest
 from rue.config import Config
 from rue.events import RunEventsProcessor, RunEventsReceiver
 from rue.resources import DependencyResolver, registry
-from rue.storage import DBManager, DBWriter
+from rue.storage import TursoRunRecorder, TursoRunStore
 from rue.testing.models import ExecutedTest, Run, TestResult, TestStatus
 from rue.testing.runner import Runner
 from tests.helpers import make_definition, make_run_context, materialize_tests
@@ -75,10 +74,10 @@ def test_run_events_receiver_requires_processor():
         RunEventsReceiver([])
 
 
-def test_db_writer_is_not_selectable_processor():
-    writer = DBWriter()
-    _ = writer
-    assert "DBWriter" not in RunEventsProcessor.REGISTRY
+def test_turso_recorder_is_not_selectable_processor():
+    recorder = TursoRunRecorder()
+    _ = recorder
+    assert "TursoRunRecorder" not in RunEventsProcessor.REGISTRY
 
 
 def test_custom_processor_autoregisters():
@@ -181,13 +180,13 @@ async def test_runner_crashes_without_current_run_events_receiver(
 
 
 @pytest.mark.asyncio
-async def test_db_writer_records_execution_before_run_finishes(
-    sqlite_db_path: Path,
+async def test_turso_recorder_records_execution_before_run_finishes(
+    database_path: Path,
 ):
-    manager = DBManager(sqlite_db_path)
-    manager.initialize()
-    writer = DBWriter()
-    writer.configure(Config(db_path=sqlite_db_path))
+    store = TursoRunStore(database_path)
+    store.initialize()
+    recorder = TursoRunRecorder()
+    recorder.configure(Config(database_path=database_path))
     run = Run()
     execution = ExecutedTest(
         definition=make_definition("test_streamed"),
@@ -195,26 +194,27 @@ async def test_db_writer_records_execution_before_run_finishes(
         execution_id=UUID("00000000-0000-0000-0000-000000000001"),
     )
 
-    await writer.on_run_start(run)
-    await writer.on_execution_complete(execution, run)
+    await recorder.on_run_start(run)
+    await recorder.on_execution_complete(execution, run)
+    recorder.close()
 
-    with sqlite3.connect(sqlite_db_path) as conn:
+    with store.connection() as conn:
         row = conn.execute(
-            "SELECT status FROM test_executions WHERE execution_id = ?",
+            "SELECT status FROM executions WHERE execution_id = ?",
             (str(execution.execution_id),),
         ).fetchone()
 
-    assert row == ("passed",)
+    assert row["status"] == "passed"
 
 
 @pytest.mark.asyncio
-async def test_db_writer_links_child_after_parent_is_persisted(
-    sqlite_db_path: Path,
+async def test_turso_recorder_links_child_after_parent_is_persisted(
+    database_path: Path,
 ):
-    manager = DBManager(sqlite_db_path)
-    manager.initialize()
-    writer = DBWriter()
-    writer.configure(Config(db_path=sqlite_db_path))
+    store = TursoRunStore(database_path)
+    store.initialize()
+    recorder = TursoRunRecorder()
+    recorder.configure(Config(database_path=database_path))
     run = Run()
     child = ExecutedTest(
         definition=make_definition("test_child"),
@@ -228,33 +228,34 @@ async def test_db_writer_links_child_after_parent_is_persisted(
         sub_executions=[child],
     )
 
-    await writer.on_run_start(run)
-    await writer.on_execution_complete(child, run)
+    await recorder.on_run_start(run)
+    await recorder.on_execution_complete(child, run)
 
-    with sqlite3.connect(sqlite_db_path) as conn:
+    with store.connection() as conn:
         parent_id = conn.execute(
-            "SELECT parent_id FROM test_executions WHERE execution_id = ?",
+            "SELECT parent_id FROM executions WHERE execution_id = ?",
             (str(child.execution_id),),
-        ).fetchone()[0]
+        ).fetchone()["parent_id"]
     assert parent_id is None
 
-    await writer.on_execution_complete(parent, run)
+    await recorder.on_execution_complete(parent, run)
+    recorder.close()
 
-    with sqlite3.connect(sqlite_db_path) as conn:
+    with store.connection() as conn:
         linked_parent_id = conn.execute(
-            "SELECT parent_id FROM test_executions WHERE execution_id = ?",
+            "SELECT parent_id FROM executions WHERE execution_id = ?",
             (str(child.execution_id),),
-        ).fetchone()[0]
+        ).fetchone()["parent_id"]
     assert linked_parent_id == str(parent.execution_id)
 
 
 @pytest.mark.asyncio
-async def test_db_writer_keeps_execution_when_later_processor_fails(
-    sqlite_db_path: Path,
+async def test_turso_recorder_keeps_execution_when_later_processor_fails(
+    database_path: Path,
 ):
-    manager = DBManager(sqlite_db_path)
-    manager.initialize()
-    writer = DBWriter()
+    store = TursoRunStore(database_path)
+    store.initialize()
+    recorder = TursoRunRecorder()
     run = Run()
     execution = ExecutedTest(
         definition=make_definition("test_before_failure"),
@@ -262,17 +263,17 @@ async def test_db_writer_keeps_execution_when_later_processor_fails(
         execution_id=UUID("00000000-0000-0000-0000-000000000004"),
     )
     make_run_context(
-        db_path=sqlite_db_path,
-        processors=(writer, RaisingProcessor()),
+        database_path=database_path,
+        processors=(recorder, RaisingProcessor()),
     )
 
     await RunEventsReceiver.current().on_run_start(run)
     with pytest.raises(RuntimeError, match="processor failed"):
         await RunEventsReceiver.current().on_execution_complete(execution)
 
-    with sqlite3.connect(sqlite_db_path) as conn:
+    with store.connection() as conn:
         row = conn.execute(
-            "SELECT status FROM test_executions WHERE execution_id = ?",
+            "SELECT status FROM executions WHERE execution_id = ?",
             (str(execution.execution_id),),
         ).fetchone()
-    assert row == ("passed",)
+    assert row["status"] == "passed"

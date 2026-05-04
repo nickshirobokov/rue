@@ -2558,6 +2558,23 @@ wheels = [
 ]
 
 [[package]]
+name = "pyturso"
+version = "0.5.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/41/89/0b25d31d9b4babd68b9f3b2010eab553769fed81df0fad28d6646a13f147/pyturso-0.5.1.tar.gz", hash = "sha256:418c186393cbb4fad30baaa4d6be18fe03369cf4691a4f42fb459758c92cb5fe", size = 1938764, upload-time = "2026-03-10T12:40:39.996Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c1/19/68ffee644f79d6764c41ffaf14917a18174b285e2a5dc17122aae648e151/pyturso-0.5.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:421e20af94af79023974392bc197f5cb2a0f9e64b508b7f37c6a5bd323801505", size = 4535414, upload-time = "2026-03-10T12:40:13.213Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/7c/b61050ac88d2436b3c0a0ef72b0a0b25a90f127ad62231ed48ca1feab5b2/pyturso-0.5.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:fb8d30fc5e009cbf213b368fd8cbf6adf11a5414d72bbc6dbabc84163cea15a0", size = 15162896, upload-time = "2026-03-10T12:40:16.264Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/76/2a9c43f08ed81f93fcdee85d0312b34f8063310f6a79e634cd4639765825/pyturso-0.5.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:030fd5b1bfe72f82f125e4de31f2298198d460a7e59b8602fc0b51af504fafe9", size = 4534230, upload-time = "2026-03-10T12:40:19.825Z" },
+    { url = "https://files.pythonhosted.org/packages/fa/5b/aaf24492637f246adfd79d3b62d7de4440240b741a430cc0b9e9b551510b/pyturso-0.5.1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:baa8846a322434a8b31c2acdd20ed19bab2de770a5f295b9892e06c1b3fb84ff", size = 15160998, upload-time = "2026-03-10T12:40:23.044Z" },
+    { url = "https://files.pythonhosted.org/packages/55/c2/5f61ace6ebec4d023983ea797e032820797ed27ad565b824f40213a19c6b/pyturso-0.5.1-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:2e10b4d4b47a2db2cf47c4cbf0345bbc5a99b7ec5528101d2fca5fd03f11e878", size = 4534591, upload-time = "2026-03-10T12:40:26.341Z" },
+    { url = "https://files.pythonhosted.org/packages/58/cb/aa78241f51e11d3bda76b8e2551ef18226b2c8f5fc359766a4856c832298/pyturso-0.5.1-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ef8822aca1a10fb60d5c161669e55e1347730d99a8943cc7db2fd1028900805a", size = 15155567, upload-time = "2026-03-10T12:40:29.846Z" },
+]
+
+[[package]]
 name = "pywin32"
 version = "311"
 source = { registry = "https://pypi.org/simple" }
@@ -2882,6 +2899,7 @@ dependencies = [
     { name = "pydantic-ai" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
+    { name = "pyturso" },
     { name = "rich" },
     { name = "tomlkit" },
     { name = "typer" },
@@ -2915,6 +2933,7 @@ requires-dist = [
     { name = "pydantic-ai", specifier = ">=1.67.0" },
     { name = "pydantic-settings", specifier = ">=2.11.0" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
+    { name = "pyturso", specifier = ">=0.5.1" },
     { name = "rich", specifier = ">=14.2.0" },
     { name = "tomlkit", specifier = ">=0.14.0" },
     { name = "typer", specifier = ">=0.24.1" },
