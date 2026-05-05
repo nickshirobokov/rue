@@ -1,4 +1,4 @@
-from .base import AssertionRepr, AssertionResult
+from rue.assertions.models import AssertionRepr, AssertionResult
 
 
 __all__ = ["AssertionRepr", "AssertionResult"]

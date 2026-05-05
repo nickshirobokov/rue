@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Literal
 
 from rue.resources import ResourceSpec
-from rue.testing.execution.base import ExecutionBackend
-from rue.testing.models import LoadedTestDef, Run, TestStatus
+from rue.testing.execution.backend import ExecutionBackend
+from rue.testing.models import ExecutedRun, LoadedTestDef, TestStatus
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ class StatusNode:
 class TestsStatusReport:
     """Status command report model."""
 
-    run_window: tuple[Run, ...] = ()
+    run_window: tuple[ExecutedRun, ...] = ()
     module_nodes: dict[Path, list[StatusNode]] = field(default_factory=dict)
 
 

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 from collections.abc import AsyncGenerator, Callable, Generator
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from typing import Any
 
-from rue.context.scopes import Scope, ScopeOwner
+from rue.context.models import ScopeOwner
+from rue.context.scopes import Scope
 from rue.models import Spec
 
 
@@ -111,14 +111,3 @@ class ScheduledTeardown:
     generator: Generator[Any, None, None] | AsyncGenerator[Any, None]
     consumer_spec: Spec
     direct_dependencies: tuple[ResourceSpec, ...]
-
-
-@dataclass(slots=True)
-class ResolverScopeState:
-    """Mutable state owned by one resource scope key."""
-
-    cache: dict[ResourceSpec, Any] = field(default_factory=dict)
-    pending: dict[ResourceSpec, asyncio.Future[Any]] = field(
-        default_factory=dict
-    )
-    teardowns: list[ScheduledTeardown] = field(default_factory=list)

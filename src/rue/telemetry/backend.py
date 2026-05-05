@@ -6,7 +6,8 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from rue.telemetry.base import TelemetryArtifact
+from rue.telemetry.models import TelemetryArtifact
+
 
 if TYPE_CHECKING:
     from rue.testing.models import LoadedTestDef, TestResult

@@ -1,6 +1,6 @@
 """Telemetry backend implementations."""
 
-from rue.telemetry.backends.base import TelemetryBackend
+from rue.telemetry.backend import TelemetryBackend
 
 
 __all__ = ["TelemetryBackend"]

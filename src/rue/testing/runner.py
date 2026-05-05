@@ -11,16 +11,16 @@ from rue.context.process_pool import LazyProcessPool
 from rue.context.runtime import CURRENT_RUN_CONTEXT, TestContext, bind
 from rue.events import RunEventsReceiver
 from rue.resources import DependencyResolver
-from rue.resources.metrics.base import MetricResult
+from rue.resources.metrics.models import MetricResult
 from rue.resources.models import Scope
 from rue.resources.sut.output import SUTOutputCapture
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.execution import DefaultTestFactory, SingleTest
 from rue.testing.execution.queue import RunnerStep, SessionQueue
 from rue.testing.models import (
+    ExecutedRun,
     ExecutedTest,
     LoadedTestDef,
-    Run,
 )
 
 
@@ -43,7 +43,7 @@ class Runner:
         self._completed_executions: dict[int, ExecutedTest] = {}
         self._remaining_module_leaves: dict[str, int] = {}
 
-        self.current_run: Run | None = None
+        self.current_run: ExecutedRun | None = None
 
     def _concurrency_limit(self) -> int:
         context = CURRENT_RUN_CONTEXT.get()
@@ -59,7 +59,7 @@ class Runner:
         items: list[LoadedTestDef],
         *,
         resolver: DependencyResolver,
-    ) -> Run:
+    ) -> ExecutedRun:
         """Run tests and return results.
 
         Args:
@@ -68,11 +68,11 @@ class Runner:
             resolver: Resource resolver for this run. The runner owns teardown.
 
         Returns:
-            Run with environment, results, and test executions.
+            ExecutedRun with environment, results, and test executions.
         """
         context = CURRENT_RUN_CONTEXT.get()
         config = context.config
-        self.current_run = Run(
+        self.current_run = ExecutedRun(
             run_id=context.run_id,
             environment=context.environment,
         )
@@ -141,7 +141,7 @@ class Runner:
         *,
         items: list[LoadedTestDef],
         resolver: DependencyResolver,
-        run: Run,
+        run: ExecutedRun,
     ) -> None:
         """Execute the test run with the given items and resolver."""
         with LazyProcessPool(self._concurrency_limit()):
@@ -217,7 +217,7 @@ class Runner:
         self,
         step: RunnerStep,
         resolver: DependencyResolver,
-        run: Run,
+        run: ExecutedRun,
     ) -> None:
         """Run one queue step."""
         if step.is_main:
@@ -282,7 +282,7 @@ class Runner:
 
     def _record_execution(
         self,
-        run: Run,
+        run: ExecutedRun,
         execution: ExecutedTest,
     ) -> None:
         self._completed_executions[

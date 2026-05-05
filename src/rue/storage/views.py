@@ -1,0 +1,1 @@
+"""Storage-specific view models."""

@@ -20,7 +20,7 @@ from rue.resources.models import ResourceGraph
 from rue.resources.registry import registry as default_resource_registry
 from rue.storage import TursoRunStore
 from rue.testing.discovery import TestLoader
-from rue.testing.execution.base import ExecutableTest
+from rue.testing.execution.executable import ExecutableTest
 from rue.testing.execution.factory import DefaultTestFactory
 from rue.testing.execution.single import SingleTest
 from rue.testing.models import TestSpecCollection

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
 
-from rue.assertions.base import AssertionResult
+from rue.assertions.models import AssertionResult
+
 
 if TYPE_CHECKING:
     from rue.testing.models.loaded import LoadedTestDef

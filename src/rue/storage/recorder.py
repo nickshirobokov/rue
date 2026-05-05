@@ -9,7 +9,7 @@ from uuid import UUID
 
 import turso
 
-from rue.assertions.base import AssertionResult
+from rue.assertions.models import AssertionResult
 from rue.events import RunEventsProcessor
 from rue.models import Spec
 from rue.predicates.models import PredicateResult
@@ -22,9 +22,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from rue.config import Config
-    from rue.testing.execution.base import ExecutableTest
+    from rue.testing.execution.executable import ExecutableTest
     from rue.testing.models.executed import ExecutedTest
-    from rue.testing.models.run import Run
+    from rue.testing.models.run import ExecutedRun
 
 
 MAX_REPR_LENGTH = 2000
@@ -57,7 +57,7 @@ class TursoRunRecorder(RunEventsProcessor):
             self._conn.close()
             self._conn = None
 
-    async def on_run_start(self, run: Run) -> None:
+    async def on_run_start(self, run: ExecutedRun) -> None:
         self._parents_by_child = {}
         self._children_by_parent = {}
         self._completed = set()
@@ -68,7 +68,7 @@ class TursoRunRecorder(RunEventsProcessor):
     async def on_tests_ready(
         self,
         tests: list[ExecutableTest],
-        run: Run,
+        run: ExecutedRun,
     ) -> None:
         _ = run
         for test in tests:
@@ -77,7 +77,7 @@ class TursoRunRecorder(RunEventsProcessor):
     async def on_execution_complete(
         self,
         execution: ExecutedTest,
-        run: Run,
+        run: ExecutedRun,
     ) -> None:
         child_ids = [child.execution_id for child in execution.sub_executions]
         if child_ids:
@@ -104,10 +104,10 @@ class TursoRunRecorder(RunEventsProcessor):
         ]
         self.link_executions(execution.execution_id, linked_children)
 
-    async def on_run_complete(self, run: Run) -> None:
+    async def on_run_complete(self, run: ExecutedRun) -> None:
         self.finish_run(run)
 
-    def start_run(self, run: Run) -> None:
+    def start_run(self, run: ExecutedRun) -> None:
         environment = run.environment
 
         def write(conn: turso.Connection) -> None:
@@ -230,7 +230,7 @@ class TursoRunRecorder(RunEventsProcessor):
 
         self._write(write)
 
-    def finish_run(self, run: Run) -> None:
+    def finish_run(self, run: ExecutedRun) -> None:
         def write(conn: turso.Connection) -> None:
             conn.execute(
                 """

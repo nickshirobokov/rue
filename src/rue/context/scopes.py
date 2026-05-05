@@ -9,6 +9,8 @@ from pathlib import Path
 from types import TracebackType
 from uuid import UUID
 
+from rue.context.models import ScopeOwner
+
 
 class Scope(StrEnum):
     """DI lifecycle scope."""
@@ -28,15 +30,6 @@ class Scope(StrEnum):
         scopes = tuple(type(self))
         return frozenset(scopes[scopes.index(self) :])
 
-
-@dataclass(frozen=True, slots=True)
-class ScopeOwner:
-    """Runtime owner for resolved injected dependencies."""
-
-    scope: Scope
-    execution_id: UUID | None = None
-    run_id: UUID | None = None
-    module_path: Path | None = None
 
 @dataclass(frozen=True, slots=True)
 class ScopeContext:

@@ -10,9 +10,9 @@ if TYPE_CHECKING:
     from rue.config import Config
     from rue.resources.models import ResourceGraph
     from rue.testing import LoadedTestDef
-    from rue.testing.execution.base import ExecutableTest
+    from rue.testing.execution.executable import ExecutableTest
     from rue.testing.models.executed import ExecutedTest
-    from rue.testing.models.run import Run
+    from rue.testing.models.run import ExecutedRun
 
 
 class RunEventsProcessorMeta(type):
@@ -37,25 +37,25 @@ class RunEventsProcessor(metaclass=RunEventsProcessorMeta):
         """Adjust processor parameters based on runtime config."""
         _ = config
 
-    async def on_run_start(self, run: Run) -> None:
+    async def on_run_start(self, run: ExecutedRun) -> None:
         """Called when a run starts."""
         _ = run
         return None
 
-    async def on_no_tests_found(self, run: Run) -> None:
+    async def on_no_tests_found(self, run: ExecutedRun) -> None:
         """Called when test collection finds no tests."""
         _ = run
         return None
 
     async def on_collection_complete(
-        self, items: list[LoadedTestDef], run: Run
+        self, items: list[LoadedTestDef], run: ExecutedRun
     ) -> None:
         """Called after test collection completes."""
         _ = items, run
         return None
 
     async def on_tests_ready(
-        self, tests: list[ExecutableTest], run: Run
+        self, tests: list[ExecutableTest], run: ExecutedRun
     ) -> None:
         """Called after all executable test trees are built."""
         _ = tests, run
@@ -68,24 +68,24 @@ class RunEventsProcessor(metaclass=RunEventsProcessorMeta):
         _ = graphs
         return None
 
-    async def on_test_start(self, test: ExecutableTest, run: Run) -> None:
+    async def on_test_start(self, test: ExecutableTest, run: ExecutedRun) -> None:
         """Called before a test starts executing."""
         _ = test, run
         return None
 
     async def on_execution_complete(
-        self, execution: ExecutedTest, run: Run
+        self, execution: ExecutedTest, run: ExecutedRun
     ) -> None:
         """Called when any test node (leaf or composite) completes."""
         _ = execution, run
         return None
 
-    async def on_run_stopped_early(self, failure_count: int, run: Run) -> None:
+    async def on_run_stopped_early(self, failure_count: int, run: ExecutedRun) -> None:
         """Called when run stops early due to maxfail limit."""
         _ = failure_count, run
         return None
 
-    async def on_run_complete(self, run: Run) -> None:
+    async def on_run_complete(self, run: ExecutedRun) -> None:
         """Called after all tests complete."""
         _ = run
         return None

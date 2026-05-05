@@ -14,14 +14,14 @@ from rue.context.runtime import (
     CURRENT_RESOURCE_HOOK_CONTEXT,
     bind,
 )
+from rue.resources.metrics.metric import Metric
+from rue.resources.metrics.models import CalculatedValue, MetricResult
 from rue.resources.models import ResourceSpec, Scope
 from rue.resources.registry import resource
 
-from .base import CalculatedValue, Metric, MetricResult
-
 
 if TYPE_CHECKING:
-    from rue.assertions.base import AssertionResult
+    from rue.assertions.models import AssertionResult
 
 
 type MetricYield = Metric | CalculatedValue

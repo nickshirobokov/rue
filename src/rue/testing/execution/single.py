@@ -20,7 +20,8 @@ from rue.context.runtime import (
 )
 from rue.resources import DependencyResolver
 from rue.resources.models import Scope
-from rue.testing.execution.base import ExecutableTest, ExecutionBackend
+from rue.testing.execution.backend import ExecutionBackend
+from rue.testing.execution.executable import ExecutableTest
 from rue.testing.execution.worker import (
     ExecutorPayload,
     RemoteExecutionResult,

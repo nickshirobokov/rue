@@ -5,63 +5,27 @@ from __future__ import annotations
 import functools
 import io
 import sys
-from collections.abc import Awaitable, Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
 from threading import RLock
-from typing import Literal, TextIO, cast
+from typing import TextIO, cast
 from uuid import UUID
 
-
-type OutputStream = Literal["stdout", "stderr"]
-type _OutputSink = Callable[[OutputStream, str], None]
-
-
-# ---------------------------------------------------------------------------
-# Data models
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class CapturedEvent:
-    stream: OutputStream
-    text: str
-
-
-@dataclass(frozen=True, slots=True)
-class CapturedStream:
-    text: str
-
-    @property
-    def lines(self) -> tuple[str, ...]:
-        return tuple(self.text.splitlines())
-
-
-@dataclass(frozen=True, slots=True)
-class CapturedOutput:
-    stdout: CapturedStream
-    stderr: CapturedStream
-    combined: CapturedStream
-    events: tuple[CapturedEvent, ...]
-
-    @classmethod
-    def from_events(cls, events: Sequence[CapturedEvent]) -> CapturedOutput:
-        events_tuple = tuple(events)
-        stdout = "".join(e.text for e in events_tuple if e.stream == "stdout")
-        stderr = "".join(e.text for e in events_tuple if e.stream == "stderr")
-        combined = "".join(e.text for e in events_tuple)
-        return cls(
-            stdout=CapturedStream(stdout),
-            stderr=CapturedStream(stderr),
-            combined=CapturedStream(combined),
-            events=events_tuple,
-        )
+from rue.resources.sut.models import (
+    CapturedEvent,
+    CapturedOutput,
+    CapturedStream,
+    OutputStream,
+)
 
 
 # ---------------------------------------------------------------------------
 # Global sys.stdout/stderr interception (singleton)
 # ---------------------------------------------------------------------------
+
+
+type _OutputSink = Callable[[OutputStream, str], None]
 
 
 class _SysStreamDispatcher(io.TextIOBase):

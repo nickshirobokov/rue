@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 
 from rue import metrics as metrics_scope_ctx
-from rue.assertions.base import AssertionResult
+from rue.assertions.models import AssertionResult
 from rue.context.collectors import (
     CURRENT_ASSERTION_RESULTS,
     CURRENT_METRIC_RESULTS,
@@ -12,7 +12,8 @@ from rue.context.collectors import (
 from rue.context.runtime import TestContext, bind
 from rue.models import Locator
 from rue.resources import DependencyResolver, ResourceSpec, Scope, registry
-from rue.resources.metrics.base import Metric, MetricMetadata, MetricResult
+from rue.resources.metrics.metric import Metric
+from rue.resources.metrics.models import MetricMetadata, MetricResult
 from tests.helpers import make_run_context, materialize_tests
 
 
@@ -24,7 +25,8 @@ def test_rewritten_assert_collects_predicate_results(tmp_path):
 from rue import test
 from rue.models import Locator
 from rue.resources import ResourceSpec, Scope
-from rue.resources.metrics.base import Metric, MetricMetadata
+from rue.resources.metrics.metric import Metric
+from rue.resources.metrics.models import MetricMetadata
 from rue.predicates import predicate
 
 @predicate
@@ -163,7 +165,8 @@ async def test_rewritten_asserts_inside_metric_functions_are_collected(
 import rue
 from rue.models import Locator
 from rue.resources import ResourceSpec, Scope
-from rue.resources.metrics.base import Metric, MetricMetadata
+from rue.resources.metrics.metric import Metric
+from rue.resources.metrics.models import MetricMetadata
 
 @rue.resource.metric
 def my_metric():

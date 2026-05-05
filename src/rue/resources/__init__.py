@@ -15,7 +15,7 @@ from rue.resources.models import (
 )
 from rue.resources.registry import ResourceRegistry, registry, resource
 from rue.resources.resolver import DependencyResolver
-from rue.resources.state import ResourceStore
+from rue.resources.store import ResourceStore
 from rue.resources.transfer import StateTransfer
 
 

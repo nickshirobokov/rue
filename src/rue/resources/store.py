@@ -7,13 +7,24 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
-from rue.context.scopes import ScopeContext, ScopeOwner
+from rue.context.models import ScopeOwner
+from rue.context.scopes import ScopeContext
 from rue.resources.models import (
-    ResolverScopeState,
     ResourceSpec,
     ScheduledTeardown,
 )
 from rue.resources.snapshot import SyncGraph
+
+
+@dataclass(slots=True)
+class ResolverScopeState:
+    """Mutable state owned by one resource scope key."""
+
+    cache: dict[ResourceSpec, Any] = field(default_factory=dict)
+    pending: dict[ResourceSpec, asyncio.Future[Any]] = field(
+        default_factory=dict
+    )
+    teardowns: list[ScheduledTeardown] = field(default_factory=list)
 
 
 @dataclass(slots=True)

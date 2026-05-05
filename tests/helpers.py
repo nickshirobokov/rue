@@ -12,7 +12,7 @@ from rue.context.scopes import CURRENT_SCOPE_CONTEXT, ScopeContext
 from rue.events import RunEventsProcessor, RunEventsReceiver
 from rue.telemetry import OtelTraceArtifact
 from rue.testing.discovery import TestLoader, TestSpecCollector
-from rue.testing.execution.base import ExecutionBackend
+from rue.testing.execution.backend import ExecutionBackend
 from rue.testing.models import BackendModifier, LoadedTestDef
 from rue.testing.models.modifiers import Modifier
 from rue.testing.models.spec import Locator, SetupFileRef, TestSpec

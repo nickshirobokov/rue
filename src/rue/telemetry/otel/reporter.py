@@ -10,14 +10,14 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from rue.events import RunEventsProcessor
-from rue.telemetry.otel.backend import OtelTraceArtifact
+from rue.telemetry.otel.models import OtelTraceArtifact
 
 
 if TYPE_CHECKING:
     from rue.config import Config
     from rue.testing import LoadedTestDef
     from rue.testing.models.executed import ExecutedTest
-    from rue.testing.models.run import Run
+    from rue.testing.models.run import ExecutedRun
 
 
 DEFAULT_OTEL_OUTPUT_ROOT = Path(".rue/traces")
@@ -37,13 +37,13 @@ class OtelReporter(RunEventsProcessor):
         """Accept runtime configuration."""
         _ = config
 
-    async def on_no_tests_found(self, run: Run) -> None:
+    async def on_no_tests_found(self, run: ExecutedRun) -> None:
         """Ignore empty runs."""
         _ = run
         return None
 
     async def on_collection_complete(
-        self, items: list[LoadedTestDef], run: Run
+        self, items: list[LoadedTestDef], run: ExecutedRun
     ) -> None:
         """Reset per-run trace directory tracking."""
         _ = items, run
@@ -51,7 +51,7 @@ class OtelReporter(RunEventsProcessor):
         return None
 
     async def on_execution_complete(
-        self, execution: ExecutedTest, run: Run
+        self, execution: ExecutedTest, run: ExecutedRun
     ) -> None:
         """Persist the execution OpenTelemetry trace artifact."""
         _ = run
@@ -77,13 +77,13 @@ class OtelReporter(RunEventsProcessor):
         )
         return None
 
-    async def on_run_complete(self, run: Run) -> None:
+    async def on_run_complete(self, run: ExecutedRun) -> None:
         """Prune old run trace directories."""
         _ = run
         self._prune_run_directories()
         return None
 
-    async def on_run_stopped_early(self, failure_count: int, run: Run) -> None:
+    async def on_run_stopped_early(self, failure_count: int, run: ExecutedRun) -> None:
         """Ignore early-stop notifications."""
         _ = failure_count, run
         return None

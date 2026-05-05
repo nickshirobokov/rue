@@ -8,8 +8,9 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 from uuid import uuid4
 
-from rue.testing.execution.base import ExecutableTest, ExecutionBackend
+from rue.testing.execution.backend import ExecutionBackend
 from rue.testing.execution.composite import CompositeTest
+from rue.testing.execution.executable import ExecutableTest
 from rue.testing.execution.queue import SessionQueue
 from rue.testing.execution.single import SingleTest
 from rue.testing.models import (

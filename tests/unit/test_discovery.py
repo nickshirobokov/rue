@@ -14,7 +14,7 @@ from rue.testing.discovery import (
     TestLoader,
     TestSpecCollector,
 )
-from rue.testing.execution.base import ExecutionBackend
+from rue.testing.execution.backend import ExecutionBackend
 from rue.testing.models import (
     BackendModifier,
     Locator,

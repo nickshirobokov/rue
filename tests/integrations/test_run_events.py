@@ -10,7 +10,7 @@ from rue.config import Config
 from rue.events import RunEventsProcessor, RunEventsReceiver
 from rue.resources import DependencyResolver, registry
 from rue.storage import TursoRunRecorder, TursoRunStore
-from rue.testing.models import ExecutedTest, Run, TestResult, TestStatus
+from rue.testing.models import ExecutedRun, ExecutedTest, TestResult, TestStatus
 from rue.testing.runner import Runner
 from tests.helpers import make_definition, make_run_context, materialize_tests
 
@@ -187,7 +187,7 @@ async def test_turso_recorder_records_execution_before_run_finishes(
     store.initialize()
     recorder = TursoRunRecorder()
     recorder.configure(Config(database_path=database_path))
-    run = Run()
+    run = ExecutedRun()
     execution = ExecutedTest(
         definition=make_definition("test_streamed"),
         result=TestResult(status=TestStatus.PASSED, duration_ms=1.0),
@@ -215,7 +215,7 @@ async def test_turso_recorder_links_child_after_parent_is_persisted(
     store.initialize()
     recorder = TursoRunRecorder()
     recorder.configure(Config(database_path=database_path))
-    run = Run()
+    run = ExecutedRun()
     child = ExecutedTest(
         definition=make_definition("test_child"),
         result=TestResult(status=TestStatus.PASSED, duration_ms=1.0),
@@ -256,7 +256,7 @@ async def test_turso_recorder_keeps_execution_when_later_processor_fails(
     store = TursoRunStore(database_path)
     store.initialize()
     recorder = TursoRunRecorder()
-    run = Run()
+    run = ExecutedRun()
     execution = ExecutedTest(
         definition=make_definition("test_before_failure"),
         result=TestResult(status=TestStatus.PASSED, duration_ms=1.0),

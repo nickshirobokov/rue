@@ -19,7 +19,8 @@ from rue.models import Locator
 from rue.storage import TursoRunRecorder, TursoRunStore
 from rue.testing import LoadedTestDef
 from rue.testing.discovery import TestDefinitionErrors, TestDefinitionIssue
-from rue.testing.models.run import Run, RunEnvironment, RunResult
+from rue.context.models import RunEnvironment
+from rue.testing.models.run import ExecutedRun, RunResult
 from rue.testing.models.spec import TestSpecCollection
 from tests.helpers import make_definition
 
@@ -165,7 +166,7 @@ def test_run_tests_returns_2_when_run_id_already_exists(
     recorder = TursoRunRecorder()
     recorder.configure(Config(database_path=turso_store.path))
     recorder.start_run(
-        Run(
+        ExecutedRun(
             run_id=existing_run_id,
             environment=make_environment(),
             result=RunResult(),
@@ -270,7 +271,7 @@ def test_cli_resolves_processors_and_injects_turso_recorder(
         async def run(self, items, *, resolver):
             captured["items"] = items
             captured["resolver"] = resolver
-            return Run()
+            return ExecutedRun()
 
     monkeypatch.setattr(
         "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
@@ -347,7 +348,7 @@ def test_tests_without_subcommand_defaults_to_run(tmp_path: Path, monkeypatch):
         async def run(self, items, *, resolver):
             captured["items"] = items
             captured["resolver"] = resolver
-            return Run()
+            return ExecutedRun()
 
     def build_spec_collection(self, paths, **kwargs):
         del self, kwargs
@@ -436,7 +437,7 @@ def test_run_and_status_share_selection_parsing(
 
             async def run(self, items, *, resolver):
                 del items, resolver
-                return Run()
+                return ExecutedRun()
 
         monkeypatch.setattr("rue.cli.tests.run.Runner", FakeRunner)
 

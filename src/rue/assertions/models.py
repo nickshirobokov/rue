@@ -81,9 +81,3 @@ class AssertionResult:
                 or f"Assertion failed: {self.expression_repr.expr}"
             )
             raise AssertionError(msg)
-
-
-def capture_var(values: dict[str, str], name: str, value: object) -> object:
-    """Capture a variable's value and store it in a dictionary."""
-    values[name] = repr(value)
-    return value

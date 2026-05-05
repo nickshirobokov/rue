@@ -29,7 +29,7 @@ from .shared import (
 
 if TYPE_CHECKING:
     from rue.assertions import AssertionResult
-    from rue.resources.metrics.base import MetricResult
+    from rue.resources.metrics.models import MetricResult
     from rue.testing.models.executed import ExecutedTest
 
 

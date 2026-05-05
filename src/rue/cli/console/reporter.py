@@ -29,9 +29,10 @@ from .shared import STATUS_STYLES
 if TYPE_CHECKING:
     from rue.config import Config
     from rue.testing import LoadedTestDef
-    from rue.testing.execution.base import ExecutableTest
+    from rue.testing.execution.executable import ExecutableTest
     from rue.testing.models.executed import ExecutedTest
-    from rue.testing.models.run import Run, RunEnvironment
+    from rue.context.models import RunEnvironment
+    from rue.testing.models.run import ExecutedRun
 
 
 class ConsoleReporter(RunEventsProcessor):
@@ -115,7 +116,7 @@ class ConsoleReporter(RunEventsProcessor):
             parts.append(git_text)
         return Group(*parts)
 
-    def _build_summary(self, run: Run) -> Group:
+    def _build_summary(self, run: ExecutedRun) -> Group:
         result = run.result
         parts: list[str] = []
         if result.passed:
@@ -196,13 +197,13 @@ class ConsoleReporter(RunEventsProcessor):
 
     # ── Run event hooks ───────────────────────────────────────────────────────
 
-    async def on_no_tests_found(self, run: Run) -> None:
+    async def on_no_tests_found(self, run: ExecutedRun) -> None:
         """Print the empty-run message."""
         _ = run
         self.console.print("[yellow]No tests found.[/yellow]")
 
     async def on_collection_complete(
-        self, items: list[LoadedTestDef], run: Run
+        self, items: list[LoadedTestDef], run: ExecutedRun
     ) -> None:
         """Initialize display state after collection."""
         if self._live is not None:
@@ -246,7 +247,7 @@ class ConsoleReporter(RunEventsProcessor):
         self._stderr_capture.start()
 
     async def on_tests_ready(
-        self, tests: list[ExecutableTest], run: Run
+        self, tests: list[ExecutableTest], run: ExecutedRun
     ) -> None:
         """Cache top-level executable tests for rendering."""
         _ = run
@@ -254,14 +255,14 @@ class ConsoleReporter(RunEventsProcessor):
             if self.is_top_level_definition(test.definition):
                 self.tests[self._top_level_key(test.definition)] = test
 
-    async def on_test_start(self, test: ExecutableTest, run: Run) -> None:
+    async def on_test_start(self, test: ExecutableTest, run: ExecutedRun) -> None:
         """Refresh live output before a test starts."""
         _ = test, run
         if self._live is not None:
             self._live.update(self._build_live_display(), refresh=True)
 
     async def on_execution_complete(
-        self, execution: ExecutedTest, run: Run
+        self, execution: ExecutedTest, run: ExecutedRun
     ) -> None:
         """Record and render one completed execution."""
         _ = run
@@ -299,7 +300,7 @@ class ConsoleReporter(RunEventsProcessor):
 
             self._mode.print_test(execution, self)
 
-    async def on_run_complete(self, run: Run) -> None:
+    async def on_run_complete(self, run: ExecutedRun) -> None:
         """Render the final run summary."""
         self._stderr_capture.stop()
 
@@ -340,7 +341,7 @@ class ConsoleReporter(RunEventsProcessor):
         self.console.print(self._build_summary(run))
 
     async def on_run_stopped_early(
-        self, failure_count: int, run: Run
+        self, failure_count: int, run: ExecutedRun
     ) -> None:
         """Print maxfail early-stop notice."""
         _ = run

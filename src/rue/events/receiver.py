@@ -15,15 +15,15 @@ from rue.events.processor import RunEventsProcessor
 if TYPE_CHECKING:
     from rue.resources.models import ResourceGraph
     from rue.testing import LoadedTestDef
-    from rue.testing.execution.base import ExecutableTest
+    from rue.testing.execution.executable import ExecutableTest
     from rue.testing.models.executed import ExecutedTest
-    from rue.testing.models.run import Run
+    from rue.testing.models.run import ExecutedRun
 
 
 class RunEventsReceiver:
     """Receives run events and forwards them to attached processors."""
 
-    run: Run
+    run: ExecutedRun
 
     def __init__(self, processors: list[RunEventsProcessor]) -> None:
         if not processors:
@@ -57,7 +57,7 @@ class RunEventsReceiver:
             processor.close()
         CURRENT_RUN_EVENTS_RECEIVER.reset(self._tokens.pop())
 
-    async def on_run_start(self, run: Run) -> None:
+    async def on_run_start(self, run: ExecutedRun) -> None:
         """Called when a run starts."""
         self.run = run
         await asyncio.gather(

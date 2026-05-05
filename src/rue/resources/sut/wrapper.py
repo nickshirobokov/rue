@@ -19,9 +19,8 @@ from pydantic_core import ArgsKwargs, SchemaValidator
 from typing_extensions import TypeVar
 
 from rue.context.runtime import CURRENT_TEST_TRACER
+from rue.resources.sut.models import CapturedOutput, CapturedStream
 from rue.resources.sut.output import (
-    CapturedOutput,
-    CapturedStream,
     SUTOutputCapture,
 )
 from rue.resources.sut.tracer import SUTTracer

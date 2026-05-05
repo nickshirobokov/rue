@@ -7,14 +7,14 @@ from uuid import uuid4
 import pytest
 import turso
 
-from rue.assertions.base import AssertionRepr, AssertionResult
+from rue.assertions.models import AssertionRepr, AssertionResult
 from rue.config import Config
 from rue.models import Locator
 from rue.predicates.models import PredicateResult
 from rue.resources import ResourceSpec, Scope
-from rue.resources.metrics.base import MetricMetadata, MetricResult
+from rue.resources.metrics.models import MetricMetadata, MetricResult
 from rue.storage import MAX_STORED_RUNS, TursoRunRecorder, TursoRunStore
-from rue.testing.models import ExecutedTest, Run, RunEnvironment, RunResult
+from rue.testing.models import ExecutedRun, ExecutedTest, RunEnvironment, RunResult
 from rue.testing.models.result import TestResult, TestStatus
 from tests.helpers import make_definition
 
@@ -148,7 +148,7 @@ def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
         assertion_results=[],
         value=12.5,
     )
-    run = Run(
+    run = ExecutedRun(
         run_id=run_id,
         start_time=start_time,
         end_time=end_time,
@@ -243,7 +243,7 @@ def test_recorder_does_not_prune_old_runs(database_path: Path) -> None:
     for index in range(MAX_STORED_RUNS + 1):
         recorder = TursoRunRecorder()
         recorder.configure(Config(database_path=database_path))
-        run = Run(
+        run = ExecutedRun(
             run_id=uuid4(),
             start_time=base_time + timedelta(days=index),
             environment=make_environment(),

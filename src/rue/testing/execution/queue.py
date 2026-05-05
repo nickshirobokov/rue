@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
 
-from rue.testing.execution.base import ExecutableTest, ExecutionBackend
+from rue.testing.execution.backend import ExecutionBackend
+from rue.testing.execution.executable import ExecutableTest
 
 
 @dataclass(slots=True)
