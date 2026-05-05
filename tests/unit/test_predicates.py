@@ -1,15 +1,15 @@
-import sqlite3
 import sys
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
+from rue.config import Config
 from rue.context.collectors import CURRENT_PREDICATE_RESULTS
 from rue.context.runtime import bind
 from rue.predicates import PredicateResult, predicate
 from rue.resources import DependencyResolver, registry
-from rue.storage import SQLiteStore
+from rue.storage import TursoRunRecorder, TursoRunStore
 from rue.testing.runner import Runner
 from tests.helpers import make_run_context, materialize_tests
 
@@ -68,32 +68,32 @@ def _artifact_payload(artifact) -> dict[str, object]:
 async def _run_module_with_tracing(
     *,
     tmp_path: Path,
-    trace_reporter,
+    trace_processor,
     monkeypatch: pytest.MonkeyPatch,
     source: str,
-    db_enabled: bool = False,
-    db_path: Path | None = None,
+    database_path: Path | None = None,
 ):
     mod_name, mod_path = _write_temp_module(tmp_path, source)
 
     try:
         monkeypatch.chdir(tmp_path)
         items = materialize_tests(mod_path)
-        store = SQLiteStore(db_path) if db_enabled else None
-        make_run_context(
-                otel=True,
-                db_enabled=db_enabled,
-                db_path=db_path,
-            )
-        runner = Runner(
-            reporters=[trace_reporter],
-            store=store,
-        )
+        processors = [trace_processor]
+        if database_path is not None:
+            store = TursoRunStore(database_path)
+            store.initialize()
+            recorder = TursoRunRecorder()
+            processors.append(recorder)
+        config = Config(otel=True)
+        if database_path is not None:
+            config = Config(otel=True, database_path=database_path)
+        make_run_context(config=config, processors=tuple(processors))
+        runner = Runner()
         run = await runner.run(
             items=items,
             resolver=DependencyResolver(registry),
         )
-        return mod_name, run, trace_reporter.artifacts
+        return mod_name, run, trace_processor.artifacts
     finally:
         sys.modules.pop(mod_name, None)
 
@@ -198,7 +198,7 @@ def test_sample():
 )
 async def test_predicate_writes_trace_attributes(
     tmp_path: Path,
-    trace_reporter,
+    trace_processor,
     monkeypatch: pytest.MonkeyPatch,
     source: str,
     span_name: str,
@@ -206,7 +206,7 @@ async def test_predicate_writes_trace_attributes(
 ):
     mod_name, run, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
-        trace_reporter=trace_reporter,
+        trace_processor=trace_processor,
         monkeypatch=monkeypatch,
         source=source,
     )
@@ -252,16 +252,15 @@ def test_predicate_accepts_keyword_only_actual_reference_parameters():
 @pytest.mark.asyncio
 async def test_runner_collects_predicate_results_and_trace_data_into_db(
     tmp_path: Path,
-    trace_reporter,
+    trace_processor,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    db_path = tmp_path / "rue.db"
+    database_path = tmp_path / "rue.turso.db"
     mod_name, run, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
-        trace_reporter=trace_reporter,
+        trace_processor=trace_processor,
         monkeypatch=monkeypatch,
-        db_enabled=True,
-        db_path=db_path,
+        database_path=database_path,
         source="""
 from rue import test
 from rue.predicates import predicate
@@ -301,17 +300,17 @@ def test_sample():
         "message": "db-message",
     }
 
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+    store = TursoRunStore(database_path)
+    with store.connection() as conn:
         assertion = conn.execute(
-            "SELECT * FROM assertions WHERE test_execution_id = ?",
+            "SELECT * FROM assertions WHERE execution_id = ?",
             (str(execution.execution_id),),
         ).fetchone()
         assert assertion is not None
 
         predicate_rows = conn.execute(
             "SELECT * FROM predicates WHERE assertion_id = ?",
-            (assertion["id"],),
+            (assertion["assertion_id"],),
         ).fetchall()
 
     assert len(predicate_rows) == 1
@@ -334,14 +333,14 @@ def test_sample():
 
 
 @pytest.mark.asyncio
-async def test_predicate_does_not_trace_outside_runner_even_after_runtime_configured(
+async def test_predicate_does_not_trace_after_runner_configured(
     tmp_path: Path,
-    trace_reporter,
+    trace_processor,
     monkeypatch: pytest.MonkeyPatch,
 ):
     _, _, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
-        trace_reporter=trace_reporter,
+        trace_processor=trace_processor,
         monkeypatch=monkeypatch,
         source="""
 from rue import test
@@ -362,12 +361,12 @@ def test_sample():
 @pytest.mark.asyncio
 async def test_predicate_trace_always_records_content_attributes(
     tmp_path: Path,
-    trace_reporter,
+    trace_processor,
     monkeypatch: pytest.MonkeyPatch,
 ):
     _, run, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
-        trace_reporter=trace_reporter,
+        trace_processor=trace_processor,
         monkeypatch=monkeypatch,
         source="""
 from rue import test
@@ -387,7 +386,16 @@ def equals(
 
 @test
 def test_sample():
-    assert equals("abc", "xyz", strict=False, confidence=0.25, message="secret") is False
+    assert (
+        equals(
+            "abc",
+            "xyz",
+            strict=False,
+            confidence=0.25,
+            message="secret",
+        )
+        is False
+    )
 """,
     )
 

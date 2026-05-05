@@ -10,10 +10,10 @@ from threading import RLock
 from types import TracebackType
 from typing import Any, Literal, NoReturn
 
+from rue.context.models import ScopeOwner
 from rue.context.scopes import (
     CURRENT_SCOPE_CONTEXT,
     Scope,
-    ScopeOwner,
 )
 
 

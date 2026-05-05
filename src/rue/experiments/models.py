@@ -15,9 +15,9 @@ from rue.resources import MonkeyPatch, Scope
 
 
 if TYPE_CHECKING:
-    from rue.resources.metrics.base import MetricResult
+    from rue.resources.metrics.models import MetricResult
     from rue.resources.resolver import DependencyResolver
-    from rue.testing.models import Run
+    from rue.testing.models import ExecutedRun
 
 
 _RECEIVER_PARAMETER_NAMES = {"self", "cls"}
@@ -162,7 +162,7 @@ class ExperimentVariantResult:
         cls,
         *,
         variant: ExperimentVariant,
-        run: Run,
+        run: ExecutedRun,
     ) -> ExperimentVariantResult:
         """Build a serializable result summary from a Rue run."""
         failures: list[tuple[str, str, str | None, str | None]] = []

@@ -6,7 +6,7 @@ from rich.console import Console
 
 from rue.cli.errors import print_definition_errors
 from rue.cli.tests.options import (
-    DBPathOpt,
+    DatabasePathOpt,
     KeywordOpt,
     SkipTagOpt,
     TagOpt,
@@ -17,7 +17,7 @@ from rue.cli.tests.options import (
 from rue.cli.tests.status.builder import TestsStatusBuilder
 from rue.cli.tests.status.render import StatusRenderer
 from rue.config import load_config
-from rue.storage.sqlite import SQLiteStore
+from rue.storage import TursoRunStore
 from rue.testing.discovery import TestDefinitionErrors
 
 
@@ -30,7 +30,7 @@ def status(
     tag: TagOpt = None,
     skip_tag: SkipTagOpt = None,
     verbose: VerboseOpt = 0,
-    db_path: DBPathOpt = None,
+    database_path: DatabasePathOpt = None,
 ) -> None:
     """Show collected tests and their pre-run status."""
     status_config, collector, resolved_paths = resolve_selection(
@@ -40,13 +40,13 @@ def status(
         tag=tag,
         skip_tag=skip_tag,
         verbose=verbose,
-        db_path=db_path,
+        database_path=database_path,
     )
     collection = collector.build_spec_collection(resolved_paths)
     builder = TestsStatusBuilder(status_config)
     store = None
-    if status_config.resolved_db_path.exists():
-        store = SQLiteStore(status_config.resolved_db_path)
+    if status_config.database_path.exists():
+        store = TursoRunStore(status_config.database_path)
     try:
         report = builder.build(collection, store=store)
     except TestDefinitionErrors as errors:

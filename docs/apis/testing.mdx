@@ -603,27 +603,22 @@ If multiple `PROCESS` resources share the same name, Rue keeps them side by side
 Execute discovered tests and return a `Run`.
 
 **Common constructor parameters:**
-- `config: Config | None = None`
-- `reporters: list[Reporter] | None = None`
 - `capture_output: bool = True`
-- `run_id: UUID | str | None = None`
 
 **Run methods:**
 ```python
 await runner.run(
-    items: list[LoadedTestDef] | None = None,
-    path: str | None = None,
-    run_id: UUID | str | None = None,
+    items: list[LoadedTestDef],
+    *,
+    resolver: DependencyResolver,
 ) -> Run
-
-runner.run_id_exists(run_id: UUID | str) -> bool
 ```
 
 **Constructor behavior:**
-- `Runner` is config-driven. OpenTelemetry, DB, timeout, fail-fast, concurrency, verbosity, and reporter-name settings come from `Config`.
-- If `config.reporters` contains names, `Runner` uses those named reporters and ignores any `reporters=[...]` instances you pass in.
-- If `config.reporters` is empty and `reporters=[...]` is provided, `Runner` uses those instances.
-- If both are omitted, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`.
+- `Runner` requires an active `RunContext`.
+- Run event processors are provided by the active `RunEventsReceiver`, not by `Runner`.
+- CLI `--processor` flags replace `config.processors`; if neither is set, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`.
+- Official CLI entrypoints append `DBWriter`; programmatic runs attach `DBWriter` when they want SQLite persistence.
 
 **Timeout behavior (`timeout`):**
 - `timeout` is a run-level limit (not per-test).
@@ -631,40 +626,39 @@ runner.run_id_exists(run_id: UUID | str) -> bool
 - In-flight work may not stop immediately, especially synchronous tests already executing in worker threads.
 
 **Run UUID behavior:**
-- `run_id` accepts either a `UUID` object or UUID string.
-- `run()` `run_id` overrides constructor `run_id`.
-- If neither is provided, Rue auto-generates a new UUID.
-- If `db_enabled=True` and the selected run UUID already exists, `run()` raises `ValueError`.
-- `run_id_exists()` can be used as a preflight check before execution.
+- `RunContext.run_id` owns the selected UUID.
+- If no run id is provided to `RunContext`, Rue auto-generates one.
+- The CLI accepts `--run-id` and rejects duplicate SQLite run ids before execution.
 
 **Example:**
 ```python
-from uuid import UUID
-
 from rue.config import Config
-from rue.reports import ConsoleReporter, OtelReporter
+from rue.context.runtime import RunContext
+from rue.events import RunEventsReceiver
+from rue.cli.console import ConsoleReporter
+from rue.telemetry.otel import OtelReporter
+from rue.resources import DependencyResolver, registry
+from rue.storage import DBWriter
+from rue.storage import DBManager
 from rue.testing import Runner
 
-runner = Runner(
-    config=Config(db_path=".rue/rue.db"),
-    reporters=[ConsoleReporter(), OtelReporter()],
-    run_id=UUID("00000000-0000-0000-0000-000000000001"),
-)
+config = Config(db_path=".rue/rue.db")
+db = DBManager(config.db_path)
+db.initialize()
+db_writer = DBWriter()
 
-if runner.run_id_exists("00000000-0000-0000-0000-000000000001"):
-    raise ValueError("run_id already exists")
-
-# Uses constructor run_id
-result = await runner.run(path="tests/")
-
-# Overrides constructor run_id for this run only
-result = await runner.run(
-    path="tests/",
-    run_id="00000000-0000-0000-0000-000000000002",
-)
+with RunContext(config=config), RunEventsReceiver([
+    ConsoleReporter(),
+    OtelReporter(),
+    db_writer,
+]):
+    result = await Runner().run(
+        items=items,
+        resolver=DependencyResolver(registry),
+    )
 ```
 
-OpenTelemetry persistence is configured through reporters. In a normal fresh process, the default reporter set includes `OtelReporter`; if you supply your own reporters, keep it attached for local `.rue/traces` storage or handle `execution.telemetry_artifacts` in `Reporter.on_execution_complete()`.
+OpenTelemetry persistence is configured through run event processors. In a normal fresh process, the default processor set includes `OtelReporter`; if you supply your own processor list, keep it attached for local `.rue/traces` storage or handle `execution.telemetry_artifacts` in `RunEventsProcessor.on_execution_complete()`.
 
 ---
 

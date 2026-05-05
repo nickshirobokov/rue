@@ -30,7 +30,7 @@ def _artifact_payload(artifact) -> dict[str, object]:
 async def _run_module_with_tracing(
     *,
     tmp_path: Path,
-    trace_reporter,
+    trace_processor,
     monkeypatch: pytest.MonkeyPatch,
     source: str,
 ):
@@ -39,15 +39,16 @@ async def _run_module_with_tracing(
     try:
         monkeypatch.chdir(tmp_path)
         items = materialize_tests(mod_path)
-        make_run_context(otel=True, db_enabled=False)
-        runner = Runner(
-            reporters=[trace_reporter],
+        make_run_context(
+            otel=True,
+            processors=(trace_processor,),
         )
+        runner = Runner()
         run = await runner.run(
             items=items,
             resolver=DependencyResolver(registry),
         )
-        return mod_name, run, trace_reporter.artifacts
+        return mod_name, run, trace_processor.artifacts
     finally:
         sys.modules.pop(mod_name, None)
 
@@ -140,13 +141,13 @@ async def test_sample(traced_pipeline):
 @pytest.mark.asyncio
 async def test_sut_trace_accessors_work_inside_runner(
     tmp_path: Path,
-    trace_reporter,
+    trace_processor,
     monkeypatch: pytest.MonkeyPatch,
     source: str,
 ):
     mod_name, run, artifacts = await _run_module_with_tracing(
         tmp_path=tmp_path,
-        trace_reporter=trace_reporter,
+        trace_processor=trace_processor,
         monkeypatch=monkeypatch,
         source=source,
     )

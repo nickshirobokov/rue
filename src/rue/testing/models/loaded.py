@@ -10,7 +10,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from rue.assertions.base import AssertionResult
+from rue.assertions.models import AssertionResult
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
     CURRENT_TEST,

@@ -4,7 +4,7 @@ import ast
 from collections.abc import Callable
 from typing import cast
 
-from rue.resources.models import Scope
+from rue.context.scopes import Scope
 from rue.resources.registry import resource
 
 
@@ -25,14 +25,12 @@ def decorate_pytest_fixture_as_resource(
     def decorator(fn: ResourceFactory) -> ResourceFactory:
         if params is not None:
             return fn
-        match scope:
-            case Scope():
-                mapped_scope = scope
-            case "function":
+        match str(scope):
+            case "test" | "function":
                 mapped_scope = Scope.TEST
-            case "class" | "module":
+            case "module" | "class":
                 mapped_scope = Scope.MODULE
-            case "package" | "session":
+            case "run" | "package" | "session":
                 mapped_scope = Scope.RUN
             case _:
                 mapped_scope = Scope.TEST

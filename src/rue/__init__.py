@@ -1,9 +1,9 @@
 """Rue - Testing framework for AI agents."""
 
+from .events import RunEventsProcessor, RunEventsReceiver
 from .experiments.decorator import experiment
 from .patching import MonkeyPatch
 from .predicates import PredicateResult, predicate
-from .reports import Reporter
 from .resources.metrics import Metric, metric, metrics
 from .resources.sut import (
     SUT,
@@ -48,7 +48,8 @@ __all__ = [
     "MonkeyPatch",
     "PredicateResult",
     "QueueBatch",
-    "Reporter",
+    "RunEventsProcessor",
+    "RunEventsReceiver",
     "RunnerStep",
     "SessionQueue",
     "backend",

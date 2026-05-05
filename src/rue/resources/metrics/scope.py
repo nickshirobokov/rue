@@ -9,7 +9,7 @@ from rue.context.runtime import bind
 
 
 if TYPE_CHECKING:
-    from rue.resources.metrics.base import Metric
+    from rue.resources.metrics.metric import Metric
 
 
 ACTIVE_ASSERTION_METRICS: ContextVar[list[Metric] | None] = ContextVar(

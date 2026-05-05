@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from threading import Lock
-from uuid import UUID
 from typing import Any
+from uuid import UUID
 
 from opentelemetry import trace
 from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
@@ -18,6 +18,7 @@ from opentelemetry.sdk.trace import (
     SpanProcessor,
     TracerProvider as SdkTracerProvider,
 )
+
 from rue.context.runtime import CURRENT_SUT_SPAN_IDS
 
 

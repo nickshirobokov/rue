@@ -4,20 +4,23 @@ from textwrap import dedent
 
 import pytest
 
+from rue.events import RunEventsProcessor
 from rue.resources import DependencyResolver, registry
 from rue.testing.discovery import TestLoader, TestSpecCollector
 from rue.testing.runner import Runner
-from tests.helpers import NullReporter, make_run_context, materialize_tests
+from tests.helpers import make_run_context, materialize_tests
 
 
-class QueueOrderReporter(NullReporter):
+class QueueOrderProcessor(RunEventsProcessor):
     def __init__(self) -> None:
         self.events: list[tuple[str, str]] = []
 
-    async def on_test_start(self, item) -> None:
-        self.events.append(("start", item.spec.full_name))
+    async def on_test_start(self, test, run) -> None:
+        _ = run
+        self.events.append(("start", test.definition.spec.full_name))
 
-    async def on_execution_complete(self, execution) -> None:
+    async def on_execution_complete(self, execution, run) -> None:
+        _ = run
         kind = (
             "complete"
             if execution.definition.spec.suffix is None
@@ -128,16 +131,14 @@ async def test_runner_executes_mixed_backends_in_queue_order(
         "test_L": 4,
     }
     items = materialize_tests(module_path)
-    reporter = QueueOrderReporter()
+    processor = QueueOrderProcessor()
 
     make_run_context(
-            otel=False,
-            db_enabled=False,
-            concurrency=4,
-        )
-    run = await Runner(
-        reporters=[reporter],
-    ).run(items=items, resolver=DependencyResolver(registry))
+        otel=False,
+        concurrency=4,
+        processors=(processor,),
+    )
+    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
 
     assert run.result.passed == len(expected_order), [
         (
@@ -149,7 +150,7 @@ async def test_runner_executes_mixed_backends_in_queue_order(
     ]
 
     assert [
-        name for kind, name in reporter.events if kind == "start"
+        name for kind, name in processor.events if kind == "start"
     ] == expected_order
     assert [
         execution.definition.spec.full_name
@@ -162,10 +163,10 @@ async def test_runner_executes_mixed_backends_in_queue_order(
     } == expected_subtest_counts
 
     a_complete = _event_index(
-        reporter.events, "complete", _full_name(module_path, "A")
+        processor.events, "complete", _full_name(module_path, "A")
     )
     assert all(
-        a_complete < _event_index(reporter.events, "start", name)
+        a_complete < _event_index(processor.events, "start", name)
         for name in (
             _full_name(module_path, "B"),
             _full_name(module_path, "C"),
@@ -174,10 +175,10 @@ async def test_runner_executes_mixed_backends_in_queue_order(
     )
 
     e_start = _event_index(
-        reporter.events, "start", _full_name(module_path, "E")
+        processor.events, "start", _full_name(module_path, "E")
     )
     assert all(
-        _event_index(reporter.events, "complete", name) < e_start
+        _event_index(processor.events, "complete", name) < e_start
         for name in (
             _full_name(module_path, "B"),
             _full_name(module_path, "C"),
@@ -186,23 +187,23 @@ async def test_runner_executes_mixed_backends_in_queue_order(
     )
 
     f_start = _event_index(
-        reporter.events, "start", _full_name(module_path, "F")
+        processor.events, "start", _full_name(module_path, "F")
     )
     assert (
-        _event_index(reporter.events, "complete", _full_name(module_path, "E"))
+        _event_index(processor.events, "complete", _full_name(module_path, "E"))
         < f_start
     )
 
     g_start = _event_index(
-        reporter.events, "start", _full_name(module_path, "G")
+        processor.events, "start", _full_name(module_path, "G")
     )
     assert (
-        _event_index(reporter.events, "complete", _full_name(module_path, "F"))
+        _event_index(processor.events, "complete", _full_name(module_path, "F"))
         < g_start
     )
 
     h_group_starts = [
-        _event_index(reporter.events, "start", name)
+        _event_index(processor.events, "start", name)
         for name in (
             _full_name(module_path, "H"),
             _full_name(module_path, "I"),
@@ -210,16 +211,16 @@ async def test_runner_executes_mixed_backends_in_queue_order(
         )
     ]
     assert all(
-        _event_index(reporter.events, "complete", _full_name(module_path, "G"))
+        _event_index(processor.events, "complete", _full_name(module_path, "G"))
         < index
         for index in h_group_starts
     )
 
     k_start = _event_index(
-        reporter.events, "start", _full_name(module_path, "K")
+        processor.events, "start", _full_name(module_path, "K")
     )
     assert all(
-        _event_index(reporter.events, "complete", name) < k_start
+        _event_index(processor.events, "complete", name) < k_start
         for name in (
             _full_name(module_path, "H"),
             _full_name(module_path, "I"),
@@ -228,10 +229,10 @@ async def test_runner_executes_mixed_backends_in_queue_order(
     )
 
     l_start = _event_index(
-        reporter.events, "start", _full_name(module_path, "L")
+        processor.events, "start", _full_name(module_path, "L")
     )
     assert (
-        _event_index(reporter.events, "complete", _full_name(module_path, "K"))
+        _event_index(processor.events, "complete", _full_name(module_path, "K"))
         < l_start
     )
 
@@ -334,16 +335,14 @@ async def test_runner_executes_multiple_modules_in_queue_order(
         *(_full_name(module_a2_path, name) for name in "ABCD"),
     ]
     items = _materialize_paths(module_a1_path, module_a2_path)
-    reporter = QueueOrderReporter()
+    processor = QueueOrderProcessor()
 
     make_run_context(
-            otel=False,
-            db_enabled=False,
-            concurrency=4,
-        )
-    run = await Runner(
-        reporters=[reporter],
-    ).run(items=items, resolver=DependencyResolver(registry))
+        otel=False,
+        concurrency=4,
+        processors=(processor,),
+    )
+    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
 
     assert run.result.passed == len(expected_order), [
         (
@@ -360,31 +359,31 @@ async def test_runner_executes_multiple_modules_in_queue_order(
     ] == expected_order
 
     a1_a_complete = _event_index(
-        reporter.events, "complete", _full_name(module_a1_path, "A")
+        processor.events, "complete", _full_name(module_a1_path, "A")
     )
     a2_a_start = _event_index(
-        reporter.events, "start", _full_name(module_a2_path, "A")
+        processor.events, "start", _full_name(module_a2_path, "A")
     )
     assert a2_a_start < a1_a_complete
 
     a2_b_start = _event_index(
-        reporter.events, "start", _full_name(module_a2_path, "B")
+        processor.events, "start", _full_name(module_a2_path, "B")
     )
     assert a2_b_start < a1_a_complete
 
     a1_b_complete = _event_index(
-        reporter.events, "complete", _full_name(module_a1_path, "B")
+        processor.events, "complete", _full_name(module_a1_path, "B")
     )
     a1_d_complete = _event_index(
-        reporter.events, "complete", _full_name(module_a1_path, "D")
+        processor.events, "complete", _full_name(module_a1_path, "D")
     )
     a2_d_start = _event_index(
-        reporter.events, "start", _full_name(module_a2_path, "D")
+        processor.events, "start", _full_name(module_a2_path, "D")
     )
     assert a2_d_start < max(a1_b_complete, a1_d_complete)
 
     a1_e_start = _event_index(
-        reporter.events, "start", _full_name(module_a1_path, "E")
+        processor.events, "start", _full_name(module_a1_path, "E")
     )
     assert a2_d_start < a1_e_start
 
@@ -433,33 +432,31 @@ async def test_runner_keeps_global_main_as_absolute_barrier_across_modules(
     )
 
     items = _materialize_paths(module_a1_path, module_a2_path)
-    reporter = QueueOrderReporter()
+    processor = QueueOrderProcessor()
 
     make_run_context(
-            otel=False,
-            db_enabled=False,
-            concurrency=2,
-        )
-    run = await Runner(
-        reporters=[reporter],
-    ).run(items=items, resolver=DependencyResolver(registry))
+        otel=False,
+        concurrency=2,
+        processors=(processor,),
+    )
+    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
 
     assert run.result.passed == 4
 
     main_start = _event_index(
-        reporter.events, "start", _full_name(module_a1_path, "B")
+        processor.events, "start", _full_name(module_a1_path, "B")
     )
     main_complete = _event_index(
-        reporter.events, "complete", _full_name(module_a1_path, "B")
+        processor.events, "complete", _full_name(module_a1_path, "B")
     )
     assert _event_index(
-        reporter.events, "complete", _full_name(module_a1_path, "A")
+        processor.events, "complete", _full_name(module_a1_path, "A")
     ) < main_start
     assert main_complete < _event_index(
-        reporter.events, "start", _full_name(module_a2_path, "A")
+        processor.events, "start", _full_name(module_a2_path, "A")
     )
     assert main_complete < _event_index(
-        reporter.events, "start", _full_name(module_a2_path, "B")
+        processor.events, "start", _full_name(module_a2_path, "B")
     )
 
 
@@ -488,13 +485,10 @@ async def test_module_main_keeps_iterate_children_concurrent(
 
     start = time.perf_counter()
     make_run_context(
-            otel=False,
-            db_enabled=False,
-            concurrency=3,
-        )
-    run = await Runner(
-        reporters=[NullReporter()],
-    ).run(items=items, resolver=DependencyResolver(registry))
+        otel=False,
+        concurrency=3,
+    )
+    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
     duration = time.perf_counter() - start
 
     assert run.result.passed == 1

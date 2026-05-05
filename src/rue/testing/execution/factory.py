@@ -8,8 +8,9 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 from uuid import uuid4
 
-from rue.testing.execution.base import ExecutableTest, ExecutionBackend
+from rue.testing.execution.backend import ExecutionBackend
 from rue.testing.execution.composite import CompositeTest
+from rue.testing.execution.executable import ExecutableTest
 from rue.testing.execution.queue import SessionQueue
 from rue.testing.execution.single import SingleTest
 from rue.testing.models import (
@@ -28,7 +29,6 @@ class DefaultTestFactory:
 
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
-    on_complete: Callable | None = None
     queue: SessionQueue | None = None
     _next_sync_actor_id: int = field(default=1, init=False, repr=False)
 
@@ -66,7 +66,6 @@ class DefaultTestFactory:
                         sync_actor_id=sync_actor_id,
                         semaphore=self.semaphore,
                         is_stopped=self.is_stopped,
-                        on_complete=self.on_complete,
                     )
                 case _:
                     raise NotImplementedError(f"Unknown backend: {backend}")
@@ -111,7 +110,6 @@ class DefaultTestFactory:
                     min_passes=min_passes,
                     execution_id=uuid4(),
                     children=children,
-                    on_complete=self.on_complete,
                 )
                 if enqueue and self.queue is not None:
                     self.queue.add(test)
@@ -140,7 +138,6 @@ class DefaultTestFactory:
                     min_passes=min_passes,
                     execution_id=uuid4(),
                     children=children,
-                    on_complete=self.on_complete,
                 )
                 if enqueue and self.queue is not None:
                     self.queue.add(test)
@@ -174,7 +171,6 @@ class DefaultTestFactory:
                     min_passes=min_passes,
                     execution_id=uuid4(),
                     children=children,
-                    on_complete=self.on_complete,
                 )
                 if enqueue and self.queue is not None:
                     self.queue.add(test)
@@ -204,7 +200,6 @@ class DefaultTestFactory:
                     min_passes=min_passes,
                     execution_id=uuid4(),
                     children=children,
-                    on_complete=self.on_complete,
                 )
                 if enqueue and self.queue is not None:
                     self.queue.add(test)

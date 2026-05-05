@@ -152,7 +152,6 @@ def test_experiment_runner_executes_four_variants_with_iterated_tests(
     runner = ExperimentRunner(
         config=Config.model_construct(
             otel=False,
-            db_enabled=False,
             concurrency=2,
             timeout=None,
             maxfail=None,
@@ -217,7 +216,6 @@ def test_experiment_collect_reloads_setup_after_definition_preload(
     runner = ExperimentRunner(
         config=Config.model_construct(
             otel=False,
-            db_enabled=False,
             concurrency=1,
             timeout=None,
             maxfail=None,

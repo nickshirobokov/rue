@@ -26,6 +26,7 @@ dependencies = [
     "msgspec>=0.21.1",
     "deepdiff>=9.0.0",
     "pycrdt>=0.12.50",
+    "pyturso>=0.5.1",
 ]
 
 classifiers = [

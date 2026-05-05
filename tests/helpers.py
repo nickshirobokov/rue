@@ -9,10 +9,10 @@ from uuid import UUID
 from rue.config import Config
 from rue.context.runtime import CURRENT_RUN_CONTEXT, RunContext
 from rue.context.scopes import CURRENT_SCOPE_CONTEXT, ScopeContext
-from rue.reports.base import Reporter
+from rue.events import RunEventsProcessor, RunEventsReceiver
 from rue.telemetry import OtelTraceArtifact
 from rue.testing.discovery import TestLoader, TestSpecCollector
-from rue.testing.execution.base import ExecutionBackend
+from rue.testing.execution.backend import ExecutionBackend
 from rue.testing.models import BackendModifier, LoadedTestDef
 from rue.testing.models.modifiers import Modifier
 from rue.testing.models.spec import Locator, SetupFileRef, TestSpec
@@ -21,38 +21,14 @@ from rue.testing.models.spec import Locator, SetupFileRef, TestSpec
 _COLLECTION_INDEX = count()
 
 
-class NullReporter(Reporter):
-    """Silent reporter for integration tests."""
-
-    def configure(self, config) -> None:
-        _ = config
-
-    async def on_no_tests_found(self) -> None:
-        pass
-
-    async def on_collection_complete(self, items, run) -> None:
-        pass
-
-    async def on_test_start(self, item) -> None:
-        pass
-
-    async def on_execution_complete(self, execution) -> None:
-        pass
-
-    async def on_run_complete(self, test_run) -> None:
-        pass
-
-    async def on_run_stopped_early(self, failure_count: int) -> None:
-        pass
-
-
-class TraceCollectorReporter(NullReporter):
-    """Reporter that keeps collected OpenTelemetry artifacts."""
+class TraceCollectorProcessor(RunEventsProcessor):
+    """Run events processor that keeps collected OpenTelemetry artifacts."""
 
     def __init__(self) -> None:
         self.artifacts: list[OtelTraceArtifact] = []
 
-    async def on_execution_complete(self, execution) -> None:
+    async def on_execution_complete(self, execution, run) -> None:
+        _ = run
         self.artifacts.extend(
             artifact
             for artifact in execution.telemetry_artifacts
@@ -125,6 +101,8 @@ def make_run_context(
     config: Config | None = None,
     *,
     run_id: UUID | None = None,
+    processors: tuple[RunEventsProcessor, ...] | None = None,
+    bind_events: bool = True,
     **config_kwargs: Any,
 ) -> RunContext:
     if config is None:
@@ -136,4 +114,9 @@ def make_run_context(
     )
     CURRENT_RUN_CONTEXT.set(context)
     CURRENT_SCOPE_CONTEXT.set(ScopeContext.for_run(context.run_id))
+    if bind_events:
+        event_processors = (
+            (RunEventsProcessor(),) if processors is None else processors
+        )
+        RunEventsReceiver(list(event_processors)).__enter__()
     return context

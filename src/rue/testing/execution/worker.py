@@ -3,49 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
-from uuid import UUID
 
 from rue.context.runtime import (
     CURRENT_TEST_TRACER,
-    RunContext,
     TestContext,
     bind,
 )
 from rue.experiments.registry import registry as default_experiment_registry
 from rue.resources import DependencyResolver
-from rue.resources.models import StateSnapshot
 from rue.resources.registry import registry as default_resource_registry
-from rue.resources.state import ResourceStore
-from rue.telemetry.base import TelemetryArtifact
+from rue.resources.store import ResourceStore
 from rue.testing.discovery.loader import TestLoader
-from rue.testing.models import TestResult
-from rue.testing.models.spec import SetupFileRef, TestSpec
+from rue.testing.execution.models import ExecutorPayload, RemoteExecutionResult
+from rue.testing.models.result import TestResult
 from rue.testing.tracing import TestTracer
-
-
-@dataclass(frozen=True, slots=True)
-class ExecutorPayload:
-    """Minimal, fully-serializable payload for remote test execution."""
-
-    spec: TestSpec
-    suite_root: Path
-    setup_chain: tuple[SetupFileRef, ...]
-    params: dict[str, Any]
-    snapshot: StateSnapshot
-    context: RunContext
-    execution_id: UUID
-
-
-@dataclass(frozen=True, slots=True)
-class RemoteExecutionResult:
-    """Serializable remote execution outcome."""
-
-    result: TestResult
-    telemetry_artifacts: tuple[TelemetryArtifact, ...]
-    sync_update: bytes
 
 
 def run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:

@@ -9,7 +9,8 @@ from typing import Any
 from uuid import UUID
 
 from rue.resources.resolver import DependencyResolver
-from rue.testing.execution.base import ExecutableTest, ExecutionBackend
+from rue.testing.execution.backend import ExecutionBackend
+from rue.testing.execution.executable import ExecutableTest
 from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.result import TestResult, TestStatus
@@ -24,7 +25,6 @@ class CompositeTest(ExecutableTest):
     min_passes: int
     execution_id: UUID
     children: list[ExecutableTest] = field(default_factory=list)
-    on_complete: Callable | None = None
 
     async def _execute(
         self,

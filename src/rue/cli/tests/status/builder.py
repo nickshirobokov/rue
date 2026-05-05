@@ -18,9 +18,9 @@ from rue.context.runtime import RunContext, TestContext
 from rue.resources import DependencyResolver, ResourceSpec
 from rue.resources.models import ResourceGraph
 from rue.resources.registry import registry as default_resource_registry
-from rue.storage.sqlite import SQLiteStore
+from rue.storage import TursoRunStore
 from rue.testing.discovery import TestLoader
-from rue.testing.execution.base import ExecutableTest
+from rue.testing.execution.executable import ExecutableTest
 from rue.testing.execution.factory import DefaultTestFactory
 from rue.testing.execution.single import SingleTest
 from rue.testing.models import TestSpecCollection
@@ -31,15 +31,15 @@ class TestsStatusBuilder:
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self._issues_by_execution_id: dict[
-            UUID, list[StatusIssue]
-        ] = defaultdict(list)
+        self._issues_by_execution_id: dict[UUID, list[StatusIssue]] = (
+            defaultdict(list)
+        )
 
     def build(
         self,
         collection: TestSpecCollection,
         *,
-        store: SQLiteStore | None,
+        store: TursoRunStore | None,
     ) -> TestsStatusReport:
         """Return the current test status report for a collection."""
         default_resource_registry.reset()

@@ -36,9 +36,8 @@ exclude-tags = ["slow"]
 keyword = "chatbot"
 fail-fast = true
 otel = false
-reporters = ["ConsoleReporter", "OtelReporter"]
-db-path = ".rue/custom.db"
-db-enabled = false
+processors = ["ConsoleReporter", "OtelReporter"]
+database-path = ".rue/custom.turso.db"
 """.strip()
     )
 
@@ -54,9 +53,8 @@ db-enabled = false
     assert config.addopts == ["-q"]
     assert config.otel is False
     assert not hasattr(config, "otel_content")
-    assert config.reporters == ["ConsoleReporter", "OtelReporter"]
-    assert config.db_path == ".rue/custom.db"
-    assert config.db_enabled is False
+    assert config.processors == ["ConsoleReporter", "OtelReporter"]
+    assert config.database_path == Path(".rue/custom.turso.db")
 
 
 def test_load_config_defaults_when_missing(
@@ -74,5 +72,22 @@ def test_load_config_defaults_when_missing(
     assert config.addopts == []
     assert config.otel is True
     assert not hasattr(config, "otel_content")
-    assert config.db_path is None
-    assert config.db_enabled is True
+    assert config.database_path == Path(".rue/rue.turso.db")
+
+
+def test_config_database_path_override_is_parsed_to_path() -> None:
+    config = load_config().with_overrides(
+        database_path=".rue/override.turso.db"
+    )
+
+    assert config.database_path == Path(".rue/override.turso.db")
+
+
+def test_config_database_path_env_override_is_parsed_to_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RUE_DATABASE_PATH", ".rue/env.turso.db")
+
+    config = load_config()
+
+    assert config.database_path == Path(".rue/env.turso.db")

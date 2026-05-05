@@ -5,9 +5,9 @@ from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
-    from rue.assertions.base import AssertionResult
-    from rue.resources.metrics.base import MetricResult
+    from rue.assertions.models import AssertionResult
     from rue.predicates.models import PredicateResult
+    from rue.resources.metrics.models import MetricResult
 
 
 CURRENT_ASSERTION_RESULTS: ContextVar[list[AssertionResult] | None] = (

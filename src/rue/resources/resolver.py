@@ -3,8 +3,9 @@
 from collections.abc import AsyncGenerator, Generator, Sequence
 from typing import Any, cast
 
+from rue.context.models import ScopeOwner
 from rue.context.runtime import CURRENT_TEST, ResourceHookContext
-from rue.context.scopes import Scope, ScopeContext, ScopeOwner
+from rue.context.scopes import Scope, ScopeContext
 from rue.models import Spec
 from rue.patching.runtime import PatchStore
 from rue.resources.models import (
@@ -14,7 +15,7 @@ from rue.resources.models import (
     ScheduledTeardown,
 )
 from rue.resources.registry import ResourceRegistry
-from rue.resources.state import ResourceStore
+from rue.resources.store import ResourceStore
 from rue.resources.transfer import StateTransfer
 
 

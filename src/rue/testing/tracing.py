@@ -7,10 +7,11 @@ from typing import TypeVar
 from uuid import UUID
 
 from rue.config import Config
-from rue.telemetry.base import TelemetryArtifact
-from rue.telemetry.backends.base import TelemetryBackend
+from rue.telemetry.backend import TelemetryBackend
+from rue.telemetry.models import TelemetryArtifact
 from rue.telemetry.otel.backend import OtelTelemetryBackend
 from rue.testing.models import LoadedTestDef, TestResult
+
 
 T = TypeVar("T", bound=TelemetryBackend)
 

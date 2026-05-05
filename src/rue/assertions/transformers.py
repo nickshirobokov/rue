@@ -16,10 +16,16 @@ class InjectAssertionDependenciesTransformer(ast.NodeTransformer):
     ) -> ast.FunctionDef | ast.AsyncFunctionDef:
         inject_stmts: list[ast.stmt] = [
             ast.ImportFrom(
-                module="rue.assertions.base",
+                module="rue.assertions.models",
                 names=[
                     ast.alias(name="AssertionRepr", asname=None),
                     ast.alias(name="AssertionResult", asname=None),
+                ],
+                level=0,
+            ),
+            ast.ImportFrom(
+                module="rue.assertions.runtime",
+                names=[
                     ast.alias(name="capture_var", asname=None),
                 ],
                 level=0,

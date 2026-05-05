@@ -9,11 +9,9 @@ from uuid import UUID
 from rich.console import Console
 from typer import Option
 
-import rue.reports.console as console_reports
-import rue.reports.otel as otel_reports
+from rue.cli.console import ConsoleReporter
 from rue.cli.errors import print_definition_errors
 from rue.cli.tests.options import (
-    DBPathOpt,
     KeywordOpt,
     SkipTagOpt,
     TagOpt,
@@ -23,12 +21,14 @@ from rue.cli.tests.options import (
 )
 from rue.config import load_config
 from rue.context.runtime import RunContext
-from rue.reports.base import Reporter
+from rue.events.processor import RunEventsProcessor
+from rue.events.receiver import RunEventsReceiver
 from rue.resources import (
     DependencyResolver,
     registry as default_resource_registry,
 )
-from rue.storage import SQLiteStore
+from rue.storage import TursoRunRecorder, TursoRunStore
+from rue.telemetry.otel import OtelReporter
 from rue.testing.discovery import TestDefinitionErrors, TestLoader
 from rue.testing.runner import Runner
 
@@ -80,20 +80,17 @@ def run(
             help="Show SUT stdout/stderr live (still captured on the SUT)",
         ),
     ] = False,
-    db_path: DBPathOpt = None,
     run_id: Annotated[
         UUID | None,
         Option("--run-id", help="UUID to assign to this test run"),
     ] = None,
-    no_db: Annotated[
-        bool,
-        Option("--no-db", help="Disable writing run data to SQLite"),
-    ] = False,
-    reporter: Annotated[
+    processor: Annotated[
         list[str] | None,
         Option(
-            "--reporter",
-            help="Reporter to use (can be specified multiple times)",
+            "--processor",
+            help=(
+                "Run events processor to use (can be specified multiple times)"
+            ),
         ),
     ] = None,
 ) -> None:
@@ -106,32 +103,25 @@ def run(
         skip_tag=skip_tag,
         verbose=verbose,
         quiet=quiet,
-        db_path=db_path,
         maxfail=maxfail if maxfail and maxfail > 0 else None,
         fail_fast=fail_fast,
         concurrency=max(0, concurrency) if concurrency is not None else None,
         timeout=timeout if timeout and timeout > 0 else None,
         otel=otel,
-        db_enabled=False if no_db else None,
-        reporters=reporter,
+        processors=processor,
     )
 
-    _ = console_reports, otel_reports
-    if not runner_config.reporters:
-        reporters = list(Reporter.REGISTRY.values())
-    else:
-        reporters = []
-        for name in runner_config.reporters:
-            if name not in Reporter.REGISTRY:
-                available = ", ".join(sorted(Reporter.REGISTRY))
-                msg = f"Unknown reporter: {name}. Available: {available}"
-                raise ValueError(msg)
-            reporters.append(Reporter.REGISTRY[name])
-    store = (
-        None
-        if not runner_config.db_enabled
-        else SQLiteStore(runner_config.resolved_db_path)
-    )
+    processors = [ConsoleReporter()]
+    if runner_config.otel:
+        processors.append(OtelReporter())
+    for name in runner_config.processors:
+        if name not in RunEventsProcessor.REGISTRY:
+            available = ", ".join(sorted(RunEventsProcessor.REGISTRY))
+            msg = f"Unknown processor: {name}. Available: {available}"
+            raise ValueError(msg)
+        processors.append(RunEventsProcessor.REGISTRY[name])
+    store = TursoRunStore(runner_config.database_path)
+    store.initialize()
 
     collection = collector.build_spec_collection(resolved_paths)
     try:
@@ -142,23 +132,18 @@ def run(
         print_definition_errors(errors)
         raise SystemExit(2) from errors
 
-    if (
-        run_id is not None
-        and store is not None
-        and store.get_run(run_id) is not None
-    ):
+    if run_id is not None and store.run_exists(run_id):
         Console().print(f"[red]run_id '{run_id}' already exists[/red]")
         raise SystemExit(2)
 
-    context = (
+    run_context = (
         RunContext(config=runner_config)
         if run_id is None
         else RunContext(config=runner_config, run_id=run_id)
     )
-    with context:
+    events_receiver = RunEventsReceiver([*processors, TursoRunRecorder()])
+    with run_context, events_receiver:
         runner = Runner(
-            reporters=reporters,
-            store=store,
             capture_output=not show_output,
         )
         run_result = asyncio.run(

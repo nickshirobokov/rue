@@ -39,7 +39,7 @@ block-beta
   user_call["User test call<br/>LoadedTestDef<br/>.call_test_fn"]
   test_done["Test cleanup<br/>DependencyResolver<br/>.teardown(Scope.TEST)"]
   module_done["Module cleanup<br/>Runner<br/>._teardown_module_if_complete"]
-  final["Run result<br/>DependencyResolver.teardown()<br/>Store.save_run"]
+  final["Run result<br/>DependencyResolver.teardown()<br/>TursoRunRecorder.on_run_complete"]
 
   space:3
   run_ctx["RunContext<br/>CURRENT_RUN_CONTEXT<br/>config, run_id, environment"]:9
@@ -141,7 +141,7 @@ ownership on top of the active run. Rue MUST NOT resolve `Scope.TEST` or
 
 | Context API | Purpose | Binder / owner | Available during | Required behavior | Main consumers |
 | --- | --- | --- | --- | --- | --- |
-| `RunContext` / `CURRENT_RUN_CONTEXT` | Run-level config, run id, environment, experiment variant metadata | Opened by CLI, experiment runner, status builder, or tests before constructing/calling runner APIs | Whole Rue run | Required; missing lookup MUST fail | `Runner`, `SingleTest`, assertions, reporters, subprocess payloads |
+| `RunContext` / `CURRENT_RUN_CONTEXT` | Run-level config, run id, environment, experiment variant metadata | Opened by CLI, experiment runner, status builder, or tests before constructing/calling runner APIs | Whole Rue run | Required; missing lookup MUST fail | `Runner`, `SingleTest`, assertions, run event processors, subprocess payloads |
 | `RunEnvironment` | Serializable metadata for the process that owns the run | Built by `RunContext` | As `RunContext.environment` | Not a context binding | Run result persistence and reports |
 | `TestContext` / `CURRENT_TEST` | Current loaded test definition and execution id | Opened by `SingleTest._execute`, subprocess worker, and status preflight | One test execution or synthetic module teardown selection | Required for test execution, graph lookup, SUT injection, and test/module-scoped resources | `LoadedTestDef`, `DependencyResolver`, SUT resources, transfer |
 | `ScopeContext` / `CURRENT_SCOPE_CONTEXT` | Current `ScopeOwner` values for `Scope.RUN`, `Scope.MODULE`, and `Scope.TEST` | Opened by `RunContext` and replaced by `TestContext` | Run context for `RUN`; test context for all scopes | Required for scoped resources and patches; invalid scope ownership MUST fail | Resource store, resolver, patch dispatch |

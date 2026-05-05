@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
+from typing import TYPE_CHECKING
 
-from rue.assertions.base import AssertionResult
+from rue.assertions.models import AssertionResult
+
 
 if TYPE_CHECKING:
     from rue.testing.models.loaded import LoadedTestDef
 
 
-class TestStatus(Enum):
+class TestStatus(StrEnum):
     """Test execution status."""
 
     __test__ = False  # Prevent pytest from collecting this as a test class
@@ -51,6 +52,7 @@ class TestResult:
         error: BaseException | None,
         assertion_results: list[AssertionResult],
     ) -> TestResult:
+        """Build a result from imperative and observed execution outcomes."""
         if imperative_outcome is not None:
             return cls(
                 status=imperative_outcome,
@@ -104,6 +106,7 @@ class TestResult:
 
     @property
     def status_repr(self) -> str:
+        """Return the status suffix shown next to execution names."""
         if self.status == TestStatus.SKIPPED:
             reason = self.error.args[0] if self.error else "skipped"
             return f"skipped ({reason})"

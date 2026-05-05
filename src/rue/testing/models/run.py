@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from rue.context.runtime import RunEnvironment
-from rue.resources.metrics.base import MetricResult
+from rue.context.models import RunEnvironment
+from rue.resources.metrics.models import MetricResult
 from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.result import TestStatus
 
@@ -58,7 +58,7 @@ class RunResult:
 
 
 @dataclass
-class Run:
+class ExecutedRun:
     """Complete record of a test run, combining environment and results.
 
     This is created at the top level of a rue test run and encapsulates

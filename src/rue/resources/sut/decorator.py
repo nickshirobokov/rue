@@ -5,9 +5,9 @@ from collections.abc import Callable
 from typing import Any
 
 from rue.context.runtime import CURRENT_TEST, CURRENT_TEST_TRACER
-from rue.resources.models import Scope
+from rue.context.scopes import Scope
 from rue.resources.registry import resource
-from rue.resources.sut.base import SUT
+from rue.resources.sut.wrapper import SUT
 from rue.telemetry.otel.backend import OtelTelemetryBackend
 
 

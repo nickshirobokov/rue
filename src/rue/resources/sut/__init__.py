@@ -1,6 +1,13 @@
-from .base import SUT
+"""System-under-test resource APIs."""
+
+from rue.resources.sut.models import (
+    CapturedEvent,
+    CapturedOutput,
+    CapturedStream,
+)
+from rue.resources.sut.wrapper import SUT
+
 from .decorator import sut
-from .output import CapturedEvent, CapturedOutput, CapturedStream
 
 
 __all__ = ["SUT", "CapturedEvent", "CapturedOutput", "CapturedStream", "sut"]

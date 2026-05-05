@@ -60,14 +60,12 @@ def run(
         concurrency=max(0, concurrency) if concurrency is not None else None,
         timeout=timeout if timeout and timeout > 0 else None,
         otel=otel,
-        db_enabled=False,
-        reporters=[],
+        processors=[],
     )
     runner_config = runner_config.model_copy(
         update={
-            "db_enabled": False,
             "maxfail": None,
-            "reporters": [],
+            "processors": [],
         }
     )
     collection = collector.build_spec_collection(resolved_paths)

@@ -2,7 +2,7 @@
 title: "Rue OpenTelemetry Traces"
 ---
 
-Rue OpenTelemetry capture is **Runner-managed**, while persistence is **reporter-managed**. Traces exist only while a test function is executing inside an active OpenTelemetry-enabled test execution created by `Runner` or `uv run rue tests run`.
+Rue OpenTelemetry capture is **Runner-managed**, while persistence is **processor-managed**. Traces exist only while a test function is executing inside an active OpenTelemetry-enabled test execution created by `Runner` or `uv run rue tests run`.
 
 ## OpenTelemetry Defaults
 
@@ -18,8 +18,8 @@ uv run rue tests run --no-otel
 # Force-enable OpenTelemetry if config or environment disabled it
 uv run rue tests run --otel
 
-# If you override reporters, keep OtelReporter attached for local trace files
-uv run rue tests run --reporter ConsoleReporter --reporter OtelReporter
+# If you override processors, keep OtelReporter attached for local trace files
+uv run rue tests run --processor ConsoleReporter --processor OtelReporter
 ```
 
 ### Config
@@ -29,7 +29,7 @@ OpenTelemetry settings can be resolved from `rue.toml`, `[tool.rue]` in `pyproje
 ```toml
 [tool.rue]
 otel = false
-reporters = ["ConsoleReporter", "OtelReporter"]
+processors = ["ConsoleReporter", "OtelReporter"]
 ```
 
 Environment variable:
@@ -41,20 +41,24 @@ CLI flags override config and environment.
 
 ```python
 from rue.config import Config
-from rue.reports import ConsoleReporter, OtelReporter
+from rue.context.runtime import RunContext
+from rue.events import RunEventsReceiver
+from rue.cli.console import ConsoleReporter
+from rue.telemetry.otel import OtelReporter
 from rue.testing import Runner
 
-runner = Runner(
-    config=Config(),
-    reporters=[ConsoleReporter(), OtelReporter()],
-)
+with RunContext(config=Config()), RunEventsReceiver([
+    ConsoleReporter(),
+    OtelReporter(),
+]):
+    runner = Runner()
 ```
 
 Use `Config(otel=False)` to disable capture programmatically.
 
-If you do not set an explicit reporter list, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`.
+If you do not set an explicit processor list, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`.
 
-If you set `config.reporters` or pass `--reporter` and leave out `OtelReporter`, OpenTelemetry capture still runs, but local `.rue/traces/...` files are not written.
+If you set `config.processors` or pass `--processor` and leave out `OtelReporter`, OpenTelemetry capture still runs, but local `.rue/traces/...` files are not written.
 
 ## Public API
 
@@ -95,12 +99,12 @@ Available read-only span accessors on `SUT`:
 
 ## Storage
 
-- Capture is enabled by default; persistence still happens only when an `OtelReporter` is attached
-- In the usual fresh-process setup, `uv run rue tests run` writes `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set
-- If you override the reporter list and omit `OtelReporter`, Rue captures traces but does not persist local trace files
+- Capture is enabled by default; persistence still happens only when an `OtelReporter` processor is attached
+- In the usual fresh-process setup, `uv run rue tests run` writes `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default processor set
+- If you override the processor list and omit `OtelReporter`, Rue captures traces but does not persist local trace files
 - `OtelReporter` stores compact JSON payloads under `.rue/traces/<run_id>/<execution_id>.json`
 - `OtelReporter` keeps only the 5 most recent run directories under `.rue/traces`
-- Custom OTEL persistence or forwarding belongs in custom reporters via `Reporter.on_execution_complete(execution)` and `execution.telemetry_artifacts`
+- Custom OTEL persistence or forwarding belongs in custom processors via `RunEventsProcessor.on_execution_complete(execution, run)` and `execution.telemetry_artifacts`
 - File format: one compact JSON trace payload per execution with `run_id`, `execution_id`, and a nested `trace` tree rooted at the test span
 - `OtelTraceArtifact.spans` stays flat with the canonical OTEL span payload for artifact consumers
 - SQLite does not persist OpenTelemetry trace payloads or trace IDs

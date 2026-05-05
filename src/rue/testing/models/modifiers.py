@@ -9,7 +9,7 @@ from rue.testing.models.case import Case, CaseGroup
 
 
 if TYPE_CHECKING:
-    from rue.testing.execution.base import ExecutionBackend
+    from rue.testing.execution.backend import ExecutionBackend
 
 
 @dataclass(frozen=True)

@@ -3,28 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from opentelemetry.trace import Span, StatusCode
 
-from rue.telemetry.base import TelemetryArtifact
-from rue.telemetry.backends.base import TelemetryBackend
+from rue.telemetry.backend import TelemetryBackend
+from rue.telemetry.models import TelemetryArtifact
+from rue.telemetry.otel.models import OtelTraceArtifact
 from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
-from pydantic import ConfigDict
+
 
 if TYPE_CHECKING:
     from rue.testing.models import LoadedTestDef, TestResult
-
-
-class OtelTraceArtifact(TelemetryArtifact):
-    """Finished OpenTelemetry trace artifact."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    trace_id: str
-    spans: list[dict[str, Any]]
 
 
 @dataclass(slots=True)

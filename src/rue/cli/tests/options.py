@@ -28,9 +28,9 @@ VerboseOpt = Annotated[
     int,
     Option("-v", "--verbose", count=True, help="Increase CLI output"),
 ]
-DBPathOpt = Annotated[
+DatabasePathOpt = Annotated[
     str | None,
-    Option("--db-path", help="Path to the Rue SQLite database"),
+    Option("--database-path", help="Path to the Rue Turso database"),
 ]
 
 
@@ -43,7 +43,7 @@ def resolve_selection(
     skip_tag: list[str] | None,
     verbose: int,
     quiet: int = 0,
-    db_path: str | None = None,
+    database_path: str | None = None,
     **overrides: Any,
 ) -> tuple[Config, TestSpecCollector, list[str]]:
     include_tags = [*config.include_tags, *(tag or [])]
@@ -51,7 +51,7 @@ def resolve_selection(
     resolved_paths = paths or config.test_paths
     resolved_config = config.with_overrides(
         keyword=keyword,
-        db_path=db_path,
+        database_path=database_path,
         verbosity=config.verbosity + verbose - quiet,
         include_tags=include_tags,
         exclude_tags=exclude_tags,
@@ -66,7 +66,7 @@ def resolve_selection(
 
 
 __all__ = [
-    "DBPathOpt",
+    "DatabasePathOpt",
     "KeywordOpt",
     "SkipTagOpt",
     "TagOpt",

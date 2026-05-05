@@ -1,6 +1,7 @@
 """Runtime patching APIs."""
 
-from rue.context.scopes import Scope, ScopeOwner
+from rue.context.models import ScopeOwner
+from rue.context.scopes import Scope
 from rue.patching.monkeypatch import MonkeyPatch
 from rue.patching.runtime import (
     PatchHandle,

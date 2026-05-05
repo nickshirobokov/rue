@@ -183,13 +183,13 @@ uv run rue tests run
 # Disable OpenTelemetry for this run
 uv run rue tests run --no-otel
 
-# If you override reporters, keep OtelReporter attached for local trace files
-uv run rue tests run --reporter ConsoleReporter --reporter OtelReporter
+# If you override processors, keep OtelReporter attached for local trace files
+uv run rue tests run --processor ConsoleReporter --processor OtelReporter
 ```
 
-In the usual fresh-process setup, `uv run rue tests run` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default reporter set. Each file stores `run_id`, `execution_id`, and a nested `trace` tree rooted at the test span.
+In the usual fresh-process setup, `uv run rue tests run` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default processor set. Each file stores `run_id`, `execution_id`, and a nested `trace` tree rooted at the test span.
 
-If you override the reporter list and leave out `OtelReporter`, Rue still captures traces for the run, but it does not write local `.rue/traces/...` files.
+If you override the processor list and leave out `OtelReporter`, Rue still captures traces for the run, but it does not write local `.rue/traces/...` files.
 
 **Use OpenTelemetry spans for**:
 - Asserting tool calls in agent tests
@@ -216,33 +216,31 @@ and no tests are executed.
 
 ### Python API
 
-You can set a default run UUID on the runner, and override it per `run()` call:
+Programmatic runs receive their UUID from `RunContext`:
 
 ```python
 from uuid import UUID
-from rue.reports import ConsoleReporter
+from rue.config import Config
+from rue.context.runtime import RunContext
+from rue.events import RunEventsReceiver
+from rue.cli.console import ConsoleReporter
+from rue.storage import DBWriter
+from rue.storage import DBManager
 from rue.testing import Runner
 
-runner = Runner(
-    reporters=[ConsoleReporter()],
+config = Config()
+db = DBManager(config.db_path)
+db.initialize()
+db_writer = DBWriter()
+
+with RunContext(
+    config=config,
     run_id=UUID("00000000-0000-0000-0000-000000000001"),
-)
-
-# Uses constructor run_id
-await runner.run(path="tests/")
-
-# Overrides constructor run_id for this run only
-await runner.run(
-    path="tests/",
-    run_id="00000000-0000-0000-0000-000000000002",
-)
+), RunEventsReceiver([ConsoleReporter(), db_writer]):
+    runner = Runner()
 ```
 
-Run IDs are currently configured only via CLI `--run-id` or Python API parameters. They are not
-read from `pyproject.toml`, `rue.toml`, or environment variables.
-
-If `db_enabled=True` and the selected run UUID already exists, `Runner.run()` raises
-`ValueError`.
+Run IDs are currently configured only via CLI `--run-id` or `RunContext`. They are not read from `pyproject.toml`, `rue.toml`, or environment variables.
 
 ## Configuration Files
 
@@ -319,25 +317,25 @@ For tests with `@rue.test.iterate()`, verbose output shows aggregated results:
 
 The individual run results are attached to `execution.sub_executions`.
 
-## Reporter System
+## Run Event Processor System
 
-Rue uses an async reporter architecture for flexible output handling.
+Rue uses async run event processors for output, trace persistence, and other lifecycle integrations.
 
-### The Reporter Interface
+### The Processor Interface
 
-All reporters implement the `Reporter` ABC from `src/rue/reports/base.py`:
+Processors subclass `RunEventsProcessor`:
 
 ```python
-class Reporter(ABC):
-    @abstractmethod
+class RunEventsProcessor:
     def configure(self, config: Config) -> None:
-        """Adjust reporter parameters from runtime config."""
+        """Adjust processor parameters from runtime config."""
 
-    @abstractmethod
-    async def on_no_tests_found(self) -> None:
+    async def on_run_start(self, run: Run) -> None:
+        """Called when a run starts."""
+
+    async def on_no_tests_found(self, run: Run) -> None:
         """Called when test collection finds no tests."""
 
-    @abstractmethod
     async def on_collection_complete(
         self,
         items: list[LoadedTestDef],
@@ -345,56 +343,63 @@ class Reporter(ABC):
     ) -> None:
         """Called after test collection completes."""
 
-    async def on_test_start(self, item: LoadedTestDef) -> None:
-        """Called before a test starts executing (optional override)."""
+    async def on_test_start(self, test: ExecutableTest, run: Run) -> None:
+        """Called before a test starts executing."""
 
-    @abstractmethod
-    async def on_execution_complete(self, execution: ExecutedTest) -> None:
-        """Called when any test node (leaf or composite) completes."""
+    async def on_execution_complete(
+        self,
+        execution: ExecutedTest,
+        run: Run,
+    ) -> None:
+        """Called when any test node completes."""
 
-    @abstractmethod
     async def on_run_complete(self, run: Run) -> None:
         """Called after all tests complete."""
-
-    @abstractmethod
-    async def on_run_stopped_early(self, failure_count: int) -> None:
-        """Called when run stops early due to maxfail limit."""
 ```
 
-### Reporter Precedence
+### Processor Selection
 
-Reporter selection follows this public precedence order:
-- CLI `--reporter` flags replace the configured reporter list
-- `config.reporters` replaces the programmatic `Runner(reporters=[...])` fallback list
-- if no explicit reporter list is set, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`
+Processor selection follows this public precedence order:
+- CLI `--processor` flags replace the configured processor list
+- `config.processors` replaces the default processor list
+- if no explicit processor list is set, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`
 
-In practice:
-- use CLI/config reporter names for the built-in reporters
-- use `Runner(reporters=[...])` when supplying custom reporter instances directly
+Official Rue entrypoints append `DBWriter` so run data streams into SQLite as executions complete. Programmatic runs attach one or more processors by opening `RunEventsReceiver([...])` around `Runner`.
 
-### Built-in Reporters
+### Built-in Processors
 
-In a normal fresh process, Rue's default reporter set includes `ConsoleReporter` and `OtelReporter`.
+In a normal fresh process, Rue's default processor set includes `ConsoleReporter` and `OtelReporter`.
 
 **ConsoleReporter**: Outputs to terminal with Rich formatting.
 
 ```python
-from rue.reports import ConsoleReporter
+from rue.cli.console import ConsoleReporter
 
-reporter = ConsoleReporter(verbosity=1)
+processor = ConsoleReporter(verbosity=1)
 ```
 
 **OtelReporter**: Persists OpenTelemetry traces under `.rue/traces`.
 
 ```python
-from rue.reports import OtelReporter
+from rue.telemetry.otel import OtelReporter
 
-reporter = OtelReporter()
+processor = OtelReporter()
 ```
 
-### Creating Custom Reporters
+**DBWriter**: Streams run and execution data into SQLite.
 
-Create custom reporters by subclassing `Reporter` and implementing all abstract methods.
+```python
+from rue.storage import DBWriter
+from rue.storage import DBManager
+
+db = DBManager()
+db.initialize()
+processor = DBWriter()
+```
+
+### Creating Custom Processors
+
+Create custom processors by subclassing `RunEventsProcessor`.
 Override `on_test_start` if you need live in-flight state. Finished telemetry arrives on `execution.telemetry_artifacts` inside `on_execution_complete`:
 
 ```python
@@ -402,12 +407,12 @@ import json
 from pathlib import Path
 
 from rue.config import Config
-from rue.reports.base import Reporter
+from rue.events import RunEventsProcessor
 from rue.telemetry import OtelTraceArtifact
 from rue.testing import Run, LoadedTestDef, ExecutedTest
 
-class JsonFileReporter(Reporter):
-    """Custom reporter that writes results to JSON file."""
+class JsonFileProcessor(RunEventsProcessor):
+    """Custom processor that writes results to JSON file."""
 
     def __init__(self, output_path: str):
         self.output_path = Path(output_path)
@@ -417,7 +422,8 @@ class JsonFileReporter(Reporter):
     def configure(self, config: Config) -> None:
         self.verbosity = config.verbosity
 
-    async def on_no_tests_found(self) -> None:
+    async def on_no_tests_found(self, run: Run) -> None:
+        _ = run
         print("No tests found")
 
     async def on_collection_complete(
@@ -428,11 +434,17 @@ class JsonFileReporter(Reporter):
         _ = run
         print(f"Collected {len(items)} tests")
 
-    async def on_test_start(self, item: LoadedTestDef) -> None:
+    async def on_test_start(self, test, run: Run) -> None:
+        _ = test, run
         # Optional lifecycle hook for live/in-flight reporting
         pass
 
-    async def on_execution_complete(self, execution: ExecutedTest) -> None:
+    async def on_execution_complete(
+        self,
+        execution: ExecutedTest,
+        run: Run,
+    ) -> None:
+        _ = run
         # Record each test result
         self.results.append({
             "name": execution.definition.spec.full_name,
@@ -461,43 +473,57 @@ class JsonFileReporter(Reporter):
         self.output_path.write_text(json.dumps(output, indent=2))
         print(f"Results written to {self.output_path}")
 
-    async def on_run_stopped_early(self, failure_count: int) -> None:
+    async def on_run_stopped_early(
+        self,
+        failure_count: int,
+        run: Run,
+    ) -> None:
+        _ = run
         print(f"Run stopped after {failure_count} failures")
 ```
 
-### Using Multiple Reporters
+### Using Multiple Processors
 
-Use multiple reporters simultaneously with the programmatic API:
+Use multiple processors simultaneously with the programmatic API:
 
 ```python
 import asyncio
 from rue.config import Config
+from rue.context.runtime import RunContext
+from rue.events import RunEventsReceiver
 from rue.testing import Runner
-from rue.reports import ConsoleReporter, OtelReporter
-from my_reporters import JsonFileReporter, SlackReporter
+from rue.cli.console import ConsoleReporter
+from rue.telemetry.otel import OtelReporter
+from rue.storage import DBWriter
+from rue.storage import DBManager
+from my_processors import JsonFileProcessor, SlackProcessor
 
 async def main():
-    # Create multiple reporters
+    config = Config()
+    db = DBManager(config.db_path)
+    db.initialize()
+    db_writer = DBWriter()
     console = ConsoleReporter(verbosity=1)
     otel = OtelReporter()
-    json_reporter = JsonFileReporter("results.json")
-    slack = SlackReporter(webhook_url="https://...")
+    json_processor = JsonFileProcessor("results.json")
+    slack = SlackProcessor(webhook_url="https://...")
 
-    # Pass all reporters to runner
-    runner = Runner(
-        config=Config(),
-        reporters=[console, otel, json_reporter, slack],
-    )
-
-    # Run tests - all reporters receive events
-    result = await runner.run(path="tests/")
+    with RunContext(config=config), RunEventsReceiver([
+        console,
+        otel,
+        db_writer,
+        json_processor,
+        slack,
+    ]):
+        result = await Runner().run(
+            items=items,
+            resolver=resolver,
+        )
 
     print(f"Results: {result.result.passed}/{result.result.total} passed")
 
 asyncio.run(main())
 ```
-
-**Note:** `ConsoleReporter` and `OtelReporter` are built-in. Custom reporters are mainly a programmatic API feature. If you supply `Runner(reporters=[...])`, that list replaces the normal default reporter set unless `config.reporters` names are set.
 
 ## Examples
 
@@ -540,23 +566,9 @@ By default, Rue stores the database at the project root:
 
 The database location is determined by walking up from the current directory to find the first directory containing `pyproject.toml`.
 
-### Disabling Database Persistence
-
-To disable database writes (e.g., for CI environments or quick local runs):
-
-```bash
-uv run rue tests run --no-db
-```
-
 ### Custom Database Path
 
-Specify a custom database location:
-
-```bash
-uv run rue tests run --db-path /path/to/custom/rue.db
-```
-
-Or configure in `pyproject.toml`:
+Database persistence is required for normal CLI runs. Configure a custom database location in `pyproject.toml`:
 
 ```toml
 [tool.rue]

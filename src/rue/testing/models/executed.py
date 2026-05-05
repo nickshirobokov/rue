@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from rue.telemetry.base import TelemetryArtifact
+from rue.telemetry.models import TelemetryArtifact
 from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.result import TestResult, TestStatus
 

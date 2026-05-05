@@ -1,29 +1,51 @@
+import asyncio
+from io import StringIO
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from rich.console import Console
 from tomlkit import parse
 from typer.testing import CliRunner
 
+from rue.assertions.models import AssertionRepr, AssertionResult
 from rue.cli import app
+from rue.cli.console import ConsoleReporter
 from rue.cli.tests.status import TestsStatusReport
 from rue.config import Config
+from rue.context.models import RunEnvironment
 from rue.context.runtime import CURRENT_RUN_CONTEXT
+from rue.events import RunEventsProcessor, RunEventsReceiver
 from rue.experiments.models import (
     ExperimentSpec,
     ExperimentVariant,
     ExperimentVariantResult,
 )
 from rue.models import Locator
-from rue.storage.sqlite import SQLiteStore
+from rue.resources import ResourceSpec, Scope
+from rue.resources.metrics.models import MetricMetadata, MetricResult
+from rue.storage import TursoRunRecorder, TursoRunStore
 from rue.testing import LoadedTestDef
 from rue.testing.discovery import TestDefinitionErrors, TestDefinitionIssue
-from rue.testing.models.run import Run, RunEnvironment, RunResult
+from rue.testing.models import ExecutedTest
+from rue.testing.models.result import TestResult, TestStatus
+from rue.testing.models.run import ExecutedRun, RunResult
 from rue.testing.models.spec import TestSpecCollection
-from tests.helpers import make_definition
+from tests.helpers import make_definition, make_run_context
 
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cli_db(tmp_path: Path, monkeypatch):
+    config = Config(database_path=str(tmp_path / "rue.turso.db"))
+    monkeypatch.setattr("rue.cli.tests.run.load_config", lambda: config)
+    monkeypatch.setattr(
+        "rue.cli.tests.status.command.load_config",
+        lambda: config,
+    )
+    monkeypatch.setattr("rue.cli.experiments.run.load_config", lambda: config)
 
 
 def dummy() -> None:
@@ -61,21 +83,21 @@ def make_environment(**updates) -> RunEnvironment:
     )
 
 
-class TestResolveReporters:
-    """Tests for reporter resolution via CLI and Config."""
+class TestResolveProcessors:
+    """Tests for processor configuration."""
 
-    def test_default_no_reporters(self):
+    def test_default_no_processors(self):
         config = Config()
-        assert config.reporters == []
+        assert config.processors == []
 
-    def test_config_reporters(self):
-        config = Config(reporters=["ConsoleReporter"])
-        assert config.reporters == ["ConsoleReporter"]
+    def test_config_processors(self):
+        config = Config(processors=["ConsoleReporter"])
+        assert config.processors == ["ConsoleReporter"]
 
     def test_cli_overrides_config(self):
-        config = Config(reporters=["OtelReporter"])
-        overridden = config.with_overrides(reporters=["ConsoleReporter"])
-        assert overridden.reporters == ["ConsoleReporter"]
+        config = Config(processors=["OtelReporter"])
+        overridden = config.with_overrides(processors=["ConsoleReporter"])
+        assert overridden.processors == ["ConsoleReporter"]
 
 
 def test_top_level_help_lists_tests_command():
@@ -97,7 +119,8 @@ def test_tests_run_help_exposes_run_options():
     result = runner.invoke(app, ["tests", "run", "--help"])
     assert result.exit_code == 0
     assert "--run-id" in result.stdout
-    assert "--no-db" in result.stdout
+    assert "--no-db" not in result.stdout
+    assert "--db-path" not in result.stdout
     assert "--otel" in result.stdout
 
 
@@ -113,7 +136,7 @@ def test_experiments_run_help_exposes_experiment_options():
 def test_tests_status_help_exposes_status_options():
     result = runner.invoke(app, ["tests", "status", "--help"])
     assert result.exit_code == 0
-    assert "--db-path" in result.stdout
+    assert "--database-path" in result.stdout
     assert "--keyword" in result.stdout
     assert "--run-id" not in result.stdout
     assert "--no-db" not in result.stdout
@@ -143,16 +166,27 @@ def test_cli_rejects_invalid_run_id():
 )
 def test_run_tests_returns_2_when_run_id_already_exists(
     command: list[str],
-    sqlite_db_path: Path, sqlite_store: SQLiteStore, monkeypatch
+    database_path: Path,
+    turso_store: TursoRunStore,
+    monkeypatch,
 ):
     existing_run_id = uuid4()
 
-    sqlite_store.save_run(
-        Run(
-            run_id=existing_run_id,
-            environment=make_environment(),
-            result=RunResult(),
+    recorder = TursoRunRecorder()
+    recorder.configure(Config(database_path=turso_store.path))
+    asyncio.run(
+        recorder.on_run_start(
+            ExecutedRun(
+                run_id=existing_run_id,
+                environment=make_environment(),
+                result=RunResult(),
+            )
         )
+    )
+    recorder.close()
+    monkeypatch.setattr(
+        "rue.cli.tests.run.load_config",
+        lambda: Config(database_path=str(database_path)),
     )
 
     planned = False
@@ -180,8 +214,6 @@ def test_run_tests_returns_2_when_run_id_already_exists(
         app,
         [
             *command,
-            "--db-path",
-            str(sqlite_db_path),
             "--run-id",
             str(existing_run_id),
         ],
@@ -211,7 +243,7 @@ def test_run_tests_returns_2_when_definition_errors(
         lambda **kwargs: pytest.fail("Runner should not be constructed"),
     )
 
-    result = runner.invoke(app, [*command, "--no-db"])
+    result = runner.invoke(app, [*command])
 
     assert result.exit_code == 2
     assert "Test definition errors" in result.stdout
@@ -219,28 +251,38 @@ def test_run_tests_returns_2_when_definition_errors(
     assert "broken" in result.stdout
 
 
-def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
+def test_cli_resolves_processors_and_injects_turso_recorder(
+    tmp_path, monkeypatch
+):
     captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "rue.cli.tests.run.load_config",
+        lambda: Config(
+            database_path=str(tmp_path / "rue.turso.db"), otel=False
+        ),
+    )
+
+    class CustomProcessor(RunEventsProcessor):
+        pass
+
+    custom = CustomProcessor()
 
     class FakeRunner:
         def __init__(
             self,
             *,
-            reporters,
-            store=None,
             capture_output=True,
         ) -> None:
             context = CURRENT_RUN_CONTEXT.get()
             captured["context"] = context
             captured["config"] = context.config
-            captured["reporters"] = reporters
-            captured["store"] = store
+            captured["processors"] = RunEventsReceiver.current().processors
             captured["capture_output"] = capture_output
 
         async def run(self, items, *, resolver):
             captured["items"] = items
             captured["resolver"] = resolver
-            return Run()
+            return ExecutedRun()
 
     monkeypatch.setattr(
         "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
@@ -257,23 +299,97 @@ def test_cli_resolves_reporters_and_injects_store(tmp_path, monkeypatch):
         [
             "tests",
             "run",
-            "--db-path",
-            str(tmp_path / "rue.db"),
-            "--reporter",
-            "ConsoleReporter",
+            "--processor",
+            "CustomProcessor",
             "--fail-fast",
             "--show-output",
         ],
     )
 
     assert result.exit_code == 0
-    assert captured["config"].reporters == ["ConsoleReporter"]
+    assert captured["config"].processors == ["CustomProcessor"]
     assert captured["config"].fail_fast is True
-    assert [type(r).__name__ for r in captured["reporters"]] == [
-        "ConsoleReporter"
+    assert [type(p).__name__ for p in captured["processors"]] == [
+        "ConsoleReporter",
+        "CustomProcessor",
+        "TursoRunRecorder",
     ]
-    assert isinstance(captured["store"], SQLiteStore)
+    assert captured["processors"][1] is custom
+    assert isinstance(captured["processors"][-1], TursoRunRecorder)
+    assert captured["processors"][-1].path == tmp_path / "rue.turso.db"
+    assert "TursoRunRecorder" not in RunEventsProcessor.REGISTRY
     assert captured["capture_output"] is False
+
+
+def test_console_reporter_prints_failed_run_and_metrics() -> None:
+    make_run_context(bind_events=False, fail_fast=False)
+    output = StringIO()
+    console = Console(
+        file=output,
+        force_terminal=False,
+        color_system=None,
+        width=120,
+    )
+    reporter = ConsoleReporter(console=console, verbosity=1)
+    definition = make_definition(
+        "test_sample",
+        module_path="tests/test_sample.py",
+    )
+    assertion = AssertionResult(
+        expression_repr=AssertionRepr(
+            expr="assert actual == expected",
+            lines_above="actual = 1",
+            lines_below="",
+            resolved_args={"actual": "1", "expected": "2"},
+        ),
+        passed=False,
+        error_message="not equal",
+    )
+    execution = ExecutedTest(
+        definition=definition,
+        result=TestResult(
+            status=TestStatus.FAILED,
+            duration_ms=5,
+            error=AssertionError("not equal"),
+            assertion_results=[assertion],
+        ),
+        execution_id=uuid4(),
+    )
+    metric = MetricResult(
+        metadata=MetricMetadata(
+            identity=ResourceSpec(
+                locator=Locator(
+                    module_path=Path("metrics.py"),
+                    function_name="latency",
+                ),
+                scope=Scope.TEST,
+            )
+        ),
+        assertion_results=[assertion],
+        value=20,
+    )
+    run = ExecutedRun(
+        environment=make_environment(),
+        result=RunResult(
+            executions=[execution],
+            metric_results=[metric],
+            total_duration_ms=5,
+        ),
+    )
+
+    async def drive_reporter() -> None:
+        await reporter.on_collection_complete([definition], run)
+        await reporter.on_execution_complete(execution, run)
+        await reporter.on_run_complete(run)
+
+    asyncio.run(drive_reporter())
+
+    text = output.getvalue()
+    assert "ASSERTIONS" in text
+    assert "Failed Assertion" in text
+    assert "METRICS" in text
+    assert "latency" in text
+    assert "1 failed" in text
 
 
 @pytest.mark.parametrize(
@@ -293,34 +409,28 @@ def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(
         lambda self, collection: [make_item("test_ok", set())],
     )
 
-    result = runner.invoke(
-        app, [*command, "--run-id", str(uuid4()), "--no-db"]
-    )
+    result = runner.invoke(app, [*command, "--run-id", str(uuid4())])
     assert result.exit_code == 0
 
 
-def test_tests_without_subcommand_defaults_to_run(monkeypatch):
+def test_tests_without_subcommand_defaults_to_run(tmp_path: Path, monkeypatch):
     captured: dict[str, object] = {}
 
     class FakeRunner:
         def __init__(
             self,
             *,
-            reporters,
-            store=None,
             capture_output=True,
         ) -> None:
             context = CURRENT_RUN_CONTEXT.get()
             captured["context"] = context
             captured["config"] = context.config
-            captured["reporters"] = reporters
-            captured["store"] = store
             captured["capture_output"] = capture_output
 
         async def run(self, items, *, resolver):
             captured["items"] = items
             captured["resolver"] = resolver
-            return Run()
+            return ExecutedRun()
 
     def build_spec_collection(self, paths, **kwargs):
         del self, kwargs
@@ -329,7 +439,9 @@ def test_tests_without_subcommand_defaults_to_run(monkeypatch):
 
     monkeypatch.setattr(
         "rue.cli.tests.run.load_config",
-        lambda: Config(db_enabled=False, fail_fast=True),
+        lambda: Config(
+            database_path=str(tmp_path / "rue.turso.db"), fail_fast=True
+        ),
     )
     monkeypatch.setattr(
         "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
@@ -346,11 +458,10 @@ def test_tests_without_subcommand_defaults_to_run(monkeypatch):
     assert result.exit_code == 0
     assert captured["paths"] == ["."]
     assert captured["config"].fail_fast is True
-    assert captured["store"] is None
 
 
 def test_rue_test_command_is_unknown():
-    result = runner.invoke(app, ["test", "--no-db"])
+    result = runner.invoke(app, ["test"])
     assert result.exit_code == 2
     assert "No such command 'test'" in result.output
 
@@ -408,7 +519,7 @@ def test_run_and_status_share_selection_parsing(
 
             async def run(self, items, *, resolver):
                 del items, resolver
-                return Run()
+                return ExecutedRun()
 
         monkeypatch.setattr("rue.cli.tests.run.Runner", FakeRunner)
 
@@ -424,8 +535,6 @@ def test_run_and_status_share_selection_parsing(
             "--skip-tag",
             "slow",
             "-v",
-            "--db-path",
-            str(tmp_path / "custom.db"),
         ],
     )
 
@@ -436,7 +545,7 @@ def test_run_and_status_share_selection_parsing(
     assert captured["keyword"] == "fast and not slow"
 
 
-def test_experiments_run_shares_selection_and_forces_no_db(
+def test_experiments_run_shares_selection_and_preserves_db_config(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -512,9 +621,8 @@ def test_experiments_run_shares_selection_and_forces_no_db(
     assert captured["include_tags"] == ("fast",)
     assert captured["exclude_tags"] == ("slow",)
     assert captured["keyword"] == "smoke"
-    assert captured["config"].db_enabled is False
     assert captured["config"].maxfail is None
-    assert captured["config"].reporters == []
+    assert captured["config"].processors == []
     assert captured["experiments"] == (experiment,)
     assert "model=mini" in cli_result.stdout
 
@@ -609,7 +717,7 @@ def test_tests_status_does_not_create_missing_db(tmp_path, monkeypatch):
 
     result = runner.invoke(
         app,
-        ["tests", "status", "--db-path", str(missing_db)],
+        ["tests", "status", "--database-path", str(missing_db)],
     )
 
     assert result.exit_code == 0

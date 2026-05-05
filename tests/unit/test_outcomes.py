@@ -16,11 +16,9 @@ def make_item(
     return make_definition(name or fn.__name__, fn=fn, is_async=is_async)
 
 
-def make_runner(null_reporter) -> Runner:
-    make_run_context(db_enabled=False)
-    return Runner(
-        reporters=[null_reporter],
-    )
+def make_runner() -> Runner:
+    make_run_context()
+    return Runner()
 
 
 @pytest.mark.parametrize(
@@ -33,7 +31,6 @@ def make_runner(null_reporter) -> Runner:
 )
 @pytest.mark.asyncio
 async def test_imperative_outcome_sets_status_and_reason(
-    null_reporter,
     outcome_fn,
     status,
     count_attr: str,
@@ -43,7 +40,7 @@ async def test_imperative_outcome_sets_status_and_reason(
     def outcome_test():
         outcome_fn(reason)
 
-    result = await make_runner(null_reporter).run(
+    result = await make_runner().run(
         items=[make_item(outcome_test)],
         resolver=DependencyResolver(registry),
     )
@@ -65,7 +62,6 @@ async def test_imperative_outcome_sets_status_and_reason(
 )
 @pytest.mark.asyncio
 async def test_imperative_outcome_without_reason_uses_expected_error_type(
-    null_reporter,
     outcome_fn,
     count_attr: str,
     error_type,
@@ -73,7 +69,7 @@ async def test_imperative_outcome_without_reason_uses_expected_error_type(
     def outcome_test():
         outcome_fn()
 
-    result = await make_runner(null_reporter).run(
+    result = await make_runner().run(
         items=[make_item(outcome_test)],
         resolver=DependencyResolver(registry),
     )
@@ -85,7 +81,6 @@ async def test_imperative_outcome_without_reason_uses_expected_error_type(
 @pytest.mark.parametrize("outcome_fn", [skip, fail, xfail])
 @pytest.mark.asyncio
 async def test_imperative_outcome_stops_execution(
-    null_reporter,
     outcome_fn,
 ):
     executed = []
@@ -95,7 +90,7 @@ async def test_imperative_outcome_stops_execution(
         outcome_fn("stopping")
         executed.append("after")
 
-    await make_runner(null_reporter).run(
+    await make_runner().run(
         items=[make_item(outcome_test)],
         resolver=DependencyResolver(registry),
     )
