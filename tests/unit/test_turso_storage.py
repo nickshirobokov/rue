@@ -1,5 +1,6 @@
 """Tests for Turso run storage."""
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -14,9 +15,14 @@ from rue.predicates.models import PredicateResult
 from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.models import MetricMetadata, MetricResult
 from rue.storage import MAX_STORED_RUNS, TursoRunRecorder, TursoRunStore
-from rue.testing.models import ExecutedRun, ExecutedTest, RunEnvironment, RunResult
+from rue.testing.models import (
+    ExecutedRun,
+    ExecutedTest,
+    RunEnvironment,
+    RunResult,
+)
 from rue.testing.models.result import TestResult, TestStatus
-from tests.helpers import make_definition
+from tests.helpers import make_definition, make_run_context
 
 
 def make_environment() -> RunEnvironment:
@@ -78,6 +84,7 @@ def test_store_rejects_invalid_native_timestamp(
 
 
 def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
+    make_run_context(bind_events=False, fail_fast=False)
     recorder = TursoRunRecorder()
     recorder.configure(Config(database_path=database_path))
     run_id = uuid4()
@@ -113,12 +120,16 @@ def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
             )
         ],
     )
+    try:
+        raise AssertionError("predicate failed")
+    except AssertionError as error:
+        execution_error = error
     execution = ExecutedTest(
         definition=definition,
         result=TestResult(
             status=TestStatus.FAILED,
             duration_ms=12.5,
-            error=AssertionError("predicate failed"),
+            error=execution_error,
             assertion_results=[assertion],
         ),
         execution_id=execution_id,
@@ -145,7 +156,7 @@ def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
                 )
             ],
         ),
-        assertion_results=[],
+        assertion_results=[assertion],
         value=12.5,
     )
     run = ExecutedRun(
@@ -172,9 +183,18 @@ def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
         tags = conn.execute(
             "SELECT tag FROM execution_tags ORDER BY tag"
         ).fetchall()
-        assertion_row = conn.execute("SELECT * FROM assertions").fetchone()
-        predicate_row = conn.execute("SELECT * FROM predicates").fetchone()
         metric_row = conn.execute("SELECT * FROM metrics").fetchone()
+        execution_assertion_row = conn.execute(
+            "SELECT * FROM assertions WHERE execution_id = ?",
+            (str(execution_id),),
+        ).fetchone()
+        metric_assertion_row = conn.execute(
+            "SELECT * FROM assertions WHERE metric_id = ?",
+            (metric_row["metric_id"],),
+        ).fetchone()
+        predicate_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM predicates"
+        ).fetchone()
         consumer_row = conn.execute(
             "SELECT * FROM metric_consumers"
         ).fetchone()
@@ -186,13 +206,15 @@ def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
     assert run_row["failed"] == 1
     assert execution_row["execution_id"] == str(execution_id)
     assert execution_row["case_id"] == str(case_id)
+    traceback_payload = json.loads(execution_row["error_traceback"])
+    assert traceback_payload["exc_type"] == "AssertionError"
     assert [row["tag"] for row in tags] == ["llm", "smoke"]
-    assert assertion_row["expression"] == "equals(actual, reference)"
-    assert assertion_row["passed"] == 0
-    assert predicate_row["predicate_name"] == "equals"
-    assert predicate_row["value"] == 0
+    assert execution_assertion_row["expression"] == "equals(actual, reference)"
+    assert execution_assertion_row["passed"] == 0
     assert metric_row["name"] == "latency_ms"
     assert metric_row["value_real"] == 12.5
+    assert metric_assertion_row["expression"] == "equals(actual, reference)"
+    assert predicate_count["count"] == 2
     assert consumer_row["kind"] == "test"
     assert dependency_row["function_name"] == "model"
 

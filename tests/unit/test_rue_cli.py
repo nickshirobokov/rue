@@ -1,13 +1,19 @@
+import asyncio
+from io import StringIO
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from rich.console import Console
 from tomlkit import parse
 from typer.testing import CliRunner
 
+from rue.assertions.models import AssertionRepr, AssertionResult
 from rue.cli import app
+from rue.cli.console import ConsoleReporter
 from rue.cli.tests.status import TestsStatusReport
 from rue.config import Config
+from rue.context.models import RunEnvironment
 from rue.context.runtime import CURRENT_RUN_CONTEXT
 from rue.events import RunEventsProcessor, RunEventsReceiver
 from rue.experiments.models import (
@@ -16,13 +22,16 @@ from rue.experiments.models import (
     ExperimentVariantResult,
 )
 from rue.models import Locator
+from rue.resources import ResourceSpec, Scope
+from rue.resources.metrics.models import MetricMetadata, MetricResult
 from rue.storage import TursoRunRecorder, TursoRunStore
 from rue.testing import LoadedTestDef
 from rue.testing.discovery import TestDefinitionErrors, TestDefinitionIssue
-from rue.context.models import RunEnvironment
+from rue.testing.models import ExecutedTest
+from rue.testing.models.result import TestResult, TestStatus
 from rue.testing.models.run import ExecutedRun, RunResult
 from rue.testing.models.spec import TestSpecCollection
-from tests.helpers import make_definition
+from tests.helpers import make_definition, make_run_context
 
 
 runner = CliRunner()
@@ -308,6 +317,77 @@ def test_cli_resolves_processors_and_injects_turso_recorder(
     assert captured["processors"][-1].path == tmp_path / "rue.turso.db"
     assert "TursoRunRecorder" not in RunEventsProcessor.REGISTRY
     assert captured["capture_output"] is False
+
+
+def test_console_reporter_prints_failed_run_and_metrics() -> None:
+    make_run_context(bind_events=False, fail_fast=False)
+    output = StringIO()
+    console = Console(
+        file=output,
+        force_terminal=False,
+        color_system=None,
+        width=120,
+    )
+    reporter = ConsoleReporter(console=console, verbosity=1)
+    definition = make_definition(
+        "test_sample",
+        module_path="tests/test_sample.py",
+    )
+    assertion = AssertionResult(
+        expression_repr=AssertionRepr(
+            expr="assert actual == expected",
+            lines_above="actual = 1",
+            lines_below="",
+            resolved_args={"actual": "1", "expected": "2"},
+        ),
+        passed=False,
+        error_message="not equal",
+    )
+    execution = ExecutedTest(
+        definition=definition,
+        result=TestResult(
+            status=TestStatus.FAILED,
+            duration_ms=5,
+            error=AssertionError("not equal"),
+            assertion_results=[assertion],
+        ),
+        execution_id=uuid4(),
+    )
+    metric = MetricResult(
+        metadata=MetricMetadata(
+            identity=ResourceSpec(
+                locator=Locator(
+                    module_path=Path("metrics.py"),
+                    function_name="latency",
+                ),
+                scope=Scope.TEST,
+            )
+        ),
+        assertion_results=[assertion],
+        value=20,
+    )
+    run = ExecutedRun(
+        environment=make_environment(),
+        result=RunResult(
+            executions=[execution],
+            metric_results=[metric],
+            total_duration_ms=5,
+        ),
+    )
+
+    async def drive_reporter() -> None:
+        await reporter.on_collection_complete([definition], run)
+        await reporter.on_execution_complete(execution, run)
+        await reporter.on_run_complete(run)
+
+    asyncio.run(drive_reporter())
+
+    text = output.getvalue()
+    assert "ASSERTIONS" in text
+    assert "Failed Assertion" in text
+    assert "METRICS" in text
+    assert "latency" in text
+    assert "1 failed" in text
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,4 @@
-"""ConsoleReporter: slim orchestrator delegating to focused sub-components."""
+"""ConsoleReporter: Rich console processor for Rue test runs."""
 
 from __future__ import annotations
 
@@ -11,19 +11,21 @@ from rich.console import Console, Group, RenderableType
 from rich.live import Live
 from rich.panel import Panel
 from rich.progress_bar import ProgressBar
-from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
 from rue.events import RunEventsProcessor
 from rue.testing.models import TestStatus
 
-from .assertions import AssertionRenderer
-from .captured import CapturedOutputRenderer, StderrCapture
-from .failures import ExceptionRenderer
-from .metrics import MetricsRenderer
+from .captured import StderrCapture
 from .modes import OutputMode, make_mode
 from .shared import STATUS_STYLES
+from .views import (
+    ConsoleCapturedOutputView,
+    ConsoleExecutionView,
+    ConsoleMetricRunView,
+    ConsoleRunView,
+)
 
 
 if TYPE_CHECKING:
@@ -31,7 +33,6 @@ if TYPE_CHECKING:
     from rue.testing import LoadedTestDef
     from rue.testing.execution.executable import ExecutableTest
     from rue.testing.models.executed import ExecutedTest
-    from rue.context.models import RunEnvironment
     from rue.testing.models.run import ExecutedRun
 
 
@@ -54,15 +55,11 @@ class ConsoleReporter(RunEventsProcessor):
         self.verbosity = verbosity
         self._mode: OutputMode = make_mode(verbosity, self.console)
         self._live: Live | None = None
-        self._assertions = AssertionRenderer()
-        self._exceptions = ExceptionRenderer()
-        self._metrics = MetricsRenderer()
         self._stderr_capture = StderrCapture()
-        self._captured_renderer = CapturedOutputRenderer()
         self._lock = asyncio.Lock()
         self.items: list[LoadedTestDef] = []
         self.item_keys: set[int] = set()
-        self.items_by_file: dict[Path, list[LoadedTestDef]] = {}
+        self.items_by_file: dict[Path | None, list[LoadedTestDef]] = {}
         self.total_tests: int = 0
         self.completed_count: int = 0
         self.tests: dict[int, ExecutableTest] = {}
@@ -71,78 +68,20 @@ class ConsoleReporter(RunEventsProcessor):
         self.failures: list[ExecutedTest] = []
         self._status_counts: dict[TestStatus, int] = {}
         self.current_module: Path | None = None
-        self.completed_modules: set[Path] = set()
+        self.completed_modules: set[Path | None] = set()
 
     def configure(self, config: Config) -> None:
         """Apply runtime console settings."""
         self.verbosity = config.verbosity
         self._mode = make_mode(self.verbosity, self.console)
-        self._assertions = AssertionRenderer()
-        self._exceptions = ExceptionRenderer(show_locals=config.verbosity >= 2)
 
     # ── Run header & summary ──────────────────────────────────────────────────
 
-    def _build_run_header(
-        self, environment: RunEnvironment, run_id: object
-    ) -> Group:
-        platform_text = Text()
-        platform_text.append("platform ", style="dim")
-        platform_text.append(environment.platform)
-        platform_text.append("  python ", style="dim")
-        platform_text.append(environment.python_version)
-        platform_text.append("  rue ", style="dim")
-        platform_text.append(environment.rue_version)
+    def _build_run_header(self, run: ExecutedRun) -> RenderableType:
+        return ConsoleRunView.from_run(run).render_header()
 
-        rootdir_text = Text()
-        rootdir_text.append("rootdir: ", style="dim")
-        rootdir_text.append(str(environment.working_directory))
-
-        parts: list[RenderableType] = [
-            Rule(Text("RUE RUN STARTS", style="bold cyan"), characters="="),
-            platform_text,
-            rootdir_text,
-        ]
-        if run_id:
-            run_id_text = Text()
-            run_id_text.append("run_id: ", style="dim")
-            run_id_text.append(str(run_id), style="dim")
-            parts.append(run_id_text)
-        if environment.branch and environment.commit_hash:
-            commit = environment.commit_hash[:8]
-            dirty = " dirty" if environment.dirty else ""
-            git_text = Text()
-            git_text.append("git: ", style="dim")
-            git_text.append(f"{environment.branch} ({commit}){dirty}")
-            parts.append(git_text)
-        return Group(*parts)
-
-    def _build_summary(self, run: ExecutedRun) -> Group:
-        result = run.result
-        parts: list[str] = []
-        if result.passed:
-            parts.append(f"[bold green]{result.passed} passed[/bold green]")
-        if result.failed:
-            parts.append(f"[bold red]{result.failed} failed[/bold red]")
-        if result.errors:
-            parts.append(f"[bold yellow]{result.errors} errors[/bold yellow]")
-        if result.skipped:
-            parts.append(f"[yellow]{result.skipped} skipped[/yellow]")
-        if result.xfailed:
-            parts.append(f"[blue]{result.xfailed} xfailed[/blue]")
-        if result.xpassed:
-            parts.append(f"[magenta]{result.xpassed} xpassed[/magenta]")
-
-        summary = ", ".join(parts) if parts else "[dim]0 tests[/dim]"
-        duration_line = (
-            f"{summary} [dim]in {result.total_duration_ms:.0f}ms[/dim]"
-        )
-        run_id_line = f"[dim]run_id: {run.run_id}[/dim]"
-        return Group(
-            Rule(Text("SUMMARY", style="bold cyan"), characters="="),
-            Text.from_markup(duration_line, justify="center"),
-            Text.from_markup(run_id_line, justify="center"),
-            Rule(characters="="),
-        )
+    def _build_summary(self, run: ExecutedRun) -> RenderableType:
+        return ConsoleRunView.from_run(run).render_summary()
 
     def _build_live_display(self) -> RenderableType:
         if self.items_by_file and len(self.completed_modules) == len(
@@ -226,7 +165,7 @@ class ConsoleReporter(RunEventsProcessor):
         self.current_module = None
         self.completed_modules = set()
 
-        self.console.print(self._build_run_header(run.environment, run.run_id))
+        self.console.print(self._build_run_header(run))
         self.console.print()
         if self._mode.show_collected_count:
             self.console.print(
@@ -255,7 +194,9 @@ class ConsoleReporter(RunEventsProcessor):
             if self.is_top_level_definition(test.definition):
                 self.tests[self._top_level_key(test.definition)] = test
 
-    async def on_test_start(self, test: ExecutableTest, run: ExecutedRun) -> None:
+    async def on_test_start(
+        self, test: ExecutableTest, run: ExecutedRun
+    ) -> None:
         """Refresh live output before a test starts."""
         _ = test, run
         if self._live is not None:
@@ -312,29 +253,32 @@ class ConsoleReporter(RunEventsProcessor):
             self.console.print()
 
         if self._mode.show_failures and self.failures:
-            for renderable in self._assertions.render(
+            for renderable in ConsoleExecutionView.render_assertion_failures(
                 self.failures, self.verbosity
             ):
                 self.console.print(renderable)
-            for renderable in self._exceptions.render(
-                self.failures, self.verbosity
+            for renderable in ConsoleExecutionView.render_exception_failures(
+                self.failures,
+                self.verbosity,
+                show_locals=self.verbosity >= 2,
             ):
                 self.console.print(renderable)
 
         if run.result.stopped_early:
             self.console.print("[yellow]Run terminated early.[/yellow]")
 
-        for renderable in self._metrics.render(
-            run.result.metric_results,
-            self.verbosity,
-            run.result.executions,
-        ):
-            self.console.print(renderable)
+        if run.result.metric_results:
+            metrics = ConsoleMetricRunView.from_results(
+                run.result.metric_results
+            )
+            for renderable in metrics.render(self.verbosity):
+                self.console.print(renderable)
 
         if self.verbosity >= 2:
-            for renderable in self._captured_renderer.render(
+            captured = ConsoleCapturedOutputView.from_lines(
                 self._stderr_capture.lines
-            ):
+            )
+            for renderable in captured.render():
                 self.console.print(renderable)
 
         self.console.print()

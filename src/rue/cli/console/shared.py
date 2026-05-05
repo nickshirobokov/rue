@@ -1,5 +1,7 @@
 """Shared primitives: status styles and pure formatting utilities."""
 
+# ruff: noqa: D101,D103
+
 from __future__ import annotations
 
 import re
@@ -8,12 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from rich.text import Text
-
 from rue.testing.models import TestStatus
 
+
 if TYPE_CHECKING:
-    from rue.assertions import AssertionRepr, AssertionResult
+    from rue.assertions import AssertionRepr
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,45 +84,3 @@ def oneline(s: str) -> str:
 
 def truncate(s: str, max_len: int = 120) -> str:
     return s if len(s) <= max_len else s[:max_len] + "…"
-
-
-def format_assertion_result(
-    assertion: AssertionResult,
-    *,
-    heading: str,
-) -> Text:
-    expr = assertion.expression_repr
-    text = Text()
-    color = "green" if assertion.passed else "red"
-
-    text.append("✓ " if assertion.passed else "✗ ", style=f"bold {color}")
-    text.append(heading, style="bold")
-    if assertion.error_message:
-        text.append("  ")
-        text.append(assertion.error_message, style="italic")
-
-    above, expr_lines, below = dedented_source_block(expr)
-
-    for line in above:
-        text.append("\n")
-        text.append(f"│  {line}", style="dim")
-    for line in expr_lines:
-        text.append("\n")
-        text.append(">  ", style=f"bold {color}")
-        text.append(line, style="bold")
-    for line in below:
-        text.append("\n")
-        text.append(f"│  {line}", style="dim")
-
-    if expr.resolved_args:
-        text.append("\n")
-        text.append("│", style="dim")
-        text.append("\n")
-        text.append("╰─ where:", style="dim italic")
-        for name, value in expr.resolved_args.items():
-            text.append("\n     ")
-            text.append(oneline(name), style="bold")
-            text.append(" = ", style="dim")
-            text.append(truncate(oneline(value)), style="cyan")
-
-    return text

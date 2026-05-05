@@ -1,12 +1,8 @@
 """Captures stderr during a run and renders it as a WARNINGS section."""
 
+# ruff: noqa: D101,D102
+
 from __future__ import annotations
-
-from collections import Counter
-
-from rich.console import RenderableType
-from rich.rule import Rule
-from rich.text import Text
 
 from rue.resources.sut.output import SUTOutputCapture
 
@@ -39,22 +35,3 @@ class StderrCapture:
     @property
     def lines(self) -> list[str]:
         return list(self._lines)
-
-
-class CapturedOutputRenderer:
-    def render(self, lines: list[str]) -> list[RenderableType]:
-        if not lines:
-            return []
-        renderables: list[RenderableType] = [
-            Text(""),
-            Rule(
-                Text("WARNINGS", style="bold yellow"),
-                characters="=",
-                style="yellow",
-            ),
-        ]
-        for line, count in Counter(lines).items():
-            label = f"{line} (x{count})" if count > 1 else line
-            renderables.append(Text(label, style="yellow dim"))
-        renderables.append(Text(""))
-        return renderables
