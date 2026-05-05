@@ -18,13 +18,15 @@ from rue.context.runtime import (
     TestContext,
     bind,
 )
+from rue.context.scopes import Scope
 from rue.resources import DependencyResolver
-from rue.resources.models import Scope
 from rue.testing.execution.backend import ExecutionBackend
 from rue.testing.execution.executable import ExecutableTest
-from rue.testing.execution.worker import (
+from rue.testing.execution.models import (
     ExecutorPayload,
     RemoteExecutionResult,
+)
+from rue.testing.execution.worker import (
     run_remote_test,
 )
 from rue.testing.models import (

@@ -174,11 +174,13 @@ def test_run_tests_returns_2_when_run_id_already_exists(
 
     recorder = TursoRunRecorder()
     recorder.configure(Config(database_path=turso_store.path))
-    recorder.start_run(
-        ExecutedRun(
-            run_id=existing_run_id,
-            environment=make_environment(),
-            result=RunResult(),
+    asyncio.run(
+        recorder.on_run_start(
+            ExecutedRun(
+                run_id=existing_run_id,
+                environment=make_environment(),
+                result=RunResult(),
+            )
         )
     )
     recorder.close()

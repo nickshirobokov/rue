@@ -18,10 +18,6 @@ from rue.storage.schema import (
 )
 
 
-class TursoFeatureError(RuntimeError):
-    """Raised when the configured Turso connection lacks required features."""
-
-
 class TursoRunStore:
     """Owns the Turso database used for Rue run storage."""
 
@@ -36,6 +32,7 @@ class TursoRunStore:
 
     @contextmanager
     def connection(self) -> Iterator[turso.Connection]:
+        """Open a configured connection and close it after use."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = self.connect()
         try:
@@ -44,6 +41,7 @@ class TursoRunStore:
             conn.close()
 
     def connect(self) -> turso.Connection:
+        """Open a Turso connection with Rue-required pragmas."""
         conn = turso.connect(
             str(self.physical_path),
             experimental_features=self.features,
@@ -55,6 +53,7 @@ class TursoRunStore:
         return conn
 
     def initialize(self) -> None:
+        """Create or update the Rue storage schema."""
         with self.connection() as conn:
             self.probe(conn)
             conn.executescript(SCHEMA)
@@ -71,19 +70,22 @@ class TursoRunStore:
             conn.commit()
 
     def probe(self, conn: turso.Connection) -> None:
+        """Verify that the connection supports Rue schema column types."""
         rows = conn.execute("PRAGMA list_types").fetchall()
         available = {str(row[0]).split("(", 1)[0] for row in rows}
         missing = REQUIRED_CUSTOM_TYPES - available
         if missing:
             names = ", ".join(sorted(missing))
-            raise TursoFeatureError(
+            raise RuntimeError(
                 f"Turso custom types are unavailable: {names}"
             )
 
     def exists(self) -> bool:
+        """Return whether the logical database path exists."""
         return self.path.exists()
 
     def schema_version(self) -> int:
+        """Return the stored schema version, or zero if unavailable."""
         if not self.exists():
             return 0
         with self.connection() as conn:
@@ -93,6 +95,7 @@ class TursoRunStore:
             return 0 if row is None else int(row["version"])
 
     def run_exists(self, run_id: UUID) -> bool:
+        """Return whether a run row already exists."""
         if not self.exists():
             return False
         with self.connection() as conn:
@@ -103,6 +106,7 @@ class TursoRunStore:
             return row is not None
 
     def run_count(self) -> int:
+        """Return the number of stored runs."""
         if not self.exists():
             return 0
         with self.connection() as conn:
@@ -131,6 +135,7 @@ class TursoRunStore:
         )
 
     def reset(self) -> None:
+        """Delete database artifacts and initialize a fresh database."""
         for path in self.artifact_paths:
             if path.exists() or path.is_symlink():
                 path.unlink()
@@ -143,6 +148,5 @@ __all__ = [
     "MAX_STORED_RUNS",
     "SCHEMA_VERSION",
     "TURSO_FEATURES",
-    "TursoFeatureError",
     "TursoRunStore",
 ]

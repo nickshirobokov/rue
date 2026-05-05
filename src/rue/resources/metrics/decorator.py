@@ -14,9 +14,10 @@ from rue.context.runtime import (
     CURRENT_RESOURCE_HOOK_CONTEXT,
     bind,
 )
+from rue.context.scopes import Scope
 from rue.resources.metrics.metric import Metric
 from rue.resources.metrics.models import CalculatedValue, MetricResult
-from rue.resources.models import ResourceSpec, Scope
+from rue.resources.models import ResourceSpec
 from rue.resources.registry import resource
 
 
@@ -66,16 +67,16 @@ def metric[**P](
         return decorator
 
     name = fn.__name__
+    resource_scope = Scope(scope)
 
     is_generator = inspect.isgeneratorfunction(fn)
     is_async_generator = inspect.isasyncgenfunction(fn)
 
     def on_resolve_hook(m: Metric) -> Metric:
-        scope_val = scope if isinstance(scope, Scope) else Scope(scope)
         ident = m.metadata.identity
         m.metadata.identity = ResourceSpec(
             locator=replace(ident.locator, function_name=name),
-            scope=scope_val,
+            scope=resource_scope,
         )
         return m
 
@@ -123,7 +124,7 @@ def metric[**P](
 
         return resource(
             wrapped_gen,
-            scope=scope,
+            scope=resource_scope,
             on_resolve=on_resolve_hook,
             on_injection=on_injection_hook,
             origin_fn=fn,
@@ -164,7 +165,7 @@ def metric[**P](
 
         return resource(
             wrapped_async_gen,
-            scope=scope,
+            scope=resource_scope,
             on_resolve=on_resolve_hook,
             on_injection=on_injection_hook,
             origin_fn=fn,

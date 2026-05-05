@@ -9,10 +9,10 @@ from datetime import UTC, datetime
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.process_pool import LazyProcessPool
 from rue.context.runtime import CURRENT_RUN_CONTEXT, TestContext, bind
+from rue.context.scopes import Scope
 from rue.events import RunEventsReceiver
 from rue.resources import DependencyResolver
 from rue.resources.metrics.models import MetricResult
-from rue.resources.models import Scope
 from rue.resources.sut.output import SUTOutputCapture
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.execution import DefaultTestFactory, SingleTest

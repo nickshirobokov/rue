@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from rue.context.scopes import Scope
 from rue.models import Locator, Spec
 from rue.resources.models import (
     LoadedResourceDef,
     ResourceFactoryKind,
     ResourceGraph,
     ResourceSpec,
-    Scope,
 )
 
 
@@ -50,9 +50,7 @@ class ResourceRegistry:
         """Register a function as a resource for dependency injection."""
 
         def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-            nonlocal scope
-            if isinstance(scope, str):
-                scope = Scope(scope)
+            resource_scope = Scope(scope)
 
             signature = inspect.signature(fn)
             dependencies = [
@@ -86,7 +84,7 @@ class ResourceRegistry:
                         module_path=origin_path,
                         function_name=fn.__name__,
                     ),
-                    scope=scope,
+                    scope=resource_scope,
                 ),
                 fn=fn,
                 factory_kind=factory_kind,

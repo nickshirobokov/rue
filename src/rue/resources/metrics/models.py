@@ -7,8 +7,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from rue.context.collectors import CURRENT_METRIC_RESULTS
+from rue.context.scopes import Scope
 from rue.models import Locator, Spec
-from rue.resources.models import ResourceSpec, Scope
+from rue.resources.models import ResourceSpec
 
 
 if TYPE_CHECKING:
@@ -70,7 +71,8 @@ class MetricResult:
     assertion_results : list[AssertionResult]
         Assertion results collected while the metric resource was running.
     value : CalculatedValue
-        The last yielded value from the metric generator. NaN if no value was yielded.
+        Last yielded value from the metric generator.
+        NaN if no value was yielded.
     """
 
     metadata: MetricMetadata
@@ -79,6 +81,7 @@ class MetricResult:
 
     @property
     def primary_case_id(self) -> str:
+        """Return the first case-like consumer identifier."""
         cases = sorted(
             str(case_id)
             for consumer in self.metadata.consumers
@@ -87,7 +90,7 @@ class MetricResult:
         if cases:
             return cases[0]
         suffixes = sorted(
-            suffix
+            str(suffix)
             for consumer in self.metadata.consumers
             if (suffix := getattr(consumer, "suffix", None))
         )
@@ -97,11 +100,13 @@ class MetricResult:
 
     @property
     def has_failures(self) -> bool:
+        """Return whether any metric assertion failed."""
         return any(
             not assertion.passed for assertion in self.assertion_results
         )
 
     def __post_init__(self) -> None:
+        """Attach new metric results to the active collector."""
         collector = CURRENT_METRIC_RESULTS.get()
         if collector is not None:
             collector.append(self)

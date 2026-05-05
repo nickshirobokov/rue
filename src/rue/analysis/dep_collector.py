@@ -8,11 +8,11 @@ import inspect
 import symtable
 import sys
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
-from collections.abc import Callable
 
 
 @dataclass(slots=True, frozen=True)
@@ -31,7 +31,7 @@ class ImportBinding:
     imported_name: str | None = None
 
 
-class DependencyCollectionMode(str, Enum):
+class DependencyCollectionMode(StrEnum):
     """Strategy controlling graph expansion."""
 
     MODULE = "module"
@@ -42,7 +42,6 @@ def _resolve_from_import(
     node: ast.ImportFrom, module_name: str, module_file: Path
 ) -> str:
     """Resolve a ``from ... import`` statement to a module path."""
-
     if node.level == 0:
         assert node.module
         return node.module
@@ -70,32 +69,27 @@ class ImportIndex:
     @property
     def local_functions(self) -> set[str]:
         """Return locally defined function names for this module."""
-
         return self._local_functions
 
     def get_module_level(self, name: str) -> ImportBinding | None:
         """Get module-level import target for a local symbol."""
-
         return self._module_level.get(name)
 
     def get_function_level(
         self, func_name: str, name: str
     ) -> ImportBinding | None:
         """Get function-scope import target for a local symbol."""
-
         func_imports = self._function_level.get(func_name)
         return func_imports.get(name) if func_imports else None
 
     def all_module_imports(self) -> set[str]:
         """Return all module-level imported module names."""
-
         return {binding.module_name for binding in self._module_level.values()}
 
     def _build(
         self, tree: ast.Module, module_name: str, module_file: Path
     ) -> None:
         """Populate import lookup structures from parsed AST."""
-
         for stmt in tree.body:
             match stmt:
                 case ast.Import() | ast.ImportFrom():
@@ -122,7 +116,6 @@ class ImportIndex:
         node: ast.stmt, module_name: str, module_file: Path
     ) -> list[tuple[str, ImportBinding]]:
         """Extract local alias to module mappings from an import node."""
-
         results: list[tuple[str, ImportBinding]] = []
         match node:
             case ast.Import(names=names):
@@ -143,7 +136,7 @@ class ImportIndex:
 
 
 class ModuleAnalyzer:
-    """Use symtable to find which imported modules are reachable from targets."""
+    """Find imported modules reachable from target symbols."""
 
     def __init__(self, source: str, filename: str) -> None:
         self._table = symtable.symtable(source, filename, "exec")
@@ -156,14 +149,12 @@ class ModuleAnalyzer:
 
     def missing_module_symbols(self, names: set[str]) -> set[str]:
         """Return symbol names not present in this module scope."""
-
         return {name for name in names if name not in self._module_symbols}
 
     def reachable_modules(
         self, targets: set[str] | None, index: ImportIndex
     ) -> set[str]:
         """Compatibility helper returning only module names."""
-
         return {
             binding.module_name
             for binding in self.reachable_bindings(targets, index)
@@ -173,14 +164,12 @@ class ModuleAnalyzer:
         self, targets: set[str] | None, index: ImportIndex
     ) -> set[ImportBinding]:
         """Compute imported modules reachable from a symbol set."""
-
         if targets is None:
             return self._all_imports(index)
         return self._trace_from(targets, index)
 
     def _all_imports(self, index: ImportIndex) -> set[ImportBinding]:
         """Collect all module-level imported modules."""
-
         modules: set[ImportBinding] = set()
         for sym in self._table.get_symbols():
             if sym.is_imported():
@@ -193,7 +182,6 @@ class ModuleAnalyzer:
         self, targets: set[str], index: ImportIndex
     ) -> set[ImportBinding]:
         """Trace reachable imports from target symbols using BFS."""
-
         modules: set[ImportBinding] = set()
         visited: set[str] = set()
         pending: deque[str] = deque(targets)
@@ -240,7 +228,6 @@ class ModuleResolver:
 
     def resolve(self, module_name: str) -> Path | None:
         """Resolve a module name to a local source file path."""
-
         if module_name in self._resolved:
             return self._resolved[module_name]
         if module_name.split(".", 1)[0] in sys.stdlib_module_names:
@@ -276,8 +263,7 @@ class DependencyCollector:
         mode: DependencyCollectionMode = DependencyCollectionMode.MODULE,
         seed_symbol: str | None = None,
     ) -> list[DependencyEntry]:
-        """Collect transitive repository-local dependencies for a seed module."""
-
+        """Collect transitive repository-local dependencies."""
         discovered: dict[str, Path] = {seed_module: seed_file}
         pending: deque[tuple[str, set[str] | None]] = deque()
         if mode == DependencyCollectionMode.SYMBOL and seed_symbol:
@@ -335,7 +321,6 @@ class DependencyCollector:
         mode: DependencyCollectionMode, binding: ImportBinding
     ) -> set[str] | None:
         """Choose target symbols to propagate into a dependency."""
-
         if (
             mode == DependencyCollectionMode.SYMBOL
             and binding.imported_name is not None
@@ -350,7 +335,6 @@ class DependencyCollector:
         pending: deque[tuple[str, set[str] | None]],
     ) -> None:
         """Add resolvable parent packages to traversal queues."""
-
         parts = module_name.split(".")
         for idx in range(1, len(parts)):
             package_name = ".".join(parts[:idx])
@@ -371,8 +355,7 @@ class DependencyCollector:
         discovered: dict[str, Path],
         pending: deque[tuple[str, set[str] | None]],
     ) -> None:
-        """When `from pkg import name` can't be resolved in pkg, try pkg.name."""
-
+        """Try pkg.name when `from pkg import name` is unresolved."""
         for symbol in analyzer.missing_module_symbols(targets):
             submodule = f"{module_name}.{symbol}"
             resolved = self._resolver.resolve(submodule)
@@ -386,7 +369,6 @@ class DependencyCollector:
         self, file_path: Path, module_name: str
     ) -> tuple[ImportIndex, ModuleAnalyzer]:
         """Load and cache per-module analysis artifacts."""
-
         cached = self._cache.get(file_path)
         if cached is not None:
             return cached
@@ -405,9 +387,7 @@ def collect_dependencies(
     mode: DependencyCollectionMode | str = DependencyCollectionMode.MODULE,
 ) -> list[DependencyEntry]:
     """Collect repository-local module dependencies for a callable."""
-
-    if isinstance(mode, str):
-        mode = DependencyCollectionMode(mode)
+    mode = DependencyCollectionMode(mode)
 
     owner_module = inspect.getmodule(fn)
     owner_file_attr = getattr(owner_module, "__file__", None)

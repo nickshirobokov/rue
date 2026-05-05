@@ -1,5 +1,6 @@
 """Tests for Turso run storage."""
 
+import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -171,9 +172,9 @@ def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
         ),
     )
 
-    recorder.start_run(run)
-    recorder.record_execution(run.run_id, execution)
-    recorder.finish_run(run)
+    asyncio.run(recorder.on_run_start(run))
+    asyncio.run(recorder.on_execution_complete(execution, run))
+    asyncio.run(recorder.on_run_complete(run))
     recorder.close()
 
     store = TursoRunStore(database_path)
@@ -271,8 +272,8 @@ def test_recorder_does_not_prune_old_runs(database_path: Path) -> None:
             environment=make_environment(),
             result=RunResult(),
         )
-        recorder.start_run(run)
-        recorder.finish_run(run)
+        asyncio.run(recorder.on_run_start(run))
+        asyncio.run(recorder.on_run_complete(run))
         recorder.close()
 
     store = TursoRunStore(database_path)

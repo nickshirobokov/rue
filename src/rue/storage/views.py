@@ -14,7 +14,7 @@ from uuid import UUID
 import turso
 
 from rue.models import Spec
-from rue.resources import ResourceSpec, Scope
+from rue.resources import ResourceSpec
 from rue.testing.models.spec import TestSpec
 
 
@@ -27,10 +27,6 @@ if TYPE_CHECKING:
 
 
 MAX_REPR_LENGTH = 2000
-
-
-def _scope_value(scope: Scope | str) -> str:
-    return scope.value if isinstance(scope, Scope) else str(scope)
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +203,7 @@ class StoredExecutionView:
     error_message: str | None
     error_traceback: str | None
     tags: tuple[str, ...]
+    child_ids: tuple[str, ...] = ()
     assertions: tuple[_StoredAssertionRow, ...] = ()
 
     @classmethod
@@ -215,11 +212,21 @@ class StoredExecutionView:
         run_id: UUID,
         execution: ExecutedTest,
         parent_id: UUID | None = None,
+        child_ids: tuple[UUID, ...] = (),
     ) -> StoredExecutionView:
         spec = execution.definition.spec
         error = execution.result.error
         module_path = spec.locator.module_path
         traceback = _StoredTracebackPayload.from_error(error)
+        children = dict.fromkeys(
+            (
+                *child_ids,
+                *(
+                    child.execution_id
+                    for child in execution.sub_executions
+                ),
+            )
+        )
         return cls(
             execution_id=str(execution.execution_id),
             run_id=str(run_id),
@@ -240,6 +247,7 @@ class StoredExecutionView:
             error_message=str(error) if error else None,
             error_traceback=None if traceback is None else traceback.json,
             tags=tuple(sorted(spec.tags)),
+            child_ids=tuple(str(child_id) for child_id in children),
             assertions=tuple(
                 _StoredAssertionRow.from_result(
                     run_id,
@@ -298,6 +306,15 @@ class StoredExecutionView:
             )
         for assertion in self.assertions:
             assertion.insert(conn)
+        for child_id in self.child_ids:
+            conn.execute(
+                """
+                UPDATE executions
+                SET parent_id = ?
+                WHERE execution_id = ?
+                """,
+                (self.execution_id, child_id),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,7 +360,7 @@ class StoredMetricView:
         return cls(
             run_id=str(run_id),
             name=identity.locator.function_name,
-            scope=_scope_value(identity.scope),
+            scope=identity.scope.value,
             provider_path=str(module_path) if module_path else None,
             provider_dir=str(module_path.parent) if module_path else None,
             value_integer=value_integer,
@@ -435,7 +452,7 @@ class _StoredMetricConsumerRow:
         case_id = None
         if isinstance(consumer, ResourceSpec):
             kind = "resource"
-            scope = _scope_value(consumer.scope)
+            scope = consumer.scope.value
         elif isinstance(consumer, TestSpec):
             kind = "test"
             suffix = consumer.suffix
@@ -503,7 +520,7 @@ class _StoredMetricDependencyRow:
             module_path=str(provider.locator.module_path)
             if provider.locator.module_path
             else None,
-            scope=_scope_value(provider.scope),
+            scope=provider.scope.value,
         )
 
     def _values(self, metric_id: int | None = None) -> tuple[object, ...]:

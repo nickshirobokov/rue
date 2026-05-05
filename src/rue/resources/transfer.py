@@ -7,11 +7,10 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from rue.context.runtime import CURRENT_TEST
-from rue.context.scopes import ScopeContext
+from rue.context.scopes import Scope, ScopeContext
 from rue.models import Spec
 from rue.resources.models import (
     ResourceSpec,
-    Scope,
     StateSnapshot,
 )
 from rue.resources.snapshot import (
