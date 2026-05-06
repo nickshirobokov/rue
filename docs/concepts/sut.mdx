@@ -116,6 +116,8 @@ Each wrapped SUT call appends Python-level stdout/stderr writes to the `SUT` ins
 - `sut.captured_output.events`
 
 Use `sut.clear_output()` when you want to reset accumulated output manually.
+Captured SUT output stays on the SUT object and is not printed live by Rue.
+Output written outside an active wrapped `SUT` call is not stored on a Rue API.
 
 ```python
 import sys

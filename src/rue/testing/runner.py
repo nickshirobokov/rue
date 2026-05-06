@@ -13,7 +13,6 @@ from rue.context.scopes import Scope
 from rue.events import RunEventsReceiver
 from rue.resources import DependencyResolver
 from rue.resources.metrics.models import MetricResult
-from rue.resources.sut.output import SUTOutputCapture
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.execution import DefaultTestFactory, SingleTest
 from rue.testing.execution.queue import RunnerStep, SessionQueue
@@ -29,13 +28,7 @@ class Runner:
 
     DEFAULT_MAX_CONCURRENCY = 10
 
-    def __init__(
-        self,
-        *,
-        capture_output: bool = True,
-    ) -> None:
-        self.capture_output = False
-
+    def __init__(self) -> None:
         self.semaphore: asyncio.Semaphore | None = None
         self.stop_flag: bool = False
         self._failure_count: int = 0
@@ -94,10 +87,7 @@ class Runner:
         metric_results: list[MetricResult] = []
         start = time.perf_counter()
 
-        with (
-            SUTOutputCapture.sys_capture(swallow=self.capture_output),
-            bind(CURRENT_METRIC_RESULTS, metric_results),
-        ):
+        with bind(CURRENT_METRIC_RESULTS, metric_results):
             try:
                 await receiver.on_collection_complete(items)
 

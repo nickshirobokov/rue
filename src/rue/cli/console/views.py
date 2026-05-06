@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import math
 import re
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -172,32 +171,6 @@ class ConsoleModuleView:
         if self.path is None:
             return "<unknown>"
         return safe_relative_path(self.path).as_posix()
-
-
-@dataclass(frozen=True, slots=True)
-class ConsoleCapturedOutputView:
-    lines: tuple[str, ...]
-
-    @classmethod
-    def from_lines(cls, lines: list[str]) -> ConsoleCapturedOutputView:
-        return cls(lines=tuple(lines))
-
-    def render(self) -> list[RenderableType]:
-        if not self.lines:
-            return []
-        renderables: list[RenderableType] = [
-            Text(""),
-            Rule(
-                Text("WARNINGS", style="bold yellow"),
-                characters="=",
-                style="yellow",
-            ),
-        ]
-        for line, count in Counter(self.lines).items():
-            label = f"{line} (x{count})" if count > 1 else line
-            renderables.append(Text(label, style="yellow dim"))
-        renderables.append(Text(""))
-        return renderables
 
 
 @dataclass(frozen=True, slots=True)
@@ -1236,7 +1209,6 @@ class ConsoleMetricRunView:
 
 __all__ = [
     "ConsoleAssertionView",
-    "ConsoleCapturedOutputView",
     "ConsoleExecutionView",
     "ConsoleMetricGroupView",
     "ConsoleMetricRunView",

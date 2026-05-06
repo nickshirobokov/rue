@@ -160,17 +160,10 @@ uv run rue tests run -vv
 
 ### Output Capture
 
-By default, Rue captures stdout and stderr only while a wrapped `SUT` call is running. Use `-s` to show SUT output live:
-
-```bash
-# Show SUT output in real-time (still captured on the SUT)
-uv run rue tests run -s
-
-# Or the long form
-uv run rue tests run --show-output
-```
-
-Assert against `sut.stdout`, `sut.stderr`, or `sut.captured_output` inside your test. Output written outside an active wrapped `SUT` call is not stored on a Rue API.
+Rue captures stdout and stderr only while a wrapped `SUT` call is running.
+Assert against `sut.stdout`, `sut.stderr`, or `sut.captured_output` inside your test.
+Captured SUT output is kept on the SUT API instead of being printed live by Rue.
+Output written outside an active wrapped `SUT` call is not stored on a Rue API.
 
 ## OpenTelemetry
 

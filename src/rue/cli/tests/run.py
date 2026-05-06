@@ -72,14 +72,6 @@ def run(
         Option("-q", "--quiet", count=True, help="Reduce CLI output"),
     ] = 0,
     verbose: VerboseOpt = 0,
-    show_output: Annotated[
-        bool,
-        Option(
-            "-s",
-            "--show-output",
-            help="Show SUT stdout/stderr live (still captured on the SUT)",
-        ),
-    ] = False,
     run_id: Annotated[
         UUID | None,
         Option("--run-id", help="UUID to assign to this test run"),
@@ -143,9 +135,7 @@ def run(
     )
     events_receiver = RunEventsReceiver([*processors, TursoRunRecorder()])
     with run_context, events_receiver:
-        runner = Runner(
-            capture_output=not show_output,
-        )
+        runner = Runner()
         run_result = asyncio.run(
             runner.run(
                 items,

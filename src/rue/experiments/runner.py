@@ -28,7 +28,6 @@ class ExperimentRunner:
     """Runs experiment variants as isolated processes."""
 
     config: Config
-    capture_output: bool = True
 
     def collect(
         self, collection: TestSpecCollection
@@ -65,7 +64,6 @@ class ExperimentRunner:
                     collection,
                     variant,
                     self.config,
-                    self.capture_output,
                 )
                 results.append(future.result())
         return tuple(results)
@@ -75,7 +73,6 @@ def run_experiment_variant(
     collection: TestSpecCollection,
     variant: ExperimentVariant,
     config: Config,
-    capture_output: bool,
 ) -> ExperimentVariantResult:
     """Process entrypoint for one experiment variant."""
     return asyncio.run(
@@ -83,7 +80,6 @@ def run_experiment_variant(
             collection,
             variant,
             config,
-            capture_output,
         )
     )
 
@@ -92,7 +88,6 @@ async def _run_experiment_variant(
     collection: TestSpecCollection,
     variant: ExperimentVariant,
     config: Config,
-    capture_output: bool,
 ) -> ExperimentVariantResult:
     default_resource_registry.reset()
     default_experiment_registry.reset()
@@ -116,9 +111,7 @@ async def _run_experiment_variant(
                 resolver=resolver,
             )
             items = loader.load_from_collection(collection)
-            runner = Runner(
-                capture_output=capture_output,
-            )
+            runner = Runner()
             run = await runner.run(items, resolver=resolver)
         finally:
             if run is None:

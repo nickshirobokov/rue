@@ -2,9 +2,6 @@
 
 Run with:
     rue tests run examples/test_example_captured_output.py
-
-Run with live SUT output visible:
-    rue tests run examples/test_example_captured_output.py -s
 """
 
 import sys

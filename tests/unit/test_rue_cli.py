@@ -268,16 +268,11 @@ def test_cli_resolves_processors_and_injects_turso_recorder(
     custom = CustomProcessor()
 
     class FakeRunner:
-        def __init__(
-            self,
-            *,
-            capture_output=True,
-        ) -> None:
+        def __init__(self) -> None:
             context = CURRENT_RUN_CONTEXT.get()
             captured["context"] = context
             captured["config"] = context.config
             captured["processors"] = RunEventsReceiver.current().processors
-            captured["capture_output"] = capture_output
 
         async def run(self, items, *, resolver):
             captured["items"] = items
@@ -302,7 +297,6 @@ def test_cli_resolves_processors_and_injects_turso_recorder(
             "--processor",
             "CustomProcessor",
             "--fail-fast",
-            "--show-output",
         ],
     )
 
@@ -318,7 +312,6 @@ def test_cli_resolves_processors_and_injects_turso_recorder(
     assert isinstance(captured["processors"][-1], TursoRunRecorder)
     assert captured["processors"][-1].path == tmp_path / "rue.turso.db"
     assert "TursoRunRecorder" not in RunEventsProcessor.REGISTRY
-    assert captured["capture_output"] is False
 
 
 def test_console_reporter_prints_failed_run_and_metrics() -> None:
@@ -417,15 +410,10 @@ def test_tests_without_subcommand_defaults_to_run(tmp_path: Path, monkeypatch):
     captured: dict[str, object] = {}
 
     class FakeRunner:
-        def __init__(
-            self,
-            *,
-            capture_output=True,
-        ) -> None:
+        def __init__(self) -> None:
             context = CURRENT_RUN_CONTEXT.get()
             captured["context"] = context
             captured["config"] = context.config
-            captured["capture_output"] = capture_output
 
         async def run(self, items, *, resolver):
             captured["items"] = items

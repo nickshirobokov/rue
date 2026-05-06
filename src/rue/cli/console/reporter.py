@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
+from os import devnull
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,11 +19,9 @@ from rich.text import Text
 from rue.events import RunEventsProcessor
 from rue.testing.models import TestStatus
 
-from .captured import StderrCapture
 from .modes import OutputMode, make_mode
 from .shared import STATUS_STYLES
 from .views import (
-    ConsoleCapturedOutputView,
     ConsoleExecutionView,
     ConsoleMetricRunView,
     ConsoleRunView,
@@ -55,7 +55,7 @@ class ConsoleReporter(RunEventsProcessor):
         self.verbosity = verbosity
         self._mode: OutputMode = make_mode(verbosity, self.console)
         self._live: Live | None = None
-        self._stderr_capture = StderrCapture()
+        self._output_suppression = ExitStack()
         self._lock = asyncio.Lock()
         self.items: list[LoadedTestDef] = []
         self.item_keys: set[int] = set()
@@ -75,13 +75,11 @@ class ConsoleReporter(RunEventsProcessor):
         self.verbosity = config.verbosity
         self._mode = make_mode(self.verbosity, self.console)
 
-    # ── Run header & summary ──────────────────────────────────────────────────
-
-    def _build_run_header(self, run: ExecutedRun) -> RenderableType:
-        return ConsoleRunView.from_run(run).render_header()
-
-    def _build_summary(self, run: ExecutedRun) -> RenderableType:
-        return ConsoleRunView.from_run(run).render_summary()
+    def close(self) -> None:
+        """Release console resources."""
+        if self._live is not None:
+            self._live.stop()
+        self._output_suppression.close()
 
     def _build_live_display(self) -> RenderableType:
         if self.items_by_file and len(self.completed_modules) == len(
@@ -123,13 +121,10 @@ class ConsoleReporter(RunEventsProcessor):
         )
         return Group(progress, live)
 
-    def _top_level_key(self, item: LoadedTestDef) -> int:
-        return item.spec.collection_index
-
     def is_top_level_definition(self, item: LoadedTestDef) -> bool:
         """Return whether the definition is a collected top-level item."""
         return (
-            self._top_level_key(item) in self.item_keys
+            item.spec.collection_index in self.item_keys
             and item.spec.suffix is None
             and item.spec.case_id is None
         )
@@ -145,11 +140,8 @@ class ConsoleReporter(RunEventsProcessor):
         self, items: list[LoadedTestDef], run: ExecutedRun
     ) -> None:
         """Initialize display state after collection."""
-        if self._live is not None:
-            self._live.stop()
-            self._live = None
         self.items = list(items)
-        self.item_keys = {self._top_level_key(item) for item in items}
+        self.item_keys = {item.spec.collection_index for item in items}
         self.items_by_file = {}
         for item in items:
             self.items_by_file.setdefault(
@@ -165,7 +157,7 @@ class ConsoleReporter(RunEventsProcessor):
         self.current_module = None
         self.completed_modules = set()
 
-        self.console.print(self._build_run_header(run))
+        self.console.print(ConsoleRunView.from_run(run).render_header())
         self.console.print()
         if self._mode.show_collected_count:
             self.console.print(
@@ -173,6 +165,9 @@ class ConsoleReporter(RunEventsProcessor):
             )
 
         if self.console.is_terminal:
+            sink = self._output_suppression.enter_context(open(devnull, "w"))
+            self._output_suppression.enter_context(redirect_stdout(sink))
+            self._output_suppression.enter_context(redirect_stderr(sink))
             self._live = Live(
                 self._build_live_display(),
                 console=self.console,
@@ -183,7 +178,6 @@ class ConsoleReporter(RunEventsProcessor):
                 redirect_stderr=False,
             )
             self._live.start()
-        self._stderr_capture.start()
 
     async def on_tests_ready(
         self, tests: list[ExecutableTest], run: ExecutedRun
@@ -192,7 +186,7 @@ class ConsoleReporter(RunEventsProcessor):
         _ = run
         for test in tests:
             if self.is_top_level_definition(test.definition):
-                self.tests[self._top_level_key(test.definition)] = test
+                self.tests[test.definition.spec.collection_index] = test
 
     async def on_test_start(
         self, test: ExecutableTest, run: ExecutedRun
@@ -212,7 +206,7 @@ class ConsoleReporter(RunEventsProcessor):
 
             is_top_level = self.is_top_level_definition(execution.definition)
             if is_top_level:
-                self.executions[self._top_level_key(execution.definition)] = (
+                self.executions[execution.definition.spec.collection_index] = (
                     execution
                 )
                 self.completed_count += 1
@@ -226,7 +220,7 @@ class ConsoleReporter(RunEventsProcessor):
             if self._live is not None:
                 module_path = execution.definition.spec.locator.module_path
                 if module_path not in self.completed_modules and all(
-                    self._top_level_key(i) in self.executions
+                    i.spec.collection_index in self.executions
                     for i in self.items_by_file.get(module_path, [])
                 ):
                     self._mode.print_completed_module(
@@ -243,11 +237,10 @@ class ConsoleReporter(RunEventsProcessor):
 
     async def on_run_complete(self, run: ExecutedRun) -> None:
         """Render the final run summary."""
-        self._stderr_capture.stop()
-
         if self._live is not None:
             self._live.stop()
             self._live = None
+        self._output_suppression.close()
 
         if self.verbosity == 0 and self.current_module is not None:
             self.console.print()
@@ -274,15 +267,8 @@ class ConsoleReporter(RunEventsProcessor):
             for renderable in metrics.render(self.verbosity):
                 self.console.print(renderable)
 
-        if self.verbosity >= 2:
-            captured = ConsoleCapturedOutputView.from_lines(
-                self._stderr_capture.lines
-            )
-            for renderable in captured.render():
-                self.console.print(renderable)
-
         self.console.print()
-        self.console.print(self._build_summary(run))
+        self.console.print(ConsoleRunView.from_run(run).render_summary())
 
     async def on_run_stopped_early(
         self, failure_count: int, run: ExecutedRun

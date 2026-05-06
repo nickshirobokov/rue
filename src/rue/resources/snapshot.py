@@ -507,15 +507,15 @@ class SnapshotExporter:
             }
             return node_id
 
+        if isinstance(value, _ATOMIC_VALUE_TYPES):
+            self.nodes[node_id] = self._export_atomic(value)
+            return node_id
+
         if self._is_primitive(value):
             self.nodes[node_id] = {
                 "kind": "value",
                 "value": value,
             }
-            return node_id
-
-        if isinstance(value, _ATOMIC_VALUE_TYPES):
-            self.nodes[node_id] = self._export_atomic(value)
             return node_id
 
         if isinstance(value, dict):
