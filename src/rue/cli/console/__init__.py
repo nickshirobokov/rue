@@ -1,6 +1,6 @@
-"""Console processor package for rue test output using Rich."""
+"""Console processor package for Rue output using Rich."""
 
-from rue.cli.console.reporter import ConsoleReporter
+from rue.cli.console.reporter import ConsoleReporter, ExperimentConsoleReporter
 
 
-__all__ = ["ConsoleReporter"]
+__all__ = ["ConsoleReporter", "ExperimentConsoleReporter"]

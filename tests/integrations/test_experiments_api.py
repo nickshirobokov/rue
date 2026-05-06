@@ -4,6 +4,8 @@ from textwrap import dedent
 import pytest
 
 from rue.config import Config
+from rue.context.runtime import CURRENT_RUN_CONTEXT
+from rue.events import RunEventsProcessor, SessionEventsReceiver
 from rue.experiments import registry as experiment_registry
 from rue.experiments.runner import ExperimentRunner
 from rue.resources import registry
@@ -19,7 +21,31 @@ def clean_registry():
     experiment_registry.reset()
 
 
-def test_experiment_runner_executes_four_variants_with_iterated_tests(
+class SessionCaptureProcessor(RunEventsProcessor):
+    def __init__(self) -> None:
+        self.started: list[str] = []
+        self.completed: list[tuple[str, int]] = []
+        self.executions: list[str] = []
+
+    async def on_run_start(self, run) -> None:
+        _ = run
+        self.started.append(CURRENT_RUN_CONTEXT.get().experiment_variant.label)
+
+    async def on_execution_complete(self, execution, run) -> None:
+        _ = run
+        spec = execution.definition.spec
+        if spec.suffix is None and spec.case_id is None:
+            self.executions.append(
+                CURRENT_RUN_CONTEXT.get().experiment_variant.label
+            )
+
+    async def on_run_complete(self, run) -> None:
+        variant = CURRENT_RUN_CONTEXT.get().experiment_variant
+        self.completed.append((variant.label, run.result.total))
+
+
+@pytest.mark.asyncio
+async def test_experiment_runner_executes_four_variants_with_iterated_tests(
     tmp_path: Path,
 ):
     (tmp_path / "app_state.py").write_text(
@@ -159,7 +185,11 @@ def test_experiment_runner_executes_four_variants_with_iterated_tests(
     )
 
     experiments = runner.collect(collection)
-    results = runner.run(collection, experiments)
+    session_processor = SessionCaptureProcessor()
+    session = SessionEventsReceiver([session_processor])
+    session.configure(runner.config)
+    results = await runner.run(collection, experiments, session=session)
+    session.close()
 
     assert [experiment.name for experiment in experiments] == [
         "model",
@@ -178,6 +208,21 @@ def test_experiment_runner_executes_four_variants_with_iterated_tests(
     ]
     assert [result.failed for result in results] == [3, 2, 1, 0, 0]
     assert [result.errors for result in results] == [1, 0, 0, 0, 0]
+    assert session_processor.started == [
+        "baseline",
+        "model=mini, prompt=strict",
+        "model=mini, prompt=creative",
+        "model=full, prompt=strict",
+        "model=full, prompt=creative",
+    ]
+    assert session_processor.completed == [
+        ("baseline", 4),
+        ("model=mini, prompt=strict", 4),
+        ("model=mini, prompt=creative", 4),
+        ("model=full, prompt=strict", 4),
+        ("model=full, prompt=creative", 4),
+    ]
+    assert len(session_processor.executions) == 20
 
 
 def test_experiment_collect_reloads_setup_after_definition_preload(

@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 
 from rue.assertions.models import AssertionRepr, AssertionResult
 from rue.cli import app
-from rue.cli.console import ConsoleReporter
+from rue.cli.console import ConsoleReporter, ExperimentConsoleReporter
 from rue.cli.tests.status import TestsStatusReport
 from rue.config import Config
 from rue.context.models import RunEnvironment
@@ -574,9 +574,10 @@ def test_experiments_run_shares_selection_and_preserves_db_config(
             captured["collection"] = collection
             return (experiment,)
 
-        def run(self, collection, experiments=None):
+        async def run(self, collection, experiments=None, *, session=None):
             captured["run_collection"] = collection
             captured["experiments"] = experiments
+            captured["session"] = session
             return (result,)
 
     monkeypatch.setattr(
@@ -612,6 +613,10 @@ def test_experiments_run_shares_selection_and_preserves_db_config(
     assert captured["config"].maxfail is None
     assert captured["config"].processors == []
     assert captured["experiments"] == (experiment,)
+    assert isinstance(
+        captured["session"].processors[0],
+        ExperimentConsoleReporter,
+    )
     assert "model=mini" in cli_result.stdout
 
 
@@ -623,7 +628,8 @@ def test_experiments_run_no_experiments_does_not_run(monkeypatch):
         def collect(self, collection):
             return ()
 
-        def run(self, collection, experiments=None):
+        async def run(self, collection, experiments=None, *, session=None):
+            del session
             raise AssertionError("ExperimentRunner.run should not be called")
 
     monkeypatch.setattr(

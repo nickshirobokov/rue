@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from typing import Any
 
 from rue.config import Config
 from rue.context.runtime import RunContext
+from rue.events import QueueForwarder, RunEventsProcessor, SessionEventsReceiver
 from rue.events.receiver import RunEventsReceiver
 from rue.experiments.models import (
     ExperimentSpec,
@@ -18,9 +21,13 @@ from rue.experiments.registry import registry as default_experiment_registry
 from rue.resources import DependencyResolver
 from rue.resources.registry import registry as default_resource_registry
 from rue.storage import TursoRunRecorder, TursoRunStore
+from rue.telemetry.otel import OtelReporter
 from rue.testing.discovery import TestLoader
 from rue.testing.models.spec import TestSpecCollection
 from rue.testing.runner import Runner
+
+
+DRAIN_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(slots=True)
@@ -40,10 +47,12 @@ class ExperimentRunner:
             loader.prepare_setup(setup_ref.path, reload=True)
         return default_experiment_registry.all()
 
-    def run(
+    async def run(
         self,
         collection: TestSpecCollection,
         experiments: tuple[ExperimentSpec, ...] | None = None,
+        *,
+        session: SessionEventsReceiver | None = None,
     ) -> tuple[ExperimentVariantResult, ...]:
         """Run baseline plus every experiment value combination."""
         experiment_specs = (
@@ -54,18 +63,40 @@ class ExperimentRunner:
 
         results: list[ExperimentVariantResult] = []
         variants = ExperimentVariant.build_all(experiment_specs)
+        mp_context = mp.get_context("spawn")
+        manager = mp_context.Manager() if session is not None else None
         with ProcessPoolExecutor(
             max_workers=1,
             max_tasks_per_child=1,
+            mp_context=mp_context,
         ) as pool:
-            for variant in variants:
-                future = pool.submit(
-                    run_experiment_variant,
-                    collection,
-                    variant,
-                    self.config,
-                )
-                results.append(future.result())
+            try:
+                for variant in variants:
+                    queue = None if manager is None else manager.Queue()
+                    future = pool.submit(
+                        run_experiment_variant,
+                        collection,
+                        variant,
+                        self.config,
+                        queue,
+                    )
+                    drain_task = (
+                        None
+                        if session is None or queue is None
+                        else asyncio.create_task(session.drain_queue(queue))
+                    )
+                    try:
+                        result = await asyncio.to_thread(future.result)
+                    finally:
+                        if drain_task is not None:
+                            await asyncio.wait_for(
+                                drain_task,
+                                timeout=DRAIN_TIMEOUT_SECONDS,
+                            )
+                    results.append(result)
+            finally:
+                if manager is not None:
+                    manager.shutdown()
         return tuple(results)
 
 
@@ -73,6 +104,7 @@ def run_experiment_variant(
     collection: TestSpecCollection,
     variant: ExperimentVariant,
     config: Config,
+    queue: Any | None = None,
 ) -> ExperimentVariantResult:
     """Process entrypoint for one experiment variant."""
     return asyncio.run(
@@ -80,6 +112,7 @@ def run_experiment_variant(
             collection,
             variant,
             config,
+            queue,
         )
     )
 
@@ -88,6 +121,7 @@ async def _run_experiment_variant(
     collection: TestSpecCollection,
     variant: ExperimentVariant,
     config: Config,
+    queue: Any | None = None,
 ) -> ExperimentVariantResult:
     default_resource_registry.reset()
     default_experiment_registry.reset()
@@ -104,7 +138,12 @@ async def _run_experiment_variant(
     store.initialize()
     resolver = DependencyResolver(default_resource_registry)
     run = None
-    with context, RunEventsReceiver([TursoRunRecorder()]):
+    processors: list[RunEventsProcessor] = [TursoRunRecorder()]
+    if config.otel:
+        processors.append(OtelReporter())
+    if queue is not None:
+        processors.append(QueueForwarder(queue))
+    with context, RunEventsReceiver(processors):
         try:
             await variant.apply(
                 default_experiment_registry.all(),

@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import sys
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
+from dataclasses import dataclass, field
 from os import devnull
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
@@ -16,6 +18,7 @@ from rich.progress_bar import ProgressBar
 from rich.table import Table
 from rich.text import Text
 
+from rue.context.runtime import CURRENT_RUN_CONTEXT
 from rue.events import RunEventsProcessor
 from rue.testing.models import TestStatus
 
@@ -34,6 +37,21 @@ if TYPE_CHECKING:
     from rue.testing.execution.executable import ExecutableTest
     from rue.testing.models.executed import ExecutedTest
     from rue.testing.models.run import ExecutedRun
+
+
+@dataclass
+class _ExperimentRunState:
+    label: str
+    run_id: UUID
+    item_keys: set[int] = field(default_factory=set)
+    total_tests: int = 0
+    ready_tests: int = 0
+    started_count: int = 0
+    completed_count: int = 0
+    status_counts: dict[TestStatus, int] = field(default_factory=dict)
+    phase: str = "starting"
+    duration_ms: float = 0
+    stopped_early: bool = False
 
 
 class ConsoleReporter(RunEventsProcessor):
@@ -278,3 +296,214 @@ class ConsoleReporter(RunEventsProcessor):
         self.console.print(
             f"\n\n[red]Stopping early after {failure_count} failure(s).[/red]"
         )
+
+
+class ExperimentConsoleReporter(RunEventsProcessor):
+    """Rich console processor for experiment sessions."""
+
+    _STATUS_ORDER: tuple[TestStatus, ...] = (
+        TestStatus.PASSED,
+        TestStatus.FAILED,
+        TestStatus.ERROR,
+        TestStatus.SKIPPED,
+        TestStatus.XFAILED,
+        TestStatus.XPASSED,
+    )
+
+    def __init__(
+        self, console: Console | None = None, verbosity: int = 0
+    ) -> None:
+        self.console = console or Console(file=sys.__stdout__)
+        self.verbosity = verbosity
+        self._live: Live | None = None
+        self._states: dict[UUID, _ExperimentRunState] = {}
+        self._lock = asyncio.Lock()
+
+    def configure(self, config: Config) -> None:
+        """Apply runtime console settings."""
+        self.verbosity = config.verbosity
+
+    def close(self) -> None:
+        """Release console resources."""
+        if self._live is not None:
+            self._live.stop()
+            self._live = None
+
+    async def on_run_start(self, run: ExecutedRun) -> None:
+        """Start tracking an experiment variant run."""
+        variant = CURRENT_RUN_CONTEXT.get().experiment_variant
+        label = "run" if variant is None else variant.label
+        async with self._lock:
+            self._states[run.run_id] = _ExperimentRunState(
+                label=label,
+                run_id=run.run_id,
+            )
+            self._refresh()
+
+    async def on_no_tests_found(self, run: ExecutedRun) -> None:
+        """Mark a variant with no tests."""
+        async with self._lock:
+            state = self._states[run.run_id]
+            state.phase = "no tests"
+            self._refresh()
+
+    async def on_collection_complete(
+        self, items: list[LoadedTestDef], run: ExecutedRun
+    ) -> None:
+        """Record variant collection size."""
+        async with self._lock:
+            state = self._states[run.run_id]
+            state.item_keys = {
+                item.spec.collection_index for item in items
+            }
+            state.total_tests = len(items)
+            state.phase = "collected"
+            self._refresh()
+
+    async def on_tests_ready(
+        self, tests: list[ExecutableTest], run: ExecutedRun
+    ) -> None:
+        """Record executable test readiness."""
+        async with self._lock:
+            state = self._states[run.run_id]
+            state.ready_tests = len(tests)
+            state.phase = "ready"
+            self._refresh()
+
+    async def on_test_start(
+        self, test: ExecutableTest, run: ExecutedRun
+    ) -> None:
+        """Record a started test."""
+        _ = test
+        async with self._lock:
+            state = self._states[run.run_id]
+            state.started_count += 1
+            state.phase = "running"
+            self._refresh()
+
+    async def on_execution_complete(
+        self, execution: ExecutedTest, run: ExecutedRun
+    ) -> None:
+        """Record one completed top-level execution."""
+        async with self._lock:
+            state = self._states[run.run_id]
+            spec = execution.definition.spec
+            if (
+                spec.collection_index in state.item_keys
+                and spec.suffix is None
+                and spec.case_id is None
+            ):
+                state.completed_count += 1
+                status = execution.result.status
+                state.status_counts[status] = (
+                    state.status_counts.get(status, 0) + 1
+                )
+            state.phase = "running"
+            self._refresh()
+
+    async def on_run_stopped_early(
+        self, failure_count: int, run: ExecutedRun
+    ) -> None:
+        """Mark a variant stopped by maxfail."""
+        _ = failure_count
+        async with self._lock:
+            state = self._states[run.run_id]
+            state.stopped_early = True
+            state.phase = "stopping"
+            self._refresh()
+
+    async def on_run_complete(self, run: ExecutedRun) -> None:
+        """Render completed variant state."""
+        async with self._lock:
+            state = self._states[run.run_id]
+            state.completed_count = run.result.total
+            state.duration_ms = run.result.total_duration_ms
+            state.stopped_early = run.result.stopped_early
+            state.status_counts = {
+                TestStatus.PASSED: run.result.passed,
+                TestStatus.FAILED: run.result.failed,
+                TestStatus.ERROR: run.result.errors,
+                TestStatus.SKIPPED: run.result.skipped,
+                TestStatus.XFAILED: run.result.xfailed,
+                TestStatus.XPASSED: run.result.xpassed,
+            }
+            state.phase = "stopped" if state.stopped_early else "complete"
+            self._refresh()
+            if self._live is None:
+                self.console.print(self._completed_line(state))
+
+    def _refresh(self) -> None:
+        if not self.console.is_terminal:
+            return
+        if self._live is None:
+            self._live = Live(
+                self._render_live_display(),
+                console=self.console,
+                auto_refresh=True,
+                refresh_per_second=2,
+                transient=False,
+            )
+            self._live.start()
+            return
+        self._live.update(self._render_live_display(), refresh=True)
+
+    def _render_live_display(self) -> Panel:
+        table = Table(show_header=True, expand=True)
+        table.add_column("Variant")
+        table.add_column("Run", no_wrap=True)
+        table.add_column("Progress", justify="right", no_wrap=True)
+        table.add_column("Status")
+        table.add_column("Phase", no_wrap=True)
+        table.add_column("Duration", justify="right", no_wrap=True)
+
+        for state in self._states.values():
+            table.add_row(
+                state.label,
+                str(state.run_id)[:8],
+                self._progress_text(state),
+                self._status_text(state),
+                state.phase,
+                self._duration_text(state),
+            )
+
+        return Panel(
+            table,
+            title="Running experiments...",
+            title_align="left",
+            border_style="cyan",
+            padding=(0, 1),
+        )
+
+    def _completed_line(self, state: _ExperimentRunState) -> Text:
+        text = Text()
+        text.append(f"variant {state.label}: ", style="bold")
+        text.append_text(self._status_text(state))
+        duration = self._duration_text(state)
+        if duration:
+            text.append(f" in {duration}", style="dim")
+        return text
+
+    def _progress_text(self, state: _ExperimentRunState) -> str:
+        total = state.total_tests
+        if not total:
+            return "0/0"
+        return f"{state.completed_count}/{total}"
+
+    def _status_text(self, state: _ExperimentRunState) -> Text:
+        text = Text()
+        for status in self._STATUS_ORDER:
+            count = state.status_counts.get(status, 0)
+            if not count:
+                continue
+            if text.plain:
+                text.append("  ")
+            style = STATUS_STYLES[status]
+            text.append(f"{style.symbol} {count}", style=style.color)
+        if not text.plain:
+            text.append("pending", style="dim")
+        return text
+
+    def _duration_text(self, state: _ExperimentRunState) -> str:
+        if state.duration_ms <= 0:
+            return ""
+        return f"{state.duration_ms / 1000:.2f}s"

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated
 
 from rich.console import Console
 from typer import Option
 
+from rue.cli.console import ExperimentConsoleReporter
 from rue.cli.errors import print_definition_errors
 from rue.cli.experiments.render import experiment_renderer
 from rue.cli.tests.options import (
@@ -18,6 +20,7 @@ from rue.cli.tests.options import (
     resolve_selection,
 )
 from rue.config import load_config
+from rue.events import SessionEventsReceiver
 from rue.experiments.runner import ExperimentRunner
 from rue.testing.discovery import TestDefinitionErrors, TestLoader
 
@@ -78,7 +81,18 @@ def run(
             Console().print("[yellow]No experiments found.[/yellow]")
             raise SystemExit(0)
 
-        results = experiment_runner.run(collection, experiments)
+        session = SessionEventsReceiver([ExperimentConsoleReporter()])
+        session.configure(runner_config)
+        try:
+            results = asyncio.run(
+                experiment_runner.run(
+                    collection,
+                    experiments,
+                    session=session,
+                )
+            )
+        finally:
+            session.close()
     except TestDefinitionErrors as errors:
         print_definition_errors(errors)
         raise SystemExit(2) from errors
