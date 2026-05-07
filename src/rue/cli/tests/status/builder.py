@@ -1,4 +1,4 @@
-"""Builder for `rue tests status` reports."""
+"""Builder for `rue status` reports."""
 
 from __future__ import annotations
 

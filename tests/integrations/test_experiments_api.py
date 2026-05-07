@@ -177,6 +177,7 @@ async def test_experiment_runner_executes_four_variants_with_iterated_tests(
     )
     runner = ExperimentRunner(
         config=Config.model_construct(
+            database_path=tmp_path / "rue.turso.db",
             otel=False,
             concurrency=2,
             timeout=None,
@@ -260,6 +261,7 @@ def test_experiment_collect_reloads_setup_after_definition_preload(
     TestLoader(collection.suite_root).load_from_collection(collection)
     runner = ExperimentRunner(
         config=Config.model_construct(
+            database_path=tmp_path / "rue.turso.db",
             otel=False,
             concurrency=1,
             timeout=None,
@@ -272,3 +274,40 @@ def test_experiment_collect_reloads_setup_after_definition_preload(
     assert [experiment.name for experiment in experiments] == [
         "answer_profile"
     ]
+
+
+@pytest.mark.asyncio
+async def test_experiment_runner_executes_single_baseline_without_experiments(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_baseline.py"
+    module_path.write_text(
+        dedent(
+            """
+            import rue
+
+
+            @rue.test
+            def test_baseline():
+                assert True
+            """
+        )
+    )
+    collection = TestSpecCollector((), (), None).build_spec_collection(
+        (module_path,),
+        explicit_root=tmp_path,
+    )
+    runner = ExperimentRunner(
+        config=Config.model_construct(
+            database_path=tmp_path / "rue.turso.db",
+            otel=False,
+            concurrency=1,
+            timeout=None,
+            maxfail=None,
+        )
+    )
+    results = await runner.run(collection, ())
+
+    assert [result.variant.label for result in results] == ["baseline"]
+    assert [result.total for result in results] == [1]
+    assert [result.passed for result in results] == [1]

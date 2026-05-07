@@ -1,7 +1,10 @@
 """Test CLI package."""
 
-from rue.cli.tests.app import DefaultCommandGroup, tests_app
+from importlib import import_module
+
 from rue.testing.discovery import TestSpecCollector
 
 
-__all__ = ["DefaultCommandGroup", "TestSpecCollector", "tests_app"]
+status = import_module("rue.cli.tests.status")
+
+__all__ = ["TestSpecCollector", "status"]

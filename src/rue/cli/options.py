@@ -1,4 +1,4 @@
-"""Shared options and selection resolution for test CLI commands."""
+"""Shared options and selection resolution for CLI commands."""
 
 from typing import Annotated, Any
 
@@ -46,6 +46,7 @@ def resolve_selection(
     database_path: str | None = None,
     **overrides: Any,
 ) -> tuple[Config, TestSpecCollector, list[str]]:
+    """Resolve CLI selection options into config, collector, and paths."""
     include_tags = [*config.include_tags, *(tag or [])]
     exclude_tags = [*config.exclude_tags, *(skip_tag or [])]
     resolved_paths = paths or config.test_paths

@@ -316,6 +316,7 @@ class ExperimentConsoleReporter(RunEventsProcessor):
         self.console = console or Console(file=sys.__stdout__)
         self.verbosity = verbosity
         self._live: Live | None = None
+        self._output_suppression = ExitStack()
         self._states: dict[UUID, _ExperimentRunState] = {}
         self._lock = asyncio.Lock()
 
@@ -328,6 +329,7 @@ class ExperimentConsoleReporter(RunEventsProcessor):
         if self._live is not None:
             self._live.stop()
             self._live = None
+        self._output_suppression.close()
 
     async def on_run_start(self, run: ExecutedRun) -> None:
         """Start tracking an experiment variant run."""
@@ -436,12 +438,17 @@ class ExperimentConsoleReporter(RunEventsProcessor):
         if not self.console.is_terminal:
             return
         if self._live is None:
+            sink = self._output_suppression.enter_context(open(devnull, "w"))
+            self._output_suppression.enter_context(redirect_stdout(sink))
+            self._output_suppression.enter_context(redirect_stderr(sink))
             self._live = Live(
                 self._render_live_display(),
                 console=self.console,
                 auto_refresh=True,
                 refresh_per_second=2,
                 transient=False,
+                redirect_stdout=False,
+                redirect_stderr=False,
             )
             self._live.start()
             return

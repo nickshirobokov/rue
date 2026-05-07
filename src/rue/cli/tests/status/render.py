@@ -1,4 +1,4 @@
-"""Rich rendering for `rue tests status`."""
+"""Rich rendering for `rue status`."""
 
 from __future__ import annotations
 

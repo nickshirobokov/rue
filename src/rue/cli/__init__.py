@@ -5,23 +5,47 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from click.core import Context
 from rich.console import Console
 from tomlkit import parse, table
 from tomlkit.container import OutOfOrderTableProxy
 from tomlkit.items import Table
 from typer import Typer
+from typer.core import TyperGroup
 
+from rue.cli import run as run_module
 from rue.cli.db import DatabaseCommands, db_app
-from rue.cli.experiments import experiments_app
-from rue.cli.tests import TestSpecCollector, tests_app
+from rue.cli.tests.status.command import status
 from rue.config import load_config
-from rue.testing.discovery import KeywordMatcher
+from rue.testing.discovery import KeywordMatcher, TestSpecCollector
 
 
-app = Typer(name="rue", help="Rue AI Testing Framework", no_args_is_help=True)
+class DefaultCommandGroup(TyperGroup):
+    """Route bare group invocations to the default subcommand."""
+
+    default_command_name = "run"
+
+    def parse_args(self, ctx: Context, args: list[str]) -> list[str]:
+        if ctx.resilient_parsing:
+            return super().parse_args(ctx, args)
+        if args and args[0] in {"--help", "-h"}:
+            return super().parse_args(ctx, args)
+        if args and args[0] in {"test", "tests", "experiments"}:
+            return super().parse_args(ctx, args)
+        if args and args[0] in self.commands:
+            return super().parse_args(ctx, args)
+        return super().parse_args(ctx, [self.default_command_name, *args])
+
+
+app = Typer(
+    name="rue",
+    cls=DefaultCommandGroup,
+    help="Rue AI Testing Framework",
+    no_args_is_help=False,
+)
 app.add_typer(db_app, name="db")
-app.add_typer(experiments_app, name="experiments")
-app.add_typer(tests_app, name="tests")
+app.command()(run_module.run)
+app.command()(status)
 
 _TomlTable = Table | OutOfOrderTableProxy
 

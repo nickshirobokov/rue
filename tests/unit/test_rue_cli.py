@@ -40,12 +40,11 @@ runner = CliRunner()
 @pytest.fixture(autouse=True)
 def _isolate_cli_db(tmp_path: Path, monkeypatch):
     config = Config(database_path=str(tmp_path / "rue.turso.db"))
-    monkeypatch.setattr("rue.cli.tests.run.load_config", lambda: config)
+    monkeypatch.setattr("rue.cli.run.load_config", lambda: config)
     monkeypatch.setattr(
         "rue.cli.tests.status.command.load_config",
         lambda: config,
     )
-    monkeypatch.setattr("rue.cli.experiments.run.load_config", lambda: config)
 
 
 def dummy() -> None:
@@ -100,41 +99,41 @@ class TestResolveProcessors:
         assert overridden.processors == ["ConsoleReporter"]
 
 
-def test_top_level_help_lists_tests_command():
+def test_top_level_help_lists_run_and_status():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "│ tests " in result.stdout
-    assert "│ experiments " in result.stdout
+    assert "│ run " in result.stdout
+    assert "│ status " in result.stdout
+    assert "│ db " in result.stdout
+    assert "│ init " in result.stdout
+    assert "│ tests " not in result.stdout
+    assert "│ experiments " not in result.stdout
     assert "\n│ test  " not in result.stdout
 
 
-def test_tests_group_help_does_not_invoke_run_help():
-    result = runner.invoke(app, ["tests", "--help"])
+def test_root_help_does_not_expose_run_options():
+    result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "Usage: rue tests [OPTIONS] COMMAND [ARGS]..." in result.stdout
     assert "--run-id" not in result.stdout
 
 
-def test_tests_run_help_exposes_run_options():
-    result = runner.invoke(app, ["tests", "run", "--help"])
+def test_run_help_exposes_all_options():
+    result = runner.invoke(app, ["run", "--help"])
     assert result.exit_code == 0
     assert "--run-id" in result.stdout
     assert "--no-db" not in result.stdout
     assert "--db-path" not in result.stdout
     assert "--otel" in result.stdout
-
-
-def test_experiments_run_help_exposes_experiment_options():
-    result = runner.invoke(app, ["experiments", "run", "--help"])
-    assert result.exit_code == 0
+    assert "-exp" in result.stdout
+    assert "--experiment" in result.stdout
+    assert "--maxfail" in result.stdout
+    assert "--fail-fast" in result.stdout
     assert "--concurrency" in result.stdout
-    assert "--timeout" in result.stdout
-    assert "--run-id" not in result.stdout
-    assert "--db-path" not in result.stdout
+    assert "--processor" in result.stdout
 
 
 def test_tests_status_help_exposes_status_options():
-    result = runner.invoke(app, ["tests", "status", "--help"])
+    result = runner.invoke(app, ["status", "--help"])
     assert result.exit_code == 0
     assert "--database-path" in result.stdout
     assert "--keyword" in result.stdout
@@ -155,13 +154,35 @@ def test_cli_no_otel_flag_overrides_config():
 
 
 def test_cli_rejects_invalid_run_id():
-    result = runner.invoke(app, ["tests", "run", "--run-id", "not-a-uuid"])
+    result = runner.invoke(app, ["run", "--run-id", "not-a-uuid"])
+    assert result.exit_code == 2
+
+
+def test_exp_with_run_id_exits_2():
+    result = runner.invoke(app, ["run", "-exp", "--run-id", str(uuid4())])
+    assert result.exit_code == 2
+    assert "--run-id" in result.stdout
+
+
+def test_exp_with_maxfail_exits_2():
+    result = runner.invoke(app, ["run", "-exp", "--maxfail", "3"])
+    assert result.exit_code == 2
+    assert "--maxfail" in result.stdout
+
+
+def test_old_tests_command_is_unknown():
+    result = runner.invoke(app, ["tests"])
+    assert result.exit_code == 2
+
+
+def test_old_experiments_command_is_unknown():
+    result = runner.invoke(app, ["experiments"])
     assert result.exit_code == 2
 
 
 @pytest.mark.parametrize(
     "command",
-    [["tests"], ["tests", "run"]],
+    [[], ["run"]],
     ids=["alias", "run"],
 )
 def test_run_tests_returns_2_when_run_id_already_exists(
@@ -185,7 +206,7 @@ def test_run_tests_returns_2_when_run_id_already_exists(
     )
     recorder.close()
     monkeypatch.setattr(
-        "rue.cli.tests.run.load_config",
+        "rue.cli.run.load_config",
         lambda: Config(database_path=str(database_path)),
     )
 
@@ -202,13 +223,13 @@ def test_run_tests_returns_2_when_run_id_already_exists(
         raise AssertionError(msg)
 
     monkeypatch.setattr(
-        "rue.cli.tests.options.TestSpecCollector.build_spec_collection", _build
+        "rue.cli.options.TestSpecCollector.build_spec_collection", _build
     )
     monkeypatch.setattr(
-        "rue.cli.tests.run.TestLoader.load_from_collection",
+        "rue.cli.run.TestLoader.load_from_collection",
         lambda self, collection: [make_item("test_ok", set())],
     )
-    monkeypatch.setattr("rue.cli.tests.run.Runner.run", _fail_run)
+    monkeypatch.setattr("rue.cli.run.Runner.run", _fail_run)
 
     result = runner.invoke(
         app,
@@ -224,22 +245,22 @@ def test_run_tests_returns_2_when_run_id_already_exists(
 
 @pytest.mark.parametrize(
     "command",
-    [["tests"], ["tests", "run"]],
+    [[], ["run"]],
     ids=["alias", "run"],
 )
 def test_run_tests_returns_2_when_definition_errors(
     command: list[str], monkeypatch
 ):
     monkeypatch.setattr(
-        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        "rue.cli.options.TestSpecCollector.build_spec_collection",
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.tests.run.TestLoader.load_from_collection",
+        "rue.cli.run.TestLoader.load_from_collection",
         raise_definition_errors,
     )
     monkeypatch.setattr(
-        "rue.cli.tests.run.Runner",
+        "rue.cli.run.Runner",
         lambda **kwargs: pytest.fail("Runner should not be constructed"),
     )
 
@@ -256,7 +277,7 @@ def test_cli_resolves_processors_and_injects_turso_recorder(
 ):
     captured: dict[str, object] = {}
     monkeypatch.setattr(
-        "rue.cli.tests.run.load_config",
+        "rue.cli.run.load_config",
         lambda: Config(
             database_path=str(tmp_path / "rue.turso.db"), otel=False
         ),
@@ -280,19 +301,18 @@ def test_cli_resolves_processors_and_injects_turso_recorder(
             return ExecutedRun()
 
     monkeypatch.setattr(
-        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        "rue.cli.options.TestSpecCollector.build_spec_collection",
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.tests.run.TestLoader.load_from_collection",
+        "rue.cli.run.TestLoader.load_from_collection",
         lambda self, collection: [make_item("test_ok", set())],
     )
-    monkeypatch.setattr("rue.cli.tests.run.Runner", FakeRunner)
+    monkeypatch.setattr("rue.cli.run.Runner", FakeRunner)
 
     result = runner.invoke(
         app,
         [
-            "tests",
             "run",
             "--processor",
             "CustomProcessor",
@@ -387,18 +407,18 @@ def test_console_reporter_prints_failed_run_and_metrics() -> None:
 
 @pytest.mark.parametrize(
     "command",
-    [["tests"], ["tests", "run"]],
+    [[], ["run"]],
     ids=["alias", "run"],
 )
 def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(
     command: list[str], monkeypatch
 ):
     monkeypatch.setattr(
-        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        "rue.cli.options.TestSpecCollector.build_spec_collection",
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.tests.run.TestLoader.load_from_collection",
+        "rue.cli.run.TestLoader.load_from_collection",
         lambda self, collection: [make_item("test_ok", set())],
     )
 
@@ -406,7 +426,7 @@ def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(
     assert result.exit_code == 0
 
 
-def test_tests_without_subcommand_defaults_to_run(tmp_path: Path, monkeypatch):
+def test_bare_invocation_defaults_to_run(tmp_path: Path, monkeypatch):
     captured: dict[str, object] = {}
 
     class FakeRunner:
@@ -426,22 +446,22 @@ def test_tests_without_subcommand_defaults_to_run(tmp_path: Path, monkeypatch):
         return TestSpecCollection(suite_root=Path.cwd())
 
     monkeypatch.setattr(
-        "rue.cli.tests.run.load_config",
+        "rue.cli.run.load_config",
         lambda: Config(
             database_path=str(tmp_path / "rue.turso.db"), fail_fast=True
         ),
     )
     monkeypatch.setattr(
-        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        "rue.cli.options.TestSpecCollector.build_spec_collection",
         build_spec_collection,
     )
     monkeypatch.setattr(
-        "rue.cli.tests.run.TestLoader.load_from_collection",
+        "rue.cli.run.TestLoader.load_from_collection",
         lambda self, collection: [make_item("test_ok", set())],
     )
-    monkeypatch.setattr("rue.cli.tests.run.Runner", FakeRunner)
+    monkeypatch.setattr("rue.cli.run.Runner", FakeRunner)
 
-    result = runner.invoke(app, ["tests"])
+    result = runner.invoke(app, [])
 
     assert result.exit_code == 0
     assert captured["paths"] == ["."]
@@ -457,8 +477,8 @@ def test_rue_test_command_is_unknown():
 @pytest.mark.parametrize(
     ("command", "status_mode"),
     [
-        (["tests", "run"], False),
-        (["tests", "status"], True),
+        (["run"], False),
+        (["status"], True),
     ],
     ids=["run", "status"],
 )
@@ -479,7 +499,7 @@ def test_run_and_status_share_selection_parsing(
         return TestSpecCollection(suite_root=Path.cwd())
 
     monkeypatch.setattr(
-        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        "rue.cli.options.TestSpecCollector.build_spec_collection",
         build_spec_collection,
     )
 
@@ -494,7 +514,7 @@ def test_run_and_status_share_selection_parsing(
         )
     else:
         monkeypatch.setattr(
-            "rue.cli.tests.run.TestLoader.load_from_collection",
+            "rue.cli.run.TestLoader.load_from_collection",
             lambda self, collection: [make_item("test_ok", set())],
         )
 
@@ -509,7 +529,7 @@ def test_run_and_status_share_selection_parsing(
                 del items, resolver
                 return ExecutedRun()
 
-        monkeypatch.setattr("rue.cli.tests.run.Runner", FakeRunner)
+        monkeypatch.setattr("rue.cli.run.Runner", FakeRunner)
 
     result = runner.invoke(
         app,
@@ -581,19 +601,28 @@ def test_experiments_run_shares_selection_and_preserves_db_config(
             return (result,)
 
     monkeypatch.setattr(
-        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        "rue.cli.options.TestSpecCollector.build_spec_collection",
         build_spec_collection,
     )
     monkeypatch.setattr(
-        "rue.cli.experiments.run.ExperimentRunner",
+        "rue.cli.run.ExperimentRunner",
         FakeExperimentRunner,
+    )
+
+    def load_from_collection(self, collection):
+        collection.setup_chains[Path("mutated.py")] = ()
+        return [make_item("test_ok", set())]
+
+    monkeypatch.setattr(
+        "rue.cli.run.TestLoader.load_from_collection",
+        load_from_collection,
     )
 
     cli_result = runner.invoke(
         app,
         [
-            "experiments",
             "run",
+            "-exp",
             str(tmp_path),
             "-k",
             "smoke",
@@ -612,6 +641,8 @@ def test_experiments_run_shares_selection_and_preserves_db_config(
     assert captured["keyword"] == "smoke"
     assert captured["config"].maxfail is None
     assert captured["config"].processors == []
+    assert Path("mutated.py") not in captured["collection"].setup_chains
+    assert Path("mutated.py") not in captured["run_collection"].setup_chains
     assert captured["experiments"] == (experiment,)
     assert isinstance(
         captured["session"].processors[0],
@@ -620,7 +651,22 @@ def test_experiments_run_shares_selection_and_preserves_db_config(
     assert "model=mini" in cli_result.stdout
 
 
-def test_experiments_run_no_experiments_does_not_run(monkeypatch):
+def test_experiments_run_no_experiments_runs_baseline(monkeypatch):
+    captured: dict[str, object] = {}
+    result = ExperimentVariantResult(
+        variant=ExperimentVariant.build_all(())[0],
+        run_id=uuid4(),
+        passed=1,
+        failed=0,
+        errors=0,
+        skipped=0,
+        xfailed=0,
+        xpassed=0,
+        total=1,
+        total_duration_ms=10,
+        stopped_early=False,
+    )
+
     class FakeExperimentRunner:
         def __init__(self, *, config) -> None:
             self.config = config
@@ -629,41 +675,52 @@ def test_experiments_run_no_experiments_does_not_run(monkeypatch):
             return ()
 
         async def run(self, collection, experiments=None, *, session=None):
-            del session
-            raise AssertionError("ExperimentRunner.run should not be called")
+            captured["collection"] = collection
+            captured["experiments"] = experiments
+            captured["session"] = session
+            return (result,)
 
     monkeypatch.setattr(
-        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        "rue.cli.options.TestSpecCollector.build_spec_collection",
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.experiments.run.ExperimentRunner",
+        "rue.cli.run.ExperimentRunner",
         FakeExperimentRunner,
     )
+    monkeypatch.setattr(
+        "rue.cli.run.TestLoader.load_from_collection",
+        lambda self, collection: [make_item("test_ok", set())],
+    )
 
-    result = runner.invoke(app, ["experiments", "run"])
+    cli_result = runner.invoke(app, ["run", "-exp"])
 
-    assert result.exit_code == 0
-    assert "No experiments found" in result.stdout
+    assert cli_result.exit_code == 0
+    assert captured["experiments"] == ()
+    assert isinstance(
+        captured["session"].processors[0],
+        ExperimentConsoleReporter,
+    )
+    assert "baseline" in cli_result.stdout
 
 
 def test_experiments_run_returns_2_when_definition_errors(monkeypatch):
     monkeypatch.setattr(
-        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        "rue.cli.options.TestSpecCollector.build_spec_collection",
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.experiments.run.TestLoader.load_from_collection",
+        "rue.cli.run.TestLoader.load_from_collection",
         raise_definition_errors,
     )
     monkeypatch.setattr(
-        "rue.cli.experiments.run.ExperimentRunner",
+        "rue.cli.run.ExperimentRunner",
         lambda **kwargs: pytest.fail(
             "ExperimentRunner should not be constructed"
         ),
     )
 
-    result = runner.invoke(app, ["experiments", "run"])
+    result = runner.invoke(app, ["run", "-exp"])
 
     assert result.exit_code == 2
     assert "Test definition errors" in result.stdout
@@ -673,7 +730,7 @@ def test_experiments_run_returns_2_when_definition_errors(monkeypatch):
 
 def test_tests_status_returns_2_when_definition_errors(monkeypatch):
     monkeypatch.setattr(
-        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        "rue.cli.options.TestSpecCollector.build_spec_collection",
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
@@ -685,7 +742,7 @@ def test_tests_status_returns_2_when_definition_errors(monkeypatch):
         lambda report, verbosity: pytest.fail("status should not render"),
     )
 
-    result = runner.invoke(app, ["tests", "status"])
+    result = runner.invoke(app, ["status"])
 
     assert result.exit_code == 2
     assert "Test definition errors" in result.stdout
@@ -697,7 +754,7 @@ def test_tests_status_does_not_create_missing_db(tmp_path, monkeypatch):
     missing_db = tmp_path / "missing.db"
 
     monkeypatch.setattr(
-        "rue.cli.tests.options.TestSpecCollector.build_spec_collection",
+        "rue.cli.options.TestSpecCollector.build_spec_collection",
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
@@ -711,7 +768,7 @@ def test_tests_status_does_not_create_missing_db(tmp_path, monkeypatch):
 
     result = runner.invoke(
         app,
-        ["tests", "status", "--database-path", str(missing_db)],
+        ["status", "--database-path", str(missing_db)],
     )
 
     assert result.exit_code == 0

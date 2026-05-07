@@ -1,4 +1,4 @@
-"""Models used by `rue tests status`."""
+"""Models used by `rue status`."""
 
 from __future__ import annotations
 

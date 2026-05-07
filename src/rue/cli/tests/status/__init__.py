@@ -1,4 +1,4 @@
-"""Status support for `rue tests`."""
+"""Status support for `rue status`."""
 
 from rue.cli.tests.status.builder import TestsStatusBuilder
 from rue.cli.tests.status.command import status, status_renderer

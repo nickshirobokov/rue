@@ -28,7 +28,7 @@ stage where that context becomes available.
 block-beta
   columns 12
 
-  cli["CLI selection<br/>rue.cli.tests.run.run<br/>resolve_selection"]
+  cli["CLI selection<br/>rue.cli.run.run<br/>resolve_selection"]
   collect["Static collection<br/>TestSpecCollector<br/>.build_spec_collection"]
   load["Definition loading<br/>TestLoader<br/>.load_from_collection"]
   runner["Runner setup<br/>Runner.__init__<br/>Runner.run"]

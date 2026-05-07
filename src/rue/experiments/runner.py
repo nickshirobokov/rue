@@ -5,8 +5,12 @@ from __future__ import annotations
 import asyncio
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
+from os import devnull
 from typing import Any
+
+import cloudpickle  # type: ignore[import-untyped]
 
 from rue.config import Config
 from rue.context.runtime import RunContext
@@ -58,11 +62,13 @@ class ExperimentRunner:
         experiment_specs = (
             self.collect(collection) if experiments is None else experiments
         )
-        if not experiment_specs:
-            return ()
 
         results: list[ExperimentVariantResult] = []
-        variants = ExperimentVariant.build_all(experiment_specs)
+        variants = (
+            (ExperimentVariant(index=0),)
+            if not experiment_specs
+            else ExperimentVariant.build_all(experiment_specs)
+        )
         mp_context = mp.get_context("spawn")
         manager = mp_context.Manager() if session is not None else None
         with ProcessPoolExecutor(
@@ -75,9 +81,9 @@ class ExperimentRunner:
                     queue = None if manager is None else manager.Queue()
                     future = pool.submit(
                         run_experiment_variant,
-                        collection,
-                        variant,
-                        self.config,
+                        cloudpickle.dumps(
+                            (collection, variant, self.config),
+                        ),
                         queue,
                     )
                     drain_task = (
@@ -89,6 +95,7 @@ class ExperimentRunner:
                         result = await asyncio.to_thread(future.result)
                     finally:
                         if drain_task is not None:
+                            queue.put(None)
                             await asyncio.wait_for(
                                 drain_task,
                                 timeout=DRAIN_TIMEOUT_SECONDS,
@@ -101,12 +108,11 @@ class ExperimentRunner:
 
 
 def run_experiment_variant(
-    collection: TestSpecCollection,
-    variant: ExperimentVariant,
-    config: Config,
+    payload: bytes,
     queue: Any | None = None,
 ) -> ExperimentVariantResult:
     """Process entrypoint for one experiment variant."""
+    collection, variant, config = cloudpickle.loads(payload)
     return asyncio.run(
         _run_experiment_variant(
             collection,
@@ -143,7 +149,12 @@ async def _run_experiment_variant(
         processors.append(OtelReporter())
     if queue is not None:
         processors.append(QueueForwarder(queue))
-    with context, RunEventsReceiver(processors):
+    output_suppression = ExitStack()
+    if queue is not None:
+        sink = output_suppression.enter_context(open(devnull, "w"))
+        output_suppression.enter_context(redirect_stdout(sink))
+        output_suppression.enter_context(redirect_stderr(sink))
+    with output_suppression, context, RunEventsReceiver(processors):
         try:
             await variant.apply(
                 default_experiment_registry.all(),

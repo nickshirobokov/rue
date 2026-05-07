@@ -1,11 +1,11 @@
-"""`rue tests status` command."""
+"""`rue status` command."""
 
 from __future__ import annotations
 
 from rich.console import Console
 
 from rue.cli.errors import print_definition_errors
-from rue.cli.tests.options import (
+from rue.cli.options import (
     DatabasePathOpt,
     KeywordOpt,
     SkipTagOpt,

@@ -169,7 +169,7 @@ def test_chatbot(group: CaseGroup, case: Case, chatbot):
 def test_health_check(api):
     assert api.health_check()
 
-# Run: uv run rue tests run --tag smoke
+# Run: uv run rue run --tag smoke
 ```
 
 **`@rue.test.tag.skip(reason=...)`** - Skip tests unconditionally
@@ -357,7 +357,7 @@ To stop on the first failure, set `fail-fast = true` in Rue config or use
 the `--fail-fast` CLI flag:
 
 ```bash
-uv run rue tests run --fail-fast
+uv run rue run --fail-fast
 ```
 
 ### Integration with metrics
@@ -387,7 +387,7 @@ def test_classifier(input, expected, classifier, accuracy: Metric):
 **Important:** Rue's assertion transformation only applies when you run files through Rue's test runner:
 
 ```bash
-uv run rue tests run test_my_tests.py  # ✓ Transformed assertions
+uv run rue run test_my_tests.py  # ✓ Transformed assertions
 python test_my_tests.py           # ✗ Standard Python behavior
 uv run test_my_tests.py           # ✗ Standard Python behavior
 ```

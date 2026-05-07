@@ -2,7 +2,7 @@
 title: "Rue OpenTelemetry Traces"
 ---
 
-Rue OpenTelemetry capture is **Runner-managed**, while persistence is **processor-managed**. Traces exist only while a test function is executing inside an active OpenTelemetry-enabled test execution created by `Runner` or `uv run rue tests run`.
+Rue OpenTelemetry capture is **Runner-managed**, while persistence is **processor-managed**. Traces exist only while a test function is executing inside an active OpenTelemetry-enabled test execution created by `Runner` or `uv run rue run`.
 
 ## OpenTelemetry Defaults
 
@@ -10,16 +10,16 @@ Rue OpenTelemetry capture is **Runner-managed**, while persistence is **processo
 
 ```bash
 # OpenTelemetry is enabled by default
-uv run rue tests run
+uv run rue run
 
 # Disable OpenTelemetry explicitly, even if config enables it
-uv run rue tests run --no-otel
+uv run rue run --no-otel
 
 # Force-enable OpenTelemetry if config or environment disabled it
-uv run rue tests run --otel
+uv run rue run --otel
 
 # If you override processors, keep OtelReporter attached for local trace files
-uv run rue tests run --processor ConsoleReporter --processor OtelReporter
+uv run rue run --processor ConsoleReporter --processor OtelReporter
 ```
 
 ### Config
@@ -100,7 +100,7 @@ Available read-only span accessors on `SUT`:
 ## Storage
 
 - Capture is enabled by default; persistence still happens only when an `OtelReporter` processor is attached
-- In the usual fresh-process setup, `uv run rue tests run` writes `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default processor set
+- In the usual fresh-process setup, `uv run rue run` writes `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default processor set
 - If you override the processor list and omit `OtelReporter`, Rue captures traces but does not persist local trace files
 - `OtelReporter` stores compact JSON payloads under `.rue/traces/<run_id>/<execution_id>.json`
 - `OtelReporter` keeps only the 5 most recent run directories under `.rue/traces`
