@@ -10,7 +10,6 @@ from uuid import UUID, uuid4
 import turso
 
 from rue.storage.schema import (
-    MAX_STORED_RUNS,
     REQUIRED_CUSTOM_TYPES,
     SCHEMA,
     SCHEMA_VERSION,
@@ -145,7 +144,6 @@ class TursoRunStore:
 
 
 __all__ = [
-    "MAX_STORED_RUNS",
     "SCHEMA_VERSION",
     "TURSO_FEATURES",
     "TursoRunStore",

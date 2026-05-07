@@ -2,7 +2,6 @@
 
 SCHEMA_VERSION = 1
 TURSO_FEATURES = "custom_types,index_method"
-MAX_STORED_RUNS = 5
 
 REQUIRED_CUSTOM_TYPES = frozenset(
     {

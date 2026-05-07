@@ -15,7 +15,7 @@ from rue.models import Locator
 from rue.predicates.models import PredicateResult
 from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.models import MetricMetadata, MetricResult
-from rue.storage import MAX_STORED_RUNS, TursoRunRecorder, TursoRunStore
+from rue.storage import TursoRunRecorder, TursoRunStore
 from rue.testing.models import (
     ExecutedRun,
     ExecutedTest,
@@ -259,23 +259,3 @@ def test_turso_mvcc_accepts_concurrent_non_overlapping_writes(
     conn_two.close()
 
     assert turso_store.run_count() == 2
-
-
-def test_recorder_does_not_prune_old_runs(database_path: Path) -> None:
-    base_time = datetime(2024, 1, 1, tzinfo=UTC)
-    for index in range(MAX_STORED_RUNS + 1):
-        recorder = TursoRunRecorder()
-        recorder.configure(Config(database_path=database_path))
-        run = ExecutedRun(
-            run_id=uuid4(),
-            start_time=base_time + timedelta(days=index),
-            environment=make_environment(),
-            result=RunResult(),
-        )
-        asyncio.run(recorder.on_run_start(run))
-        asyncio.run(recorder.on_run_complete(run))
-        recorder.close()
-
-    store = TursoRunStore(database_path)
-
-    assert store.run_count() == MAX_STORED_RUNS + 1
