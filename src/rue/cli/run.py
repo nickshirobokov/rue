@@ -146,7 +146,6 @@ def run(
 
     collection = collector.build_spec_collection(resolved_paths)
     try:
-        # Experiment collection mutates specs while expanding variants.
         load_collection = deepcopy(collection) if experiment else collection
         items = TestLoader(load_collection.suite_root).load_from_collection(
             load_collection
