@@ -51,25 +51,33 @@ class ScopeContext:
         return cls(run=ScopeOwner(scope=Scope.RUN, run_id=run_id))
 
     @classmethod
-    def for_test(
+    def for_module(
         cls,
         run_id: UUID,
-        execution_id: UUID,
         module_path: Path,
     ) -> ScopeContext:
-        """Build a scope context for test-scoped work."""
+        """Build a scope context for module-scoped work."""
         return cls(
             run=ScopeOwner(scope=Scope.RUN, run_id=run_id),
-            test=ScopeOwner(
-                scope=Scope.TEST,
-                execution_id=execution_id,
-                run_id=run_id,
-            ),
             module=ScopeOwner(
                 scope=Scope.MODULE,
                 run_id=run_id,
                 module_path=module_path,
             ),
+        )
+
+    @classmethod
+    def for_test(cls, execution_id: UUID) -> ScopeContext:
+        """Build a scope context for test-scoped work."""
+        current = cls.current()
+        return cls(
+            run=current.run,
+            test=ScopeOwner(
+                scope=Scope.TEST,
+                execution_id=execution_id,
+                run_id=current.run.run_id,
+            ),
+            module=current.module,
         )
 
     @classmethod
@@ -95,7 +103,8 @@ class ScopeContext:
             case Scope.MODULE:
                 if self.module is None:
                     msg = (
-                        "Module-scoped resources require an open TestContext."
+                        "Module-scoped resources require an open "
+                        "ModuleContext or TestContext."
                     )
                     raise RuntimeError(msg)
                 return self.module

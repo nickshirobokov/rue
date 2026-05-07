@@ -532,7 +532,7 @@ def test_materialize_imports_nested_setup_chain_in_order(tmp_path, monkeypatch):
     assert item.setup_chain == plan.setup_chains[item.spec.locator.module_path]
 
     make_run_context()
-    with TestContext(item=item, execution_id=uuid4()):
+    with TestContext(execution_id=uuid4()):
         item.fn()
 
 

@@ -57,7 +57,7 @@ def test_sample():
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         make_run_context()
-        ctx = TestContext(item=item, execution_id=uuid4())
+        ctx = TestContext(execution_id=uuid4())
         with (
             ctx,
             bind(CURRENT_ASSERTION_RESULTS, assertion_results),
@@ -98,7 +98,7 @@ def test_fail():
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         make_run_context()
-        ctx = TestContext(item=item, execution_id=uuid4())
+        ctx = TestContext(execution_id=uuid4())
         with (
             ctx,
             bind(CURRENT_ASSERTION_RESULTS, assertion_results),
@@ -137,7 +137,7 @@ def test_metric_capture_multi():
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         make_run_context()
-        ctx = TestContext(item=item, execution_id=uuid4())
+        ctx = TestContext(execution_id=uuid4())
         m = Metric(
             metadata=MetricMetadata(
                 identity=ResourceSpec(
@@ -208,7 +208,8 @@ def test_dummy():
         [item] = materialize_tests(mod_path)
         resolver = DependencyResolver(registry)
         execution_id = uuid4()
-        ctx = TestContext(item=item, execution_id=execution_id)
+        make_run_context()
+        ctx = TestContext(execution_id=execution_id)
         metric_results: list[MetricResult] = []
         with ctx, bind(CURRENT_METRIC_RESULTS, metric_results):
             graphs = registry.compile_graphs(
@@ -267,7 +268,8 @@ def test_repr_cases():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
-        with TestContext(item=item, execution_id=uuid4()), bind(
+        make_run_context()
+        with TestContext(execution_id=uuid4()), bind(
             CURRENT_ASSERTION_RESULTS,
             assertion_results,
         ):
@@ -317,7 +319,8 @@ def test_multiline_assert():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
-        with TestContext(item=item, execution_id=uuid4()), bind(
+        make_run_context()
+        with TestContext(execution_id=uuid4()), bind(
             CURRENT_ASSERTION_RESULTS,
             assertion_results,
         ):

@@ -80,10 +80,7 @@ class SingleTest(ExecutableTest):
         self,
         resolver: DependencyResolver,
     ) -> ExecutedTest:
-        with TestContext(
-            item=self.definition,
-            execution_id=self.execution_id,
-        ):
+        with TestContext(execution_id=self.execution_id):
             match self:
                 case SingleTest(is_stopped=is_stopped) if is_stopped():
                     return ExecutedTest(

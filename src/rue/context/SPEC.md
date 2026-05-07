@@ -38,7 +38,7 @@ block-beta
   resolve_deps["Dependency resolve<br/>DependencyResolver<br/>.resolve_graph_deps"]
   user_call["User test call<br/>LoadedTestDef<br/>.call_test_fn"]
   test_done["Test cleanup<br/>DependencyResolver<br/>.teardown(Scope.TEST)"]
-  module_done["Module cleanup<br/>Runner<br/>._teardown_module_if_complete"]
+  module_done["Module cleanup<br/>Runner + ModuleContext<br/>teardown(Scope.MODULE)"]
   final["Run result<br/>DependencyResolver.teardown()<br/>TursoRunRecorder.on_run_complete"]
 
   space:3
@@ -55,11 +55,11 @@ block-beta
   space
 
   space:6
-  test_ctx["TestContext<br/>CURRENT_TEST<br/>loaded item, execution id"]:4
+  test_ctx["TestContext<br/>CURRENT_TEST<br/>execution id"]:4
   space:2
 
   space:6
-  test_owner["ScopeContext<br/>TEST and MODULE owners"]:4
+  test_owner["ScopeContext<br/>TEST owner"]:4
   space:2
 
   space:6
@@ -131,11 +131,13 @@ block-beta
 
 Static collection and loading happen before Rue opens runtime contexts. They
 produce `TestSpecCollection` and `LoadedTestDef` values that execution later
-uses under `RunContext` and `TestContext`.
+uses under `RunContext`, `ModuleContext`, and `TestContext`.
 
-`RunContext` opens run ownership. `TestContext` layers test and module
-ownership on top of the active run. Rue MUST NOT resolve `Scope.TEST` or
-`Scope.MODULE` ownership unless a `TestContext` is open.
+`RunContext` opens run ownership. `ModuleContext` layers module ownership on
+top of the active run. `TestContext` layers test and module ownership on top of
+the active run. Rue MUST NOT resolve `Scope.TEST` unless a `TestContext` is
+open, and MUST NOT resolve `Scope.MODULE` unless a `ModuleContext` or
+`TestContext` is open.
 
 ## Context Catalogue
 
@@ -143,8 +145,9 @@ ownership on top of the active run. Rue MUST NOT resolve `Scope.TEST` or
 | --- | --- | --- | --- | --- | --- |
 | `RunContext` / `CURRENT_RUN_CONTEXT` | Run-level config, run id, environment, experiment variant metadata | Opened by CLI, experiment runner, status builder, or tests before constructing/calling runner APIs | Whole Rue run | Required; missing lookup MUST fail | `Runner`, `SingleTest`, assertions, run event processors, subprocess payloads |
 | `RunEnvironment` | Serializable metadata for the process that owns the run | Built by `RunContext` | As `RunContext.environment` | Not a context binding | Run result persistence and reports |
-| `TestContext` / `CURRENT_TEST` | Current loaded test definition and execution id | Opened by `SingleTest._execute`, subprocess worker, and status preflight | One test execution or synthetic module teardown selection | Required for test execution, graph lookup, SUT injection, and test/module-scoped resources | `LoadedTestDef`, `DependencyResolver`, SUT resources, transfer |
-| `ScopeContext` / `CURRENT_SCOPE_CONTEXT` | Current `ScopeOwner` values for `Scope.RUN`, `Scope.MODULE`, and `Scope.TEST` | Opened by `RunContext` and replaced by `TestContext` | Run context for `RUN`; test context for all scopes | Required for scoped resources and patches; invalid scope ownership MUST fail | Resource store, resolver, patch dispatch |
+| `ModuleContext` | Current module path without test metadata | Opened by `Runner` around top-level module work and module teardown | Top-level test dispatch and module teardown | Required for module-scoped resources and patches outside a test body | `Runner`, `DependencyResolver`, patch dispatch |
+| `TestContext` / `CURRENT_TEST` | Current execution id | Opened by `SingleTest._execute`, subprocess worker, and status preflight | One test execution | Required for test execution, graph lookup, SUT injection, and test-scoped resources | `LoadedTestDef`, `DependencyResolver`, SUT resources, transfer |
+| `ScopeContext` / `CURRENT_SCOPE_CONTEXT` | Current `ScopeOwner` values for `Scope.RUN`, `Scope.MODULE`, and `Scope.TEST` | Opened by `RunContext`, `ModuleContext`, and `TestContext` | Run context for `RUN`; module context for `MODULE`; test context for `TEST` plus active wider owners | Required for scoped resources and patches; invalid scope ownership MUST fail | Resource store, resolver, patch dispatch |
 | `ResourceHookContext` / `CURRENT_RESOURCE_HOOK_CONTEXT` | Consumer/provider metadata while resource hooks run | Opened by `DependencyResolver` around `on_resolve`, `on_injection`, and `on_teardown` | Resource hook callbacks only | Required inside hook-only APIs | Metric resource decoration and hook metadata |
 | `CURRENT_ASSERTION_RESULTS` | Optional assertion result sink | Bound with `bind` around loaded test execution or metric execution | Test body and metric collection windows | Optional; `None` means no collection | `AssertionResult.__post_init__`, metrics |
 | `CURRENT_PREDICATE_RESULTS` | Optional predicate result sink for rewritten assertions | Bound with `bind` by assertion rewrite | Predicate calls inside an assertion | Optional; `None` means no collection | `@predicate` wrappers |
@@ -169,11 +172,17 @@ it is a metric resource feature, not a cross-runtime ownership scope.
 `SingleTest` construction requires an open `RunContext` because it builds a
 test tracer from run config and run id.
 
-`TestContext` requires an open `RunContext`; entering it derives run, module,
-and test `ScopeOwner` values from the active run and loaded test.
+`ModuleContext` requires an open `RunContext`; entering it derives run and
+module `ScopeOwner` values from the active run and module path without binding
+`CURRENT_TEST`.
 
-`Scope.RUN` ownership is available inside `RunContext`. `Scope.MODULE` and
-`Scope.TEST` ownership are available only inside `TestContext`.
+`TestContext` requires an open `RunContext`; entering it layers a test
+`ScopeOwner` over the active scope context.
+
+`Scope.RUN` ownership is available inside `RunContext`. `Scope.MODULE`
+ownership is available inside `ModuleContext`. `TestContext` preserves the
+active module owner when one is already bound. `Scope.TEST` ownership is
+available only inside `TestContext`.
 
 Resource graph lookup without an explicit graph requires `CURRENT_TEST` because
 graphs are keyed by execution id.
@@ -181,8 +190,9 @@ graphs are keyed by execution id.
 Subprocess execution requires `LazyProcessPool` to be open in the runner and
 reopens serialized `RunContext` and `TestContext` inside the worker process.
 
-Module teardown may temporarily open `TestContext` for a completed execution so
-`ScopeContext.current_owner(Scope.MODULE)` selects the correct module owner.
+Module teardown opens `ModuleContext` for the completed module so
+`ScopeContext.current_owner(Scope.MODULE)` selects the correct module owner
+without exposing fake test metadata.
 
 Run teardown MUST clean remaining resource owners and patches before
 `RunContext` exits.

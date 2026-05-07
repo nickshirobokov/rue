@@ -5,18 +5,17 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import UTC, datetime
-from pathlib import Path
 
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.process_pool import LazyProcessPool
-from rue.context.runtime import CURRENT_RUN_CONTEXT, TestContext, bind
+from rue.context.runtime import CURRENT_RUN_CONTEXT, ModuleContext, bind
 from rue.context.scopes import Scope
 from rue.events import RunEventsReceiver
 from rue.resources import DependencyResolver
 from rue.resources.metrics.models import MetricResult
 from rue.telemetry.otel.runtime import otel_runtime
-from rue.testing.execution import DefaultTestFactory, SingleTest
-from rue.testing.execution.queue import RunnerStep, SessionQueue
+from rue.testing.execution import DefaultTestFactory, ExecutableTest, SingleTest
+from rue.testing.execution.queue import SessionQueue, _RunnerStep
 from rue.testing.models import (
     ExecutedRun,
     ExecutedTest,
@@ -35,7 +34,6 @@ class Runner:
         self._failure_count: int = 0
         self._queue = SessionQueue()
         self._completed_executions: dict[int, ExecutedTest] = {}
-        self._remaining_module_leaves: dict[Path, int] = {}
 
         self.current_run: ExecutedRun | None = None
 
@@ -167,12 +165,6 @@ class Runner:
                 autouse_keys=autouse_keys,
             )
             await RunEventsReceiver.current().on_di_graphs_compiled(graphs)
-            self._remaining_module_leaves = {}
-            for leaf in leaves:
-                module_path = leaf.definition.spec.locator.module_path
-                self._remaining_module_leaves[module_path] = (
-                    self._remaining_module_leaves.get(module_path, 0) + 1
-                )
             await RunEventsReceiver.current().on_tests_ready(self._queue.tests)
             self._completed_executions = {}
             context = CURRENT_RUN_CONTEXT.get()
@@ -201,7 +193,7 @@ class Runner:
 
     async def _run_step(
         self,
-        step: RunnerStep,
+        step: _RunnerStep,
         resolver: DependencyResolver,
         run: ExecutedRun,
     ) -> None:
@@ -213,13 +205,8 @@ class Runner:
             for test in batch.tests:
                 if self.stop_flag:
                     break
-                await RunEventsReceiver.current().on_test_start(test)
-                execution = await test.execute(resolver)
-                self._record_execution(run, execution)
-                await self._teardown_module_if_complete(
-                    resolver,
-                    execution,
-                )
+                await self._start_queued_test(test)
+                await self._execute_started_test(test, resolver, run)
             return
 
         condition = asyncio.Condition()
@@ -237,14 +224,9 @@ class Runner:
                             return
                         await condition.wait()
                     mq, batch, test = queued
-                    await RunEventsReceiver.current().on_test_start(test)
+                    await self._start_queued_test(test)
 
-                execution = await test.execute(resolver)
-                self._record_execution(run, execution)
-                await self._teardown_module_if_complete(
-                    resolver,
-                    execution,
-                )
+                await self._execute_started_test(test, resolver, run)
 
                 async with condition:
                     step.finish(mq, batch)
@@ -266,6 +248,30 @@ class Runner:
             await asyncio.gather(*workers, return_exceptions=True)
             raise
 
+    async def _start_queued_test(
+        self,
+        test: ExecutableTest,
+    ) -> None:
+        module_path = test.definition.spec.locator.module_path
+        with ModuleContext(module_path):
+            await RunEventsReceiver.current().on_test_start(test)
+
+    async def _execute_started_test(
+        self,
+        test: ExecutableTest,
+        resolver: DependencyResolver,
+        run: ExecutedRun,
+    ) -> None:
+        module_path = test.definition.spec.locator.module_path
+        with ModuleContext(module_path):
+            execution = await test.execute(resolver)
+        self._record_execution(run, execution)
+        closed_module = self._queue.finish(test)
+        if closed_module is None:
+            return
+        with ModuleContext(closed_module):
+            await resolver.teardown(Scope.MODULE)
+
     def _record_execution(
         self,
         run: ExecutedRun,
@@ -282,19 +288,3 @@ class Runner:
         if maxfail and self._failure_count >= maxfail:
             self.stop_flag = True
             run.result.stopped_early = True
-
-    async def _teardown_module_if_complete(
-        self,
-        resolver: DependencyResolver,
-        execution: ExecutedTest,
-    ) -> None:
-        module_path = execution.definition.spec.locator.module_path
-        remaining = self._remaining_module_leaves[module_path] - 1
-        self._remaining_module_leaves[module_path] = remaining
-        if remaining:
-            return
-        with TestContext(
-            item=execution.definition,
-            execution_id=execution.execution_id,
-        ):
-            await resolver.teardown(Scope.MODULE)

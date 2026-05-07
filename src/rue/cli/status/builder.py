@@ -14,7 +14,7 @@ from rue.cli.rendering.tests import (
     TestReportNode,
 )
 from rue.config import Config
-from rue.context.runtime import RunContext, TestContext
+from rue.context.runtime import ModuleContext, RunContext, TestContext
 from rue.resources import DependencyResolver, ResourceSpec
 from rue.resources.models import ResourceGraph
 from rue.resources.registry import registry as default_resource_registry
@@ -139,9 +139,10 @@ class TestsStatusBuilder:
             graph = graphs_by_execution_id[execution_id]
             visible_resources = {}
             try:
-                with TestContext(
-                    item=leaf.definition,
-                    execution_id=execution_id,
+                module_path = leaf.definition.spec.locator.module_path
+                with (
+                    ModuleContext(module_path),
+                    TestContext(execution_id=execution_id),
                 ):
                     await resolver.resolve_graph_deps(
                         graph,
