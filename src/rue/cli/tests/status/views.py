@@ -1,1 +1,0 @@
-"""Test status view models."""

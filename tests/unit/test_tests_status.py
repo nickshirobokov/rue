@@ -5,12 +5,12 @@ from uuid import UUID
 import pytest
 from rich.console import Console
 
-from rue.cli.tests.status import (
-    StatusNode,
-    StatusRenderer,
-    TestsStatusBuilder,
-    TestsStatusReport,
+from rue.cli.rendering.tests import (
+    TestReport,
+    TestReportNode,
+    TestTreeRenderer,
 )
+from rue.cli.status import TestsStatusBuilder
 from rue.config import Config
 from rue.models import Locator
 from rue.resources import Scope
@@ -29,10 +29,10 @@ def write_files(root: Path, files: dict[str, str]) -> None:
         path.write_text(dedent(source))
 
 
-def build_report(path: Path) -> TestsStatusReport:
+def build_report(path: Path) -> TestReport:
     collection = TestSpecCollector((), (), None).build_spec_collection((path,))
     builder = TestsStatusBuilder(Config.model_construct())
-    return builder.build(collection, store=None)
+    return builder.build(collection)
 
 
 def test_status_builder_matches_execution_tree_shape(tmp_path):
@@ -131,7 +131,7 @@ def test_status_builder_raises_definition_errors(tmp_path):
     )
     builder = TestsStatusBuilder(Config.model_construct())
     with pytest.raises(TestDefinitionErrors) as raised:
-        builder.build(collection, store=None)
+        builder.build(collection)
 
     [issue] = raised.value.exceptions
     assert "requires at least one value set" in issue.message
@@ -255,8 +255,8 @@ def test_status_builder_groups_resources_by_runtime_type(tmp_path):
     ] == ["agent"]
 
 
-def test_status_renderer_respects_verbosity_levels():
-    child_one = StatusNode(
+def test_test_tree_renderer_respects_verbosity_levels():
+    child_one = TestReportNode(
         definition=make_definition(
             "test_tree",
             suffix="one",
@@ -285,12 +285,12 @@ def test_status_renderer_respects_verbosity_levels():
             ),
         },
     )
-    child_two = StatusNode(
+    child_two = TestReportNode(
         definition=make_definition("test_tree", suffix="two"),
         backend=ExecutionBackend.ASYNCIO,
         history=(TestStatus.PASSED, None),
     )
-    root = StatusNode(
+    root = TestReportNode(
         definition=make_definition(
             "test_tree",
             modifiers=(IterateModifier(count=2, min_passes=1),),
@@ -300,10 +300,10 @@ def test_status_renderer_respects_verbosity_levels():
         children=(child_one, child_two),
         leaf_count=2,
     )
-    report = TestsStatusReport(
+    report = TestReport(
         module_nodes={Path("tests/test_tree.py"): [root]},
     )
-    renderer = StatusRenderer()
+    renderer = TestTreeRenderer()
 
     compact = Console(record=True, width=140)
     compact.print(renderer.render(report, 0))
@@ -334,3 +334,28 @@ def test_status_renderer_respects_verbosity_levels():
     assert "SUT" in very_verbose_text
     assert "confrue_metrics.py" in very_verbose_text
     assert "00000000-0000-0000-0000-000000000001" in very_verbose_text
+
+
+def test_test_tree_renderer_sorts_unknown_and_path_modules():
+    unknown = TestReportNode(
+        definition=make_definition("test_unknown"),
+        backend=ExecutionBackend.MAIN,
+    )
+    known = TestReportNode(
+        definition=make_definition("test_known", module_path="tests/test_a.py"),
+        backend=ExecutionBackend.MAIN,
+    )
+    report = TestReport(
+        module_nodes={
+            Path("tests/test_a.py"): [known],
+            None: [unknown],
+        },
+    )
+
+    console = Console(record=True, width=140)
+    console.print(TestTreeRenderer().render(report, 1))
+
+    text = console.export_text()
+    assert "<unknown>" in text
+    assert "tests/test_a.py" in text
+    assert text.index("<unknown>") < text.index("tests/test_a.py")

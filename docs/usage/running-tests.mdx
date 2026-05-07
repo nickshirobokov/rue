@@ -15,8 +15,7 @@ uv run rue run
 ```
 
 After installation, the same entrypoint is also available as `rue run`.
-Use bare `rue [PATHS]` as the shorthand alias when you want the default `run`
-command.
+The command name is explicit; bare `rue` shows command help.
 
 Run tests from specific paths:
 
@@ -176,13 +175,11 @@ uv run rue run
 # Disable OpenTelemetry for this run
 uv run rue run --no-otel
 
-# If you override processors, keep OtelReporter attached for local trace files
-uv run rue run --processor ConsoleReporter --processor OtelReporter
+# Extra processors are for custom RunEventsProcessor instances
+uv run rue run --processor CustomProcessor
 ```
 
-In the usual fresh-process setup, `uv run rue run` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default processor set. Each file stores `run_id`, `execution_id`, and a nested `trace` tree rooted at the test span.
-
-If you override the processor list and leave out `OtelReporter`, Rue still captures traces for the run, but it does not write local `.rue/traces/...` files.
+In the usual fresh-process setup, `uv run rue run` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the CLI attaches `OtelReporter` when OpenTelemetry is enabled. Each file stores `run_id`, `execution_id`, and a nested `trace` tree rooted at the test span.
 
 **Use OpenTelemetry spans for**:
 - Asserting tool calls in agent tests
@@ -216,7 +213,7 @@ from uuid import UUID
 from rue.config import Config
 from rue.context.runtime import RunContext
 from rue.events import RunEventsReceiver
-from rue.cli.console import ConsoleReporter
+from rue.cli.rendering.terminal import TerminalRunReporter
 from rue.storage import DBWriter
 from rue.storage import DBManager
 from rue.testing import Runner
@@ -229,7 +226,7 @@ db_writer = DBWriter()
 with RunContext(
     config=config,
     run_id=UUID("00000000-0000-0000-0000-000000000001"),
-), RunEventsReceiver([ConsoleReporter(), db_writer]):
+), RunEventsReceiver([TerminalRunReporter(), db_writer]):
     runner = Runner()
 ```
 
@@ -353,22 +350,23 @@ class RunEventsProcessor:
 ### Processor Selection
 
 Processor selection follows this public precedence order:
-- CLI `--processor` flags replace the configured processor list
-- `config.processors` replaces the default processor list
-- if no explicit processor list is set, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`
+- `TerminalRunReporter` is attached by the CLI for normal `rue run` output
+- `OtelReporter` is attached when OpenTelemetry is enabled
+- CLI `--processor` flags replace the configured custom processor list
+- `config.processors` adds custom processors when CLI flags are absent
 
-Official Rue entrypoints append `DBWriter` so run data streams into SQLite as executions complete. Programmatic runs attach one or more processors by opening `RunEventsReceiver([...])` around `Runner`.
+Official Rue entrypoints append the database recorder so run data streams into Turso as executions complete. Programmatic runs attach one or more processors by opening `RunEventsReceiver([...])` around `Runner`.
 
 ### Built-in Processors
 
-In a normal fresh process, Rue's default processor set includes `ConsoleReporter` and `OtelReporter`.
+In a normal fresh process, Rue's CLI processor set includes `TerminalRunReporter` and `OtelReporter`.
 
-**ConsoleReporter**: Outputs to terminal with Rich formatting.
+**TerminalRunReporter**: Outputs to terminal with Rich formatting.
 
 ```python
-from rue.cli.console import ConsoleReporter
+from rue.cli.rendering.terminal import TerminalRunReporter
 
-processor = ConsoleReporter(verbosity=1)
+processor = TerminalRunReporter(verbosity=1)
 ```
 
 **OtelReporter**: Persists OpenTelemetry traces under `.rue/traces`.
@@ -485,7 +483,7 @@ from rue.config import Config
 from rue.context.runtime import RunContext
 from rue.events import RunEventsReceiver
 from rue.testing import Runner
-from rue.cli.console import ConsoleReporter
+from rue.cli.rendering.terminal import TerminalRunReporter
 from rue.telemetry.otel import OtelReporter
 from rue.storage import DBWriter
 from rue.storage import DBManager
@@ -496,7 +494,7 @@ async def main():
     db = DBManager(config.db_path)
     db.initialize()
     db_writer = DBWriter()
-    console = ConsoleReporter(verbosity=1)
+    console = TerminalRunReporter(verbosity=1)
     otel = OtelReporter()
     json_processor = JsonFileProcessor("results.json")
     slack = SlackProcessor(webhook_url="https://...")

@@ -1,594 +1,43 @@
-"""Console-specific view models."""
+"""Metric result rendering."""
 
-# ruff: noqa: D101,D102
+# ruff: noqa: D102
 
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rich import box
 from rich.console import Group, RenderableType
-from rich.markup import escape
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
-from rich.traceback import Traceback
 from rich.tree import Tree
 
+from rue.cli.rendering.assertions import AssertionView
+from rue.cli.rendering.primitives import safe_relative_path, truncate
 from rue.models import Spec
 from rue.resources import ResourceSpec, Scope
 
-from .shared import (
-    STATUS_STYLES,
-    StatusStyle,
-    dedented_source_block,
-    oneline,
-    safe_relative_path,
-    truncate,
-)
-
 
 if TYPE_CHECKING:
-    from rue.assertions import AssertionRepr, AssertionResult
     from rue.resources.metrics.models import MetricResult
-    from rue.testing.models import TestStatus
-    from rue.testing.models.executed import ExecutedTest
-    from rue.testing.models.run import ExecutedRun
 
 
-_COMPACT_MODULE_STYLE = "white"
-_MODIFIER_STYLE = "cyan"
-_METRIC_PREFIX_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_RUE_MODULE = __import__("rue")
 _SCOPE_ORDER = {
     Scope.RUN: 0,
     Scope.MODULE: 1,
     Scope.TEST: 2,
 }
-_TREE_MODULE_STYLE = "medium_purple"
 
 
 @dataclass(frozen=True, slots=True)
-class ConsoleAssertionView:
-    expression_repr: AssertionRepr
-    passed: bool
-    error_message: str | None
+class _MetricValueView:
+    """Small display projection of one metric value and assertion counts."""
 
-    @classmethod
-    def from_result(
-        cls,
-        assertion: AssertionResult,
-    ) -> ConsoleAssertionView:
-        return cls(
-            expression_repr=assertion.expression_repr,
-            passed=assertion.passed,
-            error_message=assertion.error_message,
-        )
-
-    def render(self, heading: str) -> Text:
-        expr = self.expression_repr
-        text = Text()
-        color = "green" if self.passed else "red"
-
-        text.append("✓ " if self.passed else "✗ ", style=f"bold {color}")
-        text.append(heading, style="bold")
-        if self.error_message:
-            text.append("  ")
-            text.append(self.error_message, style="italic")
-
-        above, expr_lines, below = dedented_source_block(expr)
-
-        for line in above:
-            text.append("\n")
-            text.append(f"│  {line}", style="dim")
-        for line in expr_lines:
-            text.append("\n")
-            text.append(">  ", style=f"bold {color}")
-            text.append(line, style="bold")
-        for line in below:
-            text.append("\n")
-            text.append(f"│  {line}", style="dim")
-
-        if expr.resolved_args:
-            text.append("\n")
-            text.append("│", style="dim")
-            text.append("\n")
-            text.append("╰─ where:", style="dim italic")
-            for name, value in expr.resolved_args.items():
-                text.append("\n     ")
-                text.append(oneline(name), style="bold")
-                text.append(" = ", style="dim")
-                text.append(truncate(oneline(value)), style="cyan")
-
-        return text
-
-    def snippet(self, *, strip_metric_prefix: bool = False) -> Text:
-        expr = oneline(self.expression_repr.expr)
-        if expr.startswith("assert "):
-            expr = expr[7:]
-        if strip_metric_prefix:
-            expr = self._strip_metric_prefix(expr)
-
-        style = "red" if not self.passed else "green"
-        resolved: list[tuple[str, str]] = []
-        for label, value in self.expression_repr.resolved_args.items():
-            normalized = oneline(label)
-            if strip_metric_prefix:
-                normalized = self._strip_metric_prefix(normalized)
-            if normalized:
-                resolved.append((normalized, oneline(value)))
-        resolved.sort(key=lambda item: len(item[0]), reverse=True)
-
-        snippet = Text()
-        i = 0
-        while i < len(expr):
-            match next(
-                (
-                    (label, value)
-                    for label, value in resolved
-                    if expr.startswith(label, i)
-                ),
-                None,
-            ):
-                case (label, value):
-                    snippet.append(label, style="grey62")
-                    snippet.append(" / ", style="dim")
-                    snippet.append(value)
-                    i += len(label)
-                case None:
-                    snippet.append(expr[i], style=style)
-                    i += 1
-
-        return snippet
-
-    @staticmethod
-    def _strip_metric_prefix(expr: str) -> str:
-        if "." not in expr:
-            return expr
-        prefix, rest = expr.split(".", 1)
-        if _METRIC_PREFIX_RE.fullmatch(prefix):
-            return rest
-        return expr
-
-
-@dataclass(frozen=True, slots=True)
-class ConsoleModuleView:
-    path: Path | None
-
-    def compact_text(self) -> Text:
-        return Text(f" • {self.label} ", style=_COMPACT_MODULE_STYLE)
-
-    def tree_text(self) -> Text:
-        return Text(f"• {self.label} ", style=_TREE_MODULE_STYLE)
-
-    @property
-    def label(self) -> str:
-        if self.path is None:
-            return "<unknown>"
-        return safe_relative_path(self.path).as_posix()
-
-
-@dataclass(frozen=True, slots=True)
-class ConsoleRunView:
-    run_id: str
-    platform: str
-    python_version: str
-    rue_version: str
-    working_directory: str
-    branch: str | None
-    commit_hash: str | None
-    dirty: bool | None
-    passed: int
-    failed: int
-    errors: int
-    skipped: int
-    xfailed: int
-    xpassed: int
-    total_duration_ms: float
-
-    @classmethod
-    def from_run(cls, run: ExecutedRun) -> ConsoleRunView:
-        environment = run.environment
-        return cls(
-            run_id=str(run.run_id),
-            platform=environment.platform,
-            python_version=environment.python_version,
-            rue_version=environment.rue_version,
-            working_directory=environment.working_directory,
-            branch=environment.branch,
-            commit_hash=environment.commit_hash,
-            dirty=environment.dirty,
-            passed=run.result.passed,
-            failed=run.result.failed,
-            errors=run.result.errors,
-            skipped=run.result.skipped,
-            xfailed=run.result.xfailed,
-            xpassed=run.result.xpassed,
-            total_duration_ms=run.result.total_duration_ms,
-        )
-
-    @property
-    def short_commit(self) -> str | None:
-        if self.commit_hash is None:
-            return None
-        return self.commit_hash[:8]
-
-    @property
-    def git_summary(self) -> str | None:
-        if self.branch is None or self.short_commit is None:
-            return None
-        dirty = " dirty" if self.dirty else ""
-        return f"{self.branch} ({self.short_commit}){dirty}"
-
-    @property
-    def summary_markup(self) -> str:
-        parts = []
-        if self.passed:
-            parts.append(f"[bold green]{self.passed} passed[/bold green]")
-        if self.failed:
-            parts.append(f"[bold red]{self.failed} failed[/bold red]")
-        if self.errors:
-            parts.append(f"[bold yellow]{self.errors} errors[/bold yellow]")
-        if self.skipped:
-            parts.append(f"[yellow]{self.skipped} skipped[/yellow]")
-        if self.xfailed:
-            parts.append(f"[blue]{self.xfailed} xfailed[/blue]")
-        if self.xpassed:
-            parts.append(f"[magenta]{self.xpassed} xpassed[/magenta]")
-        return ", ".join(parts) if parts else "[dim]0 tests[/dim]"
-
-    @property
-    def duration_markup(self) -> str:
-        return (
-            f"{self.summary_markup} "
-            f"[dim]in {self.total_duration_ms:.0f}ms[/dim]"
-        )
-
-    @property
-    def run_id_markup(self) -> str:
-        return f"[dim]run_id: {self.run_id}[/dim]"
-
-    def render_header(self) -> Group:
-        platform_text = Text()
-        platform_text.append("platform ", style="dim")
-        platform_text.append(self.platform)
-        platform_text.append("  python ", style="dim")
-        platform_text.append(self.python_version)
-        platform_text.append("  rue ", style="dim")
-        platform_text.append(self.rue_version)
-
-        rootdir_text = Text()
-        rootdir_text.append("rootdir: ", style="dim")
-        rootdir_text.append(self.working_directory)
-
-        parts: list[RenderableType] = [
-            Rule(Text("RUE RUN STARTS", style="bold cyan"), characters="="),
-            platform_text,
-            rootdir_text,
-        ]
-        if self.run_id:
-            run_id_text = Text()
-            run_id_text.append("run_id: ", style="dim")
-            run_id_text.append(self.run_id, style="dim")
-            parts.append(run_id_text)
-        if self.git_summary is not None:
-            git_text = Text()
-            git_text.append("git: ", style="dim")
-            git_text.append(self.git_summary)
-            parts.append(git_text)
-        return Group(*parts)
-
-    def render_summary(self) -> Group:
-        return Group(
-            Rule(Text("SUMMARY", style="bold cyan"), characters="="),
-            Text.from_markup(self.duration_markup, justify="center"),
-            Text.from_markup(self.run_id_markup, justify="center"),
-            Rule(characters="="),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class ConsoleExecutionView:
-    label: str
-    local_name: str
-    title: str
-    status: TestStatus
-    status_style: StatusStyle
-    duration_ms: float
-    status_repr: str
-    modifier_suffix: str
-    error: BaseException | None
-    failed_assertions: tuple[ConsoleAssertionView, ...]
-    subviews: tuple[ConsoleExecutionView, ...]
-
-    @classmethod
-    def from_execution(
-        cls,
-        execution: ExecutedTest,
-        *,
-        verbosity: int = 0,
-        title: str | None = None,
-    ) -> ConsoleExecutionView:
-        spec = execution.definition.spec
-        label = spec.get_label(full=verbosity >= 2) or "case"
-        summary = ""
-        if spec.modifiers and execution.sub_executions:
-            summary = spec.modifiers[0].display_summary
-        status = execution.result.status
-        fallback_title = spec.get_label(full=verbosity >= 2)
-        return cls(
-            label=label,
-            local_name=spec.local_name,
-            title=title or fallback_title or execution.label,
-            status=status,
-            status_style=STATUS_STYLES[status],
-            duration_ms=execution.result.duration_ms,
-            status_repr=execution.result.status_repr,
-            modifier_suffix=f" {summary}" if summary else "",
-            error=execution.result.error,
-            failed_assertions=tuple(
-                ConsoleAssertionView.from_result(assertion)
-                for assertion in execution.result.assertion_results
-                if not assertion.passed
-            ),
-            subviews=tuple(
-                cls.from_execution(sub, verbosity=verbosity)
-                for sub in execution.sub_executions
-            ),
-        )
-
-    @classmethod
-    def render_assertion_failures(
-        cls,
-        failures: list[ExecutedTest],
-        verbosity: int,
-    ) -> list[RenderableType]:
-        relevant = [
-            view
-            for view in (
-                cls.from_execution(
-                    failure,
-                    title=failure.definition.spec.full_name,
-                    verbosity=verbosity,
-                )
-                for failure in failures
-            )
-            if view.has_failed_assertions
-        ]
-        if not relevant:
-            return []
-        renderables: list[RenderableType] = [
-            Text(""),
-            Rule(
-                Text("ASSERTIONS", style="bold red"),
-                characters="=",
-                style="red",
-            ),
-        ]
-        for index, failure in enumerate(relevant):
-            if index:
-                renderables.append(Text(""))
-            renderables.append(failure.assertion_panel())
-        renderables.append(Text(""))
-        return renderables
-
-    @classmethod
-    def render_exception_failures(
-        cls,
-        failures: list[ExecutedTest],
-        verbosity: int,
-        *,
-        show_locals: bool = False,
-    ) -> list[RenderableType]:
-        relevant = [
-            view
-            for view in (
-                cls.from_execution(
-                    failure,
-                    title=failure.definition.spec.full_name,
-                    verbosity=verbosity,
-                )
-                for failure in failures
-            )
-            if view.has_exception
-        ]
-        if not relevant:
-            return []
-        renderables: list[RenderableType] = [
-            Text(""),
-            Rule(
-                Text("ERRORS", style="bold red"),
-                characters="=",
-                style="red",
-            ),
-        ]
-        for index, failure in enumerate(relevant):
-            if index:
-                renderables.append(Text(""))
-            renderables.append(failure.exception_panel(show_locals=show_locals))
-        renderables.append(Text(""))
-        return renderables
-
-    @property
-    def should_show_error(self) -> bool:
-        if self.error is None:
-            return False
-        return not (
-            isinstance(self.error, AssertionError)
-            and bool(self.failed_assertions)
-        )
-
-    @property
-    def has_exception(self) -> bool:
-        return self.should_show_error or any(
-            subview.has_exception for subview in self.subviews
-        )
-
-    @property
-    def has_failed_assertions(self) -> bool:
-        return bool(self.failed_assertions) or any(
-            subview.has_failed_assertions for subview in self.subviews
-        )
-
-    @property
-    def assertion_subviews(self) -> tuple[ConsoleExecutionView, ...]:
-        return tuple(
-            subview
-            for subview in self.subviews
-            if subview.has_failed_assertions
-        )
-
-    @property
-    def exception_subviews(self) -> tuple[ConsoleExecutionView, ...]:
-        return tuple(
-            subview for subview in self.subviews if subview.has_exception
-        )
-
-    def assertion_panel(self) -> Panel:
-        renderables: list[RenderableType] = []
-
-        if self.failed_assertions:
-            combined = Text()
-            for i, assertion in enumerate(self.failed_assertions):
-                if i:
-                    combined.append("\n\n")
-                combined.append_text(assertion.render("Failed Assertion"))
-            renderables.append(combined)
-
-        renderables.extend(
-            subview.assertion_panel()
-            for subview in self.assertion_subviews
-        )
-        return self._panel(renderables)
-
-    def exception_panel(self, *, show_locals: bool = False) -> Panel:
-        renderables: list[RenderableType] = []
-
-        if self.should_show_error:
-            err = self.error
-            assert err is not None
-            if err.__traceback__:
-                renderables.append(
-                    Traceback.from_exception(
-                        type(err),
-                        err,
-                        err.__traceback__,
-                        suppress=[_RUE_MODULE],
-                        show_locals=show_locals,
-                    )
-                )
-            else:
-                renderables.append(escape(f"{type(err).__name__}: {err}"))
-
-        renderables.extend(
-            subview.exception_panel(show_locals=show_locals)
-            for subview in self.exception_subviews
-        )
-        return self._panel(renderables)
-
-    def render_test_line(
-        self,
-        *,
-        name: str | None = None,
-        extra: str = "",
-        indent: int = 2,
-        sub: bool = False,
-    ) -> Text:
-        label = name or (self.label if sub else self.local_name)
-        text = Text(" " * indent + "• ")
-        text.append_text(
-            self.sub_label_text(label) if sub else self.test_name_text(label)
-        )
-        if self.modifier_suffix:
-            text.append(self.modifier_suffix, style=_MODIFIER_STYLE)
-        text.append(f" ({self.duration_ms:.1f}ms)", style="dim")
-        if extra:
-            text.append(f" {extra}", style="dim")
-        text.append(
-            f" {self.status_style.label}", style=self.status_style.color
-        )
-        return text
-
-    def render_live_item_line(self, *, name: str | None = None) -> Text:
-        text = self.test_name_text(name or self.local_name)
-        if self.modifier_suffix:
-            text.append(self.modifier_suffix, style=_MODIFIER_STYLE)
-        text.append(f" ({self.duration_ms:.1f}ms)", style="dim")
-        if self.status_repr:
-            text.append(f" {self.status_repr}", style="dim")
-        text.append(
-            f" {self.status_style.label}", style=self.status_style.color
-        )
-        return text
-
-    def render_sub_live_line(self) -> Text:
-        text = self.sub_label_text(self.label)
-        if self.modifier_suffix:
-            text.append(self.modifier_suffix, style=_MODIFIER_STYLE)
-        text.append(f" ({self.duration_ms:.1f}ms)", style="dim")
-        text.append(
-            f" {self.status_style.label}", style=self.status_style.color
-        )
-        return text
-
-    def _panel(self, renderables: list[RenderableType]) -> Panel:
-        panel_content: RenderableType
-        match renderables:
-            case []:
-                panel_content = " "
-            case [single]:
-                panel_content = single
-            case _:
-                panel_content = Group(*renderables)
-
-        return Panel(
-            panel_content,
-            title=Text(
-                self.title,
-                style=f"bold {self.status_style.color}",
-            ),
-            title_align="left",
-            border_style=self.status_style.color,
-            expand=True,
-            padding=(1, 1),
-        )
-
-    @staticmethod
-    def running_line(name: str) -> Text:
-        text = ConsoleExecutionView.test_name_text(name)
-        text.append("  ")
-        text.append("⋯ running", style="dim")
-        return text
-
-    @staticmethod
-    def test_name_text(name: str) -> Text:
-        text = Text()
-        if "::" in name:
-            prefix, _, func = name.rpartition("::")
-            text.append(f"{prefix}::", style="dim")
-            text.append(func, style="bold")
-        else:
-            text.append(name, style="bold")
-        return text
-
-    @staticmethod
-    def sub_label_text(label: str) -> Text:
-        if label.startswith("[") and label.endswith("]"):
-            return Text(label)
-        text = Text()
-        text.append("[", style="dim")
-        text.append(label)
-        text.append("]", style="dim")
-        return text
-
-
-@dataclass(frozen=True, slots=True)
-class _ConsoleMetricValueView:
     value_str: str
     passed: int
     total: int
@@ -597,7 +46,7 @@ class _ConsoleMetricValueView:
     @classmethod
     def from_result(
         cls, metric: MetricResult
-    ) -> _ConsoleMetricValueView:
+    ) -> _MetricValueView:
         value = metric.value
         value_str = (
             "N/A"
@@ -615,7 +64,9 @@ class _ConsoleMetricValueView:
 
 
 @dataclass(frozen=True, slots=True)
-class ConsoleMetricGroupView:
+class MetricGroupView:
+    """Render one logical metric grouped across repeated instances."""
+
     key: ResourceSpec
     metrics: tuple[MetricResult, ...]
     display_name: str = ""
@@ -627,13 +78,14 @@ class ConsoleMetricGroupView:
         metrics: tuple[MetricResult, ...],
         *,
         display_name: str = "",
-    ) -> ConsoleMetricGroupView:
+    ) -> MetricGroupView:
+        """Build a display group for one metric identity."""
         return cls(key=identity, metrics=metrics, display_name=display_name)
 
     @property
-    def assertions(self) -> tuple[ConsoleAssertionView, ...]:
+    def assertions(self) -> tuple[AssertionView, ...]:
         return tuple(
-            ConsoleAssertionView.from_result(assertion)
+            AssertionView.from_result(assertion)
             for metric in self.metrics
             for assertion in metric.assertion_results
         )
@@ -656,7 +108,7 @@ class ConsoleMetricGroupView:
     @property
     def value_summary(self) -> str:
         values = [
-            _ConsoleMetricValueView.from_result(metric).value_str
+            _MetricValueView.from_result(metric).value_str
             for metric in self.metrics
         ]
         numeric_values = [
@@ -712,7 +164,8 @@ class ConsoleMetricGroupView:
         )
         return cases
 
-    def is_interesting(self, run_view: ConsoleMetricRunView) -> bool:
+    def is_interesting(self, run_view: MetricRunView) -> bool:
+        """Return whether this group needs verbose breakdown output."""
         return (
             self.has_failures
             or len(self.metrics) > 1
@@ -752,7 +205,8 @@ class ConsoleMetricGroupView:
             self.contributor_counts(),
         )
 
-    def detail_panel(self, run_view: ConsoleMetricRunView) -> Panel:
+    def detail_panel(self, run_view: MetricRunView) -> Panel:
+        """Render the verbose panel for a metric group."""
         renderables: list[RenderableType] = [self.summary_grid()]
 
         hierarchy = self.hierarchy_tree(run_view)
@@ -799,7 +253,8 @@ class ConsoleMetricGroupView:
 
         return table
 
-    def hierarchy_tree(self, run_view: ConsoleMetricRunView) -> Tree | None:
+    def hierarchy_tree(self, run_view: MetricRunView) -> Tree | None:
+        """Render provider dependency hierarchy when this metric has one."""
         if (
             self.key not in run_view.parents
             and self.key not in run_view.children
@@ -822,7 +277,7 @@ class ConsoleMetricGroupView:
         self,
         tree: Tree,
         key: ResourceSpec,
-        run_view: ConsoleMetricRunView,
+        run_view: MetricRunView,
         *,
         highlight: ResourceSpec,
         seen: set[ResourceSpec],
@@ -884,7 +339,7 @@ class ConsoleMetricGroupView:
         table.add_column("Assertions")
 
         for metric in sorted(self.metrics, key=self.metric_sort_key):
-            metric_view = _ConsoleMetricValueView.from_result(metric)
+            metric_view = _MetricValueView.from_result(metric)
             table.add_row(
                 self.instance_label(metric),
                 self._format_values(
@@ -902,6 +357,7 @@ class ConsoleMetricGroupView:
         return table
 
     def assertions_block(self) -> Group | None:
+        """Render metric assertion details grouped by instance."""
         blocks: list[RenderableType] = []
         show_instance = len(self.metrics) > 1
 
@@ -916,7 +372,7 @@ class ConsoleMetricGroupView:
                 if blocks:
                     blocks.append(Text(""))
                 blocks.append(
-                    ConsoleAssertionView.from_result(assertion).render(heading)
+                    AssertionView.from_result(assertion).render(heading)
                 )
 
         return Group(*blocks) if blocks else None
@@ -960,10 +416,10 @@ class ConsoleMetricGroupView:
         return text
 
     def instance_assertions(self, metric: MetricResult) -> Text:
-        metric_view = _ConsoleMetricValueView.from_result(metric)
+        metric_view = _MetricValueView.from_result(metric)
         if not metric_view.total:
             return Text("")
-        snippet = ConsoleMetricGroupView.from_results(
+        snippet = MetricGroupView.from_results(
             metric.metadata.identity,
             (metric,),
             display_name=self.display_name,
@@ -1049,9 +505,11 @@ class ConsoleMetricGroupView:
 
 
 @dataclass(frozen=True, slots=True)
-class ConsoleMetricRunView:
-    groups: tuple[ConsoleMetricGroupView, ...]
-    group_lookup: dict[ResourceSpec, ConsoleMetricGroupView]
+class MetricRunView:
+    """Render all metric results for one completed run."""
+
+    groups: tuple[MetricGroupView, ...]
+    group_lookup: dict[ResourceSpec, MetricGroupView]
     parents: dict[ResourceSpec, set[ResourceSpec]]
     children: dict[ResourceSpec, set[ResourceSpec]]
 
@@ -1059,7 +517,8 @@ class ConsoleMetricRunView:
     def from_results(
         cls,
         metric_results: list[MetricResult],
-    ) -> ConsoleMetricRunView:
+    ) -> MetricRunView:
+        """Group metric results and derive provider relationships."""
         grouped: dict[ResourceSpec, list[MetricResult]] = {}
         for metric in metric_results:
             grouped.setdefault(metric.metadata.identity, []).append(metric)
@@ -1083,7 +542,7 @@ class ConsoleMetricRunView:
                 else name
             )
             groups.append(
-                ConsoleMetricGroupView.from_results(
+                MetricGroupView.from_results(
                     key,
                     tuple(metrics),
                     display_name=display_name,
@@ -1114,12 +573,13 @@ class ConsoleMetricRunView:
         return sum(1 for group in self.groups if group.has_failures)
 
     @property
-    def detail_groups(self) -> tuple[ConsoleMetricGroupView, ...]:
+    def detail_groups(self) -> tuple[MetricGroupView, ...]:
         return tuple(
             group for group in self.groups if group.is_interesting(self)
         )
 
     def render(self, verbosity: int) -> list[RenderableType]:
+        """Render metrics using the same verbosity contract as run output."""
         renderables: list[RenderableType] = [
             Rule(Text("METRICS", style="bold cyan"), characters="=")
         ]
@@ -1174,6 +634,7 @@ class ConsoleMetricRunView:
         return table
 
     def find_root(self, key: ResourceSpec) -> ResourceSpec:
+        """Find the top ancestor used as the hierarchy tree root."""
         roots = self.parents.get(key, set())
         if len(roots) != 1:
             return key
@@ -1187,8 +648,8 @@ class ConsoleMetricRunView:
 
     @staticmethod
     def _build_relationships(
-        groups: tuple[ConsoleMetricGroupView, ...],
-        group_lookup: dict[ResourceSpec, ConsoleMetricGroupView],
+        groups: tuple[MetricGroupView, ...],
+        group_lookup: dict[ResourceSpec, MetricGroupView],
     ) -> tuple[
         dict[ResourceSpec, set[ResourceSpec]],
         dict[ResourceSpec, set[ResourceSpec]],
@@ -1201,17 +662,12 @@ class ConsoleMetricRunView:
                 for dependency in metric.metadata.direct_providers:
                     if dependency not in group_lookup:
                         continue
+                    # Only relationships between displayed metric groups matter.
                     parents.setdefault(group.key, set()).add(dependency)
                     children.setdefault(dependency, set()).add(group.key)
 
         return parents, children
 
 
-__all__ = [
-    "ConsoleAssertionView",
-    "ConsoleExecutionView",
-    "ConsoleMetricGroupView",
-    "ConsoleMetricRunView",
-    "ConsoleModuleView",
-    "ConsoleRunView",
-]
+
+__all__ = ["MetricGroupView", "MetricRunView"]

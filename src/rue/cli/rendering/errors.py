@@ -1,8 +1,13 @@
-"""Shared CLI error rendering."""
+"""CLI error rendering."""
 
 from rich.console import Console
 
 from rue.testing.discovery import TestDefinitionErrors
+
+
+def print_cli_error(message: str) -> None:
+    """Print a single CLI validation error."""
+    Console().print(f"[red]{message}[/red]")
 
 
 def print_definition_errors(errors: TestDefinitionErrors) -> None:
@@ -13,4 +18,4 @@ def print_definition_errors(errors: TestDefinitionErrors) -> None:
         console.print(f"[red]- {issue}[/red]")
 
 
-__all__ = ["print_definition_errors"]
+__all__ = ["print_cli_error", "print_definition_errors"]

@@ -7,6 +7,7 @@ from typing import Annotated
 from rich.console import Console
 from typer import Option, Typer
 
+from rue.cli.options import DatabasePathOpt
 from rue.config import Config, load_config
 from rue.storage import MAX_STORED_RUNS, SCHEMA_VERSION, TursoRunStore
 
@@ -79,11 +80,7 @@ class DatabaseCommands:
 
 
 @db_app.command()
-def status(
-    database_path: Annotated[
-        str | None, Option("--database-path", help="Path to the Rue Turso database")
-    ] = None,
-) -> None:
+def status(database_path: DatabasePathOpt = None) -> None:
     """Show database schema version status."""
     raise SystemExit(
         DatabaseCommands(
@@ -93,11 +90,7 @@ def status(
 
 
 @db_app.command()
-def init(
-    database_path: Annotated[
-        str | None, Option("--database-path", help="Path to the Rue Turso database")
-    ] = None,
-) -> None:
+def init(database_path: DatabasePathOpt = None) -> None:
     """Create the database schema."""
     raise SystemExit(
         DatabaseCommands(
@@ -108,9 +101,7 @@ def init(
 
 @db_app.command()
 def reset(
-    database_path: Annotated[
-        str | None, Option("--database-path", help="Path to the Rue Turso database")
-    ] = None,
+    database_path: DatabasePathOpt = None,
     yes: Annotated[
         bool,
         Option("--yes", help="Confirm destructive reset without prompting"),

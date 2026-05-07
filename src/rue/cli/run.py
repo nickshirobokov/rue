@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import ExitStack
+from contextlib import closing
 from copy import deepcopy
 from typing import Annotated
 from uuid import UUID
@@ -11,9 +11,6 @@ from uuid import UUID
 from rich.console import Console
 from typer import Option
 
-from rue.cli.console import ConsoleReporter, ExperimentConsoleReporter
-from rue.cli.errors import print_definition_errors
-from rue.cli.experiments.render import experiment_renderer
 from rue.cli.options import (
     KeywordOpt,
     SkipTagOpt,
@@ -21,6 +18,12 @@ from rue.cli.options import (
     TestPathsArg,
     VerboseOpt,
     resolve_selection,
+)
+from rue.cli.rendering.errors import print_cli_error, print_definition_errors
+from rue.cli.rendering.experiments import experiment_renderer
+from rue.cli.rendering.terminal import (
+    TerminalExperimentReporter,
+    TerminalRunReporter,
 )
 from rue.config import load_config
 from rue.context.runtime import RunContext
@@ -36,6 +39,19 @@ from rue.storage import TursoRunRecorder, TursoRunStore
 from rue.telemetry.otel import OtelReporter
 from rue.testing.discovery import TestDefinitionErrors, TestLoader
 from rue.testing.runner import Runner
+
+
+def _resolve_processors(names: list[str]) -> list[RunEventsProcessor]:
+    """Resolve configured custom processor names into registered instances."""
+    resolved = []
+    for name in names:
+        if name not in RunEventsProcessor.REGISTRY:
+            available = ", ".join(sorted(RunEventsProcessor.REGISTRY))
+            raise ValueError(
+                f"Unknown processor: {name}. Available: {available}"
+            )
+        resolved.append(RunEventsProcessor.REGISTRY[name])
+    return resolved
 
 
 def run(
@@ -100,14 +116,14 @@ def run(
         ),
     ] = False,
 ) -> None:
-    """Run rue tests, or experiment variants with -exp."""
+    """Prepare config, collection, events, and execution."""
     if experiment:
         match (run_id, maxfail):
             case (UUID(), _):
-                Console().print("[red]--run-id cannot be used with -exp[/red]")
+                print_cli_error("--run-id cannot be used with -exp")
                 raise SystemExit(2)
             case (_, int()):
-                Console().print("[red]--maxfail cannot be used with -exp[/red]")
+                print_cli_error("--maxfail cannot be used with -exp")
                 raise SystemExit(2)
             case _:
                 pass
@@ -128,14 +144,9 @@ def run(
         processors=processor if not experiment else [],
     )
 
-    if experiment:
-        runner_config = runner_config.with_overrides(
-            maxfail=None,
-            processors=[],
-        )
-
     collection = collector.build_spec_collection(resolved_paths)
     try:
+        # Experiment collection mutates specs while expanding variants.
         load_collection = deepcopy(collection) if experiment else collection
         items = TestLoader(load_collection.suite_root).load_from_collection(
             load_collection
@@ -149,20 +160,13 @@ def run(
         experiments = experiment_runner.collect(collection)
 
         session_processors: list[RunEventsProcessor] = [
-            ExperimentConsoleReporter(),
+            TerminalExperimentReporter(),
+            *_resolve_processors(processor or []),
         ]
-        for name in processor or []:
-            if name not in RunEventsProcessor.REGISTRY:
-                available = ", ".join(sorted(RunEventsProcessor.REGISTRY))
-                raise ValueError(
-                    f"Unknown processor: {name}. Available: {available}"
-                )
-            session_processors.append(RunEventsProcessor.REGISTRY[name])
 
         session = SessionEventsReceiver(session_processors)
         session.configure(runner_config)
-        with ExitStack() as stack:
-            stack.callback(session.close)
+        with closing(session):
             results = asyncio.run(
                 experiment_runner.run(
                     collection,
@@ -182,19 +186,13 @@ def run(
     store.initialize()
 
     if run_id is not None and store.run_exists(run_id):
-        Console().print(f"[red]run_id '{run_id}' already exists[/red]")
+        print_cli_error(f"run_id '{run_id}' already exists")
         raise SystemExit(2)
 
-    processors: list[RunEventsProcessor] = [ConsoleReporter()]
+    processors: list[RunEventsProcessor] = [TerminalRunReporter()]
     if runner_config.otel:
         processors.append(OtelReporter())
-    for name in runner_config.processors:
-        if name not in RunEventsProcessor.REGISTRY:
-            available = ", ".join(sorted(RunEventsProcessor.REGISTRY))
-            raise ValueError(
-                f"Unknown processor: {name}. Available: {available}"
-            )
-        processors.append(RunEventsProcessor.REGISTRY[name])
+    processors.extend(_resolve_processors(runner_config.processors))
 
     run_context = (
         RunContext(config=runner_config)

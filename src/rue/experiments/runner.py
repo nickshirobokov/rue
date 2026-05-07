@@ -54,23 +54,19 @@ class ExperimentRunner:
     async def run(
         self,
         collection: TestSpecCollection,
-        experiments: tuple[ExperimentSpec, ...] | None = None,
+        experiments: tuple[ExperimentSpec, ...],
         *,
-        session: SessionEventsReceiver | None = None,
+        session: SessionEventsReceiver,
     ) -> tuple[ExperimentVariantResult, ...]:
         """Run baseline plus every experiment value combination."""
-        experiment_specs = (
-            self.collect(collection) if experiments is None else experiments
-        )
-
         results: list[ExperimentVariantResult] = []
         variants = (
             (ExperimentVariant(index=0),)
-            if not experiment_specs
-            else ExperimentVariant.build_all(experiment_specs)
+            if not experiments
+            else ExperimentVariant.build_all(experiments)
         )
         mp_context = mp.get_context("spawn")
-        manager = mp_context.Manager() if session is not None else None
+        manager = mp_context.Manager()
         with ProcessPoolExecutor(
             max_workers=1,
             max_tasks_per_child=1,
@@ -78,7 +74,7 @@ class ExperimentRunner:
         ) as pool:
             try:
                 for variant in variants:
-                    queue = None if manager is None else manager.Queue()
+                    queue = manager.Queue()
                     future = pool.submit(
                         run_experiment_variant,
                         cloudpickle.dumps(
@@ -86,40 +82,31 @@ class ExperimentRunner:
                         ),
                         queue,
                     )
-                    drain_task = (
-                        None
-                        if session is None or queue is None
-                        else asyncio.create_task(session.drain_queue(queue))
+                    drain_task = asyncio.create_task(
+                        session.drain_queue(queue)
                     )
                     try:
                         result = await asyncio.to_thread(future.result)
                     finally:
-                        if drain_task is not None:
-                            queue.put(None)
-                            await asyncio.wait_for(
-                                drain_task,
-                                timeout=DRAIN_TIMEOUT_SECONDS,
-                            )
+                        queue.put(None)
+                        await asyncio.wait_for(
+                            drain_task,
+                            timeout=DRAIN_TIMEOUT_SECONDS,
+                        )
                     results.append(result)
             finally:
-                if manager is not None:
-                    manager.shutdown()
+                manager.shutdown()
         return tuple(results)
 
 
 def run_experiment_variant(
     payload: bytes,
-    queue: Any | None = None,
+    queue: Any,
 ) -> ExperimentVariantResult:
     """Process entrypoint for one experiment variant."""
     collection, variant, config = cloudpickle.loads(payload)
     return asyncio.run(
-        _run_experiment_variant(
-            collection,
-            variant,
-            config,
-            queue,
-        )
+        _run_experiment_variant(collection, variant, config, queue)
     )
 
 
@@ -127,7 +114,7 @@ async def _run_experiment_variant(
     collection: TestSpecCollection,
     variant: ExperimentVariant,
     config: Config,
-    queue: Any | None = None,
+    queue: Any,
 ) -> ExperimentVariantResult:
     default_resource_registry.reset()
     default_experiment_registry.reset()
@@ -147,25 +134,23 @@ async def _run_experiment_variant(
     processors: list[RunEventsProcessor] = [TursoRunRecorder()]
     if config.otel:
         processors.append(OtelReporter())
-    if queue is not None:
-        processors.append(QueueForwarder(queue))
-    output_suppression = ExitStack()
-    if queue is not None:
+    processors.append(QueueForwarder(queue))
+    with ExitStack() as output_suppression:
         sink = output_suppression.enter_context(open(devnull, "w"))
         output_suppression.enter_context(redirect_stdout(sink))
         output_suppression.enter_context(redirect_stderr(sink))
-    with output_suppression, context, RunEventsReceiver(processors):
-        try:
-            await variant.apply(
-                default_experiment_registry.all(),
-                resolver=resolver,
-            )
-            items = loader.load_from_collection(collection)
-            runner = Runner()
-            run = await runner.run(items, resolver=resolver)
-        finally:
-            if run is None:
-                await resolver.teardown()
+        with context, RunEventsReceiver(processors):
+            try:
+                await variant.apply(
+                    default_experiment_registry.all(),
+                    resolver=resolver,
+                )
+                items = loader.load_from_collection(collection)
+                runner = Runner()
+                run = await runner.run(items, resolver=resolver)
+            finally:
+                if run is None:
+                    await resolver.teardown()
     if run is None:
         raise ValueError("Run was not created")
     return ExperimentVariantResult.build(variant=variant, run=run)

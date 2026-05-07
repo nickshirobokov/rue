@@ -72,7 +72,6 @@ __all__ = [
     "SkipTagOpt",
     "TagOpt",
     "TestPathsArg",
-    "TestSpecCollector",
     "VerboseOpt",
     "resolve_selection",
 ]

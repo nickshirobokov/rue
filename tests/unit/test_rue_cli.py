@@ -10,8 +10,12 @@ from typer.testing import CliRunner
 
 from rue.assertions.models import AssertionRepr, AssertionResult
 from rue.cli import app
-from rue.cli.console import ConsoleReporter, ExperimentConsoleReporter
-from rue.cli.tests.status import TestsStatusReport
+from rue.cli.rendering.state import TerminalRunState
+from rue.cli.rendering.terminal import (
+    TerminalExperimentReporter,
+    TerminalRunReporter,
+)
+from rue.cli.rendering.tests import TestReport
 from rue.config import Config
 from rue.context.models import RunEnvironment
 from rue.context.runtime import CURRENT_RUN_CONTEXT
@@ -42,7 +46,7 @@ def _isolate_cli_db(tmp_path: Path, monkeypatch):
     config = Config(database_path=str(tmp_path / "rue.turso.db"))
     monkeypatch.setattr("rue.cli.run.load_config", lambda: config)
     monkeypatch.setattr(
-        "rue.cli.tests.status.command.load_config",
+        "rue.cli.status.command.load_config",
         lambda: config,
     )
 
@@ -90,13 +94,13 @@ class TestResolveProcessors:
         assert config.processors == []
 
     def test_config_processors(self):
-        config = Config(processors=["ConsoleReporter"])
-        assert config.processors == ["ConsoleReporter"]
+        config = Config(processors=["CustomProcessor"])
+        assert config.processors == ["CustomProcessor"]
 
     def test_cli_overrides_config(self):
-        config = Config(processors=["OtelReporter"])
-        overridden = config.with_overrides(processors=["ConsoleReporter"])
-        assert overridden.processors == ["ConsoleReporter"]
+        config = Config(processors=["ConfiguredProcessor"])
+        overridden = config.with_overrides(processors=["CustomProcessor"])
+        assert overridden.processors == ["CustomProcessor"]
 
 
 def test_top_level_help_lists_run_and_status():
@@ -180,13 +184,7 @@ def test_old_experiments_command_is_unknown():
     assert result.exit_code == 2
 
 
-@pytest.mark.parametrize(
-    "command",
-    [[], ["run"]],
-    ids=["alias", "run"],
-)
 def test_run_tests_returns_2_when_run_id_already_exists(
-    command: list[str],
     database_path: Path,
     turso_store: TursoRunStore,
     monkeypatch,
@@ -234,7 +232,7 @@ def test_run_tests_returns_2_when_run_id_already_exists(
     result = runner.invoke(
         app,
         [
-            *command,
+            "run",
             "--run-id",
             str(existing_run_id),
         ],
@@ -243,14 +241,7 @@ def test_run_tests_returns_2_when_run_id_already_exists(
     assert result.exit_code == 2
 
 
-@pytest.mark.parametrize(
-    "command",
-    [[], ["run"]],
-    ids=["alias", "run"],
-)
-def test_run_tests_returns_2_when_definition_errors(
-    command: list[str], monkeypatch
-):
+def test_run_tests_returns_2_when_definition_errors(monkeypatch):
     monkeypatch.setattr(
         "rue.cli.options.TestSpecCollector.build_spec_collection",
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
@@ -264,7 +255,7 @@ def test_run_tests_returns_2_when_definition_errors(
         lambda **kwargs: pytest.fail("Runner should not be constructed"),
     )
 
-    result = runner.invoke(app, [*command])
+    result = runner.invoke(app, ["run"])
 
     assert result.exit_code == 2
     assert "Test definition errors" in result.stdout
@@ -324,7 +315,7 @@ def test_cli_resolves_processors_and_injects_turso_recorder(
     assert captured["config"].processors == ["CustomProcessor"]
     assert captured["config"].fail_fast is True
     assert [type(p).__name__ for p in captured["processors"]] == [
-        "ConsoleReporter",
+        "TerminalRunReporter",
         "CustomProcessor",
         "TursoRunRecorder",
     ]
@@ -334,7 +325,7 @@ def test_cli_resolves_processors_and_injects_turso_recorder(
     assert "TursoRunRecorder" not in RunEventsProcessor.REGISTRY
 
 
-def test_console_reporter_prints_failed_run_and_metrics() -> None:
+def test_terminal_run_reporter_prints_failed_run_and_metrics() -> None:
     make_run_context(bind_events=False, fail_fast=False)
     output = StringIO()
     console = Console(
@@ -343,7 +334,7 @@ def test_console_reporter_prints_failed_run_and_metrics() -> None:
         color_system=None,
         width=120,
     )
-    reporter = ConsoleReporter(console=console, verbosity=1)
+    reporter = TerminalRunReporter(console=console, verbosity=1)
     definition = make_definition(
         "test_sample",
         module_path="tests/test_sample.py",
@@ -405,13 +396,51 @@ def test_console_reporter_prints_failed_run_and_metrics() -> None:
     assert "1 failed" in text
 
 
-@pytest.mark.parametrize(
-    "command",
-    [[], ["run"]],
-    ids=["alias", "run"],
-)
+def test_terminal_run_state_tracks_top_level_progress() -> None:
+    state = TerminalRunState(verbosity=1)
+    module_path = Path("tests/test_state.py")
+    top_level = make_definition(
+        "test_state",
+        module_path=module_path,
+        collection_index=10,
+    )
+    child = make_definition(
+        "test_state",
+        module_path=module_path,
+        suffix="child",
+        collection_index=10,
+    )
+    child_execution = ExecutedTest(
+        definition=child,
+        result=TestResult(status=TestStatus.PASSED, duration_ms=1),
+        execution_id=uuid4(),
+    )
+    failed_execution = ExecutedTest(
+        definition=top_level,
+        result=TestResult(status=TestStatus.FAILED, duration_ms=2),
+        execution_id=uuid4(),
+    )
+
+    state.reset_collection([top_level])
+
+    assert state.is_top_level_definition(top_level)
+    assert not state.is_top_level_definition(child)
+    assert not state.record_execution(child_execution)
+    assert state.completed_count == 0
+    assert not state.is_module_complete(module_path)
+
+    assert state.record_execution(failed_execution)
+    assert state.completed_count == 1
+    assert state.status_counts[TestStatus.FAILED] == 1
+    assert state.failures == [failed_execution]
+    assert state.is_module_complete(module_path)
+
+    state.mark_module_completed(module_path)
+    assert state.all_modules_complete
+
+
 def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(
-    command: list[str], monkeypatch
+    monkeypatch,
 ):
     monkeypatch.setattr(
         "rue.cli.options.TestSpecCollector.build_spec_collection",
@@ -422,50 +451,16 @@ def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(
         lambda self, collection: [make_item("test_ok", set())],
     )
 
-    result = runner.invoke(app, [*command, "--run-id", str(uuid4())])
+    result = runner.invoke(app, ["run", "--run-id", str(uuid4())])
     assert result.exit_code == 0
 
 
-def test_bare_invocation_defaults_to_run(tmp_path: Path, monkeypatch):
-    captured: dict[str, object] = {}
-
-    class FakeRunner:
-        def __init__(self) -> None:
-            context = CURRENT_RUN_CONTEXT.get()
-            captured["context"] = context
-            captured["config"] = context.config
-
-        async def run(self, items, *, resolver):
-            captured["items"] = items
-            captured["resolver"] = resolver
-            return ExecutedRun()
-
-    def build_spec_collection(self, paths, **kwargs):
-        del self, kwargs
-        captured["paths"] = paths
-        return TestSpecCollection(suite_root=Path.cwd())
-
-    monkeypatch.setattr(
-        "rue.cli.run.load_config",
-        lambda: Config(
-            database_path=str(tmp_path / "rue.turso.db"), fail_fast=True
-        ),
-    )
-    monkeypatch.setattr(
-        "rue.cli.options.TestSpecCollector.build_spec_collection",
-        build_spec_collection,
-    )
-    monkeypatch.setattr(
-        "rue.cli.run.TestLoader.load_from_collection",
-        lambda self, collection: [make_item("test_ok", set())],
-    )
-    monkeypatch.setattr("rue.cli.run.Runner", FakeRunner)
-
+def test_bare_invocation_requires_command_and_shows_help():
     result = runner.invoke(app, [])
 
-    assert result.exit_code == 0
-    assert captured["paths"] == ["."]
-    assert captured["config"].fail_fast is True
+    assert result.exit_code == 2
+    assert "Usage:" in result.stdout
+    assert "run" in result.stdout
 
 
 def test_rue_test_command_is_unknown():
@@ -505,12 +500,12 @@ def test_run_and_status_share_selection_parsing(
 
     if status_mode:
         monkeypatch.setattr(
-            "rue.cli.tests.status.command.TestsStatusBuilder.build",
-            lambda self, collection, store=None: TestsStatusReport(),
+            "rue.cli.status.command.TestsStatusBuilder.build",
+            lambda self, collection: TestReport(),
         )
         monkeypatch.setattr(
-            "rue.cli.tests.status.command.status_renderer.render",
-            lambda report, verbosity: f"status:{verbosity}",
+            "rue.cli.status.command.TestTreeRenderer.render",
+            lambda self, report, verbosity: f"status:{verbosity}",
         )
     else:
         monkeypatch.setattr(
@@ -646,7 +641,7 @@ def test_experiments_run_shares_selection_and_preserves_db_config(
     assert captured["experiments"] == (experiment,)
     assert isinstance(
         captured["session"].processors[0],
-        ExperimentConsoleReporter,
+        TerminalExperimentReporter,
     )
     assert "model=mini" in cli_result.stdout
 
@@ -699,7 +694,7 @@ def test_experiments_run_no_experiments_runs_baseline(monkeypatch):
     assert captured["experiments"] == ()
     assert isinstance(
         captured["session"].processors[0],
-        ExperimentConsoleReporter,
+        TerminalExperimentReporter,
     )
     assert "baseline" in cli_result.stdout
 
@@ -734,14 +729,9 @@ def test_tests_status_returns_2_when_definition_errors(monkeypatch):
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.tests.status.command.TestsStatusBuilder.build",
+        "rue.cli.status.command.TestsStatusBuilder.build",
         raise_definition_errors,
     )
-    monkeypatch.setattr(
-        "rue.cli.tests.status.command.status_renderer.render",
-        lambda report, verbosity: pytest.fail("status should not render"),
-    )
-
     result = runner.invoke(app, ["status"])
 
     assert result.exit_code == 2
@@ -758,12 +748,12 @@ def test_tests_status_does_not_create_missing_db(tmp_path, monkeypatch):
         lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.tests.status.command.TestsStatusBuilder.build",
-        lambda self, collection, store=None: TestsStatusReport(),
+        "rue.cli.status.command.TestsStatusBuilder.build",
+        lambda self, collection: TestReport(),
     )
     monkeypatch.setattr(
-        "rue.cli.tests.status.command.status_renderer.render",
-        lambda report, verbosity: "status",
+        "rue.cli.status.command.TestTreeRenderer.render",
+        lambda self, report, verbosity: "status",
     )
 
     result = runner.invoke(
