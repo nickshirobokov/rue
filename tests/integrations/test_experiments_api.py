@@ -297,6 +297,7 @@ async def test_experiment_runner_executes_single_baseline_without_experiments(
         (module_path,),
         explicit_root=tmp_path,
     )
+    TestLoader(collection.suite_root).load_from_collection(collection)
     runner = ExperimentRunner(
         config=Config.model_construct(
             database_path=tmp_path / "rue.turso.db",
@@ -306,7 +307,10 @@ async def test_experiment_runner_executes_single_baseline_without_experiments(
             maxfail=None,
         )
     )
-    results = await runner.run(collection, ())
+    session = SessionEventsReceiver([])
+    session.configure(runner.config)
+    results = await runner.run(collection, (), session=session)
+    session.close()
 
     assert [result.variant.label for result in results] == ["baseline"]
     assert [result.total for result in results] == [1]
