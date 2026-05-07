@@ -22,9 +22,7 @@ class TerminalRunState:
     verbosity: int = 0
     items: list[LoadedTestDef] = field(default_factory=list)
     item_keys: set[int] = field(default_factory=set)
-    items_by_file: dict[Path | None, list[LoadedTestDef]] = field(
-        default_factory=dict
-    )
+    items_by_file: dict[Path, list[LoadedTestDef]] = field(default_factory=dict)
     total_tests: int = 0
     completed_count: int = 0
     tests: dict[int, ExecutableTest] = field(default_factory=dict)
@@ -33,7 +31,7 @@ class TerminalRunState:
     failures: list[ExecutedTest] = field(default_factory=list)
     status_counts: dict[TestStatus, int] = field(default_factory=dict)
     current_module: Path | None = None
-    completed_modules: set[Path | None] = field(default_factory=set)
+    completed_modules: set[Path] = field(default_factory=set)
 
     def configure(self, verbosity: int) -> None:
         """Apply output verbosity to rendering state."""
@@ -87,14 +85,14 @@ class TerminalRunState:
             self.failures.append(execution)
         return True
 
-    def is_module_complete(self, path: Path | None) -> bool:
+    def is_module_complete(self, path: Path) -> bool:
         """Return whether every top-level item in a module has completed."""
         return all(
             item.spec.collection_index in self.executions
             for item in self.items_by_file.get(path, [])
         )
 
-    def mark_module_completed(self, path: Path | None) -> None:
+    def mark_module_completed(self, path: Path) -> None:
         """Mark a module as already printed in live terminal output."""
         self.completed_modules.add(path)
 

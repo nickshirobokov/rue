@@ -59,7 +59,7 @@ def make_item(
     name: str, tags: set[str], suffix: str | None = None
 ) -> LoadedTestDef:
     return make_definition(
-        name, fn=dummy, module_path="module.py", tags=tags, suffix=suffix
+        name, fn=dummy, module_path=Path(__file__), tags=tags, suffix=suffix
     )
 
 
@@ -337,7 +337,7 @@ def test_terminal_run_reporter_prints_failed_run_and_metrics() -> None:
     reporter = TerminalRunReporter(console=console, verbosity=1)
     definition = make_definition(
         "test_sample",
-        module_path="tests/test_sample.py",
+        module_path=Path(__file__),
     )
     assertion = AssertionResult(
         expression_repr=AssertionRepr(
@@ -363,7 +363,7 @@ def test_terminal_run_reporter_prints_failed_run_and_metrics() -> None:
         metadata=MetricMetadata(
             identity=ResourceSpec(
                 locator=Locator(
-                    module_path=Path("metrics.py"),
+                    module_path=Path(__file__),
                     function_name="latency",
                 ),
                 scope=Scope.TEST,
@@ -398,7 +398,7 @@ def test_terminal_run_reporter_prints_failed_run_and_metrics() -> None:
 
 def test_terminal_run_state_tracks_top_level_progress() -> None:
     state = TerminalRunState(verbosity=1)
-    module_path = Path("tests/test_state.py")
+    module_path = Path(__file__)
     top_level = make_definition(
         "test_state",
         module_path=module_path,
@@ -553,8 +553,13 @@ def test_experiments_run_shares_selection_and_preserves_db_config(
     monkeypatch,
 ):
     captured: dict[str, object] = {}
+    experiment_path = tmp_path / "experiments.py"
+    experiment_path.write_text("")
     experiment = ExperimentSpec(
-        locator=Locator(module_path=None, function_name="model"),
+        locator=Locator(
+            module_path=experiment_path,
+            function_name="model",
+        ),
         values=("mini",),
         ids=("mini",),
         fn=lambda value: None,
@@ -604,8 +609,11 @@ def test_experiments_run_shares_selection_and_preserves_db_config(
         FakeExperimentRunner,
     )
 
+    mutated_path = tmp_path / "mutated.py"
+    mutated_path.write_text("")
+
     def load_from_collection(self, collection):
-        collection.setup_chains[Path("mutated.py")] = ()
+        collection.setup_chains[mutated_path] = ()
         return [make_item("test_ok", set())]
 
     monkeypatch.setattr(
@@ -636,8 +644,8 @@ def test_experiments_run_shares_selection_and_preserves_db_config(
     assert captured["keyword"] == "smoke"
     assert captured["config"].maxfail is None
     assert captured["config"].processors == []
-    assert Path("mutated.py") not in captured["collection"].setup_chains
-    assert Path("mutated.py") not in captured["run_collection"].setup_chains
+    assert mutated_path not in captured["collection"].setup_chains
+    assert mutated_path not in captured["run_collection"].setup_chains
     assert captured["experiments"] == (experiment,)
     assert isinstance(
         captured["session"].processors[0],

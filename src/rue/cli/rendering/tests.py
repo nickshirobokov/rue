@@ -55,16 +55,14 @@ class TestReport:
     """Rendered test report grouped by module."""
 
     run_window: tuple[ExecutedRun, ...] = ()
-    module_nodes: dict[Path | None, list[TestReportNode]] = field(
-        default_factory=dict
-    )
+    module_nodes: dict[Path, list[TestReportNode]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
 class TestModuleView:
     """Module label shared by run and status output."""
 
-    path: Path | None
+    path: Path
 
     def compact_text(self) -> Text:
         return Text(f" • {self.label} ", style=_COMPACT_MODULE_STYLE)
@@ -74,8 +72,6 @@ class TestModuleView:
 
     @property
     def label(self) -> str:
-        if self.path is None:
-            return "<unknown>"
         return safe_relative_path(self.path).as_posix()
 
 

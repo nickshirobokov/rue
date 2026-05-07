@@ -95,7 +95,7 @@ def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
     end_time = start_time + timedelta(minutes=5)
     definition = make_definition(
         "test_sample",
-        module_path="tests/test_sample.py",
+        module_path=Path(__file__),
         tags={"smoke", "llm"},
         suffix="case one",
         case_id=case_id,
@@ -141,7 +141,7 @@ def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
             last_item_recorded_at=end_time,
             identity=ResourceSpec(
                 locator=Locator(
-                    module_path=Path("confrue.py"),
+                    module_path=Path(__file__),
                     function_name="latency_ms",
                 ),
                 scope=Scope.TEST,
@@ -150,7 +150,7 @@ def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
             direct_providers=[
                 ResourceSpec(
                     locator=Locator(
-                        module_path=Path("confrue.py"),
+                        module_path=Path(__file__),
                         function_name="model",
                     ),
                     scope=Scope.RUN,

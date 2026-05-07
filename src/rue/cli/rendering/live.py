@@ -73,7 +73,7 @@ class RunLiveRenderer:
 
     def print_completed_module(
         self,
-        path: Path | None,
+        path: Path,
         items: list[LoadedTestDef],
         state: TerminalRunState,
     ) -> None:
@@ -155,7 +155,7 @@ class OutputMode(ABC):
 
     def print_completed_module(
         self,
-        path: Path | None,
+        path: Path,
         items: list[LoadedTestDef],
         state: TerminalRunState,
     ) -> None:
@@ -227,7 +227,7 @@ class CompactMode(OutputMode):
 
     def print_completed_module(
         self,
-        path: Path | None,
+        path: Path,
         items: list[LoadedTestDef],
         state: TerminalRunState,
     ) -> None:
@@ -324,7 +324,7 @@ class VerboseMode(OutputMode):
 
     def print_completed_module(
         self,
-        path: Path | None,
+        path: Path,
         items: list[LoadedTestDef],
         state: TerminalRunState,
     ) -> None:

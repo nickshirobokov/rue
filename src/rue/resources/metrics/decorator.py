@@ -6,7 +6,6 @@ import functools
 import inspect
 import math
 from collections.abc import AsyncGenerator, Callable, Generator
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
@@ -17,7 +16,6 @@ from rue.context.runtime import (
 from rue.context.scopes import Scope
 from rue.resources.metrics.metric import Metric
 from rue.resources.metrics.models import CalculatedValue, MetricResult
-from rue.resources.models import ResourceSpec
 from rue.resources.registry import resource
 
 
@@ -66,18 +64,13 @@ def metric[**P](
 
         return decorator
 
-    name = fn.__name__
     resource_scope = Scope(scope)
 
     is_generator = inspect.isgeneratorfunction(fn)
     is_async_generator = inspect.isasyncgenfunction(fn)
 
     def on_resolve_hook(m: Metric) -> Metric:
-        ident = m.metadata.identity
-        m.metadata.identity = ResourceSpec(
-            locator=replace(ident.locator, function_name=name),
-            scope=resource_scope,
-        )
+        m.metadata.identity = CURRENT_RESOURCE_HOOK_CONTEXT.get().provider_spec
         return m
 
     def on_injection_hook(m: Metric) -> Metric:

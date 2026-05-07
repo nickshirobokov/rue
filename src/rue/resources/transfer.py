@@ -249,7 +249,7 @@ class StateTransfer:
 
     @staticmethod
     def _snapshot_key(spec: ResourceSpec) -> str:
-        return f"{spec.scope.value}|{spec.name}|{spec.module_path or ''}"
+        return f"{spec.scope.value}|{spec.name}|{spec.locator.module_path}"
 
     def _refresh_sync_counter(self) -> None:
         graph = self.resolver.resources.sync_graph

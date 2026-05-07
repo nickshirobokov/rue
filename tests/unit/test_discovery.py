@@ -53,7 +53,7 @@ def make_runner() -> Runner:
 def test_spec_labels_are_bounded_and_keep_full_case_id():
     case_id = UUID("00000000-0000-0000-0000-000000000001")
     spec = TestSpec(
-        locator=Locator(Path("test_sample.py"), "test_case"),
+        locator=Locator(Path(__file__), "test_case"),
         is_async=False,
         params=(),
         modifiers=(),
@@ -79,14 +79,14 @@ def test_spec_labels_are_bounded_and_keep_full_case_id():
 def test_selector_filters_by_tags_and_keyword():
     items = [
         TestSpec(
-            locator=Locator(Path("test_sample.py"), "test_fast"),
+            locator=Locator(Path(__file__), "test_fast"),
             is_async=False,
             params=(),
             modifiers=(),
             tags=frozenset({"fast", "smoke"}),
         ),
         TestSpec(
-            locator=Locator(Path("test_sample.py"), "test_slow"),
+            locator=Locator(Path(__file__), "test_slow"),
             is_async=False,
             params=(),
             modifiers=(),
@@ -529,9 +529,7 @@ def test_materialize_imports_nested_setup_chain_in_order(tmp_path, monkeypatch):
     [item] = TestLoader(plan.suite_root).load_from_collection(plan)
 
     assert item.suite_root == plan.suite_root
-    assert item.setup_chain == plan.setup_chain_for(
-        item.spec.locator.module_path
-    )
+    assert item.setup_chain == plan.setup_chains[item.spec.locator.module_path]
 
     make_run_context()
     with TestContext(item=item, execution_id=uuid4()):

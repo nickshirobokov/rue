@@ -58,7 +58,6 @@ class ScopeContext:
         module_path: Path,
     ) -> ScopeContext:
         """Build a scope context for test-scoped work."""
-        resolved_module_path = module_path.resolve()
         return cls(
             run=ScopeOwner(scope=Scope.RUN, run_id=run_id),
             test=ScopeOwner(
@@ -69,7 +68,7 @@ class ScopeContext:
             module=ScopeOwner(
                 scope=Scope.MODULE,
                 run_id=run_id,
-                module_path=resolved_module_path,
+                module_path=module_path,
             ),
         )
 

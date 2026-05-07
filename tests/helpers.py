@@ -40,7 +40,7 @@ def make_definition(
     name: str = "test_fn",
     *,
     fn: Callable[..., Any] | None = None,
-    module_path: str | Path = "test_module.py",
+    module_path: str | Path = Path(__file__),
     is_async: bool = False,
     params: list[str] | tuple[str, ...] = (),
     class_name: str | None = None,

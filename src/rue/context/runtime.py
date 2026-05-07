@@ -6,7 +6,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
-from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
@@ -53,18 +52,11 @@ class TestContext:
         scope_context = ScopeContext.for_test(
             run_id=run_context.run_id,
             execution_id=self.execution_id,
-            module_path=self.module_path,
+            module_path=self.item.spec.locator.module_path,
         )
         scope_context.__enter__()
         self._scope_contexts.append(scope_context)
         return self
-
-    @property
-    def module_path(self) -> Path:
-        """Return the resolved module path for this test context."""
-        return (
-            self.item.spec.locator.module_path or Path("<dynamic>")
-        ).resolve()
 
     def __exit__(
         self,

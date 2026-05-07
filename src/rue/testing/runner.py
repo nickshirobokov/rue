@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.process_pool import LazyProcessPool
@@ -34,7 +35,7 @@ class Runner:
         self._failure_count: int = 0
         self._queue = SessionQueue()
         self._completed_executions: dict[int, ExecutedTest] = {}
-        self._remaining_module_leaves: dict[str, int] = {}
+        self._remaining_module_leaves: dict[Path, int] = {}
 
         self.current_run: ExecutedRun | None = None
 
@@ -169,13 +170,8 @@ class Runner:
             self._remaining_module_leaves = {}
             for leaf in leaves:
                 module_path = leaf.definition.spec.locator.module_path
-                module_key = (
-                    str(module_path.resolve())
-                    if module_path is not None
-                    else "<unknown>"
-                )
-                self._remaining_module_leaves[module_key] = (
-                    self._remaining_module_leaves.get(module_key, 0) + 1
+                self._remaining_module_leaves[module_path] = (
+                    self._remaining_module_leaves.get(module_path, 0) + 1
                 )
             await RunEventsReceiver.current().on_tests_ready(self._queue.tests)
             self._completed_executions = {}
@@ -293,13 +289,8 @@ class Runner:
         execution: ExecutedTest,
     ) -> None:
         module_path = execution.definition.spec.locator.module_path
-        module_key = (
-            str(module_path.resolve())
-            if module_path is not None
-            else "<unknown>"
-        )
-        remaining = self._remaining_module_leaves[module_key] - 1
-        self._remaining_module_leaves[module_key] = remaining
+        remaining = self._remaining_module_leaves[module_path] - 1
+        self._remaining_module_leaves[module_path] = remaining
         if remaining:
             return
         with TestContext(

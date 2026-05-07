@@ -95,13 +95,6 @@ class MetricGroupView:
         return any(metric.has_failures for metric in self.metrics)
 
     @property
-    def provider_path(self) -> str | None:
-        origin = self.key.locator.module_path
-        if origin is None:
-            return None
-        return safe_relative_path(origin).as_posix()
-
-    @property
     def scope_label(self) -> str:
         return self.key.scope.value
 
@@ -139,7 +132,7 @@ class MetricGroupView:
         )
 
     @property
-    def consumer_modules(self) -> set[str]:
+    def consumer_modules(self) -> set[Path]:
         return self.consumer_modules_for(self.consumers)
 
     @property
@@ -180,13 +173,11 @@ class MetricGroupView:
         if case_id:
             return f"[{case_id}]"
         origin = metric.metadata.identity.locator.module_path
-        label = safe_relative_path(origin).as_posix() if origin else None
-        return truncate(label or "metric", 28)
+        return truncate(safe_relative_path(origin).as_posix(), 28)
 
     def metric_sort_key(self, metric: MetricResult) -> tuple[str, str]:
         origin = metric.metadata.identity.locator.module_path
-        provider = safe_relative_path(origin).as_posix() if origin else ""
-        return (metric.primary_case_id, provider)
+        return (metric.primary_case_id, safe_relative_path(origin).as_posix())
 
     def add_overview_row(self, table: Table) -> None:
         match len(self.metrics):
@@ -247,9 +238,10 @@ class MetricGroupView:
         table.add_row("Scope", Text(self.scope_label, style="dim"))
         table.add_row("Instances", str(len(self.metrics)))
         table.add_row("Value", Text(self.value_summary, style="bold"))
-
-        if self.provider_path:
-            table.add_row("Path", Text(self.provider_path, style="dim"))
+        provider_path = safe_relative_path(
+            self.key.locator.module_path
+        ).as_posix()
+        table.add_row("Path", Text(provider_path, style="dim"))
 
         return table
 
@@ -304,7 +296,7 @@ class MetricGroupView:
         rows = [
             (
                 "Modules",
-                self._format_values(self.consumer_modules, path=True),
+                self._format_values(self.consumer_modules),
             ),
             (
                 "Tests",
@@ -344,7 +336,6 @@ class MetricGroupView:
                 self.instance_label(metric),
                 self._format_values(
                     self.consumer_modules_for(tuple(metric.metadata.consumers)),
-                    path=True,
                 )
                 or "—",
                 self._format_values(
@@ -458,20 +449,19 @@ class MetricGroupView:
 
     @staticmethod
     def _format_values(
-        values: set[str],
+        values: set[str | Path],
         *,
-        path: bool = False,
         case: bool = False,
         limit: int = 4,
     ) -> str:
         if not values:
             return ""
-        items = sorted(values)
-        if path:
-            items = [
-                safe_relative_path(Path(v)).as_posix() if v else v
-                for v in items
-            ]
+        items = [
+            safe_relative_path(value).as_posix()
+            if isinstance(value, Path)
+            else value
+            for value in sorted(values, key=str)
+        ]
         if case:
             items = [f"[{v}]" for v in items]
         rendered = ", ".join(items[:limit])
@@ -480,12 +470,8 @@ class MetricGroupView:
         return rendered
 
     @staticmethod
-    def consumer_modules_for(consumers: tuple[Spec, ...]) -> set[str]:
-        return {
-            str(consumer.locator.module_path)
-            for consumer in consumers
-            if consumer.locator.module_path is not None
-        }
+    def consumer_modules_for(consumers: tuple[Spec, ...]) -> set[Path]:
+        return {consumer.locator.module_path for consumer in consumers}
 
     @staticmethod
     def test_consumers_for(consumers: tuple[Spec, ...]) -> set[str]:
@@ -531,14 +517,10 @@ class MetricRunView:
         groups = []
         for key, metrics in grouped.items():
             name = key.locator.function_name
-            provider = None
-            if key.locator.module_path is not None:
-                provider = safe_relative_path(
-                    Path(str(key.locator.module_path))
-                ).as_posix()
+            provider = safe_relative_path(key.locator.module_path).as_posix()
             display_name = (
                 f"{name} @ {provider}"
-                if name_counts[name] > 1 and provider
+                if name_counts[name] > 1
                 else name
             )
             groups.append(

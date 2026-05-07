@@ -67,9 +67,7 @@ class TestsStatusBuilder:
                 )
             )
 
-            module_nodes: dict[Path | None, list[TestReportNode]] = (
-                defaultdict(list)
-            )
+            module_nodes: dict[Path, list[TestReportNode]] = defaultdict(list)
             for test in tests:
                 module_nodes[test.definition.spec.locator.module_path].append(
                     self._finalize_node(
