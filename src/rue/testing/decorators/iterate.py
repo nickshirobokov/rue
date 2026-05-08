@@ -5,16 +5,14 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
-from rue.testing.models import (
-    Case,
-    CaseFactory,
-    CaseGroup,
+from rue.testing.compilation.modifiers import (
     CasesIterateModifier,
     GroupsIterateModifier,
     IterateModifier,
     ParameterSet,
     ParamsIterateModifier,
 )
+from rue.testing.models import Case, CaseFactory, CaseGroup
 
 
 class IterateDecorator:

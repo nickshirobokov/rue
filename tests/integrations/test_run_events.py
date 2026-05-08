@@ -20,9 +20,9 @@ from rue.events import (
 from rue.experiments.models import ExperimentVariant
 from rue.resources import DependencyResolver, registry
 from rue.storage import TursoRunRecorder, TursoRunStore
-from rue.testing.execution.factory import DefaultTestFactory
-from rue.testing.models import ExecutedRun, ExecutedTest, TestResult, TestStatus
+from rue.testing.compilation import DefaultTestFactory
 from rue.testing.runner import Runner
+from rue.testing.models import ExecutedRun, ExecutedTest, TestResult, TestStatus
 from tests.helpers import make_definition, make_run_context, materialize_tests
 
 

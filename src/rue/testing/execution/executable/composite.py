@@ -10,10 +10,13 @@ from uuid import UUID
 
 from rue.resources.resolver import DependencyResolver
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.execution.executable import ExecutableTest
-from rue.testing.models.executed import ExecutedTest
-from rue.testing.models.loaded import LoadedTestDef
-from rue.testing.models.result import TestResult, TestStatus
+from rue.testing.execution.executable.base import ExecutableTest
+from rue.testing.execution.models import (
+    ExecutedTest,
+    LoadedTestDef,
+    TestResult,
+    TestStatus,
+)
 
 
 @dataclass
@@ -83,7 +86,5 @@ class CompositeTest(ExecutableTest):
             await asyncio.gather(*tasks, return_exceptions=True)
             raise
         return [
-            execution
-            for execution in sub_executions
-            if execution is not None
+            execution for execution in sub_executions if execution is not None
         ]

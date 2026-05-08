@@ -14,8 +14,9 @@ from rue.events import RunEventsReceiver
 from rue.resources import DependencyResolver
 from rue.resources.metrics.models import MetricResult
 from rue.telemetry.otel.runtime import otel_runtime
-from rue.testing.execution import DefaultTestFactory, ExecutableTest, SingleTest
-from rue.testing.execution.queue import SessionQueue, _RunnerStep
+from rue.testing.compilation.factory import DefaultTestFactory
+from rue.testing.compilation.queue import SessionQueue, _RunnerStep
+from rue.testing.execution import ExecutableTest, SingleTest
 from rue.testing.models import (
     ExecutedRun,
     ExecutedTest,

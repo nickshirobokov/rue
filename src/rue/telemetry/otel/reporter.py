@@ -16,8 +16,7 @@ from rue.telemetry.otel.models import OtelTraceArtifact
 if TYPE_CHECKING:
     from rue.config import Config
     from rue.testing import LoadedTestDef
-    from rue.testing.models.executed import ExecutedTest
-    from rue.testing.models.run import ExecutedRun
+    from rue.testing.models import ExecutedRun, ExecutedTest
 
 
 DEFAULT_OTEL_OUTPUT_ROOT = Path(".rue/traces")

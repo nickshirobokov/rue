@@ -15,9 +15,8 @@ from rue.events.processor import RunEventsProcessor
 if TYPE_CHECKING:
     from rue.resources.models import ResourceGraph
     from rue.testing import LoadedTestDef
-    from rue.testing.execution.executable import ExecutableTest
-    from rue.testing.models.executed import ExecutedTest
-    from rue.testing.models.run import ExecutedRun
+    from rue.testing.execution.executable.base import ExecutableTest
+    from rue.testing.models import ExecutedRun, ExecutedTest
 
 
 class RunEventsReceiver:

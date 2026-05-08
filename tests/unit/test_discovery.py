@@ -15,13 +15,12 @@ from rue.testing.discovery import (
     TestSpecCollector,
 )
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.models import (
+from rue.testing.compilation.modifiers import (
     BackendModifier,
-    Locator,
     ParameterSet,
     ParamsIterateModifier,
-    TestSpec,
 )
+from rue.testing.models import Locator, TestSpec
 from rue.testing.runner import Runner
 from tests.helpers import make_run_context
 

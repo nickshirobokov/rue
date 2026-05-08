@@ -1,4 +1,4 @@
-"""Case factory-backed execution."""
+"""Adaptive execution driven by a case factory."""
 
 from __future__ import annotations
 
@@ -7,15 +7,18 @@ from uuid import UUID
 
 from rue.resources.resolver import DependencyResolver
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.execution.executable import ExecutableTest
+from rue.testing.execution.executable.base import ExecutableTest
+from rue.testing.execution.models import (
+    ExecutedTest,
+    LoadedTestDef,
+    TestResult,
+    TestStatus,
+)
 from rue.testing.models.case import CaseFactory
-from rue.testing.models.executed import ExecutedTest
-from rue.testing.models.loaded import LoadedTestDef
-from rue.testing.models.result import TestResult, TestStatus
 
 
 @dataclass(kw_only=True)
-class CaseFactoryTest(ExecutableTest):
+class AdaptiveTest(ExecutableTest):
     """Executes prebuilt attempt slots with cases from a factory."""
 
     definition: LoadedTestDef

@@ -23,8 +23,7 @@ from rue.testing.models import TestStatus
 
 
 if TYPE_CHECKING:
-    from rue.testing.models.executed import ExecutedTest
-    from rue.testing.models.run import ExecutedRun
+    from rue.testing.models import ExecutedRun, ExecutedTest
 
 
 _MODIFIER_STYLE = "cyan"

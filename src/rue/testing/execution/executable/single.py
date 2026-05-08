@@ -21,19 +21,17 @@ from rue.context.runtime import (
 from rue.context.scopes import Scope
 from rue.resources import DependencyResolver
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.execution.executable import ExecutableTest
+from rue.testing.execution.executable.base import ExecutableTest
 from rue.testing.execution.models import (
+    ExecutedTest,
     ExecutorPayload,
+    LoadedTestDef,
     RemoteExecutionResult,
+    TestResult,
+    TestStatus,
 )
 from rue.testing.execution.worker import (
     run_remote_test,
-)
-from rue.testing.models import (
-    ExecutedTest,
-    LoadedTestDef,
-    TestResult,
-    TestStatus,
 )
 from rue.testing.tracing import TestTracer
 

@@ -11,7 +11,7 @@ from typing_extensions import TypeVar
 
 
 if TYPE_CHECKING:
-    from rue.testing.models.executed import ExecutedTest
+    from rue.testing.execution.models import ExecutedTest
 
 
 InputsT = TypeVar("InputsT", default=dict[str, Any])

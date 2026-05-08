@@ -24,7 +24,7 @@ from rue.resources.fixtures_collector import (
     RewritePytestFixtureDecoratorsTransformer,
 )
 from rue.testing.decorators.tag import get_tag_data, merge_tag_data
-from rue.testing.models.loaded import LoadedTestDef
+from rue.testing.execution.models import LoadedTestDef
 from rue.testing.models.spec import SetupFileRef, TestSpec, TestSpecCollection
 
 

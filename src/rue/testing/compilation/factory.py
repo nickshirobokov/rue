@@ -8,22 +8,20 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 from uuid import uuid4
 
-from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.execution.case_factory import CaseFactoryTest
-from rue.testing.execution.composite import CompositeTest
-from rue.testing.execution.executable import ExecutableTest
-from rue.testing.execution.queue import SessionQueue
-from rue.testing.execution.single import SingleTest
-from rue.testing.models import (
+from rue.testing.compilation.modifiers import (
     BackendModifier,
-    Case,
-    CaseFactory,
     CasesIterateModifier,
     GroupsIterateModifier,
     IterateModifier,
-    LoadedTestDef,
     ParamsIterateModifier,
 )
+from rue.testing.compilation.queue import SessionQueue
+from rue.testing.execution.backend import ExecutionBackend
+from rue.testing.execution.executable.adaptive import AdaptiveTest
+from rue.testing.execution.executable.base import ExecutableTest
+from rue.testing.execution.executable.composite import CompositeTest
+from rue.testing.execution.executable.single import SingleTest
+from rue.testing.models import Case, CaseFactory, LoadedTestDef
 
 
 @dataclass
@@ -159,7 +157,7 @@ class DefaultTestFactory:
                                 for i in range(factory.max_attempts)
                             ]
                             case_children.append(
-                                CaseFactoryTest(
+                                AdaptiveTest(
                                     definition=replace(
                                         definition,
                                         spec=replace(

@@ -11,8 +11,8 @@ from rue.testing.models import TestStatus
 
 if TYPE_CHECKING:
     from rue.testing import LoadedTestDef
-    from rue.testing.execution.executable import ExecutableTest
-    from rue.testing.models.executed import ExecutedTest
+    from rue.testing.execution.executable.base import ExecutableTest
+    from rue.testing.execution.models import ExecutedTest
 
 
 @dataclass

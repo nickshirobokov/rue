@@ -18,10 +18,10 @@ from rue.context.runtime import ModuleContext, RunContext, TestContext
 from rue.resources import DependencyResolver, ResourceSpec
 from rue.resources.models import ResourceGraph
 from rue.resources.registry import registry as default_resource_registry
+from rue.testing.compilation import DefaultTestFactory
 from rue.testing.discovery import TestLoader
-from rue.testing.execution.executable import ExecutableTest
-from rue.testing.execution.factory import DefaultTestFactory
-from rue.testing.execution.single import SingleTest
+from rue.testing.execution.executable.base import ExecutableTest
+from rue.testing.execution.executable.single import SingleTest
 from rue.testing.models import TestSpecCollection
 
 

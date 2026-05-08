@@ -10,13 +10,12 @@ from uuid import UUID
 from rue.events import RunEventsReceiver
 from rue.resources.resolver import DependencyResolver
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.models.executed import ExecutedTest
-from rue.testing.models.result import TestResult, TestStatus
+from rue.testing.execution.models import ExecutedTest, TestResult, TestStatus
 
 
 if TYPE_CHECKING:
-    from rue.testing.execution.single import SingleTest
-    from rue.testing.models.loaded import LoadedTestDef
+    from rue.testing.execution.executable.single import SingleTest
+    from rue.testing.execution.models import LoadedTestDef
 
 
 class ExecutableTest(ABC):
@@ -37,7 +36,7 @@ class ExecutableTest(ABC):
 
     def leaves(self) -> list[SingleTest]:
         """Return single-test leaves below this node."""
-        from rue.testing.execution.single import SingleTest  # noqa: PLC0415
+        from rue.testing.execution.executable.single import SingleTest  # noqa: I001, PLC0415
 
         if not self.children:
             if not isinstance(self, SingleTest):

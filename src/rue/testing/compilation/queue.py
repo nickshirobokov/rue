@@ -1,4 +1,4 @@
-"""Execution queue for runner-owned test scheduling."""
+"""Scheduling queue for runner-owned test execution order."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import UUID
 
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.execution.executable import ExecutableTest
+from rue.testing.execution.executable.base import ExecutableTest
 
 
 @dataclass(slots=True)

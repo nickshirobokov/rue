@@ -16,13 +16,13 @@ from rue.predicates.models import PredicateResult
 from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.models import MetricMetadata, MetricResult
 from rue.storage import TursoRunRecorder, TursoRunStore
+from rue.testing.execution.models import TestResult, TestStatus
 from rue.testing.models import (
     ExecutedRun,
     ExecutedTest,
     RunEnvironment,
     RunResult,
 )
-from rue.testing.models.result import TestResult, TestStatus
 from tests.helpers import make_definition, make_run_context
 
 

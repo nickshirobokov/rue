@@ -30,6 +30,7 @@ class IterateModifier:
 
     @property
     def display_summary(self) -> str:
+        """Short label shown next to iterated test names."""
         return f"x {self.count} {self.display_name}"
 
 
@@ -43,6 +44,7 @@ class ParamsIterateModifier:
 
     @property
     def display_summary(self) -> str:
+        """Short label shown next to iterated test names."""
         return f"x {len(self.parameter_sets)} {self.display_name}"
 
 
@@ -56,6 +58,7 @@ class CasesIterateModifier:
 
     @property
     def display_summary(self) -> str:
+        """Short label shown next to iterated test names."""
         return f"x {len(self.cases)} {self.display_name}"
 
 
@@ -69,6 +72,7 @@ class GroupsIterateModifier:
 
     @property
     def display_summary(self) -> str:
+        """Short label shown next to iterated test names."""
         return f"x {len(self.groups)} {self.display_name}"
 
 
@@ -81,6 +85,7 @@ class BackendModifier:
 
     @property
     def display_summary(self) -> str:
+        """Short label shown next to iterated test names."""
         return ""
 
 

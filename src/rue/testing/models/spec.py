@@ -24,7 +24,7 @@ from rue.models import Locator, Spec
 
 if TYPE_CHECKING:
     from rue.testing.decorators.tag import TagData
-    from rue.testing.models.modifiers import Modifier
+    from rue.testing.compilation.modifiers import Modifier
 
 
 @dataclass
@@ -120,7 +120,7 @@ class TestSpecCollection:
     :meth:`~rue.testing.discovery.collector.TestSpecCollector.build_spec_collection`
     in the parent process and passed to
     :class:`~rue.testing.discovery.loader.TestLoader` to reconstruct live
-    :class:`~rue.testing.models.loaded.LoadedTestDef` objects locally.
+    :class:`~rue.testing.execution.models.LoadedTestDef` objects locally.
 
     * ``suite_root`` — used to create a :class:`RueImportSession` with the
       same deterministic synthetic package names as the parent.

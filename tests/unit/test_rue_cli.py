@@ -31,9 +31,12 @@ from rue.resources.metrics.models import MetricMetadata, MetricResult
 from rue.storage import TursoRunRecorder, TursoRunStore
 from rue.testing import LoadedTestDef
 from rue.testing.discovery import TestDefinitionErrors, TestDefinitionIssue
-from rue.testing.models import ExecutedTest
-from rue.testing.models.result import TestResult, TestStatus
-from rue.testing.models.run import ExecutedRun, RunResult
+from rue.testing.execution.models import (
+    ExecutedTest,
+    TestResult,
+    TestStatus,
+)
+from rue.testing.models import ExecutedRun, RunResult
 from rue.testing.models.spec import TestSpecCollection
 from tests.helpers import make_definition, make_run_context
 

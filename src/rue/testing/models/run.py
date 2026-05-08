@@ -1,4 +1,4 @@
-"""Run-level result models."""
+"""Run-level aggregates (full run record and rolled-up results)."""
 
 from __future__ import annotations
 
@@ -8,8 +8,7 @@ from uuid import UUID, uuid4
 
 from rue.context.models import RunEnvironment
 from rue.resources.metrics.models import MetricResult
-from rue.testing.models.executed import ExecutedTest
-from rue.testing.models.result import TestStatus
+from rue.testing.execution.models import ExecutedTest, TestStatus
 
 
 @dataclass
