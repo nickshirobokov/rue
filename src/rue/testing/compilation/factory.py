@@ -15,13 +15,14 @@ from rue.testing.compilation.modifiers import (
     IterateModifier,
     ParamsIterateModifier,
 )
-from rue.testing.compilation.queue import SessionQueue
+from rue.testing.compilation.queue import SuiteQueue
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.execution.executable.adaptive import AdaptiveTest
-from rue.testing.execution.executable.base import ExecutableTest
-from rue.testing.execution.executable.composite import CompositeTest
-from rue.testing.execution.executable.single import SingleTest
-from rue.testing.models import Case, CaseFactory, LoadedTestDef
+from rue.testing.execution.models import LoadedTestDef
+from rue.testing.execution.test.adaptive import AdaptiveTest
+from rue.testing.execution.test.base import ExecutableTest
+from rue.testing.execution.test.composite import CompositeTest
+from rue.testing.execution.test.single import SingleTest
+from rue.testing.models import Case, CaseFactory
 
 
 @dataclass
@@ -30,7 +31,7 @@ class DefaultTestFactory:
 
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
-    queue: SessionQueue | None = None
+    queue: SuiteQueue | None = None
     _next_sync_actor_id: int = field(default=1, init=False, repr=False)
 
     def build(
@@ -62,7 +63,7 @@ class DefaultTestFactory:
                     test: ExecutableTest = SingleTest(
                         definition=definition,
                         params=params,
-                        execution_id=uuid4(),
+                        test_execution_id=uuid4(),
                         backend=backend,
                         sync_actor_id=sync_actor_id,
                         semaphore=self.semaphore,
@@ -109,7 +110,7 @@ class DefaultTestFactory:
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
-                    execution_id=uuid4(),
+                    test_execution_id=uuid4(),
                     children=children,
                 )
                 if enqueue and self.queue is not None:
@@ -169,7 +170,7 @@ class DefaultTestFactory:
                                     ),
                                     backend=backend,
                                     min_passes=factory.max_attempts,
-                                    execution_id=uuid4(),
+                                    test_execution_id=uuid4(),
                                     children=attempt_children,
                                     factory=factory,
                                 )
@@ -182,7 +183,7 @@ class DefaultTestFactory:
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
-                    execution_id=uuid4(),
+                    test_execution_id=uuid4(),
                     children=case_children,
                 )
                 if enqueue and self.queue is not None:
@@ -215,7 +216,7 @@ class DefaultTestFactory:
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
-                    execution_id=uuid4(),
+                    test_execution_id=uuid4(),
                     children=children,
                 )
                 if enqueue and self.queue is not None:
@@ -244,7 +245,7 @@ class DefaultTestFactory:
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
-                    execution_id=uuid4(),
+                    test_execution_id=uuid4(),
                     children=children,
                 )
                 if enqueue and self.queue is not None:

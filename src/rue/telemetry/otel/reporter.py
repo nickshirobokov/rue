@@ -9,51 +9,51 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from rue.events import RunEventsProcessor
+from rue.events import SuiteEventsProcessor
 from rue.telemetry.otel.models import OtelTraceArtifact
 
 
 if TYPE_CHECKING:
     from rue.config import Config
-    from rue.testing import LoadedTestDef
-    from rue.testing.models import ExecutedRun, ExecutedTest
+    from rue.testing.execution.models import ExecutedTest, LoadedTestDef
+    from rue.testing.execution.suite.models import ExecutedSuite
 
 
 DEFAULT_OTEL_OUTPUT_ROOT = Path(".rue/traces")
-MAX_STORED_OTEL_RUNS = 5
+MAX_STORED_OTEL_SUITES = 5
 UUID_STRING_PATTERN = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
 
 
-class OtelReporter(RunEventsProcessor):
+class OtelReporter(SuiteEventsProcessor):
     """Stores OpenTelemetry trace payloads under `.rue/traces`."""
 
     def __init__(self) -> None:
-        self._prepared_run_ids: set[UUID] = set()
+        self._prepared_suite_execution_ids: set[UUID] = set()
 
     def configure(self, config: Config) -> None:
         """Accept runtime configuration."""
         _ = config
 
-    async def on_no_tests_found(self, run: ExecutedRun) -> None:
-        """Ignore empty runs."""
-        _ = run
+    async def on_no_tests_found(self, suite: ExecutedSuite) -> None:
+        """Ignore empty suites."""
+        _ = suite
         return None
 
     async def on_collection_complete(
-        self, items: list[LoadedTestDef], run: ExecutedRun
+        self, items: list[LoadedTestDef], suite: ExecutedSuite
     ) -> None:
-        """Reset per-run trace directory tracking."""
-        _ = items, run
-        self._prepared_run_ids.clear()
+        """Reset per-suite trace directory tracking."""
+        _ = items, suite
+        self._prepared_suite_execution_ids.clear()
         return None
 
-    async def on_execution_complete(
-        self, execution: ExecutedTest, run: ExecutedRun
+    async def on_test_execution_complete(
+        self, execution: ExecutedTest, suite: ExecutedSuite
     ) -> None:
-        """Persist the execution OpenTelemetry trace artifact."""
-        _ = run
+        """Persist the test execution OpenTelemetry trace artifact."""
+        _ = suite
         artifacts = [
             artifact
             for artifact in execution.telemetry_artifacts
@@ -65,34 +65,40 @@ class OtelReporter(RunEventsProcessor):
             raise ValueError("Expected exactly one OTEL trace artifact")
 
         artifact = artifacts[0]
-        if artifact.execution_id != execution.execution_id:
-            raise ValueError("OTEL artifact execution_id does not match")
+        if artifact.test_execution_id != execution.test_execution_id:
+            raise ValueError("OTEL artifact test_execution_id does not match")
 
-        run_dir = self._prepare_run_directory(artifact.run_id)
-        trace_path = run_dir / f"{execution.execution_id}.json"
+        suite_dir = self._prepare_suite_directory(
+            artifact.suite_execution_id
+        )
+        trace_path = suite_dir / f"{execution.test_execution_id}.json"
         trace_path.write_text(
             json.dumps(self._serialize_trace_artifact(artifact), indent=2),
             encoding="utf-8",
         )
         return None
 
-    async def on_run_complete(self, run: ExecutedRun) -> None:
-        """Prune old run trace directories."""
-        _ = run
-        self._prune_run_directories()
+    async def on_suite_execution_complete(self, suite: ExecutedSuite) -> None:
+        """Prune old suite trace directories."""
+        _ = suite
+        self._prune_suite_directories()
         return None
 
-    async def on_run_stopped_early(self, failure_count: int, run: ExecutedRun) -> None:
+    async def on_suite_stopped_early(
+        self,
+        failure_count: int,
+        suite: ExecutedSuite,
+    ) -> None:
         """Ignore early-stop notifications."""
-        _ = failure_count, run
+        _ = failure_count, suite
         return None
 
     def _serialize_trace_artifact(
         self, artifact: OtelTraceArtifact
     ) -> dict[str, Any]:
         return {
-            "run_id": str(artifact.run_id),
-            "execution_id": str(artifact.execution_id),
+            "suite_execution_id": str(artifact.suite_execution_id),
+            "test_execution_id": str(artifact.test_execution_id),
             "trace": self._build_trace_tree(artifact.spans),
         }
 
@@ -113,20 +119,20 @@ class OtelReporter(RunEventsProcessor):
 
         return roots[0]
 
-    def _prepare_run_directory(self, run_id: UUID) -> Path:
+    def _prepare_suite_directory(self, suite_execution_id: UUID) -> Path:
         DEFAULT_OTEL_OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-        run_dir = DEFAULT_OTEL_OUTPUT_ROOT / str(run_id)
-        if run_id not in self._prepared_run_ids:
-            if run_dir.exists():
-                shutil.rmtree(run_dir)
-            run_dir.mkdir(parents=True, exist_ok=True)
-            self._prepared_run_ids.add(run_id)
-        elif not run_dir.exists():
-            run_dir.mkdir(parents=True, exist_ok=True)
-        return run_dir
+        suite_dir = DEFAULT_OTEL_OUTPUT_ROOT / str(suite_execution_id)
+        if suite_execution_id not in self._prepared_suite_execution_ids:
+            if suite_dir.exists():
+                shutil.rmtree(suite_dir)
+            suite_dir.mkdir(parents=True, exist_ok=True)
+            self._prepared_suite_execution_ids.add(suite_execution_id)
+        elif not suite_dir.exists():
+            suite_dir.mkdir(parents=True, exist_ok=True)
+        return suite_dir
 
-    def _prune_run_directories(self) -> None:
-        run_dirs = sorted(
+    def _prune_suite_directories(self) -> None:
+        suite_dirs = sorted(
             [
                 path
                 for path in DEFAULT_OTEL_OUTPUT_ROOT.iterdir()
@@ -135,5 +141,5 @@ class OtelReporter(RunEventsProcessor):
             key=lambda path: path.stat().st_mtime_ns,
             reverse=True,
         )
-        for run_dir in run_dirs[MAX_STORED_OTEL_RUNS:]:
-            shutil.rmtree(run_dir)
+        for suite_dir in suite_dirs[MAX_STORED_OTEL_SUITES:]:
+            shutil.rmtree(suite_dir)

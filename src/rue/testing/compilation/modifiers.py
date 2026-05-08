@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ParameterSet:
-    """Concrete parameter combination for an individual test run."""
+    """Concrete parameter combination for an individual test execution."""
 
     values: dict[str, Any]
     suffix: str
@@ -22,7 +22,7 @@ class ParameterSet:
 
 @dataclass(frozen=True)
 class IterateModifier:
-    """Run the inner execution N times."""
+    """Execute the inner test N times."""
 
     count: int
     min_passes: int
@@ -36,7 +36,7 @@ class IterateModifier:
 
 @dataclass(frozen=True)
 class ParamsIterateModifier:
-    """Run the inner execution for each parameter set."""
+    """Execute the inner test once for each parameter set."""
 
     parameter_sets: tuple[ParameterSet, ...]
     min_passes: int
@@ -50,7 +50,7 @@ class ParamsIterateModifier:
 
 @dataclass(frozen=True)
 class CasesIterateModifier:
-    """Run the inner execution for each case."""
+    """Execute the inner test once for each case."""
 
     cases: tuple[Case[Any, Any] | CaseFactory, ...]
     min_passes: int
@@ -64,7 +64,7 @@ class CasesIterateModifier:
 
 @dataclass(frozen=True)
 class GroupsIterateModifier:
-    """Run the inner execution for each case group."""
+    """Execute the inner test once for each case group."""
 
     groups: tuple[CaseGroup[Any, Any, Any], ...]
     min_passes: int

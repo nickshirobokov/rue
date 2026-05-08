@@ -1,4 +1,4 @@
-"""Run output view models."""
+"""Suite output view models."""
 
 # ruff: noqa: D102
 
@@ -19,11 +19,12 @@ from rue.cli.rendering.primitives import (
     STATUS_STYLES,
     StatusStyle,
 )
-from rue.testing.models import TestStatus
+from rue.testing.execution.models import TestStatus
 
 
 if TYPE_CHECKING:
-    from rue.testing.models import ExecutedRun, ExecutedTest
+    from rue.testing.execution.models import ExecutedTest
+    from rue.testing.execution.suite.models import ExecutedSuite
 
 
 _MODIFIER_STYLE = "cyan"
@@ -31,10 +32,10 @@ _RUE_MODULE = __import__("rue")
 
 
 @dataclass(frozen=True, slots=True)
-class RunView:
-    """Render-ready summary of an ExecutedRun header and final counts."""
+class SuiteView:
+    """Render-ready summary of an ExecutedSuite header and final counts."""
 
-    run_id: str
+    suite_execution_id: str
     platform: str
     python_version: str
     rue_version: str
@@ -51,11 +52,11 @@ class RunView:
     total_duration_ms: float
 
     @classmethod
-    def from_run(cls, run: ExecutedRun) -> RunView:
-        """Project a domain run object into terminal display fields."""
-        environment = run.environment
+    def from_suite(cls, suite: ExecutedSuite) -> SuiteView:
+        """Project a domain suite object into terminal display fields."""
+        environment = suite.environment
         return cls(
-            run_id=str(run.run_id),
+            suite_execution_id=str(suite.suite_execution_id),
             platform=environment.platform,
             python_version=environment.python_version,
             rue_version=environment.rue_version,
@@ -63,13 +64,13 @@ class RunView:
             branch=environment.branch,
             commit_hash=environment.commit_hash,
             dirty=environment.dirty,
-            passed=run.result.passed,
-            failed=run.result.failed,
-            errors=run.result.errors,
-            skipped=run.result.skipped,
-            xfailed=run.result.xfailed,
-            xpassed=run.result.xpassed,
-            total_duration_ms=run.result.total_duration_ms,
+            passed=suite.result.passed,
+            failed=suite.result.failed,
+            errors=suite.result.errors,
+            skipped=suite.result.skipped,
+            xfailed=suite.result.xfailed,
+            xpassed=suite.result.xpassed,
+            total_duration_ms=suite.result.total_duration_ms,
         )
 
     @property
@@ -110,11 +111,11 @@ class RunView:
         )
 
     @property
-    def run_id_markup(self) -> str:
-        return f"[dim]run_id: {self.run_id}[/dim]"
+    def suite_execution_id_markup(self) -> str:
+        return f"[dim]suite_execution_id: {self.suite_execution_id}[/dim]"
 
     def render_header(self) -> Group:
-        """Render the banner printed before a run starts executing tests."""
+        """Render the banner printed before suite execution starts."""
         platform_text = Text()
         platform_text.append("platform ", style="dim")
         platform_text.append(self.platform)
@@ -128,15 +129,15 @@ class RunView:
         rootdir_text.append(self.working_directory)
 
         parts: list[RenderableType] = [
-            Rule(Text("RUE RUN STARTS", style="bold cyan"), characters="="),
+            Rule(Text("RUE SUITE STARTS", style="bold cyan"), characters="="),
             platform_text,
             rootdir_text,
         ]
-        if self.run_id:
-            run_id_text = Text()
-            run_id_text.append("run_id: ", style="dim")
-            run_id_text.append(self.run_id, style="dim")
-            parts.append(run_id_text)
+        if self.suite_execution_id:
+            suite_execution_id_text = Text()
+            suite_execution_id_text.append("suite_execution_id: ", style="dim")
+            suite_execution_id_text.append(self.suite_execution_id, style="dim")
+            parts.append(suite_execution_id_text)
         if self.git_summary is not None:
             git_text = Text()
             git_text.append("git: ", style="dim")
@@ -145,17 +146,17 @@ class RunView:
         return Group(*parts)
 
     def render_summary(self) -> Group:
-        """Render the final run count and run id block."""
+        """Render the final suite count and suite_execution_id block."""
         return Group(
             Rule(Text("SUMMARY", style="bold cyan"), characters="="),
             Text.from_markup(self.duration_markup, justify="center"),
-            Text.from_markup(self.run_id_markup, justify="center"),
+            Text.from_markup(self.suite_execution_id_markup, justify="center"),
             Rule(characters="="),
         )
 
 
 @dataclass(frozen=True, slots=True)
-class ExecutionView:
+class TestExecutionView:
     """Render-ready view of one executed test node and its children."""
 
     label: str
@@ -168,21 +169,21 @@ class ExecutionView:
     modifier_suffix: str
     error: BaseException | None
     failed_assertions: tuple[AssertionView, ...]
-    subviews: tuple[ExecutionView, ...]
+    subviews: tuple[TestExecutionView, ...]
 
     @classmethod
-    def from_execution(
+    def from_test_execution(
         cls,
         execution: ExecutedTest,
         *,
         verbosity: int = 0,
         title: str | None = None,
-    ) -> ExecutionView:
-        """Project execution results into terminal display state."""
+    ) -> TestExecutionView:
+        """Project test execution results into terminal display state."""
         spec = execution.definition.spec
         label = spec.get_label(full=verbosity >= 2) or "case"
         summary = ""
-        if spec.modifiers and execution.sub_executions:
+        if spec.modifiers and execution.sub_test_executions:
             summary = spec.modifiers[0].display_summary
         status = execution.result.status
         fallback_title = spec.get_label(full=verbosity >= 2)
@@ -202,8 +203,8 @@ class ExecutionView:
                 if not assertion.passed
             ),
             subviews=tuple(
-                cls.from_execution(sub, verbosity=verbosity)
-                for sub in execution.sub_executions
+                cls.from_test_execution(sub, verbosity=verbosity)
+                for sub in execution.sub_test_executions
             ),
         )
 
@@ -217,7 +218,7 @@ class ExecutionView:
         relevant = [
             view
             for view in (
-                cls.from_execution(
+                cls.from_test_execution(
                     failure,
                     title=failure.definition.spec.full_name,
                     verbosity=verbosity,
@@ -255,7 +256,7 @@ class ExecutionView:
         relevant = [
             view
             for view in (
-                cls.from_execution(
+                cls.from_test_execution(
                     failure,
                     title=failure.definition.spec.full_name,
                     verbosity=verbosity,
@@ -305,7 +306,7 @@ class ExecutionView:
         )
 
     @property
-    def assertion_subviews(self) -> tuple[ExecutionView, ...]:
+    def assertion_subviews(self) -> tuple[TestExecutionView, ...]:
         return tuple(
             subview
             for subview in self.subviews
@@ -313,13 +314,13 @@ class ExecutionView:
         )
 
     @property
-    def exception_subviews(self) -> tuple[ExecutionView, ...]:
+    def exception_subviews(self) -> tuple[TestExecutionView, ...]:
         return tuple(
             subview for subview in self.subviews if subview.has_exception
         )
 
     def assertion_panel(self) -> Panel:
-        """Render nested failed assertions under this execution."""
+        """Render nested failed assertions under this test execution."""
         renderables: list[RenderableType] = []
 
         if self.failed_assertions:
@@ -337,7 +338,7 @@ class ExecutionView:
         return self._panel(renderables)
 
     def exception_panel(self, *, show_locals: bool = False) -> Panel:
-        """Render nested exception tracebacks under this execution."""
+        """Render nested exception tracebacks under this test execution."""
         renderables: list[RenderableType] = []
 
         if self.should_show_error:
@@ -434,7 +435,7 @@ class ExecutionView:
 
     @staticmethod
     def running_line(name: str) -> Text:
-        text = ExecutionView.test_name_text(name)
+        text = TestExecutionView.test_name_text(name)
         text.append("  ")
         text.append("⋯ running", style="dim")
         return text
@@ -459,12 +460,8 @@ class ExecutionView:
         text.append(label)
         text.append("]", style="dim")
         return text
-
-
-
-
 __all__ = [
     "AssertionView",
-    "ExecutionView",
-    "RunView",
+    "SuiteView",
+    "TestExecutionView",
 ]

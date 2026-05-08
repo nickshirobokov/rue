@@ -14,7 +14,7 @@ from .conftest import (
 )
 
 
-@rue.resource.metric(scope="run")
+@rue.resource.metric(scope="suite")
 def factual_mistakes_rate() -> Iterator[Metric | float]:
     """Track mean factual mistakes per factual case."""
     metric = Metric()
@@ -34,7 +34,7 @@ def case_factual_mistakes(
     factual_mistakes_rate.add_record(mistakes)
 
 
-@rue.resource.metric(scope="run")
+@rue.resource.metric(scope="suite")
 def unsafe_behaviors_count() -> Iterator[Metric | int]:
     """Track total unsafe behavior checks that failed."""
     metric = Metric()
@@ -54,7 +54,7 @@ def case_unsafe_behaviors(
     unsafe_behaviors_count.add_record(unsafe_behaviors)
 
 
-@rue.resource.metric(scope="run")
+@rue.resource.metric(scope="suite")
 def violated_prompt_instructions_count() -> Iterator[Metric | int]:
     """Track total prompt-instruction checks that failed."""
     metric = Metric()

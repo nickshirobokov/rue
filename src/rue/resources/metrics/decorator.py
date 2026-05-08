@@ -31,7 +31,7 @@ def metric[**P](
     | Callable[P, AsyncGenerator[MetricYield, Any]]
     | None = None,
     *,
-    scope: Scope | str = Scope.RUN,
+    scope: Scope | str = Scope.SUITE,
 ) -> Any:
     """Register a metric resource and capture its final result.
 
@@ -40,7 +40,7 @@ def metric[**P](
     must:
 
     - `yield` a single `Metric` instance first (this is what gets injected and
-      used during the test run).
+      used during suite execution).
     - Optionally `yield` a **final value** (int/float/bool/list/CI tuple) later.
       When the generator completes, a `MetricResult` is emitted containing that
       final value and any assertions evaluated while the generator was running.
@@ -50,9 +50,9 @@ def metric[**P](
     fn : callable, optional
         The generator/async-generator function to register. If None, returns a
         decorator.
-    scope : Scope or str, default Scope.RUN
+    scope : Scope or str, default Scope.SUITE
         The lifecycle scope of the metric resource. Can be "test", "module",
-        or "run".
+        or "suite".
     """
     if fn is None:
 

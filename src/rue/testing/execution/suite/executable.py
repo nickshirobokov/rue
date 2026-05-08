@@ -1,45 +1,51 @@
-"""Test runner for executing discovered tests."""
+"""Executable suite execution orchestration."""
 
 from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from uuid import UUID
 
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.process_pool import LazyProcessPool
-from rue.context.runtime import CURRENT_RUN_CONTEXT, ModuleContext, bind
+from rue.context.runtime import CURRENT_SUITE_CONTEXT, ModuleContext, bind
 from rue.context.scopes import Scope
-from rue.events import RunEventsReceiver
+from rue.events import SuiteEventsReceiver
 from rue.resources import DependencyResolver
 from rue.resources.metrics.models import MetricResult
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.compilation.factory import DefaultTestFactory
-from rue.testing.compilation.queue import SessionQueue, _RunnerStep
-from rue.testing.execution import ExecutableTest, SingleTest
-from rue.testing.models import (
-    ExecutedRun,
-    ExecutedTest,
-    LoadedTestDef,
-)
+from rue.testing.compilation.queue import SuiteQueue, _SuiteStep
+from rue.testing.execution.models import ExecutedTest, LoadedTestDef
+from rue.testing.execution.suite.models import ExecutedSuite
+from rue.testing.execution.test.base import ExecutableTest
+from rue.testing.execution.test.single import SingleTest
 
 
-class Runner:
-    """Executes discovered tests with resource injection."""
+@dataclass
+class ExecutableSuite:
+    """Loaded suite with the dependencies needed to execute it."""
 
     DEFAULT_MAX_CONCURRENCY = 10
 
-    def __init__(self) -> None:
-        self.semaphore: asyncio.Semaphore | None = None
-        self.stop_flag: bool = False
-        self._failure_count: int = 0
-        self._queue = SessionQueue()
-        self._completed_executions: dict[int, ExecutedTest] = {}
-
-        self.current_run: ExecutedRun | None = None
+    items: list[LoadedTestDef]
+    suite_execution_id: UUID
+    resolver: DependencyResolver
+    semaphore: asyncio.Semaphore | None = field(default=None, init=False)
+    stop_flag: bool = field(default=False, init=False)
+    _failure_count: int = field(default=0, init=False)
+    _queue: SuiteQueue = field(default_factory=SuiteQueue, init=False)
+    _completed_test_executions: dict[int, ExecutedTest] = field(
+        default_factory=dict,
+        init=False,
+    )
+    _factory: DefaultTestFactory | None = field(default=None, init=False)
+    result: ExecutedSuite | None = field(default=None, init=False)
 
     def _concurrency_limit(self) -> int:
-        context = CURRENT_RUN_CONTEXT.get()
+        context = CURRENT_SUITE_CONTEXT.get()
         config = context.config
         return (
             config.concurrency
@@ -47,101 +53,83 @@ class Runner:
             else self.DEFAULT_MAX_CONCURRENCY
         )
 
-    async def run(
-        self,
-        items: list[LoadedTestDef],
-        *,
-        resolver: DependencyResolver,
-    ) -> ExecutedRun:
-        """Run tests and return results.
-
-        Args:
-            items: Test definitions to execute. Discover them with
-                TestSpecCollector and TestLoader before calling.
-            resolver: Resource resolver for this run. The runner owns teardown.
-
-        Returns:
-            ExecutedRun with environment, results, and test executions.
-        """
-        context = CURRENT_RUN_CONTEXT.get()
+    async def execute(self) -> ExecutedSuite:
+        """Execute this suite and return results."""
+        context = CURRENT_SUITE_CONTEXT.get()
         config = context.config
-        self.current_run = ExecutedRun(
-            run_id=context.run_id,
+        self.result = ExecutedSuite(
+            suite_execution_id=self.suite_execution_id,
             environment=context.environment,
         )
-        receiver = RunEventsReceiver.current()
-        await receiver.on_run_start(self.current_run)
+        receiver = SuiteEventsReceiver.current()
+        await receiver.on_suite_execution_start(self.result)
 
         if config.otel:
             otel_runtime.configure()
 
-        if not items:
+        if not self.items:
             try:
                 await receiver.on_no_tests_found()
-                self.current_run.end_time = datetime.now(UTC)
-                await receiver.on_run_complete()
-                return self.current_run
+                self.result.end_time = datetime.now(UTC)
+                await receiver.on_suite_execution_complete()
+                return self.result
             finally:
-                await resolver.teardown()
+                await self.resolver.teardown()
 
         metric_results: list[MetricResult] = []
         start = time.perf_counter()
 
         with bind(CURRENT_METRIC_RESULTS, metric_results):
             try:
-                await receiver.on_collection_complete(items)
+                await receiver.on_collection_complete(self.items)
 
                 self.semaphore = asyncio.Semaphore(self._concurrency_limit())
                 self.stop_flag = False
                 self._failure_count = 0
 
-                execution = self._execute_run(
-                    items=items,
-                    resolver=resolver,
-                    run=self.current_run,
+                execution = self._execute_suite(
+                    suite=self.result,
                 )
 
-                run_task = asyncio.create_task(execution)
+                suite_task = asyncio.create_task(execution)
 
                 try:
                     if config.timeout is not None:
                         await asyncio.wait_for(
-                            run_task, timeout=config.timeout
+                            suite_task, timeout=config.timeout
                         )
                     else:
-                        await run_task
+                        await suite_task
                 except TimeoutError:
-                    self.current_run.result.stopped_early = True
+                    self.result.result.stopped_early = True
                     self.stop_flag = True
             finally:
-                await resolver.teardown()
+                await self.resolver.teardown()
 
-        self.current_run.result.total_duration_ms = (
+        self.result.result.total_duration_ms = (
             time.perf_counter() - start
         ) * 1000
-        self.current_run.result.metric_results = metric_results.copy()
-        self.current_run.end_time = datetime.now(UTC)
+        self.result.result.metric_results = metric_results.copy()
+        self.result.end_time = datetime.now(UTC)
 
-        await receiver.on_run_complete()
+        await receiver.on_suite_execution_complete()
 
-        return self.current_run
+        return self.result
 
-    async def _execute_run(
+    async def _execute_suite(
         self,
         *,
-        items: list[LoadedTestDef],
-        resolver: DependencyResolver,
-        run: ExecutedRun,
+        suite: ExecutedSuite,
     ) -> None:
-        """Execute the test run with the given items and resolver."""
+        """Execute the suite with the given items and resolver."""
         with LazyProcessPool(self._concurrency_limit()):
-            self._queue = SessionQueue()
+            self._queue = SuiteQueue()
             self._factory = DefaultTestFactory(
                 semaphore=self.semaphore,
                 is_stopped=lambda: self.stop_flag,
                 queue=self._queue,
             )
-            for item in items:
+            for item in self.items:
                 self._factory.build(item)
             leaves = [
                 leaf
@@ -150,7 +138,7 @@ class Runner:
                 if isinstance(leaf, SingleTest)
             ]
             consumers = {
-                leaf.execution_id: (
+                leaf.test_execution_id: (
                     leaf.definition.spec,
                     tuple(
                         param
@@ -161,44 +149,44 @@ class Runner:
                 for leaf in leaves
             }
             autouse_keys = frozenset(consumers)
-            graphs = resolver.registry.compile_graphs(
+            graphs = self.resolver.registry.compile_graphs(
                 consumers,
                 autouse_keys=autouse_keys,
             )
-            await RunEventsReceiver.current().on_di_graphs_compiled(graphs)
-            await RunEventsReceiver.current().on_tests_ready(self._queue.tests)
-            self._completed_executions = {}
-            context = CURRENT_RUN_CONTEXT.get()
+            await SuiteEventsReceiver.current().on_di_graphs_compiled(graphs)
+            await SuiteEventsReceiver.current().on_tests_ready(
+                self._queue.tests
+            )
+            self._completed_test_executions = {}
+            context = CURRENT_SUITE_CONTEXT.get()
             config = context.config
             try:
                 for step in self._queue.steps:
                     if self.stop_flag:
                         break
-                    await self._run_step(step, resolver, run)
-                    if run.result.stopped_early and config.maxfail:
-                        await RunEventsReceiver.current().on_run_stopped_early(
-                            config.maxfail
-                        )
+                    await self._execute_step(step, suite)
+                    if suite.result.stopped_early and config.maxfail:
+                        receiver = SuiteEventsReceiver.current()
+                        await receiver.on_suite_stopped_early(config.maxfail)
                         break
             finally:
-                run.result.executions = [
+                suite.result.test_executions = [
                     execution
                     for test in self._queue.tests
                     if (
-                        execution := self._completed_executions.get(
+                        execution := self._completed_test_executions.get(
                             test.definition.spec.collection_index
                         )
                     )
                     is not None
                 ]
 
-    async def _run_step(
+    async def _execute_step(
         self,
-        step: _RunnerStep,
-        resolver: DependencyResolver,
-        run: ExecutedRun,
+        step: _SuiteStep,
+        suite: ExecutedSuite,
     ) -> None:
-        """Run one queue step."""
+        """Execute one queue step."""
         if step.is_main:
             batch = step.main_batch
             if batch is None:
@@ -207,7 +195,7 @@ class Runner:
                 if self.stop_flag:
                     break
                 await self._start_queued_test(test)
-                await self._execute_started_test(test, resolver, run)
+                await self._execute_started_test(test, suite)
             return
 
         condition = asyncio.Condition()
@@ -227,7 +215,7 @@ class Runner:
                     mq, batch, test = queued
                     await self._start_queued_test(test)
 
-                await self._execute_started_test(test, resolver, run)
+                await self._execute_started_test(test, suite)
 
                 async with condition:
                     step.finish(mq, batch)
@@ -255,37 +243,36 @@ class Runner:
     ) -> None:
         module_path = test.definition.spec.locator.module_path
         with ModuleContext(module_path):
-            await RunEventsReceiver.current().on_test_start(test)
+            await SuiteEventsReceiver.current().on_test_execution_start(test)
 
     async def _execute_started_test(
         self,
         test: ExecutableTest,
-        resolver: DependencyResolver,
-        run: ExecutedRun,
+        suite: ExecutedSuite,
     ) -> None:
         module_path = test.definition.spec.locator.module_path
         with ModuleContext(module_path):
-            execution = await test.execute(resolver)
-        self._record_execution(run, execution)
+            execution = await test.execute(self.resolver)
+        self._record_test_execution(suite, execution)
         closed_module = self._queue.finish(test)
         if closed_module is None:
             return
         with ModuleContext(closed_module):
-            await resolver.teardown(Scope.MODULE)
+            await self.resolver.teardown(Scope.MODULE)
 
-    def _record_execution(
+    def _record_test_execution(
         self,
-        run: ExecutedRun,
+        suite: ExecutedSuite,
         execution: ExecutedTest,
     ) -> None:
-        self._completed_executions[
+        self._completed_test_executions[
             execution.definition.spec.collection_index
         ] = execution
         if not execution.result.status.is_failure:
             return
         self._failure_count += 1
-        context = CURRENT_RUN_CONTEXT.get()
+        context = CURRENT_SUITE_CONTEXT.get()
         maxfail = context.config.maxfail
         if maxfail and self._failure_count >= maxfail:
             self.stop_flag = True
-            run.result.stopped_early = True
+            suite.result.stopped_early = True

@@ -17,7 +17,7 @@ class Scope(StrEnum):
 
     TEST = auto()  # Fresh instance per test
     MODULE = auto()  # Shared across tests in same file
-    RUN = auto()  # Shared across entire test run
+    SUITE = auto()  # Shared across entire suite execution
 
     @classmethod
     def provider_priority(cls) -> tuple[Scope, ...]:
@@ -35,7 +35,7 @@ class Scope(StrEnum):
 class ScopeContext:
     """Current runtime owners for resolved injected dependencies."""
 
-    run: ScopeOwner
+    suite: ScopeOwner
     test: ScopeOwner | None = None
     module: ScopeOwner | None = None
     _tokens: list[Token[ScopeContext]] = field(
@@ -46,36 +46,44 @@ class ScopeContext:
     )
 
     @classmethod
-    def for_run(cls, run_id: UUID) -> ScopeContext:
-        """Build a scope context for run-scoped work."""
-        return cls(run=ScopeOwner(scope=Scope.RUN, run_id=run_id))
+    def for_suite(cls, suite_execution_id: UUID) -> ScopeContext:
+        """Build a scope context for suite-scoped work."""
+        return cls(
+            suite=ScopeOwner(
+                scope=Scope.SUITE,
+                suite_execution_id=suite_execution_id,
+            )
+        )
 
     @classmethod
     def for_module(
         cls,
-        run_id: UUID,
+        suite_execution_id: UUID,
         module_path: Path,
     ) -> ScopeContext:
         """Build a scope context for module-scoped work."""
         return cls(
-            run=ScopeOwner(scope=Scope.RUN, run_id=run_id),
+            suite=ScopeOwner(
+                scope=Scope.SUITE,
+                suite_execution_id=suite_execution_id,
+            ),
             module=ScopeOwner(
                 scope=Scope.MODULE,
-                run_id=run_id,
+                suite_execution_id=suite_execution_id,
                 module_path=module_path,
             ),
         )
 
     @classmethod
-    def for_test(cls, execution_id: UUID) -> ScopeContext:
+    def for_test(cls, test_execution_id: UUID) -> ScopeContext:
         """Build a scope context for test-scoped work."""
         current = cls.current()
         return cls(
-            run=current.run,
+            suite=current.suite,
             test=ScopeOwner(
                 scope=Scope.TEST,
-                execution_id=execution_id,
-                run_id=current.run.run_id,
+                test_execution_id=test_execution_id,
+                suite_execution_id=current.suite.suite_execution_id,
             ),
             module=current.module,
         )
@@ -93,8 +101,8 @@ class ScopeContext:
     def owner(self, scope: Scope) -> ScopeOwner:
         """Return the owner for a scope in this context."""
         match scope:
-            case Scope.RUN:
-                return self.run
+            case Scope.SUITE:
+                return self.suite
             case Scope.TEST:
                 if self.test is None:
                     msg = "Test-scoped resources require an open TestContext."
@@ -110,7 +118,7 @@ class ScopeContext:
                 return self.module
 
     def __enter__(self) -> ScopeContext:
-        """Bind this scope context to the current execution scope."""
+        """Bind this scope context to the current runtime ownership scope."""
         self._tokens.append(CURRENT_SCOPE_CONTEXT.set(self))
         return self
 

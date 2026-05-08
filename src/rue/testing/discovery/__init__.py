@@ -11,19 +11,17 @@ from rue.testing.discovery.loader import (
     TestDefinitionIssue,
     TestLoader,
 )
-from rue.testing.models import LoadedTestDef
-from rue.testing.models.spec import SetupFileRef, TestSpecCollection
+from rue.testing.models.spec import SetupFileRef, SuiteSpec
 
 
 __all__ = [
     "KeywordMatcher",
-    "LoadedTestDef",
     "RueImportSession",
     "RueModuleLoader",
     "SetupFileRef",
+    "SuiteSpec",
     "TestDefinitionErrors",
     "TestDefinitionIssue",
     "TestLoader",
-    "TestSpecCollection",
     "TestSpecCollector",
 ]

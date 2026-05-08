@@ -1,4 +1,4 @@
-"""Run event processor that records Rue runs into Turso."""
+"""Suite event processor that records Rue suites into Turso."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from uuid import UUID
 
 import turso
 
-from rue.events import RunEventsProcessor
-from rue.storage.store import TursoRunStore
-from rue.storage.views import StoredExecutionView, StoredRunView
+from rue.events import SuiteEventsProcessor
+from rue.storage.store import TursoSuiteStore
+from rue.storage.views import StoredSuiteView, StoredTestExecutionView
 
 
 if TYPE_CHECKING:
@@ -17,18 +17,19 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from rue.config import Config
-    from rue.testing.execution.executable.base import ExecutableTest
-    from rue.testing.models import ExecutedRun, ExecutedTest
+    from rue.testing.execution.models import ExecutedTest
+    from rue.testing.execution.suite.models import ExecutedSuite
+    from rue.testing.execution.test.base import ExecutableTest
 
 
 MAX_TRANSACTION_ATTEMPTS = 3
 
 
-class TursoRunRecorder(RunEventsProcessor):
-    """Persists run lifecycle events into Turso."""
+class TursoSuiteRecorder(SuiteEventsProcessor):
+    """Persists suite lifecycle events into Turso."""
 
     def __init__(self) -> None:
-        self.store = TursoRunStore()
+        self.store = TursoSuiteStore()
         self._conn: turso.Connection | None = None
         self._parents_by_child: dict[UUID, UUID] = {}
         self._children_by_parent: dict[UUID, list[UUID]] = {}
@@ -41,7 +42,7 @@ class TursoRunRecorder(RunEventsProcessor):
 
     def configure(self, config: Config) -> None:
         """Apply runtime storage configuration."""
-        self.store = TursoRunStore(config.database_path)
+        self.store = TursoSuiteStore(config.database_path)
 
     def close(self) -> None:
         """Close the active Turso connection, if one is open."""
@@ -49,54 +50,56 @@ class TursoRunRecorder(RunEventsProcessor):
             self._conn.close()
             self._conn = None
 
-    async def on_run_start(self, run: ExecutedRun) -> None:
-        """Initialize storage and persist the initial run row."""
+    async def on_suite_execution_start(self, suite: ExecutedSuite) -> None:
+        """Initialize storage and persist the initial suite row."""
         self._parents_by_child = {}
         self._children_by_parent = {}
         self._completed = set()
         self.store.initialize()
         self._conn = self.store.connect()
-        self._write(StoredRunView.from_run(run).insert)
+        self._write(StoredSuiteView.from_suite(suite).insert)
 
     async def on_tests_ready(
         self,
         tests: list[ExecutableTest],
-        run: ExecutedRun,
+        suite: ExecutedSuite,
     ) -> None:
-        """Record expected execution tree relationships."""
-        _ = run
+        """Record expected test execution tree relationships."""
+        _ = suite
         for test in tests:
             self._record_tree(test)
 
-    async def on_execution_complete(
+    async def on_test_execution_complete(
         self,
         execution: ExecutedTest,
-        run: ExecutedRun,
+        suite: ExecutedSuite,
     ) -> None:
-        """Persist one completed execution and link finished children."""
-        child_ids = [child.execution_id for child in execution.sub_executions]
+        """Persist one completed test execution and link finished children."""
+        child_ids = [
+            child.test_execution_id for child in execution.sub_test_executions
+        ]
         if child_ids:
-            self._children_by_parent[execution.execution_id] = child_ids
+            self._children_by_parent[execution.test_execution_id] = child_ids
             for child_id in child_ids:
-                self._parents_by_child[child_id] = execution.execution_id
-        parent_id = self._parents_by_child.get(execution.execution_id)
+                self._parents_by_child[child_id] = execution.test_execution_id
+        parent_id = self._parents_by_child.get(execution.test_execution_id)
         persisted_parent_id = (
             parent_id if parent_id in self._completed else None
         )
-        view = StoredExecutionView.from_execution(
-            run.run_id,
+        view = StoredTestExecutionView.from_test_execution(
+            suite.suite_execution_id,
             execution,
             persisted_parent_id,
             child_ids=tuple(
-                self._children_by_parent.get(execution.execution_id, ())
+                self._children_by_parent.get(execution.test_execution_id, ())
             ),
         )
         self._write(view.insert)
-        self._completed.add(execution.execution_id)
+        self._completed.add(execution.test_execution_id)
 
-    async def on_run_complete(self, run: ExecutedRun) -> None:
-        """Persist final run counters and run-level metrics."""
-        self._write(StoredRunView.from_run(run).finish)
+    async def on_suite_execution_complete(self, suite: ExecutedSuite) -> None:
+        """Persist final suite counters and suite-level metrics."""
+        self._write(StoredSuiteView.from_suite(suite).finish)
 
     def _connection(self) -> turso.Connection:
         if self._conn is None:
@@ -122,13 +125,13 @@ class TursoRunRecorder(RunEventsProcessor):
                 raise
 
     def _record_tree(self, test: ExecutableTest) -> None:
-        child_ids = [child.execution_id for child in test.children]
+        child_ids = [child.test_execution_id for child in test.children]
         if child_ids:
-            self._children_by_parent[test.execution_id] = child_ids
+            self._children_by_parent[test.test_execution_id] = child_ids
             for child_id in child_ids:
-                self._parents_by_child[child_id] = test.execution_id
+                self._parents_by_child[child_id] = test.test_execution_id
         for child in test.children:
             self._record_tree(child)
 
 
-__all__ = ["TursoRunRecorder"]
+__all__ = ["TursoSuiteRecorder"]

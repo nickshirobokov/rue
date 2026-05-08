@@ -2,7 +2,7 @@
 
 This example models a small RAG-style pipeline: retrieve context for a user query,
 then compose an answer. You run the same suite with some tests in-process (async)
-and others in a subprocess worker, while a run-scoped SUT keeps one
+and others in a subprocess worker, while a suite-scoped SUT keeps one
 `DocumentProcessingPipeline` instance per worker. After all tests in that process
 finish, the teardown sees every query that touched that instance—so you can
 assert the workflow ran end-to-end even when cases are split across local and
@@ -12,14 +12,14 @@ Run with concurrent local and subprocess workers:
     uv run rue run examples/test_example_mixed_backends.py --concurrency 4
 
 With the default reporter set, Rue also persists trace artifacts under
-`.rue/traces/<run_id>/<execution_id>.json`.
+`.rue/traces/<suite_execution_id>/<test_execution_id>.json`.
 """
 
 import asyncio
 import time
 
 import rue
-from rue import ExecutionBackend, Metric, SUT, metrics
+from rue import SUT, ExecutionBackend, Metric, metrics
 
 
 # Same worker: two queries handled by the async (in-process) tests.
@@ -53,7 +53,7 @@ class DocumentProcessingPipeline:
         return f"{query} -> {' | '.join(chunks)}"
 
 
-@rue.resource.sut(scope="run")
+@rue.resource.sut(scope="suite")
 def document_pipeline():
     sut = SUT(
         DocumentProcessingPipeline(),
@@ -64,7 +64,7 @@ def document_pipeline():
     assert sorted(sut.instance.seen_queries) == sorted(ALL_QUERIES)
 
 
-@rue.resource.metric(scope="run")
+@rue.resource.metric(scope="suite")
 def overall_quality():
     metric = Metric()
     yield metric

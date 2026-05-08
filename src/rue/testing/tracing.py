@@ -1,4 +1,4 @@
-"""Per-execution telemetry orchestration."""
+"""Per-test-execution telemetry orchestration."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from rue.config import Config
 from rue.telemetry.backend import TelemetryBackend
 from rue.telemetry.models import TelemetryArtifact
 from rue.telemetry.otel.backend import OtelTelemetryBackend
-from rue.testing.models import LoadedTestDef, TestResult
+from rue.testing.execution.models import LoadedTestDef, TestResult
 
 
 T = TypeVar("T", bound=TelemetryBackend)
@@ -18,11 +18,11 @@ T = TypeVar("T", bound=TelemetryBackend)
 
 @dataclass(slots=True)
 class TestTracer:
-    """Coordinates telemetry backends for one concrete execution."""
+    """Coordinates telemetry backends for one concrete test execution."""
 
     __test__ = False
 
-    run_id: UUID
+    suite_execution_id: UUID
     backends: tuple[TelemetryBackend, ...] = ()
 
     @classmethod
@@ -30,20 +30,23 @@ class TestTracer:
         cls,
         *,
         config: Config,
-        run_id: UUID,
+        suite_execution_id: UUID,
     ) -> TestTracer:
         """Build a tracer by resolving telemetry backends from config flags."""
         backends: list[TelemetryBackend] = []
         if config.otel:
             backends.append(OtelTelemetryBackend())
-        return cls(run_id=run_id, backends=tuple(backends))
+        return cls(
+            suite_execution_id=suite_execution_id,
+            backends=tuple(backends),
+        )
 
-    def start(self, definition: LoadedTestDef, execution_id: UUID) -> None:
+    def start(self, definition: LoadedTestDef, test_execution_id: UUID) -> None:
         for backend in self.backends:
             backend.start(
                 definition,
-                run_id=self.run_id,
-                execution_id=execution_id,
+                suite_execution_id=self.suite_execution_id,
+                test_execution_id=test_execution_id,
             )
 
     def record_result(self, result: TestResult) -> None:

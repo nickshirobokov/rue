@@ -12,5 +12,5 @@ class TelemetryArtifact(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    run_id: UUID
-    execution_id: UUID
+    suite_execution_id: UUID
+    test_execution_id: UUID

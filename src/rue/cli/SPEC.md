@@ -1,14 +1,14 @@
 # Rue CLI
 
-The CLI is glue. It turns user intent into a run plan, opens the right runtime
-contexts, wires event processors, and gets out of the way. Runner, discovery,
-storage, telemetry, and rendering all stay in their own lanes.
+The CLI is glue. It turns user intent into a suite plan, opens the right runtime
+contexts, wires event processors, and gets out of the way. Suite execution,
+discovery, storage, telemetry, and rendering all stay in their own lanes.
 
 ## Shape
 
 - `__init__.py`: Typer app wiring. Bare `rue` shows help. No hidden run alias.
 - `options.py`: shared option types and selection resolution. If a flag changes
-  what tests run, normalize it here.
+  what tests execute, normalize it here.
 - `run.py`: the main traffic cop for `rue run` and `rue run -exp`.
 - `status/`: dry-run inspection. Builds the same kind of test tree users will
   run, but does not execute test bodies.
@@ -17,14 +17,14 @@ storage, telemetry, and rendering all stay in their own lanes.
 - `rendering/`: every terminal view, style, Rich renderer, and live output
   adapter. If it decides how something looks, it goes here.
 
-## Core Pattern
+## Execution Pattern
 
 Command modules do orchestration:
 
 1. load config
 2. merge CLI overrides
 3. discover/load tests
-4. pick run mode
+4. pick suite mode
 5. open contexts
 6. call domain services
 7. exit with the right code
@@ -37,23 +37,24 @@ Rendering modules do presentation:
 4. print final reports
 
 Do not mix those. If `run.py` starts building Rich trees or tables, that is a
-smell. If rendering starts mutating runner/storage state, also a smell.
+smell. If rendering starts mutating suite execution or storage state, also a
+smell.
 
 ## Rendering Package
 
 - `primitives.py`: tiny shared formatting atoms: status styles, paths, text.
 - `tests.py`: shared test tree report models and renderer.
-- `run.py`: run header, summary, execution lines, failure panels.
+- `suite.py`: suite header, summary, execution lines, failure panels.
 - `metrics.py`: metric overview and verbose breakdowns.
 - `experiments.py`: experiment progress and final variant comparison.
-- `live.py`: verbosity modes for live run output.
+- `live.py`: verbosity modes for live suite output.
 - `terminal.py`: terminal event adapters plus Rich Live session ownership.
 - `errors.py`: CLI error display.
 
 Imports should point to the owning module directly. No compatibility shims, no
 old aliases, no “just in case” re-exports.
 
-## Run Lifecycle
+## Suite Lifecycle
 
 ```mermaid
 sequenceDiagram
@@ -61,12 +62,12 @@ sequenceDiagram
     participant Entry as CLI Entrypoint
     participant Resolve as Runtime Resolution
     participant Collect as Test Collection
-    participant Mode as Run Mode
-    participant Session as Execution Session
+    participant Mode as Suite Mode
+    participant Session as Suite Execution Session
     participant Events as Event Pipeline
     participant Render as Terminal Rendering
     participant Store as Persistence
-    participant Core as Runner Core
+    participant Suite as ExecutableSuite
     participant Exp as Experiment Session
 
     User->>Entry: start rue run
@@ -74,22 +75,22 @@ sequenceDiagram
     Resolve-->>Entry: runtime plan
     Entry->>Collect: discover specs and load selected definitions
     Collect-->>Entry: executable input or definition errors
-    Entry->>Mode: choose normal run or experiment run
+    Entry->>Mode: choose normal suite or experiment suite
 
-    alt normal run
-        Mode->>Session: open run context with processors
-        Session->>Store: prepare database and duplicate run guard
+    alt normal suite
+        Mode->>Session: open suite context with processors
+        Session->>Store: prepare database and duplicate suite guard
         Session->>Events: bind event receiver
-        Session->>Core: execute selected tests
-        Core->>Events: publish run lifecycle events
+        Session->>Suite: execute selected tests
+        Suite->>Events: publish suite lifecycle events
         Events->>Render: update live progress and final report
-        Events->>Store: persist run and execution records
-        Core-->>Session: completed run result
+        Events->>Store: persist suite execution and test execution records
+        Suite-->>Session: completed suite result
         Session-->>User: exit from failed and error counts
-    else experiment run
+    else experiment suite
         Mode->>Exp: collect variants from selected specs
-        Exp->>Session: run each variant as a child run
-        Session->>Events: forward child run lifecycle events
+        Exp->>Session: run each variant as a child suite
+        Session->>Events: forward child suite lifecycle events
         Events->>Render: update experiment progress
         Exp-->>Render: render ranked variant comparison
         Render-->>User: exit success after comparison
@@ -118,17 +119,17 @@ Definition errors still stop the command because the suite shape is invalid.
 
 ## Experiments
 
-`rue run -exp` shares collection and config resolution with normal runs, then
-splits into variant child runs. `TerminalExperimentReporter` owns live progress;
-`ExperimentRenderer` owns the final comparison. `--run-id` and `--maxfail` are
-rejected because one CLI invocation fans out into multiple child runs.
+`rue run -exp` shares collection and config resolution with normal suites, then
+splits into variant child suites. `TerminalExperimentReporter` owns live progress;
+`ExperimentRenderer` owns the final comparison. `--suite-execution-id` and `--maxfail` are
+rejected because one CLI invocation fans out into multiple child suites.
 
 ## Extension Points
 
-- Custom processors are registered `RunEventsProcessor` instances selected by
+- Custom processors are registered `SuiteEventsProcessor` instances selected by
   `--processor` or `config.processors`.
-- The CLI always attaches `TerminalRunReporter` for normal terminal output.
-- The CLI appends `TursoRunRecorder` so official runs persist by default.
+- The CLI always attaches `TerminalSuiteReporter` for normal terminal output.
+- The CLI appends `TursoSuiteRecorder` so official suites persist by default.
 - `OtelReporter` attaches when `Config.otel` is true.
 
 ## House Rules
@@ -136,6 +137,6 @@ rejected because one CLI invocation fans out into multiple child runs.
 - Add new terminal UX under `rue.cli.rendering`.
 - Reuse existing report/view models before inventing another model.
 - Keep command files as control flow, not view code.
-- Keep live mutability in `TerminalRunState` or `ExperimentRunState`.
+- Keep live mutability in `TerminalSuiteState` or `ExperimentSuiteState`.
 - Break imports cleanly when architecture changes. No ghost modules.
 - Prefer boring, predictable output over clever terminal tricks.

@@ -6,7 +6,7 @@ from enum import StrEnum
 
 
 class ExecutionBackend(StrEnum):
-    """Where a test node runs."""
+    """Where a test node suites."""
 
     MAIN = "main"
     MODULE_MAIN = "module_main"

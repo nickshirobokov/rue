@@ -13,22 +13,22 @@ from rich.live import Live
 
 from rue.cli.rendering.experiments import (
     ExperimentLiveRenderer,
-    ExperimentRunState,
+    ExperimentSuiteState,
 )
-from rue.cli.rendering.live import RunLiveRenderer
-from rue.cli.rendering.metrics import MetricRunView
-from rue.cli.rendering.run import ExecutionView, RunView
-from rue.cli.rendering.state import TerminalRunState
-from rue.context.runtime import CURRENT_RUN_CONTEXT
-from rue.events import RunEventsProcessor
-from rue.testing.models import TestStatus
+from rue.cli.rendering.live import SuiteLiveRenderer
+from rue.cli.rendering.metrics import MetricSuiteView
+from rue.cli.rendering.state import TerminalSuiteState
+from rue.cli.rendering.suite import SuiteView, TestExecutionView
+from rue.context.runtime import CURRENT_SUITE_CONTEXT
+from rue.events import SuiteEventsProcessor
+from rue.testing.execution.models import TestStatus
 
 
 if TYPE_CHECKING:
     from rue.config import Config
-    from rue.testing import LoadedTestDef
-    from rue.testing.execution.executable.base import ExecutableTest
-    from rue.testing.models import ExecutedRun, ExecutedTest
+    from rue.testing.execution.models import ExecutedTest, LoadedTestDef
+    from rue.testing.execution.suite.models import ExecutedSuite
+    from rue.testing.execution.test.base import ExecutableTest
 
 
 class TerminalLiveSession:
@@ -93,21 +93,21 @@ class TerminalLiveSession:
         self._suppression = ExitStack()
 
 
-class TerminalRunReporter(RunEventsProcessor):
-    """Translate single-run lifecycle events into terminal rendering updates."""
+class TerminalSuiteReporter(SuiteEventsProcessor):
+    """Translate single-suite lifecycle events into terminal rendering updates."""
 
     def __init__(
         self, console: Console | None = None, verbosity: int = 0
     ) -> None:
         self.console = console or Console(file=sys.__stdout__)
         self.verbosity = verbosity
-        self._renderer = RunLiveRenderer(self.console, verbosity)
+        self._renderer = SuiteLiveRenderer(self.console, verbosity)
         self._live = TerminalLiveSession(
             self.console,
             refresh_per_second=1,
         )
         self._lock = asyncio.Lock()
-        self.state = TerminalRunState(verbosity=verbosity)
+        self.state = TerminalSuiteState(verbosity=verbosity)
 
     def configure(self, config: Config) -> None:
         """Apply runtime terminal settings."""
@@ -119,18 +119,18 @@ class TerminalRunReporter(RunEventsProcessor):
         """Release terminal resources."""
         self._live.close()
 
-    async def on_no_tests_found(self, run: ExecutedRun) -> None:
-        """Print the empty-run message."""
-        _ = run
+    async def on_no_tests_found(self, suite: ExecutedSuite) -> None:
+        """Print the empty-suite message."""
+        _ = suite
         self.console.print("[yellow]No tests found.[/yellow]")
 
     async def on_collection_complete(
-        self, items: list[LoadedTestDef], run: ExecutedRun
+        self, items: list[LoadedTestDef], suite: ExecutedSuite
     ) -> None:
         """Initialize display state after collection."""
         self.state.reset_collection(items)
 
-        self.console.print(RunView.from_run(run).render_header())
+        self.console.print(SuiteView.from_suite(suite).render_header())
         self.console.print()
         if self._renderer.show_collected_count:
             self.console.print(
@@ -140,27 +140,27 @@ class TerminalRunReporter(RunEventsProcessor):
         self._live.start(self._renderer.render(self.state))
 
     async def on_tests_ready(
-        self, tests: list[ExecutableTest], run: ExecutedRun
+        self, tests: list[ExecutableTest], suite: ExecutedSuite
     ) -> None:
         """Cache top-level executable tests for rendering."""
-        _ = run
+        _ = suite
         self.state.record_ready_tests(tests)
 
-    async def on_test_start(
-        self, test: ExecutableTest, run: ExecutedRun
+    async def on_test_execution_start(
+        self, test: ExecutableTest, suite: ExecutedSuite
     ) -> None:
-        """Refresh live output before a test starts."""
-        _ = test, run
+        """Refresh live output before test execution starts."""
+        _ = test, suite
         if self._live.is_active:
             self._live.update(self._renderer.render(self.state), refresh=True)
 
-    async def on_execution_complete(
-        self, execution: ExecutedTest, run: ExecutedRun
+    async def on_test_execution_complete(
+        self, execution: ExecutedTest, suite: ExecutedSuite
     ) -> None:
-        """Record and render one completed execution."""
-        _ = run
+        """Record and render one completed test execution."""
+        _ = suite
         async with self._lock:
-            is_top_level = self.state.record_execution(execution)
+            is_top_level = self.state.record_test_execution(execution)
 
             if self._live.is_active:
                 module_path = execution.definition.spec.locator.module_path
@@ -185,50 +185,50 @@ class TerminalRunReporter(RunEventsProcessor):
 
             self._renderer.print_test(execution, self.state)
 
-    async def on_run_complete(self, run: ExecutedRun) -> None:
-        """Render the final run summary."""
+    async def on_suite_execution_complete(self, suite: ExecutedSuite) -> None:
+        """Render the final suite summary."""
         self._live.close()
 
         if self.verbosity == 0 and self.state.current_module is not None:
             self.console.print()
 
         if self._renderer.show_failures and self.state.failures:
-            for renderable in ExecutionView.render_assertion_failures(
+            for renderable in TestExecutionView.render_assertion_failures(
                 self.state.failures, self.verbosity
             ):
                 self.console.print(renderable)
-            for renderable in ExecutionView.render_exception_failures(
+            for renderable in TestExecutionView.render_exception_failures(
                 self.state.failures,
                 self.verbosity,
                 show_locals=self.verbosity >= 2,
             ):
                 self.console.print(renderable)
 
-        if run.result.stopped_early:
-            self.console.print("[yellow]Run terminated early.[/yellow]")
+        if suite.result.stopped_early:
+            self.console.print("[yellow]Suite terminated early.[/yellow]")
 
-        if run.result.metric_results:
-            metrics = MetricRunView.from_results(
-                run.result.metric_results
+        if suite.result.metric_results:
+            metrics = MetricSuiteView.from_results(
+                suite.result.metric_results
             )
             for renderable in metrics.render(self.verbosity):
                 self.console.print(renderable)
 
         self.console.print()
-        self.console.print(RunView.from_run(run).render_summary())
+        self.console.print(SuiteView.from_suite(suite).render_summary())
 
-    async def on_run_stopped_early(
-        self, failure_count: int, run: ExecutedRun
+    async def on_suite_stopped_early(
+        self, failure_count: int, suite: ExecutedSuite
     ) -> None:
         """Print maxfail early-stop notice."""
-        _ = run
+        _ = suite
         self.console.print(
             f"\n\n[red]Stopping early after {failure_count} failure(s).[/red]"
         )
 
 
-class TerminalExperimentReporter(RunEventsProcessor):
-    """Translate multi-run experiment session events into terminal updates."""
+class TerminalExperimentReporter(SuiteEventsProcessor):
+    """Translate multi-suite experiment session events into terminal updates."""
 
     def __init__(
         self, console: Console | None = None, verbosity: int = 0
@@ -251,30 +251,30 @@ class TerminalExperimentReporter(RunEventsProcessor):
         """Release terminal resources."""
         self._live.close()
 
-    async def on_run_start(self, run: ExecutedRun) -> None:
-        """Start tracking an experiment variant run."""
-        variant = CURRENT_RUN_CONTEXT.get().experiment_variant
-        label = "run" if variant is None else variant.label
+    async def on_suite_execution_start(self, suite: ExecutedSuite) -> None:
+        """Start tracking an experiment variant suite."""
+        variant = CURRENT_SUITE_CONTEXT.get().experiment_variant
+        label = "suite" if variant is None else variant.label
         async with self._lock:
-            self._renderer.states[run.run_id] = ExperimentRunState(
+            self._renderer.states[suite.suite_execution_id] = ExperimentSuiteState(
                 label=label,
-                run_id=run.run_id,
+                suite_execution_id=suite.suite_execution_id,
             )
             self._refresh()
 
-    async def on_no_tests_found(self, run: ExecutedRun) -> None:
+    async def on_no_tests_found(self, suite: ExecutedSuite) -> None:
         """Mark a variant with no tests."""
         async with self._lock:
-            state = self._renderer.states[run.run_id]
+            state = self._renderer.states[suite.suite_execution_id]
             state.phase = "no tests"
             self._refresh()
 
     async def on_collection_complete(
-        self, items: list[LoadedTestDef], run: ExecutedRun
+        self, items: list[LoadedTestDef], suite: ExecutedSuite
     ) -> None:
         """Record variant collection size."""
         async with self._lock:
-            state = self._renderer.states[run.run_id]
+            state = self._renderer.states[suite.suite_execution_id]
             state.item_keys = {
                 item.spec.collection_index for item in items
             }
@@ -283,32 +283,32 @@ class TerminalExperimentReporter(RunEventsProcessor):
             self._refresh()
 
     async def on_tests_ready(
-        self, tests: list[ExecutableTest], run: ExecutedRun
+        self, tests: list[ExecutableTest], suite: ExecutedSuite
     ) -> None:
         """Record executable test readiness."""
         async with self._lock:
-            state = self._renderer.states[run.run_id]
+            state = self._renderer.states[suite.suite_execution_id]
             state.ready_tests = len(tests)
             state.phase = "ready"
             self._refresh()
 
-    async def on_test_start(
-        self, test: ExecutableTest, run: ExecutedRun
+    async def on_test_execution_start(
+        self, test: ExecutableTest, suite: ExecutedSuite
     ) -> None:
-        """Record a started test."""
+        """Record a started test execution."""
         _ = test
         async with self._lock:
-            state = self._renderer.states[run.run_id]
+            state = self._renderer.states[suite.suite_execution_id]
             state.started_count += 1
             state.phase = "running"
             self._refresh()
 
-    async def on_execution_complete(
-        self, execution: ExecutedTest, run: ExecutedRun
+    async def on_test_execution_complete(
+        self, execution: ExecutedTest, suite: ExecutedSuite
     ) -> None:
-        """Record one completed top-level execution."""
+        """Record one completed top-level test execution."""
         async with self._lock:
-            state = self._renderer.states[run.run_id]
+            state = self._renderer.states[suite.suite_execution_id]
             spec = execution.definition.spec
             if (
                 spec.collection_index in state.item_keys
@@ -323,31 +323,31 @@ class TerminalExperimentReporter(RunEventsProcessor):
             state.phase = "running"
             self._refresh()
 
-    async def on_run_stopped_early(
-        self, failure_count: int, run: ExecutedRun
+    async def on_suite_stopped_early(
+        self, failure_count: int, suite: ExecutedSuite
     ) -> None:
         """Mark a variant stopped by maxfail."""
         _ = failure_count
         async with self._lock:
-            state = self._renderer.states[run.run_id]
+            state = self._renderer.states[suite.suite_execution_id]
             state.stopped_early = True
             state.phase = "stopping"
             self._refresh()
 
-    async def on_run_complete(self, run: ExecutedRun) -> None:
+    async def on_suite_execution_complete(self, suite: ExecutedSuite) -> None:
         """Render completed variant state."""
         async with self._lock:
-            state = self._renderer.states[run.run_id]
-            state.completed_count = run.result.total
-            state.duration_ms = run.result.total_duration_ms
-            state.stopped_early = run.result.stopped_early
+            state = self._renderer.states[suite.suite_execution_id]
+            state.completed_count = suite.result.total
+            state.duration_ms = suite.result.total_duration_ms
+            state.stopped_early = suite.result.stopped_early
             state.status_counts = {
-                TestStatus.PASSED: run.result.passed,
-                TestStatus.FAILED: run.result.failed,
-                TestStatus.ERROR: run.result.errors,
-                TestStatus.SKIPPED: run.result.skipped,
-                TestStatus.XFAILED: run.result.xfailed,
-                TestStatus.XPASSED: run.result.xpassed,
+                TestStatus.PASSED: suite.result.passed,
+                TestStatus.FAILED: suite.result.failed,
+                TestStatus.ERROR: suite.result.errors,
+                TestStatus.SKIPPED: suite.result.skipped,
+                TestStatus.XFAILED: suite.result.xfailed,
+                TestStatus.XPASSED: suite.result.xpassed,
             }
             state.phase = "stopped" if state.stopped_early else "complete"
             self._refresh()
@@ -361,5 +361,5 @@ class TerminalExperimentReporter(RunEventsProcessor):
 __all__ = [
     "TerminalExperimentReporter",
     "TerminalLiveSession",
-    "TerminalRunReporter",
+    "TerminalSuiteReporter",
 ]

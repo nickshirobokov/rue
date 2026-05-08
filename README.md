@@ -100,16 +100,16 @@ Run it:
 uv run rue run
 ```
 
-Use a custom run UUID when you need stable correlation IDs:
+Use a custom `suite_execution_id` when you need stable correlation IDs:
 
 ```bash
-uv run rue run --run-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
+uv run rue run --suite-execution-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
 ```
 
 Output:
 
 ```
-Rue Test Runner
+Rue Test Suite
 =================
 
 Collected 1 test

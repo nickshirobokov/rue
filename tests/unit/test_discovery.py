@@ -8,6 +8,11 @@ import pytest
 
 from rue.context.runtime import TestContext
 from rue.resources import DependencyResolver, Scope, registry
+from rue.testing.compilation.modifiers import (
+    BackendModifier,
+    ParameterSet,
+    ParamsIterateModifier,
+)
 from rue.testing.discovery import (
     KeywordMatcher,
     TestDefinitionErrors,
@@ -15,14 +20,9 @@ from rue.testing.discovery import (
     TestSpecCollector,
 )
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.compilation.modifiers import (
-    BackendModifier,
-    ParameterSet,
-    ParamsIterateModifier,
-)
+from rue.testing.execution.suite.executable import ExecutableSuite
 from rue.testing.models import Locator, TestSpec
-from rue.testing.runner import Runner
-from tests.helpers import make_run_context
+from tests.helpers import make_suite_context
 
 
 @pytest.fixture(autouse=True)
@@ -40,13 +40,17 @@ def write_files(root, files):
 
 
 def materialize(path):
-    plan = TestSpecCollector((), (), None).build_spec_collection((path,))
-    return TestLoader(plan.suite_root).load_from_collection(plan)
+    suitespec = TestSpecCollector((), (), None).collect_test_specs((path,))
+    return TestLoader(suitespec.suite_root).load_tests(suitespec)
 
 
-def make_runner() -> Runner:
-    make_run_context()
-    return Runner()
+async def execute_items(items):
+    context = make_suite_context()
+    return await ExecutableSuite(
+        items=items,
+        suite_execution_id=context.suite_execution_id,
+        resolver=DependencyResolver(registry),
+    ).execute()
 
 
 def test_spec_labels_are_bounded_and_keep_full_case_id():
@@ -137,13 +141,13 @@ def test_selector_plan_discovers_rue_tests_and_static_tags(tmp_path):
         },
     )
 
-    plan = TestSpecCollector((), (), None).build_spec_collection(
+    suitespec = TestSpecCollector((), (), None).collect_test_specs(
         (tmp_path,), explicit_root=tmp_path
     )
-    specs_by_name = {spec.full_name: spec.tags for spec in plan.specs}
+    specs_by_name = {spec.full_name: spec.tags for spec in suitespec.specs}
 
-    assert plan.suite_root == tmp_path
-    assert [spec.collection_index for spec in plan.specs] == [0, 1, 2, 3]
+    assert suitespec.suite_root == tmp_path
+    assert [spec.collection_index for spec in suitespec.specs] == [0, 1, 2, 3]
     assert specs_by_name == {
         "test_sample::helper": frozenset(),
         "test_sample::test_top": frozenset({"smoke"}),
@@ -180,7 +184,7 @@ def test_selector_plan_ignores_setup_and_legacy_modules(tmp_path):
     assert [
         spec.full_name
         for spec in TestSpecCollector((), (), None)
-        .build_spec_collection((tmp_path,))
+        .collect_test_specs((tmp_path,))
         .specs
     ] == ["test_real::test_real"]
 
@@ -208,15 +212,15 @@ def test_selector_skips_unselected_modules_before_import(tmp_path):
         },
     )
 
-    plan = TestSpecCollector([], [], "good").build_spec_collection(
+    suitespec = TestSpecCollector([], [], "good").collect_test_specs(
         [str(tmp_path)]
     )
-    items = TestLoader(plan.suite_root).load_from_collection(plan)
+    items = TestLoader(suitespec.suite_root).load_tests(suitespec)
 
     assert [item.spec.locator.function_name for item in items] == ["test_good"]
 
 
-def test_load_from_collection_skips_unselected_invalid_tests_in_same_module(
+def test_load_tests_skips_unselected_invalid_tests_in_same_module(
     tmp_path,
 ):
     write_files(
@@ -236,15 +240,15 @@ def test_load_from_collection_skips_unselected_invalid_tests_in_same_module(
         },
     )
 
-    plan = TestSpecCollector([], [], "good").build_spec_collection(
+    suitespec = TestSpecCollector([], [], "good").collect_test_specs(
         [str(tmp_path)]
     )
-    items = TestLoader(plan.suite_root).load_from_collection(plan)
+    items = TestLoader(suitespec.suite_root).load_tests(suitespec)
 
     assert [item.spec.locator.function_name for item in items] == ["test_good"]
 
 
-def test_load_from_collection_enriches_runtime_metadata(tmp_path):
+def test_load_tests_enriches_runtime_metadata(tmp_path):
     write_files(
         tmp_path,
         {
@@ -273,25 +277,25 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
         },
     )
 
-    plan = TestSpecCollector((), (), None).build_spec_collection(
+    suitespec = TestSpecCollector((), (), None).collect_test_specs(
         (tmp_path / "test_metadata.py",)
     )
-    planned_specs = {spec.locator.function_name: spec for spec in plan.specs}
+    specs_by_function_name = {spec.locator.function_name: spec for spec in suitespec.specs}
 
-    assert planned_specs["test_main_skip"].params == ()
-    assert planned_specs["test_main_skip"].skip_reason is None
-    assert planned_specs["test_main_skip"].modifiers == ()
-    assert planned_specs["test_expected_failure"].xfail_reason is None
-    valid_plan = replace(
-        plan,
+    assert specs_by_function_name["test_main_skip"].params == ()
+    assert specs_by_function_name["test_main_skip"].skip_reason is None
+    assert specs_by_function_name["test_main_skip"].modifiers == ()
+    assert specs_by_function_name["test_expected_failure"].xfail_reason is None
+    valid_suitespec = replace(
+        suitespec,
         specs=tuple(
             spec
-            for spec in plan.specs
+            for spec in suitespec.specs
             if spec.locator.function_name
             in {"test_main_skip", "test_expected_failure"}
         ),
     )
-    items = TestLoader(valid_plan.suite_root).load_from_collection(valid_plan)
+    items = TestLoader(valid_suitespec.suite_root).load_tests(valid_suitespec)
     items_by_name = {item.spec.locator.function_name: item for item in items}
     backend_modifier, params_modifier = items_by_name[
         "test_main_skip"
@@ -307,7 +311,7 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
     assert items_by_name["test_expected_failure"].spec.xfail_reason == "known"
     assert items_by_name["test_expected_failure"].spec.xfail_strict is True
     with pytest.raises(TestDefinitionErrors) as raised:
-        TestLoader(plan.suite_root).load_from_collection(plan)
+        TestLoader(suitespec.suite_root).load_tests(suitespec)
     messages = {str(issue) for issue in raised.value.exceptions}
     assert any(
         "test_bad" in message
@@ -322,7 +326,7 @@ def test_load_from_collection_enriches_runtime_metadata(tmp_path):
     )
 
 
-def test_load_from_collection_raises_setup_failures(tmp_path):
+def test_load_tests_raises_setup_failures(tmp_path):
     write_files(
         tmp_path,
         {
@@ -337,17 +341,17 @@ def test_load_from_collection_raises_setup_failures(tmp_path):
         },
     )
 
-    plan = TestSpecCollector((), (), None).build_spec_collection((tmp_path,))
+    suitespec = TestSpecCollector((), (), None).collect_test_specs((tmp_path,))
 
     with pytest.raises(TestDefinitionErrors) as raised:
-        TestLoader(plan.suite_root).load_from_collection(plan)
+        TestLoader(suitespec.suite_root).load_tests(suitespec)
 
     [issue] = raised.value.exceptions
     assert issue.spec.full_name == "test_bad::test_bad"
     assert issue.message == "bad setup"
 
 
-def test_load_from_collection_raises_missing_callable(tmp_path):
+def test_load_tests_raises_missing_callable(tmp_path):
     write_files(
         tmp_path,
         {
@@ -365,30 +369,30 @@ def test_load_from_collection_raises_missing_callable(tmp_path):
         },
     )
 
-    original_plan = TestSpecCollector((), (), None).build_spec_collection(
+    original_suitespec = TestSpecCollector((), (), None).collect_test_specs(
         (tmp_path,)
     )
     bad_spec = replace(
-        original_plan.specs[1],
+        original_suitespec.specs[1],
         locator=Locator(
-            module_path=original_plan.specs[1].locator.module_path,
+            module_path=original_suitespec.specs[1].locator.module_path,
             function_name="missing_test",
         ),
     )
-    plan = replace(
-        original_plan,
-        specs=(original_plan.specs[0], bad_spec),
+    suitespec = replace(
+        original_suitespec,
+        specs=(original_suitespec.specs[0], bad_spec),
     )
 
     with pytest.raises(TestDefinitionErrors) as raised:
-        TestLoader(plan.suite_root).load_from_collection(plan)
+        TestLoader(suitespec.suite_root).load_tests(suitespec)
 
     [issue] = raised.value.exceptions
     assert issue.spec.locator.function_name == "missing_test"
     assert "missing_test" in issue.message
 
 
-def test_load_from_collection_raises_non_callable_target(tmp_path):
+def test_load_tests_raises_non_callable_target(tmp_path):
     write_files(
         tmp_path,
         {
@@ -404,20 +408,20 @@ def test_load_from_collection_raises_non_callable_target(tmp_path):
         },
     )
 
-    original_plan = TestSpecCollector((), (), None).build_spec_collection(
+    original_suitespec = TestSpecCollector((), (), None).collect_test_specs(
         (tmp_path,)
     )
     bad_spec = replace(
-        original_plan.specs[0],
+        original_suitespec.specs[0],
         locator=Locator(
-            module_path=original_plan.specs[0].locator.module_path,
+            module_path=original_suitespec.specs[0].locator.module_path,
             function_name="not_callable",
         ),
     )
-    plan = replace(original_plan, specs=(bad_spec,))
+    suitespec = replace(original_suitespec, specs=(bad_spec,))
 
     with pytest.raises(TestDefinitionErrors) as raised:
-        TestLoader(plan.suite_root).load_from_collection(plan)
+        TestLoader(suitespec.suite_root).load_tests(suitespec)
 
     [issue] = raised.value.exceptions
     assert issue.spec.locator.function_name == "not_callable"
@@ -456,14 +460,11 @@ async def test_materialize_supports_same_dir_setup_without_pyproject(
         },
     )
 
-    run = await make_runner().run(
-        items=materialize(tmp_path),
-        resolver=DependencyResolver(registry),
-    )
+    suite = await execute_items(materialize(tmp_path))
 
-    assert run.result.passed == 1
-    assert run.result.failed == 0
-    assert run.result.errors == 0
+    assert suite.result.passed == 1
+    assert suite.result.failed == 0
+    assert suite.result.errors == 0
 
 
 def test_materialize_imports_nested_setup_chain_in_order(tmp_path, monkeypatch):
@@ -522,16 +523,16 @@ def test_materialize_imports_nested_setup_chain_in_order(tmp_path, monkeypatch):
         },
     )
 
-    plan = TestSpecCollector((), (), None).build_spec_collection(
+    suitespec = TestSpecCollector((), (), None).collect_test_specs(
         (tmp_path / "nested",)
     )
-    [item] = TestLoader(plan.suite_root).load_from_collection(plan)
+    [item] = TestLoader(suitespec.suite_root).load_tests(suitespec)
 
-    assert item.suite_root == plan.suite_root
-    assert item.setup_chain == plan.setup_chains[item.spec.locator.module_path]
+    assert item.suite_root == suitespec.suite_root
+    assert item.setup_chain == suitespec.setup_chains[item.spec.locator.module_path]
 
-    make_run_context()
-    with TestContext(execution_id=uuid4()):
+    make_suite_context()
+    with TestContext(test_execution_id=uuid4()):
         item.fn()
 
 
@@ -610,10 +611,10 @@ def test_materialize_uses_single_session_for_selected_modules(
         },
     )
 
-    plan = TestSpecCollector([], [], "good").build_spec_collection(
+    suitespec = TestSpecCollector([], [], "good").collect_test_specs(
         [str(tmp_path)]
     )
-    items = TestLoader(plan.suite_root).load_from_collection(plan)
+    items = TestLoader(suitespec.suite_root).load_tests(suitespec)
 
     assert [item.spec.locator.function_name for item in items] == [
         "test_good",
@@ -662,14 +663,11 @@ async def test_materialize_promotes_pytest_fixtures(
 
     write_files(tmp_path, files)
 
-    run = await make_runner().run(
-        items=materialize(tmp_path),
-        resolver=DependencyResolver(registry),
-    )
+    suite = await execute_items(materialize(tmp_path))
 
-    assert run.result.passed == 1
-    assert run.result.failed == 0
-    assert run.result.errors == 0
+    assert suite.result.passed == 1
+    assert suite.result.failed == 0
+    assert suite.result.errors == 0
 
 
 def test_materialize_uses_deterministic_module_names(tmp_path):
@@ -715,9 +713,11 @@ def test_materialize_rewrites_pytest_fixture_aliases_to_resources(tmp_path):
     [item] = materialize(tmp_path)
 
     assert item.spec.locator.function_name == "test_uses_fixture"
-    execution_id = uuid4()
-    graphs = registry.compile_graphs({execution_id: (item.spec, ("greeting",))})
-    graph = graphs[execution_id]
+    test_execution_id = uuid4()
+    graphs = registry.compile_graphs(
+        {test_execution_id: (item.spec, ("greeting",))}
+    )
+    graph = graphs[test_execution_id]
     greeting = registry.get_definition(
         graph.injections["greeting"]
     )

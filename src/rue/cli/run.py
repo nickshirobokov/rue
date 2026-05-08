@@ -23,34 +23,34 @@ from rue.cli.rendering.errors import print_cli_error, print_definition_errors
 from rue.cli.rendering.experiments import experiment_renderer
 from rue.cli.rendering.terminal import (
     TerminalExperimentReporter,
-    TerminalRunReporter,
+    TerminalSuiteReporter,
 )
 from rue.config import load_config
-from rue.context.runtime import RunContext
+from rue.context.runtime import SuiteContext
 from rue.events import SessionEventsReceiver
-from rue.events.processor import RunEventsProcessor
-from rue.events.receiver import RunEventsReceiver
-from rue.experiments.runner import ExperimentRunner
+from rue.events.processor import SuiteEventsProcessor
+from rue.events.receiver import SuiteEventsReceiver
+from rue.experiments.executable import ExecutableExperiment
 from rue.resources import (
     DependencyResolver,
     registry as default_resource_registry,
 )
-from rue.storage import TursoRunRecorder, TursoRunStore
+from rue.storage import TursoSuiteRecorder, TursoSuiteStore
 from rue.telemetry.otel import OtelReporter
 from rue.testing.discovery import TestDefinitionErrors, TestLoader
-from rue.testing.runner import Runner
+from rue.testing.execution.suite.executable import ExecutableSuite
 
 
-def _resolve_processors(names: list[str]) -> list[RunEventsProcessor]:
+def _resolve_processors(names: list[str]) -> list[SuiteEventsProcessor]:
     """Resolve configured custom processor names into registered instances."""
     resolved = []
     for name in names:
-        if name not in RunEventsProcessor.REGISTRY:
-            available = ", ".join(sorted(RunEventsProcessor.REGISTRY))
+        if name not in SuiteEventsProcessor.REGISTRY:
+            available = ", ".join(sorted(SuiteEventsProcessor.REGISTRY))
             raise ValueError(
                 f"Unknown processor: {name}. Available: {available}"
             )
-        resolved.append(RunEventsProcessor.REGISTRY[name])
+        resolved.append(SuiteEventsProcessor.REGISTRY[name])
     return resolved
 
 
@@ -82,7 +82,7 @@ def run(
     ] = None,
     timeout: Annotated[
         float | None,
-        Option("--timeout", help="Global test run timeout in seconds"),
+        Option("--timeout", help="Global suite execution timeout in seconds"),
     ] = None,
     otel: Annotated[
         bool | None,
@@ -93,16 +93,19 @@ def run(
         Option("-q", "--quiet", count=True, help="Reduce CLI output"),
     ] = 0,
     verbose: VerboseOpt = 0,
-    run_id: Annotated[
+    suite_execution_id: Annotated[
         UUID | None,
-        Option("--run-id", help="UUID to assign to this test run"),
+        Option(
+            "--suite-execution-id",
+            help="UUID to assign to this suite execution",
+        ),
     ] = None,
     processor: Annotated[
         list[str] | None,
         Option(
             "--processor",
             help=(
-                "Run events processor to use "
+                "Suite events processor to use "
                 "(can be specified multiple times)"
             ),
         ),
@@ -116,11 +119,11 @@ def run(
         ),
     ] = False,
 ) -> None:
-    """Prepare config, collection, events, and execution."""
+    """Prepare config, suite specs, events, and execution."""
     if experiment:
-        match (run_id, maxfail):
+        match (suite_execution_id, maxfail):
             case (UUID(), _):
-                print_cli_error("--run-id cannot be used with -exp")
+                print_cli_error("--suite-execution-id cannot be used with -exp")
                 raise SystemExit(2)
             case (_, int()):
                 print_cli_error("--maxfail cannot be used with -exp")
@@ -128,7 +131,7 @@ def run(
             case _:
                 pass
 
-    runner_config, collector, resolved_paths = resolve_selection(
+    suite_config, collector, resolved_paths = resolve_selection(
         config=load_config(),
         paths=paths,
         keyword=keyword,
@@ -144,31 +147,31 @@ def run(
         processors=processor if not experiment else [],
     )
 
-    collection = collector.build_spec_collection(resolved_paths)
+    suitespec = collector.collect_test_specs(resolved_paths)
     try:
-        load_collection = deepcopy(collection) if experiment else collection
-        items = TestLoader(load_collection.suite_root).load_from_collection(
-            load_collection
+        load_suitespec = deepcopy(suitespec) if experiment else suitespec
+        items = TestLoader(load_suitespec.suite_root).load_tests(
+            load_suitespec
         )
     except TestDefinitionErrors as errors:
         print_definition_errors(errors)
         raise SystemExit(2) from errors
 
     if experiment:
-        experiment_runner = ExperimentRunner(config=runner_config)
-        experiments = experiment_runner.collect(collection)
+        executable_experiment = ExecutableExperiment(config=suite_config)
+        experiments = executable_experiment.collect(suitespec)
 
-        session_processors: list[RunEventsProcessor] = [
+        session_processors: list[SuiteEventsProcessor] = [
             TerminalExperimentReporter(),
             *_resolve_processors(processor or []),
         ]
 
         session = SessionEventsReceiver(session_processors)
-        session.configure(runner_config)
+        session.configure(suite_config)
         with closing(session):
             results = asyncio.run(
-                experiment_runner.run(
-                    collection,
+                executable_experiment.execute(
+                    suitespec,
                     experiments,
                     session=session,
                 )
@@ -176,40 +179,49 @@ def run(
         console = Console()
         for renderable in experiment_renderer.render(
             results,
-            runner_config.verbosity,
+            suite_config.verbosity,
         ):
             console.print(renderable)
         raise SystemExit(0)
 
-    store = TursoRunStore(runner_config.database_path)
+    store = TursoSuiteStore(suite_config.database_path)
     store.initialize()
 
-    if run_id is not None and store.run_exists(run_id):
-        print_cli_error(f"run_id '{run_id}' already exists")
+    if (
+        suite_execution_id is not None
+        and store.suite_execution_exists(suite_execution_id)
+    ):
+        print_cli_error(
+            f"suite_execution_id '{suite_execution_id}' already exists"
+        )
         raise SystemExit(2)
 
-    processors: list[RunEventsProcessor] = [TerminalRunReporter()]
-    if runner_config.otel:
+    processors: list[SuiteEventsProcessor] = [TerminalSuiteReporter()]
+    if suite_config.otel:
         processors.append(OtelReporter())
-    processors.extend(_resolve_processors(runner_config.processors))
+    processors.extend(_resolve_processors(suite_config.processors))
 
-    run_context = (
-        RunContext(config=runner_config)
-        if run_id is None
-        else RunContext(config=runner_config, run_id=run_id)
+    suite_context = (
+        SuiteContext(config=suite_config)
+        if suite_execution_id is None
+        else SuiteContext(
+            config=suite_config,
+            suite_execution_id=suite_execution_id,
+        )
     )
-    events_receiver = RunEventsReceiver([*processors, TursoRunRecorder()])
-    with run_context, events_receiver:
-        run_result = asyncio.run(
-            Runner().run(
-                items,
+    events_receiver = SuiteEventsReceiver([*processors, TursoSuiteRecorder()])
+    with suite_context, events_receiver:
+        suite = asyncio.run(
+            ExecutableSuite(
+                items=items,
+                suite_execution_id=suite_context.suite_execution_id,
                 resolver=DependencyResolver(default_resource_registry),
-            )
+            ).execute()
         )
     raise SystemExit(
         0
-        if run_result.result.failed == 0
-        and run_result.result.errors == 0
+        if suite.result.failed == 0
+        and suite.result.errors == 0
         else 1
     )
 

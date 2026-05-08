@@ -1,6 +1,5 @@
-"""Test execution."""
+"""Concrete executable test graph nodes."""
 
-from rue.testing.execution.backend import ExecutionBackend
 from rue.testing.execution.test.adaptive import AdaptiveTest
 from rue.testing.execution.test.base import ExecutableTest
 from rue.testing.execution.test.composite import CompositeTest
@@ -11,6 +10,5 @@ __all__ = [
     "AdaptiveTest",
     "CompositeTest",
     "ExecutableTest",
-    "ExecutionBackend",
     "SingleTest",
 ]

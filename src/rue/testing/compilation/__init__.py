@@ -1,4 +1,4 @@
-"""Compile modifiers into graphs, queue runs, and execute tests."""
+"""Compile modifiers into graphs, queue suites, and execute tests."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from rue.testing.compilation.modifiers import (
     ParameterSet,
     ParamsIterateModifier,
 )
-from rue.testing.compilation.queue import SessionQueue
+from rue.testing.compilation.queue import SuiteQueue
 
 
 __all__ = [
@@ -24,5 +24,5 @@ __all__ = [
     "Modifier",
     "ParameterSet",
     "ParamsIterateModifier",
-    "SessionQueue",
+    "SuiteQueue",
 ]

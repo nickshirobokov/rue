@@ -178,11 +178,11 @@ class SUT(Generic[InstanceT]):
     def clear_output(self) -> None:
         self._output_capture.clear()
 
-    def reset_output_state(self, execution_id: UUID | None) -> None:
-        self._output_capture.reset(execution_id)
+    def reset_output_state(self, test_execution_id: UUID | None) -> None:
+        self._output_capture.reset(test_execution_id)
 
-    def reset_trace_state(self, execution_id: UUID | None) -> None:
-        self._tracer.reset(execution_id)
+    def reset_trace_state(self, test_execution_id: UUID | None) -> None:
+        self._tracer.reset(test_execution_id)
 
     def activate_trace(self, session: OtelTraceSession) -> None:
         self._tracer.activate(session)

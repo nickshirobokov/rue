@@ -51,7 +51,7 @@ class Case(BaseModel, Generic[InputsT, RefsT]):
 
 
 class CaseFactory(ABC):
-    """Stateful engine that emits generated cases during execution."""
+    """Stateful engine that emits generated cases during test execution."""
 
     max_attempts: int
     display_name: str
@@ -95,13 +95,13 @@ class CaseGroup(BaseModel, Generic[InputsT, RefsT, GroupRefsT]):
 
     Use with ``@rue.test.iterate.groups(...)`` to iterate a test function
     over multiple groups; each group is executed as a nested case-iterated
-    run.
+    test execution.
 
     Attributes
     ----------
     name : str
         Human-readable label that identifies the group in reports and
-        execution trees.
+        test execution trees.
     cases : list[Case[InputsT, RefsT]]
         Ordered list of cases belonging to this group. Must contain at
         least one case.

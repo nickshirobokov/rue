@@ -5,11 +5,12 @@ from textwrap import dedent
 import pytest
 
 from rue.resources import DependencyResolver, registry
-from rue.storage import TursoRunRecorder, TursoRunStore
+from rue.storage import TursoSuiteRecorder, TursoSuiteStore
 from rue.testing.discovery import TestLoader, TestSpecCollector
-from rue.testing.models import CaseFactory, TestStatus
-from rue.testing.runner import Runner
-from tests.helpers import make_run_context, materialize_tests
+from rue.testing.execution.models import TestStatus
+from rue.testing.execution.suite.executable import ExecutableSuite
+from rue.testing.models import CaseFactory
+from tests.helpers import make_suite_context, materialize_tests
 
 
 @pytest.fixture(autouse=True)
@@ -19,22 +20,22 @@ def clean_registry():
     registry.reset()
 
 
-def _failed_executions(run):
+def _failed_executions(suite):
     failures = []
-    pending = list(run.result.executions)
+    pending = list(suite.result.test_executions)
     while pending:
         execution = pending.pop()
-        if execution.status is not TestStatus.PASSED:
+        if execution.result.status is not TestStatus.PASSED:
             failures.append(
                 (
                     execution.definition.spec.full_name,
-                    execution.status.value,
+                    execution.result.status.value,
                     str(execution.result.error)
                     if execution.result.error
                     else None,
                 )
             )
-        pending.extend(execution.sub_executions)
+        pending.extend(execution.sub_test_executions)
     return failures
 
 
@@ -48,24 +49,25 @@ def test_case_factory_rejects_invalid_max_attempts():
         _InvalidFactory(max_attempts=0)
 
 
-async def _run_module(
+async def _suite_module(
     module_path: Path,
     *,
     concurrency: int = 4,
     otel: bool = False,
 ):
-    make_run_context(
+    context = make_suite_context(
         otel=otel,
         concurrency=concurrency,
     )
-    return await Runner().run(
+    return await ExecutableSuite(
         items=materialize_tests(module_path),
+        suite_execution_id=context.suite_execution_id,
         resolver=DependencyResolver(registry),
-    )
+    ).execute()
 
 
 @pytest.mark.asyncio
-async def test_runner_resolves_mixed_scope_di_graph_hooks_and_teardown(
+async def test_executable_suite_resolves_mixed_scope_di_graph_hooks_and_teardown(
     tmp_path: Path,
 ):
     module_path = tmp_path / "test_mixed_resource_graph.py"
@@ -77,23 +79,23 @@ async def test_runner_resolves_mixed_scope_di_graph_hooks_and_teardown(
             from rue.resources.models import Scope
 
 
-            @rue.resource(scope=Scope.RUN)
+            @rue.resource(scope=Scope.SUITE)
             def events():
-                return ["run"]
+                return ["suite"]
 
 
-            @rue.resource(scope=Scope.RUN)
-            def run_state(events):
-                events.append("run_state:setup")
+            @rue.resource(scope=Scope.SUITE)
+            def suite_state(events):
+                events.append("suite_state:setup")
                 return {"cases": []}
 
 
             @rue.resource(scope=Scope.MODULE)
-            def module_state(run_state, events):
+            def module_state(suite_state, events):
                 events.append("module_state:setup")
-                yield {"run": run_state}
+                yield {"suite": suite_state}
                 events.append(
-                    f"module_state:teardown:{len(run_state['cases'])}"
+                    f"module_state:teardown:{len(suite_state['cases'])}"
                 )
 
 
@@ -115,14 +117,14 @@ async def test_runner_resolves_mixed_scope_di_graph_hooks_and_teardown(
             @rue.test
             def test_mutates_shared_scope(label, case_state):
                 case_state["local"][0] = label
-                case_state["module"]["run"]["cases"].append(label)
+                case_state["module"]["suite"]["cases"].append(label)
 
 
             @rue.test.backend(ExecutionBackend.MAIN)
             @rue.test
-            def test_after(run_state, events):
-                assert sorted(run_state["cases"]) == ["left", "right"]
-                assert events.count("run_state:setup") == 1
+            def test_after(suite_state, events):
+                assert sorted(suite_state["cases"]) == ["left", "right"]
+                assert events.count("suite_state:setup") == 1
                 assert events.count("module_state:setup") == 1
                 assert events.count("audit:setup") == 3
                 assert events.count("case_state:setup") == 3
@@ -132,10 +134,10 @@ async def test_runner_resolves_mixed_scope_di_graph_hooks_and_teardown(
         )
     )
 
-    run = await _run_module(module_path, concurrency=3)
+    suite = await _suite_module(module_path, concurrency=3)
 
-    assert run.result.passed == 2, _failed_executions(run)
-    assert [len(e.sub_executions) for e in run.result.executions] == [2, 0]
+    assert suite.result.passed == 2, _failed_executions(suite)
+    assert [len(e.sub_test_executions) for e in suite.result.test_executions] == [2, 0]
 
 
 @pytest.mark.asyncio
@@ -189,21 +191,22 @@ async def test_module_scope_teardown_waits_for_top_level_composite(
     )
     builtins.rue_module_lifecycle_events = []
     try:
-        collection = TestSpecCollector((), (), None).build_spec_collection(
+        suitespec = TestSpecCollector((), (), None).collect_test_specs(
             (module_a_path, module_b_path)
         )
-        items = TestLoader(collection.suite_root).load_from_collection(
-            collection
+        items = TestLoader(suitespec.suite_root).load_tests(
+            suitespec
         )
-        make_run_context(otel=False, concurrency=2)
-        run = await Runner().run(
+        context = make_suite_context(otel=False, concurrency=2)
+        suite = await ExecutableSuite(
             items=items,
+            suite_execution_id=context.suite_execution_id,
             resolver=DependencyResolver(registry),
-        )
+        ).execute()
     finally:
         del builtins.rue_module_lifecycle_events
 
-    assert run.result.passed == 2, _failed_executions(run)
+    assert suite.result.passed == 2, _failed_executions(suite)
 
 
 @pytest.mark.asyncio
@@ -259,13 +262,13 @@ async def test_nested_iteration_rolls_up_cases_groups_and_params(
         )
     )
 
-    run = await _run_module(module_path, concurrency=3)
+    suite = await _suite_module(module_path, concurrency=3)
 
-    assert run.result.passed == 2, _failed_executions(run)
-    assert [len(e.sub_executions) for e in run.result.executions] == [2, 2]
+    assert suite.result.passed == 2, _failed_executions(suite)
+    assert [len(e.sub_test_executions) for e in suite.result.test_executions] == [2, 2]
     assert [
-        [child.status for child in execution.sub_executions]
-        for execution in run.result.executions
+        [child.result.status for child in execution.sub_test_executions]
+        for execution in suite.result.test_executions
     ] == [
         [TestStatus.PASSED, TestStatus.PASSED],
         [TestStatus.PASSED, TestStatus.PASSED],
@@ -308,7 +311,7 @@ async def test_case_factory_mixes_with_static_cases_and_stops_after_failure(
                     builtins.factory_observations.append(
                         (
                             case.inputs["value"],
-                            execution.status.value,
+                            execution.result.status.value,
                             execution.definition.spec.case_id == case.id,
                         )
                     )
@@ -330,35 +333,38 @@ async def test_case_factory_mixes_with_static_cases_and_stops_after_failure(
     builtins.factory_observations = []
     builtins.seen_case_values = []
     try:
-        run = await _run_module(module_path, concurrency=3)
+        suite = await _suite_module(module_path, concurrency=3)
     finally:
         observations = builtins.factory_observations
         seen_values = builtins.seen_case_values
         del builtins.factory_observations
         del builtins.seen_case_values
 
-    assert run.result.passed == 1, _failed_executions(run)
-    [execution] = run.result.executions
-    assert [child.status for child in execution.sub_executions] == [
+    assert suite.result.passed == 1, _failed_executions(suite)
+    [execution] = suite.result.test_executions
+    assert [child.result.status for child in execution.sub_test_executions] == [
         TestStatus.PASSED,
         TestStatus.PASSED,
         TestStatus.FAILED,
     ]
 
-    factory_execution = execution.sub_executions[2]
+    factory_execution = execution.sub_test_executions[2]
     assert factory_execution.definition.spec.suffix == "generated"
     assert [
         child.definition.spec.suffix
-        for child in factory_execution.sub_executions
+        for child in factory_execution.sub_test_executions
     ] == ["attempt 1", "attempt 2", "attempt 3"]
-    assert [child.status for child in factory_execution.sub_executions] == [
+    assert [
+        child.result.status
+        for child in factory_execution.sub_test_executions
+    ] == [
         TestStatus.PASSED,
         TestStatus.FAILED,
         TestStatus.NOT_RUN,
     ]
     assert [
         child.definition.spec.case_id is not None
-        for child in factory_execution.sub_executions
+        for child in factory_execution.sub_test_executions
     ] == [True, True, False]
     assert observations == [
         (10, "passed", True),
@@ -396,7 +402,7 @@ async def test_case_factory_marks_remaining_attempts_not_run_when_exhausted(
 
                 async def observe(self, case, execution):
                     builtins.exhaustion_observations.append(
-                        (case.inputs["value"], execution.status.value)
+                        (case.inputs["value"], execution.result.status.value)
                     )
 
 
@@ -411,45 +417,49 @@ async def test_case_factory_marks_remaining_attempts_not_run_when_exhausted(
 
     builtins.exhaustion_observations = []
     database_path = tmp_path / "rue.turso.db"
-    recorder = TursoRunRecorder()
+    recorder = TursoSuiteRecorder()
     try:
-        make_run_context(
+        context = make_suite_context(
             otel=False,
             concurrency=3,
             database_path=database_path,
             processors=(recorder,),
         )
-        run = await Runner().run(
+        suite = await ExecutableSuite(
             items=materialize_tests(module_path),
+            suite_execution_id=context.suite_execution_id,
             resolver=DependencyResolver(registry),
-        )
+        ).execute()
     finally:
         observations = builtins.exhaustion_observations
         del builtins.exhaustion_observations
         recorder.close()
 
-    assert run.result.passed == 1, _failed_executions(run)
-    [execution] = run.result.executions
-    [factory_execution] = execution.sub_executions
-    assert factory_execution.status is TestStatus.PASSED
-    assert [child.status for child in factory_execution.sub_executions] == [
+    assert suite.result.passed == 1, _failed_executions(suite)
+    [execution] = suite.result.test_executions
+    [factory_execution] = execution.sub_test_executions
+    assert factory_execution.result.status is TestStatus.PASSED
+    assert [
+        child.result.status
+        for child in factory_execution.sub_test_executions
+    ] == [
         TestStatus.PASSED,
         TestStatus.NOT_RUN,
         TestStatus.NOT_RUN,
     ]
     assert observations == [(7, "passed")]
 
-    with TursoRunStore(database_path).connection() as conn:
+    with TursoSuiteStore(database_path).connection() as conn:
         factory_row = conn.execute(
             """
-            SELECT execution_id FROM executions
+            SELECT test_execution_id FROM test_executions
             WHERE suffix = 'one generated case'
             """
         ).fetchone()
         attempt_rows = conn.execute(
             """
             SELECT suffix, status, parent_id
-            FROM executions
+            FROM test_executions
             WHERE suffix LIKE 'attempt%'
             ORDER BY suffix
             """
@@ -459,9 +469,9 @@ async def test_case_factory_marks_remaining_attempts_not_run_when_exhausted(
         (row["suffix"], row["status"], row["parent_id"])
         for row in attempt_rows
     ] == [
-        ("attempt 1", "passed", factory_row["execution_id"]),
-        ("attempt 2", "not_run", factory_row["execution_id"]),
-        ("attempt 3", "not_run", factory_row["execution_id"]),
+        ("attempt 1", "passed", factory_row["test_execution_id"]),
+        ("attempt 2", "not_run", factory_row["test_execution_id"]),
+        ("attempt 3", "not_run", factory_row["test_execution_id"]),
     ]
 
 
@@ -497,20 +507,23 @@ async def test_case_factory_runs_generated_case_with_subprocess_backend(
         )
     )
 
-    run = await _run_module(module_path, concurrency=2)
+    suite = await _suite_module(module_path, concurrency=2)
 
-    assert run.result.passed == 1, _failed_executions(run)
-    [execution] = run.result.executions
-    [factory_execution] = execution.sub_executions
+    assert suite.result.passed == 1, _failed_executions(suite)
+    [execution] = suite.result.test_executions
+    [factory_execution] = execution.sub_test_executions
     assert factory_execution.definition.spec.suffix == "subprocess generated"
-    assert [child.status for child in factory_execution.sub_executions] == [
+    assert [
+        child.result.status
+        for child in factory_execution.sub_test_executions
+    ] == [
         TestStatus.PASSED,
     ]
-    assert factory_execution.sub_executions[0].definition.spec.case_id
+    assert factory_execution.sub_test_executions[0].definition.spec.case_id
 
 
 @pytest.mark.asyncio
-async def test_metrics_sut_tracing_and_predicates_share_one_run_context(
+async def test_metrics_sut_tracing_and_predicates_share_one_suite_context(
     tmp_path: Path,
 ):
     module_path = tmp_path / "test_traced_metrics.py"
@@ -562,14 +575,14 @@ async def test_metrics_sut_tracing_and_predicates_share_one_run_context(
         )
     )
 
-    run = await _run_module(module_path, concurrency=1, otel=True)
+    suite = await _suite_module(module_path, concurrency=1, otel=True)
 
-    assert run.result.passed == 1, _failed_executions(run)
-    [metric_result] = run.result.metric_results
+    assert suite.result.passed == 1, _failed_executions(suite)
+    [metric_result] = suite.result.metric_results
     assert metric_result.metadata.identity.name == "quality"
     assert metric_result.value == 1
     assert len(metric_result.assertion_results) == 1
-    [execution] = run.result.executions
+    [execution] = suite.result.test_executions
     assert sum(
         1
         for assertion in execution.result.assertion_results

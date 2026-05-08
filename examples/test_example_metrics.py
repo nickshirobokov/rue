@@ -104,7 +104,7 @@ def geography_bot(query: str) -> str:
     raise ValueError(f"Unknown query: {query}")
 
 
-@rue.resource.metric(scope="run")
+@rue.resource.metric(scope="suite")
 def average_hallucinations_per_case():
     metric = Metric()
     yield metric

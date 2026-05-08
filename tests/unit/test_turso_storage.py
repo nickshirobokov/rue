@@ -1,4 +1,4 @@
-"""Tests for Turso run storage."""
+"""Tests for Turso suite storage."""
 
 import asyncio
 import json
@@ -11,23 +11,19 @@ import turso
 
 from rue.assertions.models import AssertionRepr, AssertionResult
 from rue.config import Config
+from rue.context.models import SuiteEnvironment
 from rue.models import Locator
 from rue.predicates.models import PredicateResult
 from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.models import MetricMetadata, MetricResult
-from rue.storage import TursoRunRecorder, TursoRunStore
-from rue.testing.execution.models import TestResult, TestStatus
-from rue.testing.models import (
-    ExecutedRun,
-    ExecutedTest,
-    RunEnvironment,
-    RunResult,
-)
-from tests.helpers import make_definition, make_run_context
+from rue.storage import TursoSuiteRecorder, TursoSuiteStore
+from rue.testing.execution.models import ExecutedTest, TestResult, TestStatus
+from rue.testing.execution.suite.models import ExecutedSuite, SuiteResult
+from tests.helpers import make_definition, make_suite_context
 
 
-def make_environment() -> RunEnvironment:
-    return RunEnvironment(
+def make_environment() -> SuiteEnvironment:
+    return SuiteEnvironment(
         python_version="3.12.0",
         platform="darwin",
         hostname="host",
@@ -40,36 +36,36 @@ def make_environment() -> RunEnvironment:
 
 
 def test_store_initializes_strict_turso_schema(
-    turso_store: TursoRunStore,
+    turso_store: TursoSuiteStore,
 ) -> None:
     with turso_store.connection() as conn:
         columns = {
             row["name"]: row["type"]
-            for row in conn.execute("PRAGMA table_info(runs)").fetchall()
+            for row in conn.execute("PRAGMA table_info(suite_executions)").fetchall()
         }
         table = next(
             row
             for row in conn.execute("PRAGMA table_list").fetchall()
-            if row["name"] == "runs"
+            if row["name"] == "suite_executions"
         )
 
     assert table["strict"] == 1
-    assert columns["run_id"] == "uuid"
+    assert columns["suite_execution_id"] == "uuid"
     assert columns["start_time"] == "timestamp"
     assert columns["stopped_early"] == "boolean"
     assert columns["python_version"] == "varchar"
 
 
 def test_store_rejects_invalid_native_timestamp(
-    turso_store: TursoRunStore,
+    turso_store: TursoSuiteStore,
 ) -> None:
     with turso_store.connection() as conn:
         with pytest.raises(turso.DatabaseError, match="invalid timestamp"):
             conn.execute(
                 """
-                INSERT INTO runs (
-                    run_id, start_time, python_version, platform, hostname,
-                    working_directory, rue_version
+                INSERT INTO suite_executions (
+                    suite_execution_id, start_time, python_version,
+                    platform, hostname, working_directory, rue_version
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -84,12 +80,12 @@ def test_store_rejects_invalid_native_timestamp(
             )
 
 
-def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
-    make_run_context(bind_events=False, fail_fast=False)
-    recorder = TursoRunRecorder()
+def test_recorder_persists_normalized_suite_data(database_path: Path) -> None:
+    make_suite_context(bind_events=False, fail_fast=False)
+    recorder = TursoSuiteRecorder()
     recorder.configure(Config(database_path=database_path))
-    run_id = uuid4()
-    execution_id = uuid4()
+    suite_execution_id = uuid4()
+    test_execution_id = uuid4()
     case_id = uuid4()
     start_time = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     end_time = start_time + timedelta(minutes=5)
@@ -133,7 +129,7 @@ def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
             error=execution_error,
             assertion_results=[assertion],
         ),
-        execution_id=execution_id,
+        test_execution_id=test_execution_id,
     )
     metric = MetricResult(
         metadata=MetricMetadata(
@@ -153,41 +149,41 @@ def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
                         module_path=Path(__file__),
                         function_name="model",
                     ),
-                    scope=Scope.RUN,
+                    scope=Scope.SUITE,
                 )
             ],
         ),
         assertion_results=[assertion],
         value=12.5,
     )
-    run = ExecutedRun(
-        run_id=run_id,
+    suite = ExecutedSuite(
+        suite_execution_id=suite_execution_id,
         start_time=start_time,
         end_time=end_time,
         environment=make_environment(),
-        result=RunResult(
-            executions=[execution],
+        result=SuiteResult(
+            test_executions=[execution],
             metric_results=[metric],
             total_duration_ms=15.0,
         ),
     )
 
-    asyncio.run(recorder.on_run_start(run))
-    asyncio.run(recorder.on_execution_complete(execution, run))
-    asyncio.run(recorder.on_run_complete(run))
+    asyncio.run(recorder.on_suite_execution_start(suite))
+    asyncio.run(recorder.on_test_execution_complete(execution, suite))
+    asyncio.run(recorder.on_suite_execution_complete(suite))
     recorder.close()
 
-    store = TursoRunStore(database_path)
+    store = TursoSuiteStore(database_path)
     with store.connection() as conn:
-        run_row = conn.execute("SELECT * FROM runs").fetchone()
-        execution_row = conn.execute("SELECT * FROM executions").fetchone()
+        suite_row = conn.execute("SELECT * FROM suite_executions").fetchone()
+        execution_row = conn.execute("SELECT * FROM test_executions").fetchone()
         tags = conn.execute(
-            "SELECT tag FROM execution_tags ORDER BY tag"
+            "SELECT tag FROM test_execution_tags ORDER BY tag"
         ).fetchall()
         metric_row = conn.execute("SELECT * FROM metrics").fetchone()
         execution_assertion_row = conn.execute(
-            "SELECT * FROM assertions WHERE execution_id = ?",
-            (str(execution_id),),
+            "SELECT * FROM assertions WHERE test_execution_id = ?",
+            (str(test_execution_id),),
         ).fetchone()
         metric_assertion_row = conn.execute(
             "SELECT * FROM assertions WHERE metric_id = ?",
@@ -203,9 +199,9 @@ def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
             "SELECT * FROM metric_dependencies"
         ).fetchone()
 
-    assert run_row["run_id"] == str(run_id)
-    assert run_row["failed"] == 1
-    assert execution_row["execution_id"] == str(execution_id)
+    assert suite_row["suite_execution_id"] == str(suite_execution_id)
+    assert suite_row["failed"] == 1
+    assert execution_row["test_execution_id"] == str(test_execution_id)
     assert execution_row["case_id"] == str(case_id)
     traceback_payload = json.loads(execution_row["error_traceback"])
     assert traceback_payload["exc_type"] == "AssertionError"
@@ -221,7 +217,7 @@ def test_recorder_persists_normalized_run_data(database_path: Path) -> None:
 
 
 def test_turso_mvcc_accepts_concurrent_non_overlapping_writes(
-    turso_store: TursoRunStore,
+    turso_store: TursoSuiteStore,
 ) -> None:
     row = (
         "2024-01-01T00:00:00+00:00",
@@ -237,8 +233,8 @@ def test_turso_mvcc_accepts_concurrent_non_overlapping_writes(
     conn_two.execute("BEGIN CONCURRENT")
     conn_one.execute(
         """
-        INSERT INTO runs (
-            run_id, start_time, python_version, platform, hostname,
+        INSERT INTO suite_executions (
+            suite_execution_id, start_time, python_version, platform, hostname,
             working_directory, rue_version
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
@@ -246,8 +242,8 @@ def test_turso_mvcc_accepts_concurrent_non_overlapping_writes(
     )
     conn_two.execute(
         """
-        INSERT INTO runs (
-            run_id, start_time, python_version, platform, hostname,
+        INSERT INTO suite_executions (
+            suite_execution_id, start_time, python_version, platform, hostname,
             working_directory, rue_version
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
@@ -258,4 +254,4 @@ def test_turso_mvcc_accepts_concurrent_non_overlapping_writes(
     conn_one.close()
     conn_two.close()
 
-    assert turso_store.run_count() == 2
+    assert turso_store.suite_execution_count() == 2

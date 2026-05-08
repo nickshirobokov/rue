@@ -12,7 +12,7 @@ from uuid import UUID
 
 from rue.context.process_pool import LazyProcessPool
 from rue.context.runtime import (
-    CURRENT_RUN_CONTEXT,
+    CURRENT_SUITE_CONTEXT,
     CURRENT_TEST,
     CURRENT_TEST_TRACER,
     TestContext,
@@ -21,17 +21,17 @@ from rue.context.runtime import (
 from rue.context.scopes import Scope
 from rue.resources import DependencyResolver
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.execution.executable.base import ExecutableTest
 from rue.testing.execution.models import (
     ExecutedTest,
-    ExecutorPayload,
     LoadedTestDef,
-    RemoteExecutionResult,
+    RemoteTestExecutionPayload,
+    RemoteTestExecutionResult,
     TestResult,
     TestStatus,
 )
+from rue.testing.execution.test.base import ExecutableTest
 from rue.testing.execution.worker import (
-    run_remote_test,
+    execute_remote_test,
 )
 from rue.testing.tracing import TestTracer
 
@@ -46,7 +46,7 @@ class SingleTest(ExecutableTest):
 
     definition: LoadedTestDef
     params: dict[str, Any]
-    execution_id: UUID
+    test_execution_id: UUID
     backend: ExecutionBackend = ExecutionBackend.ASYNCIO
     sync_actor_id: int = 1
     children: list[ExecutableTest] = field(
@@ -60,10 +60,10 @@ class SingleTest(ExecutableTest):
         """Initialize derived execution collaborators."""
         if self.definition.spec.modifiers:
             raise ValueError("SingleTest should not have modifiers")
-        context = CURRENT_RUN_CONTEXT.get()
+        context = CURRENT_SUITE_CONTEXT.get()
         self.tracer = TestTracer.build(
             config=context.config,
-            run_id=context.run_id,
+            suite_execution_id=context.suite_execution_id,
         )
 
     def __getstate__(self) -> dict[str, Any]:
@@ -71,14 +71,16 @@ class SingleTest(ExecutableTest):
         state = self.__dict__.copy()
         state["semaphore"] = None
         state["is_stopped"] = _never_stopped
-        state["tracer"] = TestTracer(run_id=self.tracer.run_id)
+        state["tracer"] = TestTracer(
+            suite_execution_id=self.tracer.suite_execution_id
+        )
         return state
 
     async def _execute(
         self,
         resolver: DependencyResolver,
     ) -> ExecutedTest:
-        with TestContext(execution_id=self.execution_id):
+        with TestContext(test_execution_id=self.test_execution_id):
             match self:
                 case SingleTest(is_stopped=is_stopped) if is_stopped():
                     return ExecutedTest(
@@ -86,9 +88,9 @@ class SingleTest(ExecutableTest):
                         result=TestResult(
                             status=TestStatus.SKIPPED,
                             duration_ms=0,
-                            error=Exception("Run stopped early"),
+                            error=Exception("Suite stopped early"),
                         ),
-                        execution_id=self.execution_id,
+                        test_execution_id=self.test_execution_id,
                     )
                 case SingleTest(definition=LoadedTestDef(spec=spec)) if (
                     spec.skip_reason
@@ -100,7 +102,7 @@ class SingleTest(ExecutableTest):
                             duration_ms=0,
                             error=Exception(spec.skip_reason),
                         ),
-                        execution_id=self.execution_id,
+                        test_execution_id=self.test_execution_id,
                     )
                 case SingleTest(backend=ExecutionBackend.SUBPROCESS):
                     return await self._execute_subprocess(resolver)
@@ -111,23 +113,26 @@ class SingleTest(ExecutableTest):
         self,
         resolver: DependencyResolver,
     ) -> ExecutedTest:
-        execution_id = CURRENT_TEST.get().execution_id
+        test_execution_id = CURRENT_TEST.get().test_execution_id
         semaphore = (
             self.semaphore if self.semaphore else contextlib.nullcontext()
         )
 
         with bind(CURRENT_TEST_TRACER, self.tracer):
-            self.tracer.start(self.definition, execution_id=execution_id)
+            self.tracer.start(
+                self.definition,
+                test_execution_id=test_execution_id,
+            )
             async with semaphore:
                 (
                     duration_ms,
                     imperative_outcome,
                     error,
                     assertion_results,
-                ) = await self.definition.run_loaded_test(
+                ) = await self.definition.execute_loaded_test(
                     params=self.params,
                     resolver=resolver,
-                    run_sync_in_thread=self.backend
+                    execute_sync_in_thread=self.backend
                     is not ExecutionBackend.MAIN,
                     is_stopped=self.is_stopped,
                 )
@@ -153,7 +158,7 @@ class SingleTest(ExecutableTest):
         return ExecutedTest(
             definition=self.definition,
             result=result,
-            execution_id=execution_id,
+            test_execution_id=test_execution_id,
             telemetry_artifacts=telemetry_artifacts,
         )
 
@@ -161,9 +166,9 @@ class SingleTest(ExecutableTest):
         self,
         resolver: DependencyResolver,
     ) -> ExecutedTest:
-        run_ctx = CURRENT_RUN_CONTEXT.get()
-        execution_id = CURRENT_TEST.get().execution_id
-        remote_result: RemoteExecutionResult
+        suite_context = CURRENT_SUITE_CONTEXT.get()
+        test_execution_id = CURRENT_TEST.get().test_execution_id
+        remote_result: RemoteTestExecutionResult
 
         try:
             semaphore = (
@@ -171,28 +176,28 @@ class SingleTest(ExecutableTest):
             )
             async with semaphore:
                 await resolver.resolve_graph_deps(
-                    resolver.registry.get_graph(execution_id),
+                    resolver.registry.get_graph(test_execution_id),
                     {},
                     consumer_spec=self.definition.spec,
                     preload=True,
                 )
                 snapshot = resolver.transfer.export_snapshot(
-                    execution_id,
+                    test_execution_id,
                     actor_id=self.sync_actor_id,
                 )
 
-                payload = ExecutorPayload(
+                payload = RemoteTestExecutionPayload(
                     spec=self.definition.spec,
                     suite_root=self.definition.suite_root,
                     setup_chain=self.definition.setup_chain,
                     params=dict(self.params),
                     snapshot=snapshot,
-                    context=run_ctx,
-                    execution_id=execution_id,
+                    context=suite_context,
+                    test_execution_id=test_execution_id,
                 )
 
                 future = LazyProcessPool.current_executor().submit(
-                    run_remote_test,
+                    execute_remote_test,
                     payload,
                 )
                 remote_result = await asyncio.wrap_future(future)
@@ -206,6 +211,6 @@ class SingleTest(ExecutableTest):
         return ExecutedTest(
             definition=self.definition,
             result=remote_result.result,
-            execution_id=execution_id,
+            test_execution_id=test_execution_id,
             telemetry_artifacts=remote_result.telemetry_artifacts,
         )

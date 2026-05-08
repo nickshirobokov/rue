@@ -13,7 +13,7 @@ Register a metric resource that yields a Metric instance and optionally a final 
 @metric(
     fn: Callable | None = None,
     *,
-    scope: Scope | str = Scope.PROCESS,
+    scope: Scope | str = Scope.SUITE,
 )
 ```
 
@@ -22,7 +22,7 @@ Register a metric resource that yields a Metric instance and optionally a final 
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `fn` | `Callable \| None` | `None` | Generator or async generator function |
-| `scope` | `Scope \| str` | `Scope.PROCESS` | Lifecycle scope: `"test"`, `"module"`, or `"process"` |
+| `scope` | `Scope \| str` | `Scope.SUITE` | Lifecycle scope: `"test"`, `"module"`, or `"suite"` |
 
 **Returns:** Decorated function registered as a metric resource
 
@@ -197,7 +197,7 @@ Result captured when a metric resource completes.
 | `assertion_results` | `list[AssertionResult]` | Assertions evaluated in metric teardown |
 | `value` | `CalculatedValue` | Final yielded value (or `NaN` if none) |
 
-**Note:** `MetricResult` instances are automatically collected and included in test run reports.
+**Note:** `MetricResult` instances are automatically collected and included in suite execution reports.
 
 **Example:**
 ```python

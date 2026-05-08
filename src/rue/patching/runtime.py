@@ -398,8 +398,8 @@ class PatchManager:
             context = CURRENT_SCOPE_CONTEXT.get()
             for record in reversed(patched.records):
                 match record.owner.scope:
-                    case Scope.RUN:
-                        active_owner = context.run
+                    case Scope.SUITE:
+                        active_owner = context.suite
                     case Scope.TEST:
                         active_owner = context.test
                     case Scope.MODULE:

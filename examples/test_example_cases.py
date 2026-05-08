@@ -5,7 +5,7 @@ from typing import Callable
 from pydantic import BaseModel
 
 import rue
-from rue import Case, SUT
+from rue import SUT, Case
 
 
 # =============================== Example AI chatbot function ===============================

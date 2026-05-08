@@ -8,8 +8,8 @@ Using `@rue.resource` enables:
 - Injecting dependencies into test functions without explicit instantiation
 - Sharing expensive setup across multiple tests (database connections, API clients)
 - Automatic teardown and cleanup with generator syntax
-- Scoping lifecycles at test, module, or run level
-- Defining directory-scoped `RUN` overrides through `conftest.py` or `confrue_*.py`
+- Scoping lifecycles at test, module, or suite level
+- Defining directory-scoped `SUITE` overrides through `conftest.py` or `confrue_*.py`
 - Stacking resources to build complex dependency hierarchies
 
 <Note>
@@ -86,7 +86,7 @@ async def test_async_endpoint(async_client):
 
 Rue automatically detects async resources and awaits them appropriately.
 
-## Scopes: Test, Module, Run
+## Scopes: Test, Module, Suite
 
 Resources can be scoped to control their lifecycle and determine how instances are shared across tests.
 
@@ -103,8 +103,8 @@ def isolated_db():
 def shared_api_client():
     return APIClient()  # Reused across tests in same file
 
-# Run scope: Shared across the run for the active provider
-@rue.resource(scope="run")
+# Suite scope: Shared across the suite for the active provider
+@rue.resource(scope="suite")
 def ml_model():
     # Expensive model loaded once for all tests
     return load_model("model.pkl")
@@ -113,7 +113,7 @@ def ml_model():
 def test_user_queries(user_id, isolated_db, shared_api_client, ml_model):
     # isolated_db: new instance for each of 5 cases
     # shared_api_client: same instance across all 5 cases in this file
-    # ml_model: same active provider reused across the run
+    # ml_model: same active provider reused across the suite
 
     user = isolated_db.get_user(user_id)
     enriched = shared_api_client.enrich(user)
@@ -124,19 +124,19 @@ def test_user_queries(user_id, isolated_db, shared_api_client, ml_model):
 Available scopes:
 - `"test"`: New instance per parametrized test case (default)
 - `"module"`: One instance per test file/module
-- `"run"`: One active provider instance reused across the run
+- `"suite"`: One active provider instance reused across the suite
 
-If multiple `RUN` resources share the same name, Rue keeps them side by side
+If multiple `SUITE` resources share the same name, Rue keeps them side by side
 and selects the nearest ancestor provider relative to the consumer spec.
 Without a consumer module path, resolution falls back to the latest registered
 definition in the first matching scope.
 
-### Directory-Scoped `RUN` Resources
+### Directory-Scoped `SUITE` Resources
 
-`RUN` resources are now best understood as directory-scoped shared resources,
+`SUITE` resources are now best understood as directory-scoped shared resources,
 not as one global instance per name.
 
-Put same-name `RUN` resources in `conftest.py` or `confrue_*.py` files when
+Put same-name `SUITE` resources in `conftest.py` or `confrue_*.py` files when
 different parts of your test tree need different shared setup:
 
 ```text
@@ -152,7 +152,7 @@ project/
 # confrue_root.py
 import rue
 
-@rue.resource(scope="run")
+@rue.resource(scope="suite")
 def settings():
     return {"mode": "public"}
 ```
@@ -161,7 +161,7 @@ def settings():
 # admin/confrue_admin.py
 import rue
 
-@rue.resource(scope="run")
+@rue.resource(scope="suite")
 def settings():
     return {"mode": "admin"}
 ```
@@ -185,14 +185,14 @@ def test_admin(settings):
 ```
 
 Rules to remember:
-- Same-name `RUN` resources can coexist in different directories.
+- Same-name `SUITE` resources can coexist in different directories.
 - Rue picks the nearest ancestor provider for the consumer module path.
 - Sibling branches do not see each other's child overrides.
 - Different directory-specific providers do not share cached state.
-- If a `RUN` resource is resolved without a consumer module path, Rue falls back to the latest active registration.
+- If a `SUITE` resource is resolved without a consumer module path, Rue falls back to the latest active registration.
 
 <Info>
-  Put shared `RUN` resources in `conftest.py` or `confrue_*.py` files so the directory tree controls which provider is active. See [confrue Files](/concepts/confrue-files).
+  Put shared `SUITE` resources in `conftest.py` or `confrue_*.py` files so the directory tree controls which provider is active. See [confrue Files](/concepts/confrue-files).
 </Info>
 
 ## Stacking Resources: Dependency Injection
@@ -203,7 +203,7 @@ Resources can depend on other resources by declaring them as parameters. This en
 import rue
 
 # Base resource
-@rue.resource(scope="run")
+@rue.resource(scope="suite")
 def config():
     return {"api_url": "https://api.example.com", "timeout": 30}
 
@@ -233,11 +233,11 @@ This creates a dependency chain:
 ```
 authenticated_client (test-level)
 └── http_client (module-level)
-    └── config (run-level)
+    └── config (suite-level)
 ```
 
 Rue resolves dependencies automatically, respecting scopes: `config` is created
-once per active run provider, `http_client` once per module, and
+once per active suite provider, `http_client` once per module, and
 `authenticated_client` fresh for each test case.
 
 ## Lifecycle Hooks
@@ -248,7 +248,7 @@ Resources support three optional hooks for advanced control:
 import rue
 
 @rue.resource(
-    scope="run",
+    scope="suite",
     on_resolve=lambda client: setup_monitoring(client),      # Runs once on creation
     on_injection=lambda client: client.refresh_token(),       # Runs every injection
     on_teardown=lambda client: save_metrics(client)           # Runs after teardown
@@ -303,7 +303,7 @@ def test_simple(user_id):
     assert user_id > 0
 
 # Use resources for expensive or stateful setup
-@rue.resource(scope="run")
+@rue.resource(scope="suite")
 def ml_model():
     return load_expensive_model()  # Reuse across tests
 
@@ -352,22 +352,22 @@ Choose scope based on cost of creation and whether state should be shared. Wider
 ```python
 import rue
 
-# Run scope: Expensive to create, no state mutations
-@rue.resource(scope="run")
+# Suite scope: Expensive to create, no state mutations
+@rue.resource(scope="suite")
 def ml_model():
     """Load once, share everywhere - model is immutable"""
     return load_model("classifier.pkl")  # Expensive operation
 
-# Suite scope: Moderate cost, isolated per file
+# Module scope: Moderate cost, isolated per file
 @rue.resource(scope="module")
 def api_client():
     """Share within file, fresh per file - moderate state"""
     return APIClient()  # May accumulate some state
 
-# Case scope: Cheap to create, must be isolated
+# Test scope: Cheap to create, must be isolated
 @rue.resource(scope="test")
 def temp_directory():
-    """Fresh for each test case - mutable state"""
+    """Fresh for each test execution - mutable state"""
     import tempfile
     tmpdir = tempfile.mkdtemp()
     yield tmpdir
@@ -376,7 +376,7 @@ def temp_directory():
 def test_classifier(temp_directory, api_client, ml_model):
     # temp_directory: isolated per test
     # api_client: shared across tests in this file
-    # ml_model: shared across the run for the active provider
+    # ml_model: shared across the suite for the active provider
     pass
 ```
 
@@ -412,7 +412,7 @@ def test_complex(test_environment):
 **Do this:**
 ```python
 # Composable resources with clear dependencies
-@rue.resource(scope="run")
+@rue.resource(scope="suite")
 def config():
     return load_config()
 
@@ -453,7 +453,7 @@ import logging
 usage_stats = []
 
 @rue.resource(
-    scope="run",
+    scope="suite",
     on_resolve=lambda model: logging.info(f"Model loaded: {model.version}"),
     on_injection=lambda model: usage_stats.append({"model": model.name, "time": time.time()}),
     on_teardown=lambda model: logging.info(f"Model used {len(usage_stats)} times")

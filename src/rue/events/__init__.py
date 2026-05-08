@@ -1,13 +1,13 @@
-"""Run lifecycle events."""
+"""Suite lifecycle events."""
 
-from rue.events.processor import RunEventsProcessor
-from rue.events.receiver import RunEventsReceiver
+from rue.events.processor import SuiteEventsProcessor
+from rue.events.receiver import SuiteEventsReceiver
 from rue.events.session import QueueForwarder, SessionEventsReceiver
 
 
 __all__ = [
     "QueueForwarder",
-    "RunEventsProcessor",
-    "RunEventsReceiver",
     "SessionEventsReceiver",
+    "SuiteEventsProcessor",
+    "SuiteEventsReceiver",
 ]

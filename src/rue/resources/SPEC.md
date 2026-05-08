@@ -31,9 +31,9 @@ def test_health(client):
 
 Users pick scope to express lifetime:
 
-- `test`: fresh value per execution; best for mutable or isolated state
+- `test`: fresh value per test execution; best for mutable or isolated state
 - `module`: one value per test file; best for medium-cost shared setup
-- `run`: one value per active provider; best for expensive shared setup
+- `suite`: one value per active provider; best for expensive shared setup
 
 Generator resources give users teardown without a second API:
 
@@ -50,9 +50,9 @@ for a directory tree. Same-name providers may coexist; Rue selects the provider
 nearest to the requesting test module.
 
 Resources can cross subprocess boundaries. Syncable values are snapshotted
-before a subprocess test runs, hydrated in the worker, and merged back into the
-parent after execution. Non-syncable resources are resolved in the process that
-needs them.
+before a subprocess test executes, hydrated in the worker, and merged back into
+the parent after test execution. Non-syncable resources are resolved in the
+process that needs them.
 
 Specialized user-facing APIs are still resources: `@rue.metric` records quality
 signals, `@rue.sut` wraps systems under test with tracing/output capture, and
@@ -83,7 +83,7 @@ sequenceDiagram
     participant User as Test/setup module
     participant Loader as TestLoader / AST rewrite
     participant Registry as ResourceRegistry
-    participant Runner as Runner
+    participant Suite as ExecutableSuite
     participant Resolver as DependencyResolver
     participant Store as ResourceStore
     participant Transfer as StateTransfer
@@ -91,9 +91,9 @@ sequenceDiagram
 
     Loader->>User: import setup + test modules
     User->>Registry: decorators register LoadedResourceDef
-    Runner->>Registry: compile_graphs(execution_id -> consumer params)
-    Registry-->>Runner: ResourceGraph(autouse, injections, dependencies)
-    Runner->>Test: run_loaded_test(resolver)
+    Suite->>Registry: compile_graphs(test_execution_id -> consumer params)
+    Registry-->>Suite: ResourceGraph(autouse, injections, dependencies)
+    Suite->>Test: execute_loaded_test(resolver)
     Test->>Resolver: resolve_graph_deps(graph, params, consumer_spec)
     Resolver->>Resolver: bind PatchStore
     loop autouse + injected resource roots
@@ -115,15 +115,15 @@ sequenceDiagram
     end
     Test->>User: call test function(**kwargs)
     alt subprocess backend
-        Runner->>Resolver: preload shared graph deps
-        Resolver->>Transfer: export_snapshot(execution_id)
-        Transfer-->>Runner: StateSnapshot
-        Runner->>Transfer: worker hydrate(snapshot)
+        Suite->>Resolver: preload shared graph deps
+        Resolver->>Transfer: export_snapshot(test_execution_id)
+        Transfer-->>Suite: StateSnapshot
+        Suite->>Transfer: worker hydrate(snapshot)
         Transfer->>Resolver: resolve missing/opaque resources
-        Transfer-->>Runner: update_since(snapshot)
-        Runner->>Transfer: apply_update(snapshot, update)
+        Transfer-->>Suite: update_since(snapshot)
+        Suite->>Transfer: apply_update(snapshot, update)
     end
-    Runner->>Resolver: teardown(Scope.TEST), ModuleContext + teardown(Scope.MODULE), final teardown()
+    Suite->>Resolver: teardown(Scope.TEST), ModuleContext + teardown(Scope.MODULE), final teardown()
     Resolver->>Resolver: close generator teardowns
     Resolver->>Store: clear(owner)
     Resolver->>Resolver: undo PatchStore handles
@@ -135,10 +135,10 @@ sequenceDiagram
 | --- | --- |
 | `resource()` / `ResourceRegistry.register_resource()` | Register one provider function as a `LoadedResourceDef`. |
 | `ResourceSpec` | Provider identity: locator plus `Scope`. |
-| `ResourceGraph` | Per-execution concrete graph: autouse roots, injection roots, dependency edges, resolution order. |
+| `ResourceGraph` | Per-test-execution concrete graph: autouse roots, injection roots, dependency edges, resolution order. |
 | `DependencyResolver` | Runtime resolver, teardown owner, and patch-store binder. |
 | `ResourceStore` | Cache, pending futures, teardown records, and sync graph per `ScopeOwner`. |
-| `StateTransfer` | Snapshot/hydrate/update path for subprocess execution. |
+| `StateTransfer` | Snapshot/hydrate/update path for subprocess test execution. |
 | `ResourceHookContext` | Ambient metadata while resource hooks run. |
 | `ModuleContext` | Runtime module owner used for top-level module work and module teardown. |
 
@@ -146,8 +146,8 @@ sequenceDiagram
 
 - Registration happens while setup/test modules are imported; graph compilation
   happens after executable leaves and their params are known.
-- Provider selection is concrete before execution: by requested name, allowed
-  scope, and nearest provider directory to the consumer module.
+- Provider selection is concrete before test execution: by requested name,
+  allowed scope, and nearest provider directory to the consumer module.
 - Wider scopes cannot depend on narrower scopes. The current rule is encoded by
   `Scope.dependency_scopes`.
 - Runtime ownership is not the provider path. Values are cached under

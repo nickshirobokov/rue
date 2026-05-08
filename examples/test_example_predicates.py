@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import rue
-
 from rue.predicates import (
     follows_policy,
     has_conflicting_facts,

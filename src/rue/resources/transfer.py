@@ -36,12 +36,12 @@ class StateTransfer:
 
     def export_snapshot(
         self,
-        execution_id: UUID,
+        test_execution_id: UUID,
         *,
         actor_id: int,
     ) -> StateSnapshot:
         """Build a CRDT transfer snapshot for the given resource closure."""
-        graph = self.resolver.registry.get_graph(execution_id)
+        graph = self.resolver.registry.get_graph(test_execution_id)
         resources = self._syncable_resources(graph.resolution_order)
         sync_graph = self.resolver.resources.sync_graph
         sync_graph.sync_live_roots(
@@ -66,9 +66,9 @@ class StateTransfer:
         consumer_spec: Spec,
     ) -> None:
         """Hydrate this resolver from a serialized transfer snapshot."""
-        execution_id = CURRENT_TEST.get().execution_id
+        test_execution_id = CURRENT_TEST.get().test_execution_id
         graph = snapshot.graph
-        self.resolver.registry.save_graph(execution_id, graph)
+        self.resolver.registry.save_graph(test_execution_id, graph)
         sync_specs = self._syncable_resources(graph.resolution_order)
 
         transfer_graph = SyncGraph.from_update(

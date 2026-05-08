@@ -68,9 +68,9 @@ def test_reset_with_yes_recreates_database(
     with turso_store.connection() as conn:
         conn.execute(
             """
-            INSERT INTO runs (
-                run_id, start_time, python_version, platform, hostname,
-                working_directory, rue_version
+            INSERT INTO suite_executions (
+                suite_execution_id, start_time, python_version, platform,
+                hostname, working_directory, rue_version
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
@@ -89,4 +89,4 @@ def test_reset_with_yes_recreates_database(
 
     assert result == 0
     assert turso_store.path.exists()
-    assert turso_store.run_count() == 0
+    assert turso_store.suite_execution_count() == 0

@@ -1,4 +1,4 @@
-"""Tests for runner-managed Rue tracing."""
+"""Tests for suite-managed Rue tracing."""
 
 import sys
 from importlib import import_module
@@ -8,8 +8,8 @@ from uuid import uuid4
 import pytest
 
 from rue.resources import DependencyResolver, registry
-from rue.testing.runner import Runner
-from tests.helpers import make_run_context, materialize_tests
+from rue.testing.execution.suite.executable import ExecutableSuite
+from tests.helpers import make_suite_context, materialize_tests
 
 
 def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
@@ -21,13 +21,13 @@ def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
 
 def _artifact_payload(artifact) -> dict[str, object]:
     return {
-        "run_id": str(artifact.run_id),
-        "execution_id": str(artifact.execution_id),
+        "suite_execution_id": str(artifact.suite_execution_id),
+        "test_execution_id": str(artifact.test_execution_id),
         "spans": artifact.spans,
     }
 
 
-async def _run_module_with_tracing(
+async def _suite_module_with_tracing(
     *,
     tmp_path: Path,
     trace_processor,
@@ -39,16 +39,16 @@ async def _run_module_with_tracing(
     try:
         monkeypatch.chdir(tmp_path)
         items = materialize_tests(mod_path)
-        make_run_context(
+        context = make_suite_context(
             otel=True,
             processors=(trace_processor,),
         )
-        runner = Runner()
-        run = await runner.run(
+        suite = await ExecutableSuite(
             items=items,
+            suite_execution_id=context.suite_execution_id,
             resolver=DependencyResolver(registry),
-        )
-        return mod_name, run, trace_processor.artifacts
+        ).execute()
+        return mod_name, suite, trace_processor.artifacts
     finally:
         sys.modules.pop(mod_name, None)
 
@@ -139,20 +139,20 @@ async def test_sample(traced_pipeline):
     ],
 )
 @pytest.mark.asyncio
-async def test_sut_trace_accessors_work_inside_runner(
+async def test_sut_trace_accessors_work_inside_suite(
     tmp_path: Path,
     trace_processor,
     monkeypatch: pytest.MonkeyPatch,
     source: str,
 ):
-    mod_name, run, artifacts = await _run_module_with_tracing(
+    mod_name, suite, artifacts = await _suite_module_with_tracing(
         tmp_path=tmp_path,
         trace_processor=trace_processor,
         monkeypatch=monkeypatch,
         source=source,
     )
 
-    assert run.result.passed == 1
+    assert suite.result.passed == 1
     payloads = [_artifact_payload(artifact) for artifact in artifacts]
     assert any(
         span["name"] == f"test.{mod_name}::test_sample"

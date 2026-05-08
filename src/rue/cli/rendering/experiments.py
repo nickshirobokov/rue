@@ -14,15 +14,15 @@ from rich.text import Text
 
 from rue.cli.rendering.primitives import STATUS_STYLES
 from rue.experiments.models import ExperimentVariantResult
-from rue.testing.models import TestStatus
+from rue.testing.execution.models import TestStatus
 
 
 @dataclass
-class ExperimentRunState:
-    """Live state for one experiment variant run."""
+class ExperimentSuiteState:
+    """Live state for one experiment variant suite."""
 
     label: str
-    run_id: UUID
+    suite_execution_id: UUID
     item_keys: set[int] = field(default_factory=set)
     total_tests: int = 0
     ready_tests: int = 0
@@ -49,7 +49,7 @@ class ExperimentLiveRenderer:
 
     def __init__(self, verbosity: int = 0) -> None:
         self.verbosity = verbosity
-        self.states: dict[UUID, ExperimentRunState] = {}
+        self.states: dict[UUID, ExperimentSuiteState] = {}
 
     def configure(self, verbosity: int) -> None:
         """Apply verbosity for future live renders."""
@@ -59,7 +59,7 @@ class ExperimentLiveRenderer:
         """Render the live experiment progress panel."""
         table = Table(show_header=True, expand=True)
         table.add_column("Variant")
-        table.add_column("Run", no_wrap=True)
+        table.add_column("Suite", no_wrap=True)
         table.add_column("Progress", justify="right", no_wrap=True)
         table.add_column("Status")
         table.add_column("Phase", no_wrap=True)
@@ -68,7 +68,7 @@ class ExperimentLiveRenderer:
         for state in self.states.values():
             table.add_row(
                 state.label,
-                str(state.run_id)[:8],
+                str(state.suite_execution_id)[:8],
                 self.progress_text(state),
                 self.status_text(state),
                 state.phase,
@@ -83,7 +83,7 @@ class ExperimentLiveRenderer:
             padding=(0, 1),
         )
 
-    def completed_line(self, state: ExperimentRunState) -> Text:
+    def completed_line(self, state: ExperimentSuiteState) -> Text:
         """Render one completed variant line for non-terminal output."""
         text = Text()
         text.append(f"variant {state.label}: ", style="bold")
@@ -93,13 +93,13 @@ class ExperimentLiveRenderer:
             text.append(f" in {duration}", style="dim")
         return text
 
-    def progress_text(self, state: ExperimentRunState) -> str:
+    def progress_text(self, state: ExperimentSuiteState) -> str:
         """Return completed/total progress text for a variant."""
         if not state.total_tests:
             return "0/0"
         return f"{state.completed_count}/{state.total_tests}"
 
-    def status_text(self, state: ExperimentRunState) -> Text:
+    def status_text(self, state: ExperimentSuiteState) -> Text:
         """Render status counts for a variant."""
         text = Text()
         for status in self._STATUS_ORDER:
@@ -114,7 +114,7 @@ class ExperimentLiveRenderer:
             text.append("pending", style="dim")
         return text
 
-    def duration_text(self, state: ExperimentRunState) -> str:
+    def duration_text(self, state: ExperimentSuiteState) -> str:
         """Return formatted duration text when a variant has finished."""
         if state.duration_ms <= 0:
             return ""
@@ -215,7 +215,7 @@ class ExperimentRenderer:
             ),
         )
         table.add_row("Duration", f"{result.total_duration_ms / 1000:.2f}s")
-        table.add_row("Run", str(result.run_id))
+        table.add_row("suite_execution_id", str(result.suite_execution_id))
         return table
 
     def _failures_table(
@@ -227,13 +227,13 @@ class ExperimentRenderer:
         table.add_column("Status", no_wrap=True)
         table.add_column("Test")
         if verbosity >= 2:
-            table.add_column("Execution ID")
+            table.add_column("Test execution ID")
             table.add_column("Error")
 
-        for label, status, execution_id, error in result.failures:
+        for label, status, test_execution_id, error in result.failures:
             row = [status, label]
             if verbosity >= 2:
-                row.extend([execution_id or "", error or ""])
+                row.extend([test_execution_id or "", error or ""])
             table.add_row(*row)
         return table
 

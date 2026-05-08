@@ -23,18 +23,18 @@ _register_builtin_resources(registry)
 
 
 __all__ = [
+    "DependencyResolver",
     "LoadedResourceDef",
     "MonkeyPatch",
     "ResourceFactoryKind",
     "ResourceGraph",
     "ResourceRegistry",
-    "DependencyResolver",
     "ResourceSpec",
     "ResourceStore",
     "ScheduledTeardown",
-    "StateTransfer",
-    "StateSnapshot",
     "Scope",
+    "StateSnapshot",
+    "StateTransfer",
     "registry",
     "resource",
 ]

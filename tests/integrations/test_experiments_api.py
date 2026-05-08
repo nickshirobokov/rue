@@ -4,10 +4,10 @@ from textwrap import dedent
 import pytest
 
 from rue.config import Config
-from rue.context.runtime import CURRENT_RUN_CONTEXT
-from rue.events import RunEventsProcessor, SessionEventsReceiver
+from rue.context.runtime import CURRENT_SUITE_CONTEXT
+from rue.events import SessionEventsReceiver, SuiteEventsProcessor
 from rue.experiments import registry as experiment_registry
-from rue.experiments.runner import ExperimentRunner
+from rue.experiments.executable import ExecutableExperiment
 from rue.resources import registry
 from rue.testing.discovery import TestLoader, TestSpecCollector
 
@@ -21,31 +21,31 @@ def clean_registry():
     experiment_registry.reset()
 
 
-class SessionCaptureProcessor(RunEventsProcessor):
+class SessionCaptureProcessor(SuiteEventsProcessor):
     def __init__(self) -> None:
         self.started: list[str] = []
         self.completed: list[tuple[str, int]] = []
-        self.executions: list[str] = []
+        self.test_executions: list[str] = []
 
-    async def on_run_start(self, run) -> None:
-        _ = run
-        self.started.append(CURRENT_RUN_CONTEXT.get().experiment_variant.label)
+    async def on_suite_execution_start(self, suite) -> None:
+        _ = suite
+        self.started.append(CURRENT_SUITE_CONTEXT.get().experiment_variant.label)
 
-    async def on_execution_complete(self, execution, run) -> None:
-        _ = run
+    async def on_test_execution_complete(self, execution, suite) -> None:
+        _ = suite
         spec = execution.definition.spec
         if spec.suffix is None and spec.case_id is None:
-            self.executions.append(
-                CURRENT_RUN_CONTEXT.get().experiment_variant.label
+            self.test_executions.append(
+                CURRENT_SUITE_CONTEXT.get().experiment_variant.label
             )
 
-    async def on_run_complete(self, run) -> None:
-        variant = CURRENT_RUN_CONTEXT.get().experiment_variant
-        self.completed.append((variant.label, run.result.total))
+    async def on_suite_execution_complete(self, suite) -> None:
+        variant = CURRENT_SUITE_CONTEXT.get().experiment_variant
+        self.completed.append((variant.label, suite.result.total))
 
 
 @pytest.mark.asyncio
-async def test_experiment_runner_executes_four_variants_with_iterated_tests(
+async def test_executable_experiment_executes_four_variants_with_iterated_tests(
     tmp_path: Path,
 ):
     (tmp_path / "app_state.py").write_text(
@@ -171,11 +171,11 @@ async def test_experiment_runner_executes_four_variants_with_iterated_tests(
             """
         )
     )
-    collection = TestSpecCollector((), (), None).build_spec_collection(
+    suitespec = TestSpecCollector((), (), None).collect_test_specs(
         (module_path,),
         explicit_root=tmp_path,
     )
-    runner = ExperimentRunner(
+    executable_experiment = ExecutableExperiment(
         config=Config.model_construct(
             database_path=tmp_path / "rue.turso.db",
             otel=False,
@@ -185,11 +185,15 @@ async def test_experiment_runner_executes_four_variants_with_iterated_tests(
         )
     )
 
-    experiments = runner.collect(collection)
+    experiments = executable_experiment.collect(suitespec)
     session_processor = SessionCaptureProcessor()
     session = SessionEventsReceiver([session_processor])
-    session.configure(runner.config)
-    results = await runner.run(collection, experiments, session=session)
+    session.configure(executable_experiment.config)
+    results = await executable_experiment.execute(
+        suitespec,
+        experiments,
+        session=session,
+    )
     session.close()
 
     assert [experiment.name for experiment in experiments] == [
@@ -223,7 +227,7 @@ async def test_experiment_runner_executes_four_variants_with_iterated_tests(
         ("model=full, prompt=strict", 4),
         ("model=full, prompt=creative", 4),
     ]
-    assert len(session_processor.executions) == 20
+    assert len(session_processor.test_executions) == 20
 
 
 def test_experiment_collect_reloads_setup_after_definition_preload(
@@ -254,12 +258,12 @@ def test_experiment_collect_reloads_setup_after_definition_preload(
             """
         )
     )
-    collection = TestSpecCollector((), (), None).build_spec_collection(
+    suitespec = TestSpecCollector((), (), None).collect_test_specs(
         (module_path,),
         explicit_root=tmp_path,
     )
-    TestLoader(collection.suite_root).load_from_collection(collection)
-    runner = ExperimentRunner(
+    TestLoader(suitespec.suite_root).load_tests(suitespec)
+    executable_experiment = ExecutableExperiment(
         config=Config.model_construct(
             database_path=tmp_path / "rue.turso.db",
             otel=False,
@@ -269,7 +273,7 @@ def test_experiment_collect_reloads_setup_after_definition_preload(
         )
     )
 
-    experiments = runner.collect(collection)
+    experiments = executable_experiment.collect(suitespec)
 
     assert [experiment.name for experiment in experiments] == [
         "answer_profile"
@@ -277,7 +281,7 @@ def test_experiment_collect_reloads_setup_after_definition_preload(
 
 
 @pytest.mark.asyncio
-async def test_experiment_runner_executes_single_baseline_without_experiments(
+async def test_executable_experiment_executes_single_baseline_without_experiments(
     tmp_path: Path,
 ):
     module_path = tmp_path / "test_baseline.py"
@@ -293,12 +297,12 @@ async def test_experiment_runner_executes_single_baseline_without_experiments(
             """
         )
     )
-    collection = TestSpecCollector((), (), None).build_spec_collection(
+    suitespec = TestSpecCollector((), (), None).collect_test_specs(
         (module_path,),
         explicit_root=tmp_path,
     )
-    TestLoader(collection.suite_root).load_from_collection(collection)
-    runner = ExperimentRunner(
+    TestLoader(suitespec.suite_root).load_tests(suitespec)
+    executable_experiment = ExecutableExperiment(
         config=Config.model_construct(
             database_path=tmp_path / "rue.turso.db",
             otel=False,
@@ -308,8 +312,12 @@ async def test_experiment_runner_executes_single_baseline_without_experiments(
         )
     )
     session = SessionEventsReceiver([])
-    session.configure(runner.config)
-    results = await runner.run(collection, (), session=session)
+    session.configure(executable_experiment.config)
+    results = await executable_experiment.execute(
+        suitespec,
+        (),
+        session=session,
+    )
     session.close()
 
     assert [result.variant.label for result in results] == ["baseline"]

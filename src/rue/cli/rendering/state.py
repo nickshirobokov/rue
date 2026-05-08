@@ -6,18 +6,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from rue.testing.models import TestStatus
+from rue.testing.execution.models import TestStatus
 
 
 if TYPE_CHECKING:
-    from rue.testing import LoadedTestDef
-    from rue.testing.execution.executable.base import ExecutableTest
-    from rue.testing.execution.models import ExecutedTest
+    from rue.testing.execution.models import ExecutedTest, LoadedTestDef
+    from rue.testing.execution.test.base import ExecutableTest
 
 
 @dataclass
-class TerminalRunState:
-    """Run progress state consumed by terminal renderers."""
+class TerminalSuiteState:
+    """Suite progress state consumed by terminal renderers."""
 
     verbosity: int = 0
     items: list[LoadedTestDef] = field(default_factory=list)
@@ -26,8 +25,8 @@ class TerminalRunState:
     total_tests: int = 0
     completed_count: int = 0
     tests: dict[int, ExecutableTest] = field(default_factory=dict)
-    executions: dict[int, ExecutedTest] = field(default_factory=dict)
-    all_executions: dict[int, ExecutedTest] = field(default_factory=dict)
+    test_executions: dict[int, ExecutedTest] = field(default_factory=dict)
+    all_test_executions: dict[int, ExecutedTest] = field(default_factory=dict)
     failures: list[ExecutedTest] = field(default_factory=list)
     status_counts: dict[TestStatus, int] = field(default_factory=dict)
     current_module: Path | None = None
@@ -38,7 +37,7 @@ class TerminalRunState:
         self.verbosity = verbosity
 
     def reset_collection(self, items: list[LoadedTestDef]) -> None:
-        """Reset state for a newly collected run."""
+        """Reset state for a newly collected suite."""
         self.items = list(items)
         self.item_keys = {item.spec.collection_index for item in items}
         self.items_by_file = {}
@@ -49,8 +48,8 @@ class TerminalRunState:
         self.total_tests = len(items)
         self.completed_count = 0
         self.tests = {}
-        self.executions = {}
-        self.all_executions = {}
+        self.test_executions = {}
+        self.all_test_executions = {}
         self.failures = []
         self.status_counts = {}
         self.current_module = None
@@ -70,14 +69,16 @@ class TerminalRunState:
             if self.is_top_level_definition(test.definition):
                 self.tests[test.definition.spec.collection_index] = test
 
-    def record_execution(self, execution: ExecutedTest) -> bool:
-        """Record a completed execution and return if it is top-level."""
-        self.all_executions[id(execution.definition)] = execution
+    def record_test_execution(self, execution: ExecutedTest) -> bool:
+        """Record a completed test execution and return if it is top-level."""
+        self.all_test_executions[id(execution.definition)] = execution
 
         if not self.is_top_level_definition(execution.definition):
             return False
 
-        self.executions[execution.definition.spec.collection_index] = execution
+        self.test_executions[
+            execution.definition.spec.collection_index
+        ] = execution
         self.completed_count += 1
         status = execution.result.status
         self.status_counts[status] = self.status_counts.get(status, 0) + 1
@@ -88,7 +89,7 @@ class TerminalRunState:
     def is_module_complete(self, path: Path) -> bool:
         """Return whether every top-level item in a module has completed."""
         return all(
-            item.spec.collection_index in self.executions
+            item.spec.collection_index in self.test_executions
             for item in self.items_by_file.get(path, [])
         )
 
@@ -104,4 +105,4 @@ class TerminalRunState:
         )
 
 
-__all__ = ["TerminalRunState"]
+__all__ = ["TerminalSuiteState"]

@@ -56,7 +56,7 @@ class MetricMetadata:
                 module_path=Path(__file__),
                 function_name="",
             ),
-            scope=Scope.RUN,
+            scope=Scope.SUITE,
         )
     )
     consumers: list[Spec] = field(default_factory=list)

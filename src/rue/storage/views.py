@@ -22,15 +22,16 @@ if TYPE_CHECKING:
     from rue.assertions.models import AssertionResult
     from rue.predicates.models import PredicateResult
     from rue.resources.metrics.models import MetricResult
-    from rue.testing.models import ExecutedRun, ExecutedTest
+    from rue.testing.execution.models import ExecutedTest
+    from rue.testing.execution.suite.models import ExecutedSuite
 
 
 MAX_REPR_LENGTH = 2000
 
 
 @dataclass(frozen=True, slots=True)
-class StoredRunView:
-    run_id: str
+class StoredSuiteView:
+    suite_execution_id: str
     start_time: str
     end_time: str | None
     total_duration_ms: float
@@ -53,21 +54,21 @@ class StoredRunView:
     metrics: tuple[StoredMetricView, ...] = ()
 
     @classmethod
-    def from_run(cls, run: ExecutedRun) -> StoredRunView:
-        environment = run.environment
+    def from_suite(cls, suite: ExecutedSuite) -> StoredSuiteView:
+        environment = suite.environment
         return cls(
-            run_id=str(run.run_id),
-            start_time=run.start_time.isoformat(),
-            end_time=run.end_time.isoformat() if run.end_time else None,
-            total_duration_ms=run.result.total_duration_ms,
-            passed=run.result.passed,
-            failed=run.result.failed,
-            errors=run.result.errors,
-            skipped=run.result.skipped,
-            xfailed=run.result.xfailed,
-            xpassed=run.result.xpassed,
-            total=run.result.total,
-            stopped_early=run.result.stopped_early,
+            suite_execution_id=str(suite.suite_execution_id),
+            start_time=suite.start_time.isoformat(),
+            end_time=suite.end_time.isoformat() if suite.end_time else None,
+            total_duration_ms=suite.result.total_duration_ms,
+            passed=suite.result.passed,
+            failed=suite.result.failed,
+            errors=suite.result.errors,
+            skipped=suite.result.skipped,
+            xfailed=suite.result.xfailed,
+            xpassed=suite.result.xpassed,
+            total=suite.result.total,
+            stopped_early=suite.result.stopped_early,
             commit_hash=environment.commit_hash,
             branch=environment.branch,
             dirty=environment.dirty,
@@ -77,14 +78,14 @@ class StoredRunView:
             working_directory=environment.working_directory,
             rue_version=environment.rue_version,
             metrics=tuple(
-                StoredMetricView.from_metric(run.run_id, metric)
-                for metric in run.result.metric_results
+                StoredMetricView.from_metric(suite.suite_execution_id, metric)
+                for metric in suite.result.metric_results
             ),
         )
 
     def _insert_values(self) -> tuple[object, ...]:
         return (
-            self.run_id,
+            self.suite_execution_id,
             self.start_time,
             self.end_time,
             self.total_duration_ms,
@@ -126,14 +127,14 @@ class StoredRunView:
             self.hostname,
             self.working_directory,
             self.rue_version,
-            self.run_id,
+            self.suite_execution_id,
         )
 
     def insert(self, conn: turso.Connection) -> None:
         conn.execute(
             """
-            INSERT INTO runs (
-                run_id, start_time, end_time, total_duration_ms,
+            INSERT INTO suite_executions (
+                suite_execution_id, start_time, end_time, total_duration_ms,
                 passed, failed, errors, skipped, xfailed, xpassed,
                 total, stopped_early, commit_hash, branch, dirty,
                 python_version, platform, hostname, working_directory,
@@ -148,7 +149,7 @@ class StoredRunView:
     def update(self, conn: turso.Connection) -> None:
         conn.execute(
             """
-            UPDATE runs SET
+            UPDATE suite_executions SET
                 end_time = ?,
                 total_duration_ms = ?,
                 passed = ?,
@@ -167,7 +168,7 @@ class StoredRunView:
                 hostname = ?,
                 working_directory = ?,
                 rue_version = ?
-            WHERE run_id = ?
+            WHERE suite_execution_id = ?
             """,
             self._update_values(),
         )
@@ -182,9 +183,9 @@ class StoredRunView:
 
 
 @dataclass(frozen=True, slots=True)
-class StoredExecutionView:
-    execution_id: str
-    run_id: str
+class StoredTestExecutionView:
+    test_execution_id: str
+    suite_execution_id: str
     parent_id: str | None
     function_name: str
     module_path: str
@@ -206,13 +207,13 @@ class StoredExecutionView:
     assertions: tuple[_StoredAssertionRow, ...] = ()
 
     @classmethod
-    def from_execution(
+    def from_test_execution(
         cls,
-        run_id: UUID,
+        suite_execution_id: UUID,
         execution: ExecutedTest,
         parent_id: UUID | None = None,
         child_ids: tuple[UUID, ...] = (),
-    ) -> StoredExecutionView:
+    ) -> StoredTestExecutionView:
         spec = execution.definition.spec
         error = execution.result.error
         module_path = spec.locator.module_path
@@ -221,14 +222,14 @@ class StoredExecutionView:
             (
                 *child_ids,
                 *(
-                    child.execution_id
-                    for child in execution.sub_executions
+                    child.test_execution_id
+                    for child in execution.sub_test_executions
                 ),
             )
         )
         return cls(
-            execution_id=str(execution.execution_id),
-            run_id=str(run_id),
+            test_execution_id=str(execution.test_execution_id),
+            suite_execution_id=str(suite_execution_id),
             parent_id=str(parent_id) if parent_id is not None else None,
             function_name=spec.locator.function_name,
             module_path=str(module_path),
@@ -240,8 +241,8 @@ class StoredExecutionView:
             skip_reason=spec.skip_reason,
             xfail_reason=spec.xfail_reason,
             xfail_strict=spec.xfail_strict,
-            status=execution.status.value,
-            duration_ms=execution.duration_ms,
+            status=execution.result.status.value,
+            duration_ms=execution.result.duration_ms,
             error_type=type(error).__name__ if error else None,
             error_message=str(error) if error else None,
             error_traceback=None if traceback is None else traceback.json,
@@ -249,9 +250,9 @@ class StoredExecutionView:
             child_ids=tuple(str(child_id) for child_id in children),
             assertions=tuple(
                 _StoredAssertionRow.from_result(
-                    run_id,
+                    suite_execution_id,
                     assertion,
-                    execution_id=execution.execution_id,
+                    test_execution_id=execution.test_execution_id,
                 )
                 for assertion in execution.result.assertion_results
             ),
@@ -259,8 +260,8 @@ class StoredExecutionView:
 
     def _insert_values(self) -> tuple[object, ...]:
         return (
-            self.execution_id,
-            self.run_id,
+            self.test_execution_id,
+            self.suite_execution_id,
             self.parent_id,
             self.function_name,
             self.module_path,
@@ -280,13 +281,13 @@ class StoredExecutionView:
         )
 
     def _tag_rows(self) -> tuple[tuple[str, str], ...]:
-        return tuple((self.execution_id, tag) for tag in self.tags)
+        return tuple((self.test_execution_id, tag) for tag in self.tags)
 
     def insert(self, conn: turso.Connection) -> None:
         conn.execute(
             """
-            INSERT INTO executions (
-                execution_id, run_id, parent_id, function_name,
+            INSERT INTO test_executions (
+                test_execution_id, suite_execution_id, parent_id, function_name,
                 module_path, class_name, is_async, case_id, suffix,
                 collection_index, skip_reason, xfail_reason, xfail_strict,
                 status, duration_ms, error_type, error_message,
@@ -298,7 +299,7 @@ class StoredExecutionView:
         for row in self._tag_rows():
             conn.execute(
                 """
-                INSERT INTO execution_tags (execution_id, tag)
+                INSERT INTO test_execution_tags (test_execution_id, tag)
                 VALUES (?, ?)
                 """,
                 row,
@@ -308,17 +309,17 @@ class StoredExecutionView:
         for child_id in self.child_ids:
             conn.execute(
                 """
-                UPDATE executions
+                UPDATE test_executions
                 SET parent_id = ?
-                WHERE execution_id = ?
+                WHERE test_execution_id = ?
                 """,
-                (self.execution_id, child_id),
+                (self.test_execution_id, child_id),
             )
 
 
 @dataclass(frozen=True, slots=True)
 class StoredMetricView:
-    run_id: str
+    suite_execution_id: str
     name: str
     scope: str
     provider_path: str
@@ -335,7 +336,7 @@ class StoredMetricView:
     @classmethod
     def from_metric(
         cls,
-        run_id: UUID,
+        suite_execution_id: UUID,
         metric: MetricResult,
     ) -> StoredMetricView:
         value = metric.value
@@ -356,7 +357,7 @@ class StoredMetricView:
         identity = meta.identity
         module_path = identity.locator.module_path
         return cls(
-            run_id=str(run_id),
+            suite_execution_id=str(suite_execution_id),
             name=identity.locator.function_name,
             scope=identity.scope.value,
             provider_path=str(module_path),
@@ -380,7 +381,7 @@ class StoredMetricView:
             ),
             assertions=tuple(
                 _StoredAssertionRow.from_result(
-                    run_id,
+                    suite_execution_id,
                     assertion,
                     metric_id=None,
                 )
@@ -390,7 +391,7 @@ class StoredMetricView:
 
     def _insert_values(self) -> tuple[object, ...]:
         return (
-            self.run_id,
+            self.suite_execution_id,
             self.name,
             self.scope,
             self.provider_path,
@@ -406,7 +407,7 @@ class StoredMetricView:
         row = conn.execute(
             """
             INSERT INTO metrics (
-                run_id, name, scope, provider_path,
+                suite_execution_id, name, scope, provider_path,
                 value_integer, value_real, value_boolean, value_json,
                 first_recorded_at, last_recorded_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -542,8 +543,8 @@ class _StoredMetricDependencyRow:
 
 @dataclass(frozen=True, slots=True)
 class _StoredAssertionRow:
-    run_id: str
-    execution_id: str | None
+    suite_execution_id: str
+    test_execution_id: str | None
     metric_id: int | None
     expression: str
     lines_above: str
@@ -557,15 +558,17 @@ class _StoredAssertionRow:
     @classmethod
     def from_result(
         cls,
-        run_id: UUID,
+        suite_execution_id: UUID,
         assertion: AssertionResult,
-        execution_id: UUID | None = None,
+        test_execution_id: UUID | None = None,
         metric_id: int | None = None,
     ) -> _StoredAssertionRow:
         expression = assertion.expression_repr
         return cls(
-            run_id=str(run_id),
-            execution_id=str(execution_id) if execution_id else None,
+            suite_execution_id=str(suite_execution_id),
+            test_execution_id=(
+                str(test_execution_id) if test_execution_id else None
+            ),
             metric_id=metric_id,
             expression=expression.expr,
             lines_above=expression.lines_above,
@@ -575,7 +578,11 @@ class _StoredAssertionRow:
             passed=assertion.passed,
             error_message=assertion.error_message,
             predicates=tuple(
-                _StoredPredicateRow.from_result(run_id, None, predicate)
+                _StoredPredicateRow.from_result(
+                    suite_execution_id,
+                    None,
+                    predicate,
+                )
                 for predicate in assertion.predicate_results
             ),
         )
@@ -583,8 +590,8 @@ class _StoredAssertionRow:
     def _values(self, metric_id: int | None = None) -> tuple[object, ...]:
         metric_ref = self.metric_id if self.metric_id is not None else metric_id
         return (
-            self.run_id,
-            self.execution_id,
+            self.suite_execution_id,
+            self.test_execution_id,
             metric_ref,
             self.expression,
             self.lines_above,
@@ -603,8 +610,9 @@ class _StoredAssertionRow:
         row = conn.execute(
             """
             INSERT INTO assertions (
-                run_id, execution_id, metric_id, expression, lines_above,
-                lines_below, resolved_args, col_offset, passed, error_message
+                suite_execution_id, test_execution_id, metric_id,
+                expression, lines_above, lines_below, resolved_args,
+                col_offset, passed, error_message
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING assertion_id
             """,
@@ -618,7 +626,7 @@ class _StoredAssertionRow:
 
 @dataclass(frozen=True, slots=True)
 class _StoredPredicateRow:
-    run_id: str
+    suite_execution_id: str
     assertion_id: int | None
     predicate_name: str
     actual: str
@@ -631,12 +639,12 @@ class _StoredPredicateRow:
     @classmethod
     def from_result(
         cls,
-        run_id: UUID,
+        suite_execution_id: UUID,
         assertion_id: int | None,
         predicate: PredicateResult,
     ) -> _StoredPredicateRow:
         return cls(
-            run_id=str(run_id),
+            suite_execution_id=str(suite_execution_id),
             assertion_id=assertion_id,
             predicate_name=predicate.name,
             actual=predicate.actual,
@@ -655,7 +663,7 @@ class _StoredPredicateRow:
         )
         assert assertion_ref is not None
         return (
-            self.run_id,
+            self.suite_execution_id,
             assertion_ref,
             self.predicate_name,
             self.actual,
@@ -674,8 +682,8 @@ class _StoredPredicateRow:
         conn.execute(
             """
             INSERT INTO predicates (
-                run_id, assertion_id, predicate_name, actual, reference,
-                strict, confidence, value, message
+                suite_execution_id, assertion_id, predicate_name, actual,
+                reference, strict, confidence, value, message
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             self._values(assertion_id),
@@ -744,7 +752,7 @@ class _StoredTracebackPayload:
 
 __all__ = [
     "MAX_REPR_LENGTH",
-    "StoredExecutionView",
     "StoredMetricView",
-    "StoredRunView",
+    "StoredSuiteView",
+    "StoredTestExecutionView",
 ]

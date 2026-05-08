@@ -1,4 +1,4 @@
-"""Execution and run outcome models."""
+"""Test execution outcome models."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from rue.assertions.models import AssertionResult
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
     CURRENT_TEST,
-    RunContext,
+    SuiteContext,
     bind,
 )
 from rue.resources import DependencyResolver
@@ -66,7 +66,7 @@ class TestResult:
         error: BaseException | None,
         assertion_results: list[AssertionResult],
     ) -> TestResult:
-        """Build a result from imperative and observed execution outcomes."""
+        """Build a result from imperative and observed test execution outcomes."""
         if imperative_outcome is not None:
             return cls(
                 status=imperative_outcome,
@@ -120,7 +120,7 @@ class TestResult:
 
     @property
     def status_repr(self) -> str:
-        """Return the status suffix shown next to execution names."""
+        """Return the status suffix shown next to test execution names."""
         if self.status == TestStatus.SKIPPED:
             reason = self.error.args[0] if self.error else "skipped"
             return f"skipped ({reason})"
@@ -137,15 +137,15 @@ class TestResult:
 
 @dataclass
 class LoadedTestDef:
-    """A discovered test function ready for execution in the current process.
+    """A discovered test function ready for test execution in this process.
 
     Pairs a serializable :class:`TestSpec` with the live callable resolved
     by the loader.  The ``spec`` is the cross-process-safe record; ``fn`` is
     the process-local binding.
 
     ``suite_root`` and ``setup_chain`` capture the import context used to
-    materialize this callable so expanded leaves still describe the original
-    suite/session they came from.
+    materialize this callable so expanded leaves still describe the suite they
+    came from.
     """
 
     __test__ = False  # Prevent pytest from collecting this as a test class
@@ -159,7 +159,7 @@ class LoadedTestDef:
         self,
         kwargs: dict[str, Any],
         *,
-        run_sync_in_thread: bool,
+        execute_sync_in_thread: bool,
     ) -> None:
         """Call the loaded test function with resolved resource kwargs."""
         instance = None
@@ -181,17 +181,17 @@ class LoadedTestDef:
 
         if self.spec.is_async:
             await call()
-        elif run_sync_in_thread:
+        elif execute_sync_in_thread:
             await asyncio.to_thread(call)
         else:
             call()
 
-    async def run_loaded_test(
+    async def execute_loaded_test(
         self,
         *,
         params: dict[str, Any],
         resolver: DependencyResolver,
-        run_sync_in_thread: bool,
+        execute_sync_in_thread: bool,
         is_stopped: Callable[[], bool] | None = None,
     ) -> tuple[
         float,
@@ -199,7 +199,7 @@ class LoadedTestDef:
         BaseException | None,
         list[AssertionResult],
     ]:
-        """Resolve resources, run this test, and return execution metadata."""
+        """Resolve resources, execute this test, and return metadata."""
         assertion_results: list[AssertionResult] = []
         error: BaseException | None = None
         imperative_outcome: TestStatus | None = None
@@ -209,18 +209,18 @@ class LoadedTestDef:
             try:
                 kwargs = await resolver.resolve_graph_deps(
                     resolver.registry.get_graph(
-                        CURRENT_TEST.get().execution_id
+                        CURRENT_TEST.get().test_execution_id
                     ),
                     params,
                     consumer_spec=self.spec,
                 )
                 if is_stopped is not None and is_stopped():
                     imperative_outcome = TestStatus.SKIPPED
-                    error = Exception("Run stopped early")
+                    error = Exception("Suite stopped early")
                 else:
                     await self.call_test_fn(
                         kwargs=kwargs,
-                        run_sync_in_thread=run_sync_in_thread,
+                        execute_sync_in_thread=execute_sync_in_thread,
                     )
             except SkipTest as raised:
                 imperative_outcome = TestStatus.SKIPPED
@@ -247,40 +247,30 @@ class ExecutedTest:
     """Complete record of a test execution, combining context and result.
 
     Encapsulates both the test context (inputs/setup) and the result (outcome)
-    as a single execution record.
+    as a single test execution record.
     """
 
     __test__ = False  # Prevent pytest from collecting this as a test class
 
     definition: LoadedTestDef
     result: TestResult
-    execution_id: UUID
+    test_execution_id: UUID
     telemetry_artifacts: tuple[TelemetryArtifact, ...] = ()
-    sub_executions: list[ExecutedTest] = field(default_factory=list)
-
-    @property
-    def status(self) -> TestStatus:
-        """Convenience access to result status."""
-        return self.result.status
-
-    @property
-    def duration_ms(self) -> float:
-        """Convenience access to result duration."""
-        return self.result.duration_ms
+    sub_test_executions: list[ExecutedTest] = field(default_factory=list)
 
     @property
     def label(self) -> str:
-        """Short display label from spec or execution id."""
+        """Short display label from spec or test_execution_id."""
         dlabel = self.definition.spec.get_label()
         if dlabel:
             return dlabel
-        if self.execution_id:
-            return str(self.execution_id)[:8]
+        if self.test_execution_id:
+            return str(self.test_execution_id)[:8]
         return "case"
 
 
 @dataclass(frozen=True, slots=True)
-class ExecutorPayload:
+class RemoteTestExecutionPayload:
     """Minimal, fully-serializable payload for remote test execution."""
 
     spec: TestSpec
@@ -288,13 +278,13 @@ class ExecutorPayload:
     setup_chain: tuple[SetupFileRef, ...]
     params: dict[str, Any]
     snapshot: StateSnapshot
-    context: RunContext
-    execution_id: UUID
+    context: SuiteContext
+    test_execution_id: UUID
 
 
 @dataclass(frozen=True, slots=True)
-class RemoteExecutionResult:
-    """Serializable remote execution outcome."""
+class RemoteTestExecutionResult:
+    """Serializable remote test execution outcome."""
 
     result: TestResult
     telemetry_artifacts: tuple[TelemetryArtifact, ...]

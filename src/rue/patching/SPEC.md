@@ -28,13 +28,13 @@ def test_value(monkeypatch):
 
 The built-in `monkeypatch` resource is registered for every `Scope`. Test
 functions receive a test-scoped patcher. Resource factories receive a patcher
-matching the resource scope, so setup can patch for `test`, `module`, or `run`
+matching the resource scope, so setup can patch for `test`, `module`, or `suite`
 lifetime.
 
 Patches are undone by Rue teardown, not by user cleanup code. Test patches end
-at `Scope.TEST` teardown, module patches at `Scope.MODULE` teardown, and run
+at `Scope.TEST` teardown, module patches at `Scope.MODULE` teardown, and suite
 patches at final resolver teardown. Experiment hooks use the same API directly
-with `MonkeyPatch.for_scope(Scope.RUN)`.
+with `MonkeyPatch.for_scope(Scope.SUITE)`.
 
 ## Runtime Model
 
@@ -72,9 +72,9 @@ flowchart TB
 
     target["Real target member<br/>Target.value"]
     dispatcher["Dispatcher<br/>installed once on Target.value<br/>keeps original value nearby"]
-    current["Current Rue scope<br/>ScopeContext.current()<br/>which run/module/test is active right now"]
+    current["Current Rue scope<br/>ScopeContext.current()<br/>which suite/module/test is active right now"]
     visible["Visible result<br/>matching owner value<br/>or original if no owner matches"]
-    teardown["Owner teardown<br/>resolver tears down TEST / MODULE / RUN owner"]
+    teardown["Owner teardown<br/>resolver tears down TEST / MODULE / SUITE owner"]
 
     class patchCall code
     class patchOwner,current ownerNode
@@ -139,7 +139,7 @@ and the matching records disappear.
 - A dispatcher is installed once per target member. Later patches append records
   for different owners.
 - Active lookup walks records newest-first and returns the first record owned by
-  the current run, module, or test owner for that record's scope. Module owners
+  the current suite, module, or test owner for that record's scope. Module owners
   come from `ModuleContext` during top-level module work and module teardown,
   or from `TestContext` during a test execution.
 - Missing-value patches use the same dispatch path and raise

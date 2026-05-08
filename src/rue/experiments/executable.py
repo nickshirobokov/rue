@@ -1,4 +1,4 @@
-"""Experiment runner."""
+"""Executable experiment suites."""
 
 from __future__ import annotations
 
@@ -13,9 +13,13 @@ from typing import Any
 import cloudpickle  # type: ignore[import-untyped]
 
 from rue.config import Config
-from rue.context.runtime import RunContext
-from rue.events import QueueForwarder, RunEventsProcessor, SessionEventsReceiver
-from rue.events.receiver import RunEventsReceiver
+from rue.context.runtime import SuiteContext
+from rue.events import (
+    QueueForwarder,
+    SessionEventsReceiver,
+    SuiteEventsProcessor,
+)
+from rue.events.receiver import SuiteEventsReceiver
 from rue.experiments.models import (
     ExperimentSpec,
     ExperimentVariant,
@@ -24,41 +28,41 @@ from rue.experiments.models import (
 from rue.experiments.registry import registry as default_experiment_registry
 from rue.resources import DependencyResolver
 from rue.resources.registry import registry as default_resource_registry
-from rue.storage import TursoRunRecorder, TursoRunStore
+from rue.storage import TursoSuiteRecorder, TursoSuiteStore
 from rue.telemetry.otel import OtelReporter
 from rue.testing.discovery import TestLoader
-from rue.testing.models.spec import TestSpecCollection
-from rue.testing.runner import Runner
+from rue.testing.execution.suite.executable import ExecutableSuite
+from rue.testing.models.spec import SuiteSpec
 
 
 DRAIN_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(slots=True)
-class ExperimentRunner:
-    """Runs experiment variants as isolated processes."""
+class ExecutableExperiment:
+    """Executes experiment variants as isolated child suites."""
 
     config: Config
 
     def collect(
-        self, collection: TestSpecCollection
+        self, suitespec: SuiteSpec
     ) -> tuple[ExperimentSpec, ...]:
         """Load setup files and return registered experiments."""
         default_resource_registry.reset()
         default_experiment_registry.reset()
-        loader = TestLoader(collection.suite_root)
-        for setup_ref in collection.all_setup_files:
+        loader = TestLoader(suitespec.suite_root)
+        for setup_ref in suitespec.all_setup_files:
             loader.prepare_setup(setup_ref.path, reload=True)
         return default_experiment_registry.all()
 
-    async def run(
+    async def execute(
         self,
-        collection: TestSpecCollection,
+        suitespec: SuiteSpec,
         experiments: tuple[ExperimentSpec, ...],
         *,
         session: SessionEventsReceiver,
     ) -> tuple[ExperimentVariantResult, ...]:
-        """Run baseline plus every experiment value combination."""
+        """Execute baseline plus every experiment value combination."""
         results: list[ExperimentVariantResult] = []
         variants = (
             (ExperimentVariant(index=0),)
@@ -68,7 +72,8 @@ class ExperimentRunner:
         mp_context = mp.get_context("spawn")
         manager = mp_context.Manager()
         with ProcessPoolExecutor(
-            max_workers=1, #TODO: keep as 1 until Turso ships 0.6 with concurrent writes
+            # TODO: keep as 1 until Turso ships 0.6 with concurrent writes.
+            max_workers=1,
             max_tasks_per_child=1,
             mp_context=mp_context,
         ) as pool:
@@ -76,9 +81,9 @@ class ExperimentRunner:
                 for variant in variants:
                     queue = manager.Queue()
                     future = pool.submit(
-                        run_experiment_variant,
+                        execute_experiment_variant,
                         cloudpickle.dumps(
-                            (collection, variant, self.config),
+                            (suitespec, variant, self.config),
                         ),
                         queue,
                     )
@@ -99,39 +104,39 @@ class ExperimentRunner:
         return tuple(results)
 
 
-def run_experiment_variant(
+def execute_experiment_variant(
     payload: bytes,
     queue: Any,
 ) -> ExperimentVariantResult:
     """Process entrypoint for one experiment variant."""
-    collection, variant, config = cloudpickle.loads(payload)
+    suitespec, variant, config = cloudpickle.loads(payload)
     return asyncio.run(
-        _run_experiment_variant(collection, variant, config, queue)
+        _execute_experiment_variant(suitespec, variant, config, queue)
     )
 
 
-async def _run_experiment_variant(
-    collection: TestSpecCollection,
+async def _execute_experiment_variant(
+    suitespec: SuiteSpec,
     variant: ExperimentVariant,
     config: Config,
     queue: Any,
 ) -> ExperimentVariantResult:
     default_resource_registry.reset()
     default_experiment_registry.reset()
-    loader = TestLoader(collection.suite_root)
-    for setup_ref in collection.all_setup_files:
+    loader = TestLoader(suitespec.suite_root)
+    for setup_ref in suitespec.all_setup_files:
         loader.prepare_setup(setup_ref.path)
 
-    context = RunContext(
+    context = SuiteContext(
         config=config,
         experiment_variant=variant,
-        experiment_setup_chain=collection.all_setup_files,
+        experiment_setup_chain=suitespec.all_setup_files,
     )
-    store = TursoRunStore(config.database_path)
+    store = TursoSuiteStore(config.database_path)
     store.initialize()
     resolver = DependencyResolver(default_resource_registry)
-    run = None
-    processors: list[RunEventsProcessor] = [TursoRunRecorder()]
+    suite = None
+    processors: list[SuiteEventsProcessor] = [TursoSuiteRecorder()]
     if config.otel:
         processors.append(OtelReporter())
     processors.append(QueueForwarder(queue))
@@ -139,24 +144,27 @@ async def _run_experiment_variant(
         sink = output_suppression.enter_context(open(devnull, "w"))
         output_suppression.enter_context(redirect_stdout(sink))
         output_suppression.enter_context(redirect_stderr(sink))
-        with context, RunEventsReceiver(processors):
+        with context, SuiteEventsReceiver(processors):
             try:
                 await variant.apply(
                     default_experiment_registry.all(),
                     resolver=resolver,
                 )
-                items = loader.load_from_collection(collection)
-                runner = Runner()
-                run = await runner.run(items, resolver=resolver)
+                items = loader.load_tests(suitespec)
+                suite = await ExecutableSuite(
+                    items=items,
+                    suite_execution_id=context.suite_execution_id,
+                    resolver=resolver,
+                ).execute()
             finally:
-                if run is None:
+                if suite is None:
                     await resolver.teardown()
-    if run is None:
-        raise ValueError("Run was not created")
-    return ExperimentVariantResult.build(variant=variant, run=run)
+    if suite is None:
+        raise ValueError("Suite was not created")
+    return ExperimentVariantResult.build(variant=variant, suite=suite)
 
 
 __all__ = [
-    "ExperimentRunner",
-    "run_experiment_variant",
+    "ExecutableExperiment",
+    "execute_experiment_variant",
 ]

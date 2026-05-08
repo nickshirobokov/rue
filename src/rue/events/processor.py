@@ -1,4 +1,4 @@
-"""Base processor for run lifecycle events."""
+"""Base processor for suite lifecycle events."""
 
 from __future__ import annotations
 
@@ -9,55 +9,57 @@ from uuid import UUID
 if TYPE_CHECKING:
     from rue.config import Config
     from rue.resources.models import ResourceGraph
-    from rue.testing import LoadedTestDef
-    from rue.testing.execution.executable.base import ExecutableTest
-    from rue.testing.models import ExecutedRun, ExecutedTest
+    from rue.testing.execution.models import ExecutedTest, LoadedTestDef
+    from rue.testing.execution.suite.models import ExecutedSuite
+    from rue.testing.execution.test.base import ExecutableTest
 
 
-class RunEventsProcessorMeta(type):
+class SuiteEventsProcessorMeta(type):
     """Registers processor instances after initialization."""
 
-    def __call__(cls, *args: Any, **kwargs: Any) -> RunEventsProcessor:
-        """Create and register a run event processor."""
+    def __call__(cls, *args: Any, **kwargs: Any) -> SuiteEventsProcessor:
+        """Create and register a suite event processor."""
         processor = super().__call__(*args, **kwargs)
-        if cls is not RunEventsProcessor and not cls.__module__.startswith(
+        if cls is not SuiteEventsProcessor and not cls.__module__.startswith(
             "rue."
         ):
-            RunEventsProcessor.REGISTRY[cls.__name__] = processor
+            SuiteEventsProcessor.REGISTRY[cls.__name__] = processor
         return processor
 
 
-class RunEventsProcessor(metaclass=RunEventsProcessorMeta):
-    """Base class for run lifecycle event processors."""
+class SuiteEventsProcessor(metaclass=SuiteEventsProcessorMeta):
+    """Base class for suite lifecycle event processors."""
 
-    REGISTRY: ClassVar[dict[str, RunEventsProcessor]] = {}
+    REGISTRY: ClassVar[dict[str, SuiteEventsProcessor]] = {}
 
     def configure(self, config: Config) -> None:
         """Adjust processor parameters based on runtime config."""
         _ = config
 
-    async def on_run_start(self, run: ExecutedRun) -> None:
-        """Called when a run starts."""
-        _ = run
+    async def on_suite_execution_start(
+        self, suite: ExecutedSuite
+    ) -> None:
+        """Called when suite execution starts."""
+        _ = suite
         return None
 
-    async def on_no_tests_found(self, run: ExecutedRun) -> None:
+    async def on_no_tests_found(self, suite: ExecutedSuite) -> None:
         """Called when test collection finds no tests."""
-        _ = run
+        _ = suite
         return None
 
     async def on_collection_complete(
-        self, items: list[LoadedTestDef], run: ExecutedRun
+        self, items: list[LoadedTestDef], suite: ExecutedSuite
     ) -> None:
         """Called after test collection completes."""
-        _ = items, run
+        _ = items, suite
         return None
 
     async def on_tests_ready(
-        self, tests: list[ExecutableTest], run: ExecutedRun
+        self, tests: list[ExecutableTest], suite: ExecutedSuite
     ) -> None:
         """Called after all executable test trees are built."""
-        _ = tests, run
+        _ = tests, suite
         return None
 
     async def on_di_graphs_compiled(
@@ -67,30 +69,32 @@ class RunEventsProcessor(metaclass=RunEventsProcessorMeta):
         _ = graphs
         return None
 
-    async def on_test_start(
-        self, test: ExecutableTest, run: ExecutedRun
+    async def on_test_execution_start(
+        self, test: ExecutableTest, suite: ExecutedSuite
     ) -> None:
-        """Called before a test starts executing."""
-        _ = test, run
+        """Called before test execution starts."""
+        _ = test, suite
         return None
 
-    async def on_execution_complete(
-        self, execution: ExecutedTest, run: ExecutedRun
+    async def on_test_execution_complete(
+        self, execution: ExecutedTest, suite: ExecutedSuite
     ) -> None:
-        """Called when any test node (leaf or composite) completes."""
-        _ = execution, run
+        """Called when any test execution node completes."""
+        _ = execution, suite
         return None
 
-    async def on_run_stopped_early(
-        self, failure_count: int, run: ExecutedRun
+    async def on_suite_stopped_early(
+        self, failure_count: int, suite: ExecutedSuite
     ) -> None:
-        """Called when run stops early due to maxfail limit."""
-        _ = failure_count, run
+        """Called when suite stops early due to maxfail limit."""
+        _ = failure_count, suite
         return None
 
-    async def on_run_complete(self, run: ExecutedRun) -> None:
-        """Called after all tests complete."""
-        _ = run
+    async def on_suite_execution_complete(
+        self, suite: ExecutedSuite
+    ) -> None:
+        """Called after suite execution completes."""
+        _ = suite
         return None
 
     def close(self) -> None:

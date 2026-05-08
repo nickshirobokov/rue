@@ -161,7 +161,7 @@ What it changes is the recorded metadata:
 
 - `PredicateResult.message` stores the explanation
 - predicate traces can include `predicate.message`
-- database-backed runs can persist the message with the predicate result
+- database-backed suite executions can persist the message with the predicate result
 
 This is most useful when the predicate runs inside a normal Rue `assert`, because Rue is already collecting predicate metadata for that assertion.
 

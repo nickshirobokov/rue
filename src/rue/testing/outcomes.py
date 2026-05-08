@@ -38,5 +38,5 @@ def fail(reason: str = "") -> NoReturn:
 
 
 def xfail(reason: str = "") -> NoReturn:
-    """Mark the current test as expected to fail and stop execution."""
+    """Mark the current test as expected to fail and stop test execution."""
     raise XFailTest(reason)

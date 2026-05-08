@@ -1,4 +1,4 @@
-"""Execution base classes."""
+"""Executable test base classes."""
 
 from __future__ import annotations
 
@@ -7,15 +7,15 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from rue.events import RunEventsReceiver
+from rue.events import SuiteEventsReceiver
 from rue.resources.resolver import DependencyResolver
 from rue.testing.execution.backend import ExecutionBackend
 from rue.testing.execution.models import ExecutedTest, TestResult, TestStatus
 
 
 if TYPE_CHECKING:
-    from rue.testing.execution.executable.single import SingleTest
     from rue.testing.execution.models import LoadedTestDef
+    from rue.testing.execution.test.single import SingleTest
 
 
 class ExecutableTest(ABC):
@@ -23,11 +23,11 @@ class ExecutableTest(ABC):
 
     definition: LoadedTestDef
     backend: ExecutionBackend
-    execution_id: UUID
+    test_execution_id: UUID
     children: list[ExecutableTest]
 
     def walk(self) -> list[ExecutableTest]:
-        """Return this execution node and every descendant."""
+        """Return this test execution node and every descendant."""
         nodes: list[ExecutableTest] = [self]
         for child in self.children:
             for node in child.walk():
@@ -36,7 +36,7 @@ class ExecutableTest(ABC):
 
     def leaves(self) -> list[SingleTest]:
         """Return single-test leaves below this node."""
-        from rue.testing.execution.executable.single import SingleTest  # noqa: I001, PLC0415
+        from rue.testing.execution.test.single import SingleTest  # noqa: I001, PLC0415
 
         if not self.children:
             if not isinstance(self, SingleTest):
@@ -52,7 +52,7 @@ class ExecutableTest(ABC):
 
     async def not_run(self, reason: str) -> ExecutedTest:
         """Build and emit a synthetic result for a node that never ran."""
-        sub_executions = [
+        sub_test_executions = [
             await child.not_run(reason) for child in self.children
         ]
         execution = ExecutedTest(
@@ -62,10 +62,10 @@ class ExecutableTest(ABC):
                 duration_ms=0,
                 error=Exception(reason),
             ),
-            execution_id=self.execution_id,
-            sub_executions=sub_executions,
+            test_execution_id=self.test_execution_id,
+            sub_test_executions=sub_test_executions,
         )
-        await RunEventsReceiver.current().on_execution_complete(execution)
+        await SuiteEventsReceiver.current().on_test_execution_complete(execution)
         return execution
 
     async def execute(
@@ -84,10 +84,10 @@ class ExecutableTest(ABC):
                     duration_ms=(time.perf_counter() - start) * 1000,
                     error=error,
                 ),
-                execution_id=self.execution_id,
+                test_execution_id=self.test_execution_id,
             )
 
-        await RunEventsReceiver.current().on_execution_complete(execution)
+        await SuiteEventsReceiver.current().on_test_execution_complete(execution)
         return execution
 
     @abstractmethod

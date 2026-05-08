@@ -1,1 +1,1 @@
-"""Internal context grouping for Rue runtime state."""
+"""Internal context grouping for Rue suite execution state."""

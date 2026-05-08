@@ -4,9 +4,9 @@ from textwrap import dedent
 import pytest
 
 from rue.resources import DependencyResolver, registry
-from rue.testing.models import TestStatus
-from rue.testing.runner import Runner
-from tests.helpers import make_run_context, materialize_tests
+from rue.testing.execution.models import TestStatus
+from rue.testing.execution.suite.executable import ExecutableSuite
+from tests.helpers import make_suite_context, materialize_tests
 
 
 @pytest.mark.asyncio
@@ -23,7 +23,7 @@ async def test_iterated_subprocess_children_keep_distinct_process_updates(
             from rue.resources import resource
             from rue.resources.models import Scope
 
-            @resource(scope=Scope.RUN)
+            @resource(scope=Scope.SUITE)
             def shared_events():
                 return []
 
@@ -44,25 +44,29 @@ async def test_iterated_subprocess_children_keep_distinct_process_updates(
     )
 
     items = materialize_tests(module_path)
-    make_run_context(
-            otel=False,
-            concurrency=4,
-        )
-    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
+    context = make_suite_context(
+        otel=False,
+        concurrency=4,
+    )
+    suite = await ExecutableSuite(
+        items=items,
+        suite_execution_id=context.suite_execution_id,
+        resolver=DependencyResolver(registry),
+    ).execute()
 
     after_execution = next(
         execution
-        for execution in run.result.executions
+        for execution in suite.result.test_executions
         if execution.definition.spec.name == "test_after"
     )
 
-    assert after_execution.status == TestStatus.PASSED, [
+    assert after_execution.result.status == TestStatus.PASSED, [
         (
             execution.definition.spec.name,
-            execution.status.value,
+            execution.result.status.value,
             str(execution.result.error) if execution.result.error else None,
         )
-        for execution in run.result.executions
+        for execution in suite.result.test_executions
     ]
 
 
@@ -79,11 +83,11 @@ async def test_local_and_subprocess_updates_preserve_process_identity(
             from rue.resources import resource
             from rue.resources.models import Scope
 
-            @resource(scope=Scope.RUN)
+            @resource(scope=Scope.SUITE)
             def shared_events():
                 return []
 
-            @resource(scope=Scope.RUN)
+            @resource(scope=Scope.SUITE)
             def shared_meta():
                 return {}
 
@@ -110,25 +114,29 @@ async def test_local_and_subprocess_updates_preserve_process_identity(
     )
 
     items = materialize_tests(module_path)
-    make_run_context(
-            otel=False,
-            concurrency=2,
-        )
-    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
+    context = make_suite_context(
+        otel=False,
+        concurrency=2,
+    )
+    suite = await ExecutableSuite(
+        items=items,
+        suite_execution_id=context.suite_execution_id,
+        resolver=DependencyResolver(registry),
+    ).execute()
 
     after_execution = next(
         execution
-        for execution in run.result.executions
+        for execution in suite.result.test_executions
         if execution.definition.spec.name == "test_after"
     )
 
-    assert after_execution.status == TestStatus.PASSED, [
+    assert after_execution.result.status == TestStatus.PASSED, [
         (
             execution.definition.spec.name,
-            execution.status.value,
+            execution.result.status.value,
             str(execution.result.error) if execution.result.error else None,
         )
-        for execution in run.result.executions
+        for execution in suite.result.test_executions
     ]
 
 
@@ -155,7 +163,7 @@ async def test_local_and_subprocess_nested_updates_merge_without_replacing_root(
                     self.branch = Branch()
                     self.meta = {}
 
-            @resource(scope=Scope.RUN)
+            @resource(scope=Scope.SUITE)
             def shared_state():
                 return SharedState()
 
@@ -190,25 +198,29 @@ async def test_local_and_subprocess_nested_updates_merge_without_replacing_root(
     )
 
     items = materialize_tests(module_path)
-    make_run_context(
-            otel=False,
-            concurrency=2,
-        )
-    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
+    context = make_suite_context(
+        otel=False,
+        concurrency=2,
+    )
+    suite = await ExecutableSuite(
+        items=items,
+        suite_execution_id=context.suite_execution_id,
+        resolver=DependencyResolver(registry),
+    ).execute()
 
     after_execution = next(
         execution
-        for execution in run.result.executions
+        for execution in suite.result.test_executions
         if execution.definition.spec.name == "test_after"
     )
 
-    assert after_execution.status == TestStatus.PASSED, [
+    assert after_execution.result.status == TestStatus.PASSED, [
         (
             execution.definition.spec.name,
-            execution.status.value,
+            execution.result.status.value,
             str(execution.result.error) if execution.result.error else None,
         )
-        for execution in run.result.executions
+        for execution in suite.result.test_executions
     ]
 
 
@@ -231,7 +243,7 @@ async def test_local_and_subprocess_shared_sut_trace_state_stays_isolated(
                     with otel_runtime.start_as_current_span(f"{label}_step"):
                         return label
 
-            @rue.resource.sut(scope=Scope.RUN)
+            @rue.resource.sut(scope=Scope.SUITE)
             def shared_pipeline():
                 return rue.SUT(SharedPipeline(), methods=["run"])
 
@@ -257,19 +269,23 @@ async def test_local_and_subprocess_shared_sut_trace_state_stays_isolated(
     )
 
     items = materialize_tests(module_path)
-    make_run_context(
-            otel=True,
-            concurrency=2,
-        )
-    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
+    context = make_suite_context(
+        otel=True,
+        concurrency=2,
+    )
+    suite = await ExecutableSuite(
+        items=items,
+        suite_execution_id=context.suite_execution_id,
+        resolver=DependencyResolver(registry),
+    ).execute()
 
-    assert run.result.passed == 2, [
+    assert suite.result.passed == 2, [
         (
             execution.definition.spec.name,
-            execution.status.value,
+            execution.result.status.value,
             str(execution.result.error) if execution.result.error else None,
         )
-        for execution in run.result.executions
+        for execution in suite.result.test_executions
     ]
 
 
@@ -288,7 +304,7 @@ async def test_main_backend_waits_for_local_and_subprocess_stage(
             from rue.resources import resource
             from rue.resources.models import Scope
 
-            @resource(scope=Scope.RUN)
+            @resource(scope=Scope.SUITE)
             def events():
                 return []
 
@@ -317,17 +333,21 @@ async def test_main_backend_waits_for_local_and_subprocess_stage(
     )
 
     items = materialize_tests(module_path)
-    make_run_context(
-            otel=False,
-            concurrency=3,
-        )
-    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
+    context = make_suite_context(
+        otel=False,
+        concurrency=3,
+    )
+    suite = await ExecutableSuite(
+        items=items,
+        suite_execution_id=context.suite_execution_id,
+        resolver=DependencyResolver(registry),
+    ).execute()
 
-    assert run.result.passed == 4, [
+    assert suite.result.passed == 4, [
         (
             execution.definition.spec.name,
-            execution.status.value,
+            execution.result.status.value,
             str(execution.result.error) if execution.result.error else None,
         )
-        for execution in run.result.executions
+        for execution in suite.result.test_executions
     ]

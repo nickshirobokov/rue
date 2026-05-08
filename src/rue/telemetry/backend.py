@@ -10,7 +10,7 @@ from rue.telemetry.models import TelemetryArtifact
 
 
 if TYPE_CHECKING:
-    from rue.testing.models import LoadedTestDef, TestResult
+    from rue.testing.execution.models import LoadedTestDef, TestResult
 
 
 class TelemetryBackend(ABC):
@@ -21,8 +21,8 @@ class TelemetryBackend(ABC):
         self,
         definition: LoadedTestDef,
         *,
-        run_id: UUID,
-        execution_id: UUID,
+        suite_execution_id: UUID,
+        test_execution_id: UUID,
     ) -> None:
         """Start collecting telemetry for one concrete execution."""
 

@@ -5,13 +5,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from rue.events import RunEventsProcessor
-from rue.storage import TursoRunStore
+from rue.events import SuiteEventsProcessor
+from rue.storage import TursoSuiteStore
 from tests.helpers import TraceCollectorProcessor
 
 
 def _reset_processors() -> None:
-    RunEventsProcessor.REGISTRY.clear()
+    SuiteEventsProcessor.REGISTRY.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -32,8 +32,8 @@ def database_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def turso_store(database_path: Path) -> TursoRunStore:
-    store = TursoRunStore(database_path)
+def turso_store(database_path: Path) -> TursoSuiteStore:
+    store = TursoSuiteStore(database_path)
     store.initialize()
     return store
 
