@@ -4,23 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from uuid import UUID
 
 from rue.testing.execution.backend import ExecutionBackend
 from rue.testing.execution.executable import ExecutableTest
 
 
 @dataclass(slots=True)
-class QueueBatch:
+class _QueueBatch:
     """One sequential or parallel batch of tests."""
 
     backend: ExecutionBackend | None = None
     tests: list[ExecutableTest] = field(default_factory=list)
     _next_index: int = field(default=0, init=False, repr=False)
     _active_count: int = field(default=0, init=False, repr=False)
-
-    @property
-    def is_main(self) -> bool:
-        return self.backend is ExecutionBackend.MAIN
 
     @property
     def is_parallel(self) -> bool:
@@ -57,15 +54,14 @@ class QueueBatch:
 
 
 @dataclass(slots=True)
-class ModuleQueue:
+class _ModuleQueue:
     """Batch queue for a single module inside one concurrent runner step."""
 
-    module_path: Path
-    batches: list[QueueBatch] = field(default_factory=list)
+    batches: list[_QueueBatch] = field(default_factory=list)
     _next_batch_index: int = field(default=0, init=False, repr=False)
 
     @property
-    def current_batch(self) -> QueueBatch | None:
+    def current_batch(self) -> _QueueBatch | None:
         if self._next_batch_index >= len(self.batches):
             return None
         return self.batches[self._next_batch_index]
@@ -83,7 +79,7 @@ class ModuleQueue:
         if self.batches and self.batches[-1].backend is backend:
             self.batches[-1].append(test)
             return
-        batch = QueueBatch(backend=backend)
+        batch = _QueueBatch(backend=backend)
         batch.append(test)
         self.batches.append(batch)
 
@@ -96,12 +92,12 @@ class ModuleQueue:
 
 
 @dataclass(slots=True)
-class RunnerStep:
+class _RunnerStep:
     """One absolute runner step (main or parallel module region)."""
 
-    main_batch: QueueBatch | None = None
-    module_queues: list[ModuleQueue] = field(default_factory=list)
-    _module_index: dict[Path, ModuleQueue] = field(
+    main_batch: _QueueBatch | None = None
+    module_queues: list[_ModuleQueue] = field(default_factory=list)
+    _module_index: dict[Path, _ModuleQueue] = field(
         default_factory=dict, init=False, repr=False
     )
     _next_module_index: int = field(default=0, init=False, repr=False)
@@ -128,21 +124,21 @@ class RunnerStep:
     def add(self, test: ExecutableTest) -> None:
         if test.backend is ExecutionBackend.MAIN:
             if self.main_batch is None:
-                self.main_batch = QueueBatch(backend=ExecutionBackend.MAIN)
+                self.main_batch = _QueueBatch(backend=ExecutionBackend.MAIN)
             self.main_batch.append(test)
             return
 
         module_path = test.definition.spec.locator.module_path
         mq = self._module_index.get(module_path)
         if mq is None:
-            mq = ModuleQueue(module_path=module_path)
+            mq = _ModuleQueue()
             self._module_index[module_path] = mq
             self.module_queues.append(mq)
         mq.append(test)
 
     def dequeue_ready(
         self,
-    ) -> tuple[ModuleQueue, QueueBatch, ExecutableTest] | None:
+    ) -> tuple[_ModuleQueue, _QueueBatch, ExecutableTest] | None:
         count = len(self.module_queues)
         for offset in range(count):
             queue_index = (self._next_module_index + offset) % count
@@ -156,7 +152,7 @@ class RunnerStep:
             return mq, batch, entry
         return None
 
-    def finish(self, mq: ModuleQueue, batch: QueueBatch) -> None:
+    def finish(self, mq: _ModuleQueue, batch: _QueueBatch) -> None:
         batch.finish()
         mq.advance()
 
@@ -165,30 +161,53 @@ class RunnerStep:
 class SessionQueue:
     """Ordered queue of backend-aware runner steps."""
 
-    steps: list[RunnerStep] = field(default_factory=list)
+    steps: list[_RunnerStep] = field(default_factory=list)
     _tests: list[ExecutableTest] = field(
         default_factory=list, init=False, repr=False
+    )
+    _remaining_by_module: dict[Path, set[UUID]] = field(
+        default_factory=dict, init=False, repr=False
     )
 
     def add(self, test: ExecutableTest) -> None:
         """Append a top-level executable test to the queue."""
         self._tests.append(test)
+        module_path = test.definition.spec.locator.module_path
+        self._remaining_by_module.setdefault(module_path, set()).add(
+            test.execution_id
+        )
         match test.backend:
             case ExecutionBackend.MAIN:
                 if self.steps and self.steps[-1].is_main:
                     runner_step = self.steps[-1]
                 else:
-                    runner_step = RunnerStep(
-                        main_batch=QueueBatch(backend=ExecutionBackend.MAIN)
+                    runner_step = _RunnerStep(
+                        main_batch=_QueueBatch(backend=ExecutionBackend.MAIN)
                     )
                     self.steps.append(runner_step)
             case _:
                 if self.steps and not self.steps[-1].is_main:
                     runner_step = self.steps[-1]
                 else:
-                    runner_step = RunnerStep()
+                    runner_step = _RunnerStep()
                     self.steps.append(runner_step)
         runner_step.add(test)
+
+    def finish(self, test: ExecutableTest) -> Path | None:
+        """Mark a top-level executable complete and return closed module."""
+        module_path = test.definition.spec.locator.module_path
+        remaining = self._remaining_by_module[module_path]
+        if test.execution_id not in remaining:
+            msg = (
+                "Cannot finish an executable that is not pending: "
+                f"{test.execution_id}"
+            )
+            raise RuntimeError(msg)
+        remaining.remove(test.execution_id)
+        if remaining:
+            return None
+        del self._remaining_by_module[module_path]
+        return module_path
 
     @property
     def tests(self) -> list[ExecutableTest]:
@@ -197,23 +216,3 @@ class SessionQueue:
             self._tests,
             key=lambda test: test.definition.spec.collection_index,
         )
-
-    @property
-    def batches(self) -> list[QueueBatch]:
-        """Flattened queue batches ordered by discovery index."""
-        out: list[QueueBatch] = []
-        for step in self.steps:
-            if step.main_batch is not None:
-                out.append(step.main_batch)
-                continue
-            out.extend(
-                sorted(
-                    (
-                        batch
-                        for mq in step.module_queues
-                        for batch in mq.batches
-                    ),
-                    key=lambda batch: batch.tests[0].definition.spec.collection_index,
-                )
-            )
-        return out

@@ -11,18 +11,17 @@ This page covers **how to run tests** and **how the reporting system works**, re
 Run all discovered tests in the current directory:
 
 ```bash
-uv run rue tests run
+uv run rue run
 ```
 
-After installation, the same entrypoint is also available as `rue tests run`.
-Use `rue tests` as the shorthand alias when you want the default `run`
-subcommand.
+After installation, the same entrypoint is also available as `rue run`.
+The command name is explicit; bare `rue` shows command help.
 
 Run tests from specific paths:
 
 ```bash
-uv run rue tests run tests/
-uv run rue tests run test_chatbot.py test_agent.py
+uv run rue run tests/
+uv run rue run test_chatbot.py test_agent.py
 ```
 
 ## Filtering Tests
@@ -33,14 +32,14 @@ Use `-k` to filter tests by name with boolean expressions:
 
 ```bash
 # Run tests with "chatbot" in the name
-uv run rue tests run -k chatbot
+uv run rue run -k chatbot
 
 # Boolean operators: and, or, not
-uv run rue tests run -k "chatbot and not slow"
-uv run rue tests run -k "gpt4 or claude"
+uv run rue run -k "chatbot and not slow"
+uv run rue run -k "gpt4 or claude"
 
 # Grouping with parentheses
-uv run rue tests run -k "(fast or smoke) and not flaky"
+uv run rue run -k "(fast or smoke) and not flaky"
 ```
 
 Keyword matching is substring-based: `-k agent` matches `test_agent_response`, `test_weather_agent`, etc.
@@ -53,27 +52,27 @@ Use `-t`/`--tag` to include tests with specific tags:
 
 ```bash
 # Run tests tagged "smoke"
-uv run rue tests run --tag smoke
+uv run rue run --tag smoke
 
 # Multiple tags (OR logic)
-uv run rue tests run --tag smoke --tag fast
+uv run rue run --tag smoke --tag fast
 ```
 
 Use `--skip-tag` to exclude tests:
 
 ```bash
 # Skip slow tests
-uv run rue tests run --skip-tag slow
+uv run rue run --skip-tag slow
 
 # Skip multiple tags
-uv run rue tests run --skip-tag slow --skip-tag flaky
+uv run rue run --skip-tag slow --skip-tag flaky
 ```
 
 **Combine filters**:
 
 ```bash
 # Run fast smoke tests about chatbots
-uv run rue tests run --tag smoke --tag fast -k chatbot
+uv run rue run --tag smoke --tag fast -k chatbot
 ```
 
 ## Controlling Execution
@@ -83,13 +82,13 @@ uv run rue tests run --tag smoke --tag fast -k chatbot
 **`--maxfail N`** - Stop after N failures:
 
 ```bash
-uv run rue tests run --maxfail 3  # Stop after 3 failures
+uv run rue run --maxfail 3  # Stop after 3 failures
 ```
 
 **`--fail-fast`** - Stop at the first failed assertion within a test:
 
 ```bash
-uv run rue tests run --fail-fast
+uv run rue run --fail-fast
 ```
 
 Without `--fail-fast`, Rue collects all assertion failures in a test. With it, the test stops at the first failure.
@@ -100,13 +99,13 @@ Control parallel test execution with `--concurrency`:
 
 ```bash
 # Sequential (default)
-uv run rue tests run --concurrency 1
+uv run rue run --concurrency 1
 
 # 5 concurrent tests
-uv run rue tests run --concurrency 5
+uv run rue run --concurrency 5
 
 # Unlimited (capped at 10)
-uv run rue tests run --concurrency 0
+uv run rue run --concurrency 0
 ```
 
 **When to use concurrency**:
@@ -127,7 +126,7 @@ Set a global timeout for the entire test run:
 
 ```bash
 # Stop after 300 seconds (5 minutes)
-uv run rue tests run --timeout 300
+uv run rue run --timeout 300
 ```
 
 The timeout applies to the entire test session, not individual tests.
@@ -140,16 +139,16 @@ Control output detail with `-v` (verbose) or `-q` (quiet):
 
 ```bash
 # Minimal output (only failures)
-uv run rue tests run -q
+uv run rue run -q
 
 # Very minimal
-uv run rue tests run -qq
+uv run rue run -qq
 
 # Verbose output
-uv run rue tests run -v
+uv run rue run -v
 
 # Very verbose
-uv run rue tests run -vv
+uv run rue run -vv
 ```
 
 **Verbosity levels**:
@@ -160,17 +159,10 @@ uv run rue tests run -vv
 
 ### Output Capture
 
-By default, Rue captures stdout and stderr only while a wrapped `SUT` call is running. Use `-s` to show SUT output live:
-
-```bash
-# Show SUT output in real-time (still captured on the SUT)
-uv run rue tests run -s
-
-# Or the long form
-uv run rue tests run --show-output
-```
-
-Assert against `sut.stdout`, `sut.stderr`, or `sut.captured_output` inside your test. Output written outside an active wrapped `SUT` call is not stored on a Rue API.
+Rue captures stdout and stderr only while a wrapped `SUT` call is running.
+Assert against `sut.stdout`, `sut.stderr`, or `sut.captured_output` inside your test.
+Captured SUT output is kept on the SUT API instead of being printed live by Rue.
+Output written outside an active wrapped `SUT` call is not stored on a Rue API.
 
 ## OpenTelemetry
 
@@ -178,18 +170,16 @@ Rue enables OpenTelemetry capture by default so spans from your SUT and tests ar
 
 ```bash
 # Default behavior
-uv run rue tests run
+uv run rue run
 
 # Disable OpenTelemetry for this run
-uv run rue tests run --no-otel
+uv run rue run --no-otel
 
-# If you override processors, keep OtelReporter attached for local trace files
-uv run rue tests run --processor ConsoleReporter --processor OtelReporter
+# Extra processors are for custom RunEventsProcessor instances
+uv run rue run --processor CustomProcessor
 ```
 
-In the usual fresh-process setup, `uv run rue tests run` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the built-in `OtelReporter` is part of the default processor set. Each file stores `run_id`, `execution_id`, and a nested `trace` tree rooted at the test span.
-
-If you override the processor list and leave out `OtelReporter`, Rue still captures traces for the run, but it does not write local `.rue/traces/...` files.
+In the usual fresh-process setup, `uv run rue run` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the CLI attaches `OtelReporter` when OpenTelemetry is enabled. Each file stores `run_id`, `execution_id`, and a nested `trace` tree rooted at the test span.
 
 **Use OpenTelemetry spans for**:
 - Asserting tool calls in agent tests
@@ -208,7 +198,7 @@ need a stable external correlation ID (for example, linking CI jobs to Rue runs)
 Provide a UUID with `--run-id`:
 
 ```bash
-uv run rue tests run --run-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
+uv run rue run --run-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
 ```
 
 If that UUID already exists in the configured SQLite database, the command exits with code `2`
@@ -223,7 +213,7 @@ from uuid import UUID
 from rue.config import Config
 from rue.context.runtime import RunContext
 from rue.events import RunEventsReceiver
-from rue.cli.console import ConsoleReporter
+from rue.cli.rendering.terminal import TerminalRunReporter
 from rue.storage import DBWriter
 from rue.storage import DBManager
 from rue.testing import Runner
@@ -236,7 +226,7 @@ db_writer = DBWriter()
 with RunContext(
     config=config,
     run_id=UUID("00000000-0000-0000-0000-000000000001"),
-), RunEventsReceiver([ConsoleReporter(), db_writer]):
+), RunEventsReceiver([TerminalRunReporter(), db_writer]):
     runner = Runner()
 ```
 
@@ -360,22 +350,23 @@ class RunEventsProcessor:
 ### Processor Selection
 
 Processor selection follows this public precedence order:
-- CLI `--processor` flags replace the configured processor list
-- `config.processors` replaces the default processor list
-- if no explicit processor list is set, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`
+- `TerminalRunReporter` is attached by the CLI for normal `rue run` output
+- `OtelReporter` is attached when OpenTelemetry is enabled
+- CLI `--processor` flags replace the configured custom processor list
+- `config.processors` adds custom processors when CLI flags are absent
 
-Official Rue entrypoints append `DBWriter` so run data streams into SQLite as executions complete. Programmatic runs attach one or more processors by opening `RunEventsReceiver([...])` around `Runner`.
+Official Rue entrypoints append the database recorder so run data streams into Turso as executions complete. Programmatic runs attach one or more processors by opening `RunEventsReceiver([...])` around `Runner`.
 
 ### Built-in Processors
 
-In a normal fresh process, Rue's default processor set includes `ConsoleReporter` and `OtelReporter`.
+In a normal fresh process, Rue's CLI processor set includes `TerminalRunReporter` and `OtelReporter`.
 
-**ConsoleReporter**: Outputs to terminal with Rich formatting.
+**TerminalRunReporter**: Outputs to terminal with Rich formatting.
 
 ```python
-from rue.cli.console import ConsoleReporter
+from rue.cli.rendering.terminal import TerminalRunReporter
 
-processor = ConsoleReporter(verbosity=1)
+processor = TerminalRunReporter(verbosity=1)
 ```
 
 **OtelReporter**: Persists OpenTelemetry traces under `.rue/traces`.
@@ -492,7 +483,7 @@ from rue.config import Config
 from rue.context.runtime import RunContext
 from rue.events import RunEventsReceiver
 from rue.testing import Runner
-from rue.cli.console import ConsoleReporter
+from rue.cli.rendering.terminal import TerminalRunReporter
 from rue.telemetry.otel import OtelReporter
 from rue.storage import DBWriter
 from rue.storage import DBManager
@@ -503,7 +494,7 @@ async def main():
     db = DBManager(config.db_path)
     db.initialize()
     db_writer = DBWriter()
-    console = ConsoleReporter(verbosity=1)
+    console = TerminalRunReporter(verbosity=1)
     otel = OtelReporter()
     json_processor = JsonFileProcessor("results.json")
     slack = SlackProcessor(webhook_url="https://...")
@@ -529,17 +520,17 @@ asyncio.run(main())
 
 **Run smoke tests concurrently**:
 ```bash
-uv run rue tests run --tag smoke --concurrency 5
+uv run rue run --tag smoke --concurrency 5
 ```
 
 **Debug a specific test with OpenTelemetry**:
 ```bash
-uv run rue tests run -k "agent_tool_call" -vv
+uv run rue run -k "agent_tool_call" -vv
 ```
 
 **Run fast tests, stop on first failure**:
 ```bash
-uv run rue tests run --tag fast --fail-fast
+uv run rue run --tag fast --fail-fast
 ```
 
 **CI configuration** (pyproject.toml):
@@ -592,7 +583,6 @@ uv run rue db status
 Database: /Users/you/project/.rue/rue.db
 Current version: <current schema version>
 Target version: <target schema version>
-Max stored runs: 5
 Status: Up to date
 ```
 

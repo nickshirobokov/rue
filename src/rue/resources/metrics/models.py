@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rue.context.collectors import CURRENT_METRIC_RESULTS
@@ -51,7 +52,10 @@ class MetricMetadata:
     first_item_recorded_at: datetime | None = None
     identity: ResourceSpec = field(
         default_factory=lambda: ResourceSpec(
-            locator=Locator(module_path=None, function_name=""),
+            locator=Locator(
+                module_path=Path(__file__),
+                function_name="",
+            ),
             scope=Scope.RUN,
         )
     )

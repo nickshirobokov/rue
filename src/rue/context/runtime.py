@@ -21,7 +21,6 @@ from rue.models import Spec
 
 if TYPE_CHECKING:
     from rue.resources.models import ResourceSpec
-    from rue.testing.models.loaded import LoadedTestDef
     from rue.testing.tracing import TestTracer
 
 
@@ -31,7 +30,6 @@ class TestContext:
 
     __test__ = False
 
-    item: LoadedTestDef
     execution_id: UUID
     _tokens: list[Token[TestContext]] = field(
         default_factory=list,
@@ -49,22 +47,10 @@ class TestContext:
     def __enter__(self) -> TestContext:
         """Bind this test context to the current execution scope."""
         self._tokens.append(CURRENT_TEST.set(self))
-        run_context = CURRENT_RUN_CONTEXT.get()
-        scope_context = ScopeContext.for_test(
-            run_id=run_context.run_id,
-            execution_id=self.execution_id,
-            module_path=self.module_path,
-        )
+        scope_context = ScopeContext.for_test(self.execution_id)
         scope_context.__enter__()
         self._scope_contexts.append(scope_context)
         return self
-
-    @property
-    def module_path(self) -> Path:
-        """Return the resolved module path for this test context."""
-        return (
-            self.item.spec.locator.module_path or Path("<dynamic>")
-        ).resolve()
 
     def __exit__(
         self,
@@ -75,6 +61,39 @@ class TestContext:
         """Restore the previous test context."""
         self._scope_contexts.pop().__exit__(exc_type, exc, traceback)
         CURRENT_TEST.reset(self._tokens.pop())
+
+
+@dataclass(slots=True)
+class ModuleContext:
+    """Runtime data owned by work inside one test module."""
+
+    module_path: Path
+    _scope_contexts: list[ScopeContext] = field(
+        default_factory=list,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def __enter__(self) -> ModuleContext:
+        """Bind this module context to the current execution scope."""
+        run_context = CURRENT_RUN_CONTEXT.get()
+        scope_context = ScopeContext.for_module(
+            run_id=run_context.run_id,
+            module_path=self.module_path,
+        )
+        scope_context.__enter__()
+        self._scope_contexts.append(scope_context)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Restore the previous scope context."""
+        self._scope_contexts.pop().__exit__(exc_type, exc, traceback)
 
 
 @dataclass(slots=True)

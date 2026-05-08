@@ -159,20 +159,14 @@ class DependencyResolver:
     def undo_patches(
         self,
         *,
-        scope: Scope | None = None,
         owner: ScopeOwner | None = None,
     ) -> None:
         """Pop patches from the store and undo them."""
-        match (owner, scope):
-            case (ScopeOwner() as o, None):
+        match owner:
+            case ScopeOwner() as o:
                 handles = reversed(self.patches.pop_owner(o))
-            case (None, None):
+            case None:
                 handles = reversed(self.patches.pop_all())
-            case (None, Scope.TEST | Scope.MODULE | Scope.RUN):
-                handles = reversed(self.patches.pop_scope(scope))
-            case (ScopeOwner() as o, Scope.TEST | Scope.MODULE | Scope.RUN):
-                msg = "Owner and scope cannot both be specified."
-                raise ValueError(msg)
         for handle in handles:
             handle.undo()
 

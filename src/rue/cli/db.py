@@ -7,8 +7,9 @@ from typing import Annotated
 from rich.console import Console
 from typer import Option, Typer
 
+from rue.cli.options import DatabasePathOpt
 from rue.config import Config, load_config
-from rue.storage import MAX_STORED_RUNS, SCHEMA_VERSION, TursoRunStore
+from rue.storage import SCHEMA_VERSION, TursoRunStore
 
 
 db_app = Typer(help="Database management commands")
@@ -29,7 +30,6 @@ class DatabaseCommands:
         self.console.print(f"Exists: {self.store.exists()}")
         self.console.print(f"Schema version: {current}")
         self.console.print(f"Target version: {SCHEMA_VERSION}")
-        self.console.print(f"Max stored runs: {MAX_STORED_RUNS}")
         self.console.print(f"Stored runs: {self.store.run_count()}")
 
         if current == SCHEMA_VERSION:
@@ -79,11 +79,7 @@ class DatabaseCommands:
 
 
 @db_app.command()
-def status(
-    database_path: Annotated[
-        str | None, Option("--database-path", help="Path to the Rue Turso database")
-    ] = None,
-) -> None:
+def status(database_path: DatabasePathOpt = None) -> None:
     """Show database schema version status."""
     raise SystemExit(
         DatabaseCommands(
@@ -93,11 +89,7 @@ def status(
 
 
 @db_app.command()
-def init(
-    database_path: Annotated[
-        str | None, Option("--database-path", help="Path to the Rue Turso database")
-    ] = None,
-) -> None:
+def init(database_path: DatabasePathOpt = None) -> None:
     """Create the database schema."""
     raise SystemExit(
         DatabaseCommands(
@@ -108,9 +100,7 @@ def init(
 
 @db_app.command()
 def reset(
-    database_path: Annotated[
-        str | None, Option("--database-path", help="Path to the Rue Turso database")
-    ] = None,
+    database_path: DatabasePathOpt = None,
     yes: Annotated[
         bool,
         Option("--yes", help="Confirm destructive reset without prompting"),

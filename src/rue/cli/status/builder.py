@@ -1,4 +1,4 @@
-"""Builder for `rue tests status` reports."""
+"""Builder for `rue status` reports."""
 
 from __future__ import annotations
 
@@ -8,17 +8,16 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from rue.cli.tests.status.models import (
-    StatusIssue,
-    StatusNode,
-    TestsStatusReport,
+from rue.cli.rendering.tests import (
+    TestReport,
+    TestReportIssue,
+    TestReportNode,
 )
 from rue.config import Config
-from rue.context.runtime import RunContext, TestContext
+from rue.context.runtime import ModuleContext, RunContext, TestContext
 from rue.resources import DependencyResolver, ResourceSpec
 from rue.resources.models import ResourceGraph
 from rue.resources.registry import registry as default_resource_registry
-from rue.storage import TursoRunStore
 from rue.testing.discovery import TestLoader
 from rue.testing.execution.executable import ExecutableTest
 from rue.testing.execution.factory import DefaultTestFactory
@@ -27,21 +26,19 @@ from rue.testing.models import TestSpecCollection
 
 
 class TestsStatusBuilder:
-    """Build status reports from discovered tests."""
+    """Inspect discovered tests and return render-ready status data."""
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self._issues_by_execution_id: dict[UUID, list[StatusIssue]] = (
+        self._issues_by_execution_id: dict[UUID, list[TestReportIssue]] = (
             defaultdict(list)
         )
 
     def build(
         self,
         collection: TestSpecCollection,
-        *,
-        store: TursoRunStore | None,
-    ) -> TestsStatusReport:
-        """Return the current test status report for a collection."""
+    ) -> TestReport:
+        """Build executable trees and preflight dependencies."""
         default_resource_registry.reset()
         self._issues_by_execution_id = defaultdict(list)
 
@@ -70,7 +67,7 @@ class TestsStatusBuilder:
                 )
             )
 
-            module_nodes: dict[Path, list[StatusNode]] = defaultdict(list)
+            module_nodes: dict[Path, list[TestReportNode]] = defaultdict(list)
             for test in tests:
                 module_nodes[test.definition.spec.locator.module_path].append(
                     self._finalize_node(
@@ -79,7 +76,7 @@ class TestsStatusBuilder:
                     )
                 )
 
-            return TestsStatusReport(
+            return TestReport(
                 run_window=(),
                 module_nodes=dict(module_nodes),
             )
@@ -91,10 +88,12 @@ class TestsStatusBuilder:
         dict[UUID, tuple[ResourceSpec, ...]],
         dict[UUID, ResourceGraph],
     ]:
+        """Compile static dependency graphs for each leaf test."""
         connected_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]] = {}
         graphs_by_execution_id: dict[UUID, ResourceGraph] = {}
         for leaf in leaves:
             try:
+                # Status surfaces dependency problems as tree issues.
                 graphs = default_resource_registry.compile_graphs(
                     {
                         leaf.execution_id: (
@@ -124,6 +123,7 @@ class TestsStatusBuilder:
         connected_by_execution_id: dict[UUID, tuple[ResourceSpec, ...]],
         graphs_by_execution_id: dict[UUID, ResourceGraph],
     ) -> dict[UUID, dict[str, tuple[ResourceSpec, ...]]]:
+        """Resolve graph dependencies enough to report visible resources."""
         resources_by_execution_id: dict[
             UUID, dict[str, tuple[ResourceSpec, ...]]
         ] = {}
@@ -139,9 +139,10 @@ class TestsStatusBuilder:
             graph = graphs_by_execution_id[execution_id]
             visible_resources = {}
             try:
-                with TestContext(
-                    item=leaf.definition,
-                    execution_id=execution_id,
+                module_path = leaf.definition.spec.locator.module_path
+                with (
+                    ModuleContext(module_path),
+                    TestContext(execution_id=execution_id),
                 ):
                     await resolver.resolve_graph_deps(
                         graph,
@@ -152,6 +153,7 @@ class TestsStatusBuilder:
             except Exception as error:
                 self._add_issue(execution_id, "resolve", str(error))
             finally:
+                # Group resolved instances by runtime type for compact display.
                 grouped_resources: dict[str, list[ResourceSpec]] = {}
                 for spec in connected:
                     value = visible_resources.get(spec)
@@ -178,13 +180,14 @@ class TestsStatusBuilder:
         phase: Literal["resolve"],
         message: str,
     ) -> None:
+        """Attach one deduplicated status issue to a leaf execution."""
         if any(
             issue.phase == phase and issue.message == message
             for issue in self._issues_by_execution_id[execution_id]
         ):
             return
         self._issues_by_execution_id[execution_id].append(
-            StatusIssue(phase=phase, message=message)
+            TestReportIssue(phase=phase, message=message)
         )
 
     def _finalize_node(
@@ -193,7 +196,8 @@ class TestsStatusBuilder:
         resources_by_execution_id: dict[
             UUID, dict[str, tuple[ResourceSpec, ...]]
         ],
-    ) -> StatusNode:
+    ) -> TestReportNode:
+        """Convert an executable test tree into shared report nodes."""
         children = tuple(
             self._finalize_node(
                 child,
@@ -204,7 +208,7 @@ class TestsStatusBuilder:
         leaf_count = (
             sum(child.leaf_count for child in children) if children else 1
         )
-        return StatusNode(
+        return TestReportNode(
             definition=test.definition,
             backend=test.backend,
             history=(),

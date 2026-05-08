@@ -3,13 +3,13 @@
 This example shows how to:
 1. Register traceable SUT factories with `rue.SUT(...)`
 2. Inspect sync, async, and multi-method SUT spans
-3. Persist local trace files with the `OtelReporter`
+3. Persist local trace files with the CLI-attached `OtelReporter`
 
 Run with default OpenTelemetry capture:
-    uv run rue tests run examples/test_example_otel_spans.py
+    uv run rue run examples/test_example_otel_spans.py
 
-Persist local trace files too:
-    uv run rue tests run examples/test_example_otel_spans.py --reporter ConsoleReporter --reporter OtelReporter
+Force-enable local trace files when config disables OpenTelemetry:
+    uv run rue run examples/test_example_otel_spans.py --otel
 """
 
 import asyncio

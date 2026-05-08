@@ -1,13 +1,13 @@
 """Example demonstrating sync test threading and queue barrier backends.
 
-By default, sync rue tests run in a worker thread so the event loop
+By default, sync rue run in a worker thread so the event loop
 stays responsive (e.g. for live console updates). Use
 @rue.test.backend(ExecutionBackend.MODULE_MAIN)
 when a test should block only its own module queue, and
 @rue.test.backend(ExecutionBackend.MAIN)
 when a test must execute on the true main thread and block all work.
 
-    uv run rue tests run examples/test_example_run_inline.py -v
+    uv run rue run examples/test_example_run_inline.py -v
 """
 
 import threading

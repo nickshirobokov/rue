@@ -1,9 +1,11 @@
+import builtins
 from pathlib import Path
 from textwrap import dedent
 
 import pytest
 
 from rue.resources import DependencyResolver, registry
+from rue.testing.discovery import TestLoader, TestSpecCollector
 from rue.testing.models import TestStatus
 from rue.testing.runner import Runner
 from tests.helpers import make_run_context, materialize_tests
@@ -60,6 +62,7 @@ async def test_runner_resolves_mixed_scope_di_graph_hooks_and_teardown(
         dedent(
             """
             import rue
+            from rue import ExecutionBackend
             from rue.resources.models import Scope
 
 
@@ -104,6 +107,7 @@ async def test_runner_resolves_mixed_scope_di_graph_hooks_and_teardown(
                 case_state["module"]["run"]["cases"].append(label)
 
 
+            @rue.test.backend(ExecutionBackend.MAIN)
             @rue.test
             def test_after(run_state, events):
                 assert sorted(run_state["cases"]) == ["left", "right"]
@@ -121,6 +125,74 @@ async def test_runner_resolves_mixed_scope_di_graph_hooks_and_teardown(
 
     assert run.result.passed == 2, _failed_executions(run)
     assert [len(e.sub_executions) for e in run.result.executions] == [2, 0]
+
+
+@pytest.mark.asyncio
+async def test_module_scope_teardown_waits_for_top_level_composite(
+    tmp_path: Path,
+):
+    module_a_path = tmp_path / "test_module_scope_a.py"
+    module_b_path = tmp_path / "test_module_scope_b.py"
+    module_a_path.write_text(
+        dedent(
+            """
+            import asyncio
+            import builtins
+
+            import rue
+            from rue.resources.models import Scope
+
+
+            @rue.resource(scope=Scope.MODULE)
+            def module_state():
+                builtins.rue_module_lifecycle_events.append("setup")
+                yield "ready"
+                builtins.rue_module_lifecycle_events.append("teardown")
+
+
+            @rue.test.iterate.params("value", [1, 2])
+            @rue.test
+            async def test_many(value, module_state):
+                await asyncio.sleep(0)
+                assert module_state == "ready"
+            """
+        )
+    )
+    module_b_path.write_text(
+        dedent(
+            """
+            import builtins
+
+            import rue
+            from rue import ExecutionBackend
+
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_after_module_a():
+                assert builtins.rue_module_lifecycle_events == [
+                    "setup",
+                    "teardown",
+                ]
+            """
+        )
+    )
+    builtins.rue_module_lifecycle_events = []
+    try:
+        collection = TestSpecCollector((), (), None).build_spec_collection(
+            (module_a_path, module_b_path)
+        )
+        items = TestLoader(collection.suite_root).load_from_collection(
+            collection
+        )
+        make_run_context(otel=False, concurrency=2)
+        run = await Runner().run(
+            items=items,
+            resolver=DependencyResolver(registry),
+        )
+    finally:
+        del builtins.rue_module_lifecycle_events
+
+    assert run.result.passed == 2, _failed_executions(run)
 
 
 @pytest.mark.asyncio

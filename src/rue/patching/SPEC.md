@@ -139,7 +139,9 @@ and the matching records disappear.
 - A dispatcher is installed once per target member. Later patches append records
   for different owners.
 - Active lookup walks records newest-first and returns the first record owned by
-  the current run, module, or test owner for that record's scope.
+  the current run, module, or test owner for that record's scope. Module owners
+  come from `ModuleContext` during top-level module work and module teardown,
+  or from `TestContext` during a test execution.
 - Missing-value patches use the same dispatch path and raise
   `AttributeError`, `KeyError`, or `IndexError` when selected.
 - Undo removes handles in reverse teardown order. The original value is restored

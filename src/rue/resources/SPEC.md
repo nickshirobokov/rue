@@ -123,7 +123,7 @@ sequenceDiagram
         Transfer-->>Runner: update_since(snapshot)
         Runner->>Transfer: apply_update(snapshot, update)
     end
-    Runner->>Resolver: teardown(Scope.TEST / MODULE / all)
+    Runner->>Resolver: teardown(Scope.TEST), ModuleContext + teardown(Scope.MODULE), final teardown()
     Resolver->>Resolver: close generator teardowns
     Resolver->>Store: clear(owner)
     Resolver->>Resolver: undo PatchStore handles
@@ -140,6 +140,7 @@ sequenceDiagram
 | `ResourceStore` | Cache, pending futures, teardown records, and sync graph per `ScopeOwner`. |
 | `StateTransfer` | Snapshot/hydrate/update path for subprocess execution. |
 | `ResourceHookContext` | Ambient metadata while resource hooks run. |
+| `ModuleContext` | Runtime module owner used for top-level module work and module teardown. |
 
 ## Core Rules
 
@@ -150,7 +151,8 @@ sequenceDiagram
 - Wider scopes cannot depend on narrower scopes. The current rule is encoded by
   `Scope.dependency_scopes`.
 - Runtime ownership is not the provider path. Values are cached under
-  `ScopeContext.current_owner(spec.scope)`.
+  `ScopeContext.current_owner(spec.scope)`, with module owners supplied by
+  `ModuleContext` or `TestContext`.
 - Only the first resolver task materializes a `(ResourceSpec, ScopeOwner)`;
   concurrent callers wait on the pending future.
 - `PatchStore` is bound for resolution and teardown so `monkeypatch` resources

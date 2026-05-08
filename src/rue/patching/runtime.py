@@ -99,14 +99,6 @@ class PatchStore:
         """Remove and return patch handles for one owner."""
         return self._handles.pop(owner, [])
 
-    def pop_scope(self, scope: Scope) -> list[PatchHandle]:
-        """Remove and return patch handles for all owners in one scope."""
-        handles: list[PatchHandle] = []
-        for owner in tuple(self._handles):
-            if owner.scope is scope:
-                handles.extend(self.pop_owner(owner))
-        return handles
-
     def pop_all(self) -> list[PatchHandle]:
         """Remove and return all patch handles."""
         handles: list[PatchHandle] = []

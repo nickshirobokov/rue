@@ -21,7 +21,9 @@ def test_rewritten_assert_collects_predicate_results(tmp_path):
     mod_name = f"test_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(
-        """
+        f"""
+from pathlib import Path
+
 from rue import test
 from rue.models import Locator
 from rue.resources import ResourceSpec, Scope
@@ -35,7 +37,17 @@ def equals(actual, reference):
 
 @test
 def test_sample():
-    m = Metric(metadata=MetricMetadata(identity=ResourceSpec(locator=Locator(module_path=None, function_name="m"), scope=Scope.RUN)))
+    m = Metric(
+        metadata=MetricMetadata(
+            identity=ResourceSpec(
+                locator=Locator(
+                    module_path=Path({str(mod_path)!r}),
+                    function_name="m",
+                ),
+                scope=Scope.RUN,
+            )
+        )
+    )
     m.add_record([1, 2, 3])
     assert equals(1, 1) and (m.len == 3)
 """.lstrip()
@@ -45,7 +57,7 @@ def test_sample():
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         make_run_context()
-        ctx = TestContext(item=item, execution_id=uuid4())
+        ctx = TestContext(execution_id=uuid4())
         with (
             ctx,
             bind(CURRENT_ASSERTION_RESULTS, assertion_results),
@@ -86,7 +98,7 @@ def test_fail():
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         make_run_context()
-        ctx = TestContext(item=item, execution_id=uuid4())
+        ctx = TestContext(execution_id=uuid4())
         with (
             ctx,
             bind(CURRENT_ASSERTION_RESULTS, assertion_results),
@@ -125,12 +137,12 @@ def test_metric_capture_multi():
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
         make_run_context()
-        ctx = TestContext(item=item, execution_id=uuid4())
+        ctx = TestContext(execution_id=uuid4())
         m = Metric(
             metadata=MetricMetadata(
                 identity=ResourceSpec(
                     locator=Locator(
-                        module_path=None,
+                        module_path=mod_path,
                         function_name="assert_outcomes",
                     ),
                     scope=Scope.RUN,
@@ -161,7 +173,9 @@ async def test_rewritten_asserts_inside_metric_functions_are_collected(
     mod_name = f"test_{uuid4().hex}"
     mod_path = tmp_path / f"{mod_name}.py"
     mod_path.write_text(
-        """
+        f"""
+from pathlib import Path
+
 import rue
 from rue.models import Locator
 from rue.resources import ResourceSpec, Scope
@@ -170,7 +184,17 @@ from rue.resources.metrics.models import MetricMetadata
 
 @rue.resource.metric
 def my_metric():
-    m = Metric(metadata=MetricMetadata(identity=ResourceSpec(locator=Locator(module_path=None, function_name="m"), scope=Scope.RUN)))
+    m = Metric(
+        metadata=MetricMetadata(
+            identity=ResourceSpec(
+                locator=Locator(
+                    module_path=Path({str(mod_path)!r}),
+                    function_name="m",
+                ),
+                scope=Scope.RUN,
+            )
+        )
+    )
     yield m
     assert False, "nope"
 
@@ -184,7 +208,8 @@ def test_dummy():
         [item] = materialize_tests(mod_path)
         resolver = DependencyResolver(registry)
         execution_id = uuid4()
-        ctx = TestContext(item=item, execution_id=execution_id)
+        make_run_context()
+        ctx = TestContext(execution_id=execution_id)
         metric_results: list[MetricResult] = []
         with ctx, bind(CURRENT_METRIC_RESULTS, metric_results):
             graphs = registry.compile_graphs(
@@ -243,7 +268,8 @@ def test_repr_cases():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
-        with TestContext(item=item, execution_id=uuid4()), bind(
+        make_run_context()
+        with TestContext(execution_id=uuid4()), bind(
             CURRENT_ASSERTION_RESULTS,
             assertion_results,
         ):
@@ -293,7 +319,8 @@ def test_multiline_assert():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
-        with TestContext(item=item, execution_id=uuid4()), bind(
+        make_run_context()
+        with TestContext(execution_id=uuid4()), bind(
             CURRENT_ASSERTION_RESULTS,
             assertion_results,
         ):

@@ -1,11 +1,10 @@
-"""`rue tests status` command."""
+"""`rue status` command."""
 
 from __future__ import annotations
 
 from rich.console import Console
 
-from rue.cli.errors import print_definition_errors
-from rue.cli.tests.options import (
+from rue.cli.options import (
     DatabasePathOpt,
     KeywordOpt,
     SkipTagOpt,
@@ -14,14 +13,11 @@ from rue.cli.tests.options import (
     VerboseOpt,
     resolve_selection,
 )
-from rue.cli.tests.status.builder import TestsStatusBuilder
-from rue.cli.tests.status.render import StatusRenderer
+from rue.cli.rendering.errors import print_definition_errors
+from rue.cli.rendering.tests import TestTreeRenderer
+from rue.cli.status.builder import TestsStatusBuilder
 from rue.config import load_config
-from rue.storage import TursoRunStore
 from rue.testing.discovery import TestDefinitionErrors
-
-
-status_renderer = StatusRenderer()
 
 
 def status(
@@ -44,15 +40,12 @@ def status(
     )
     collection = collector.build_spec_collection(resolved_paths)
     builder = TestsStatusBuilder(status_config)
-    store = None
-    if status_config.database_path.exists():
-        store = TursoRunStore(status_config.database_path)
     try:
-        report = builder.build(collection, store=store)
+        report = builder.build(collection)
     except TestDefinitionErrors as errors:
         print_definition_errors(errors)
         raise SystemExit(2) from errors
-    Console().print(status_renderer.render(report, status_config.verbosity))
+    Console().print(TestTreeRenderer().render(report, status_config.verbosity))
 
 
-__all__ = ["status", "status_renderer"]
+__all__ = ["status"]

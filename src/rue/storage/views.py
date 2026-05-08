@@ -188,7 +188,7 @@ class StoredExecutionView:
     run_id: str
     parent_id: str | None
     function_name: str
-    module_path: str | None
+    module_path: str
     class_name: str | None
     is_async: bool
     case_id: str | None
@@ -232,7 +232,7 @@ class StoredExecutionView:
             run_id=str(run_id),
             parent_id=str(parent_id) if parent_id is not None else None,
             function_name=spec.locator.function_name,
-            module_path=str(module_path) if module_path else None,
+            module_path=str(module_path),
             class_name=spec.locator.class_name,
             is_async=spec.is_async,
             case_id=str(spec.case_id) if spec.case_id else None,
@@ -322,8 +322,7 @@ class StoredMetricView:
     run_id: str
     name: str
     scope: str
-    provider_path: str | None
-    provider_dir: str | None
+    provider_path: str
     value_integer: int | None
     value_real: float | None
     value_boolean: bool | None
@@ -361,8 +360,7 @@ class StoredMetricView:
             run_id=str(run_id),
             name=identity.locator.function_name,
             scope=identity.scope.value,
-            provider_path=str(module_path) if module_path else None,
-            provider_dir=str(module_path.parent) if module_path else None,
+            provider_path=str(module_path),
             value_integer=value_integer,
             value_real=value_real,
             value_boolean=value_boolean,
@@ -397,7 +395,6 @@ class StoredMetricView:
             self.name,
             self.scope,
             self.provider_path,
-            self.provider_dir,
             self.value_integer,
             self.value_real,
             self.value_boolean,
@@ -410,10 +407,10 @@ class StoredMetricView:
         row = conn.execute(
             """
             INSERT INTO metrics (
-                run_id, name, scope, provider_path, provider_dir,
+                run_id, name, scope, provider_path,
                 value_integer, value_real, value_boolean, value_json,
                 first_recorded_at, last_recorded_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING metric_id
             """,
             self._insert_values(),
@@ -433,7 +430,7 @@ class _StoredMetricConsumerRow:
     metric_id: int | None
     kind: str
     function_name: str
-    module_path: str | None
+    module_path: str
     class_name: str | None
     scope: str | None
     suffix: str | None
@@ -462,9 +459,7 @@ class _StoredMetricConsumerRow:
             metric_id=metric_id,
             kind=kind,
             function_name=locator.function_name,
-            module_path=(
-                str(locator.module_path) if locator.module_path else None
-            ),
+            module_path=str(locator.module_path),
             class_name=locator.class_name,
             scope=scope,
             suffix=suffix,
@@ -505,7 +500,7 @@ class _StoredMetricConsumerRow:
 class _StoredMetricDependencyRow:
     metric_id: int | None
     function_name: str
-    module_path: str | None
+    module_path: str
     scope: str
 
     @classmethod
@@ -517,9 +512,7 @@ class _StoredMetricDependencyRow:
         return cls(
             metric_id=metric_id,
             function_name=provider.locator.function_name,
-            module_path=str(provider.locator.module_path)
-            if provider.locator.module_path
-            else None,
+            module_path=str(provider.locator.module_path),
             scope=provider.scope.value,
         )
 

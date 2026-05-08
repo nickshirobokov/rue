@@ -395,11 +395,11 @@ class TestLoader:
         items: list[LoadedTestDef] = []
         issues: list[TestDefinitionIssue] = []
         for module_path, requested_specs in by_module.items():
-            setup_chain = collection.setup_chain_for(module_path)
+            setup_chain = collection.setup_chains[module_path]
             try:
                 for setup_ref in setup_chain:
                     self.prepare_setup(setup_ref.path)
-                module = self._session.load_module(module_path.resolve())
+                module = self._session.load_module(module_path)
             except Exception as error:
                 issues.extend(
                     TestDefinitionIssue(spec, str(error))
@@ -441,7 +441,7 @@ class TestLoader:
         inside the module or class namespace.
         """
         if module is None:
-            module = self._session.load_module(spec.locator.module_path.resolve())
+            module = self._session.load_module(spec.locator.module_path)
 
         match spec.locator.class_name:
             case str() as class_name:

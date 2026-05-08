@@ -1,4 +1,4 @@
-"""Shared primitives: status styles and pure formatting utilities."""
+"""Shared CLI rendering primitives."""
 
 # ruff: noqa: D101,D103
 

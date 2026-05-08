@@ -38,6 +38,10 @@ from rue.testing.models import (
 from rue.testing.tracing import TestTracer
 
 
+def _never_stopped() -> bool:
+    return False
+
+
 @dataclass
 class SingleTest(ExecutableTest):
     """Executes a single test directly or in a subprocess."""
@@ -64,14 +68,19 @@ class SingleTest(ExecutableTest):
             run_id=context.run_id,
         )
 
+    def __getstate__(self) -> dict[str, Any]:
+        """Serialize the event-visible test without runtime schedulers."""
+        state = self.__dict__.copy()
+        state["semaphore"] = None
+        state["is_stopped"] = _never_stopped
+        state["tracer"] = TestTracer(run_id=self.tracer.run_id)
+        return state
+
     async def _execute(
         self,
         resolver: DependencyResolver,
     ) -> ExecutedTest:
-        with TestContext(
-            item=self.definition,
-            execution_id=self.execution_id,
-        ):
+        with TestContext(execution_id=self.execution_id):
             match self:
                 case SingleTest(is_stopped=is_stopped) if is_stopped():
                     return ExecutedTest(

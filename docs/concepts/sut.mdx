@@ -30,7 +30,7 @@ def test_chatbot_works(chatbot):
 The most common use case for `@rue.resource.sut` is asserting on the SUT call span(s).
 
 <Note>
-SUT trace accessors work only when OpenTelemetry is enabled. Rue enables it by default in `uv run rue tests run`; use `--no-otel` to opt out.
+SUT trace accessors work only when OpenTelemetry is enabled. Rue enables it by default in `uv run rue run`; use `--no-otel` to opt out.
 </Note>
 
 <Steps>
@@ -116,6 +116,8 @@ Each wrapped SUT call appends Python-level stdout/stderr writes to the `SUT` ins
 - `sut.captured_output.events`
 
 Use `sut.clear_output()` when you want to reset accumulated output manually.
+Captured SUT output stays on the SUT object and is not printed live by Rue.
+Output written outside an active wrapped `SUT` call is not stored on a Rue API.
 
 ```python
 import sys

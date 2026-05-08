@@ -5,12 +5,12 @@ from uuid import UUID
 import pytest
 from rich.console import Console
 
-from rue.cli.tests.status import (
-    StatusNode,
-    StatusRenderer,
-    TestsStatusBuilder,
-    TestsStatusReport,
+from rue.cli.rendering.tests import (
+    TestReport,
+    TestReportNode,
+    TestTreeRenderer,
 )
+from rue.cli.status import TestsStatusBuilder
 from rue.config import Config
 from rue.models import Locator
 from rue.resources import Scope
@@ -29,10 +29,10 @@ def write_files(root: Path, files: dict[str, str]) -> None:
         path.write_text(dedent(source))
 
 
-def build_report(path: Path) -> TestsStatusReport:
+def build_report(path: Path) -> TestReport:
     collection = TestSpecCollector((), (), None).build_spec_collection((path,))
     builder = TestsStatusBuilder(Config.model_construct())
-    return builder.build(collection, store=None)
+    return builder.build(collection)
 
 
 def test_status_builder_matches_execution_tree_shape(tmp_path):
@@ -131,7 +131,7 @@ def test_status_builder_raises_definition_errors(tmp_path):
     )
     builder = TestsStatusBuilder(Config.model_construct())
     with pytest.raises(TestDefinitionErrors) as raised:
-        builder.build(collection, store=None)
+        builder.build(collection)
 
     [issue] = raised.value.exceptions
     assert "requires at least one value set" in issue.message
@@ -255,10 +255,13 @@ def test_status_builder_groups_resources_by_runtime_type(tmp_path):
     ] == ["agent"]
 
 
-def test_status_renderer_respects_verbosity_levels():
-    child_one = StatusNode(
+def test_test_tree_renderer_respects_verbosity_levels():
+    module_path = Path(__file__)
+    resource_path = Path(__file__).with_name("test_rue_cli.py")
+    child_one = TestReportNode(
         definition=make_definition(
             "test_tree",
+            module_path=module_path,
             suffix="one",
             case_id=UUID("00000000-0000-0000-0000-000000000001"),
         ),
@@ -268,7 +271,7 @@ def test_status_renderer_respects_verbosity_levels():
             "Metric": (
                 ResourceSpec(
                     locator=Locator(
-                        module_path=Path("/tmp/project/confrue_metrics.py"),
+                        module_path=module_path,
                         function_name="latency",
                     ),
                     scope=Scope.RUN,
@@ -277,7 +280,7 @@ def test_status_renderer_respects_verbosity_levels():
             "SUT": (
                 ResourceSpec(
                     locator=Locator(
-                        module_path=Path("/tmp/project/conftest.py"),
+                        module_path=resource_path,
                         function_name="agent",
                     ),
                     scope=Scope.TEST,
@@ -285,14 +288,19 @@ def test_status_renderer_respects_verbosity_levels():
             ),
         },
     )
-    child_two = StatusNode(
-        definition=make_definition("test_tree", suffix="two"),
+    child_two = TestReportNode(
+        definition=make_definition(
+            "test_tree",
+            module_path=module_path,
+            suffix="two",
+        ),
         backend=ExecutionBackend.ASYNCIO,
         history=(TestStatus.PASSED, None),
     )
-    root = StatusNode(
+    root = TestReportNode(
         definition=make_definition(
             "test_tree",
+            module_path=module_path,
             modifiers=(IterateModifier(count=2, min_passes=1),),
         ),
         backend=ExecutionBackend.ASYNCIO,
@@ -300,10 +308,10 @@ def test_status_renderer_respects_verbosity_levels():
         children=(child_one, child_two),
         leaf_count=2,
     )
-    report = TestsStatusReport(
-        module_nodes={Path("tests/test_tree.py"): [root]},
+    report = TestReport(
+        module_nodes={module_path: [root]},
     )
-    renderer = StatusRenderer()
+    renderer = TestTreeRenderer()
 
     compact = Console(record=True, width=140)
     compact.print(renderer.render(report, 0))
@@ -311,7 +319,7 @@ def test_status_renderer_respects_verbosity_levels():
     assert "2 variations" in compact_text
     assert "Metric" not in compact_text
     assert "History" not in compact_text
-    assert "test_module::test_tree" not in compact_text
+    assert "test_tests_status::test_tree" not in compact_text
 
     verbose = Console(record=True, width=140)
     verbose.print(renderer.render(report, 1))
@@ -332,5 +340,40 @@ def test_status_renderer_respects_verbosity_levels():
     assert "[one | 00000000-0000-0000-0000-000000000001]" in very_verbose_text
     assert "Metric" in very_verbose_text
     assert "SUT" in very_verbose_text
-    assert "confrue_metrics.py" in very_verbose_text
+    assert "test_tests_status.py" in very_verbose_text
     assert "00000000-0000-0000-0000-000000000001" in very_verbose_text
+
+
+def test_test_tree_renderer_sorts_path_modules():
+    earlier_path = Path(__file__).with_name("test_rue_cli.py")
+    later_path = Path(__file__)
+    later = TestReportNode(
+        definition=make_definition(
+            "test_later",
+            module_path=later_path,
+        ),
+        backend=ExecutionBackend.MAIN,
+    )
+    earlier = TestReportNode(
+        definition=make_definition(
+            "test_earlier",
+            module_path=earlier_path,
+        ),
+        backend=ExecutionBackend.MAIN,
+    )
+    report = TestReport(
+        module_nodes={
+            later_path: [later],
+            earlier_path: [earlier],
+        },
+    )
+
+    console = Console(record=True, width=140)
+    console.print(TestTreeRenderer().render(report, 1))
+
+    text = console.export_text()
+    earlier_label = "tests/unit/test_rue_cli.py"
+    later_label = "tests/unit/test_tests_status.py"
+    assert earlier_label in text
+    assert later_label in text
+    assert text.index(earlier_label) < text.index(later_label)

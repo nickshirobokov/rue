@@ -4,6 +4,8 @@ These models carry all test metadata that can cross a process boundary
 (no live callables). They are the wire format between the parent discovery
 process and any worker that materializes and executes tests.
 
+Specs describe module-backed members only; dynamic callables are unsupported.
+
 :class:`TestSpecCollection` bundles suite layout, setup file chains, and the
 ordered list of :class:`TestSpec` objects produced during discovery.
 """
@@ -144,7 +146,3 @@ class TestSpecCollection:
                     seen.add(ref.path)
                     result.append(ref)
         return tuple(result)
-
-    def setup_chain_for(self, module_path: Path) -> tuple[SetupFileRef, ...]:
-        """Return the setup chain for a specific test module path."""
-        return self.setup_chains.get(module_path, ())

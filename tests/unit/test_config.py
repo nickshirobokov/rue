@@ -36,7 +36,7 @@ exclude-tags = ["slow"]
 keyword = "chatbot"
 fail-fast = true
 otel = false
-processors = ["ConsoleReporter", "OtelReporter"]
+processors = ["CustomProcessor"]
 database-path = ".rue/custom.turso.db"
 """.strip()
     )
@@ -53,7 +53,7 @@ database-path = ".rue/custom.turso.db"
     assert config.addopts == ["-q"]
     assert config.otel is False
     assert not hasattr(config, "otel_content")
-    assert config.processors == ["ConsoleReporter", "OtelReporter"]
+    assert config.processors == ["CustomProcessor"]
     assert config.database_path == Path(".rue/custom.turso.db")
 
 

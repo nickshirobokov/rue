@@ -356,8 +356,8 @@ class TestSupportBot:
 
 **CLI Usage:**
 ```bash
-rue tests run --tag smoke    # Only smoke tests
-rue tests run --tag slow     # Only slow tests
+rue run --tag smoke    # Only smoke tests
+rue run --tag slow     # Only slow tests
 ```
 
 ---
@@ -602,9 +602,6 @@ If multiple `PROCESS` resources share the same name, Rue keeps them side by side
 
 Execute discovered tests and return a `Run`.
 
-**Common constructor parameters:**
-- `capture_output: bool = True`
-
 **Run methods:**
 ```python
 await runner.run(
@@ -617,8 +614,9 @@ await runner.run(
 **Constructor behavior:**
 - `Runner` requires an active `RunContext`.
 - Run event processors are provided by the active `RunEventsReceiver`, not by `Runner`.
-- CLI `--processor` flags replace `config.processors`; if neither is set, a normal fresh process uses the built-in `ConsoleReporter` and `OtelReporter`.
-- Official CLI entrypoints append `DBWriter`; programmatic runs attach `DBWriter` when they want SQLite persistence.
+- The CLI always attaches `TerminalRunReporter`; when OpenTelemetry is enabled, it also attaches `OtelReporter`.
+- CLI `--processor` flags replace configured custom processors; `config.processors` adds custom processors when CLI flags are absent.
+- Official CLI entrypoints append the database recorder; programmatic runs attach storage processors when they want persistence.
 
 **Timeout behavior (`timeout`):**
 - `timeout` is a run-level limit (not per-test).
@@ -635,7 +633,7 @@ await runner.run(
 from rue.config import Config
 from rue.context.runtime import RunContext
 from rue.events import RunEventsReceiver
-from rue.cli.console import ConsoleReporter
+from rue.cli.rendering.terminal import TerminalRunReporter
 from rue.telemetry.otel import OtelReporter
 from rue.resources import DependencyResolver, registry
 from rue.storage import DBWriter
@@ -648,7 +646,7 @@ db.initialize()
 db_writer = DBWriter()
 
 with RunContext(config=config), RunEventsReceiver([
-    ConsoleReporter(),
+    TerminalRunReporter(),
     OtelReporter(),
     db_writer,
 ]):
@@ -658,7 +656,7 @@ with RunContext(config=config), RunEventsReceiver([
     )
 ```
 
-OpenTelemetry persistence is configured through run event processors. In a normal fresh process, the default processor set includes `OtelReporter`; if you supply your own processor list, keep it attached for local `.rue/traces` storage or handle `execution.telemetry_artifacts` in `RunEventsProcessor.on_execution_complete()`.
+OpenTelemetry persistence is configured through run event processors. In a normal fresh process, the CLI attaches `OtelReporter` when OpenTelemetry is enabled; custom processors can also handle `execution.telemetry_artifacts` in `RunEventsProcessor.on_execution_complete()`.
 
 ---
 

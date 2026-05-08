@@ -1,9 +1,11 @@
+import builtins
 from pathlib import Path
 from textwrap import dedent
 
 import pytest
 
 from rue.resources import DependencyResolver, registry
+from rue.testing.discovery import TestLoader, TestSpecCollector
 from rue.testing.models import TestStatus
 from rue.testing.runner import Runner
 from tests.helpers import make_run_context, materialize_tests
@@ -229,6 +231,71 @@ async def test_resource_monkeypatch_and_test_patches_are_execution_isolated(
     run = await _run_module(module_path)
 
     assert run.result.passed == 4, _failed_executions(run)
+
+
+@pytest.mark.asyncio
+async def test_module_scoped_monkeypatch_restores_before_next_module(
+    tmp_path: Path,
+):
+    module_a_path = tmp_path / "test_module_patch_a.py"
+    module_b_path = tmp_path / "test_module_patch_b.py"
+    module_a_path.write_text(
+        dedent(
+            """
+            import builtins
+
+            import rue
+            from rue.resources.models import Scope
+
+
+            @rue.resource(scope=Scope.MODULE)
+            def module_patch(monkeypatch):
+                monkeypatch.setattr(
+                    builtins,
+                    "rue_module_patch_value",
+                    "patched",
+                )
+
+
+            @rue.test
+            def test_patched(module_patch):
+                assert builtins.rue_module_patch_value == "patched"
+            """
+        )
+    )
+    module_b_path.write_text(
+        dedent(
+            """
+            import builtins
+
+            import rue
+            from rue import ExecutionBackend
+
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_restored():
+                assert builtins.rue_module_patch_value == "original"
+                assert type(builtins.rue_module_patch_value) is str
+            """
+        )
+    )
+    builtins.rue_module_patch_value = "original"
+    try:
+        collection = TestSpecCollector((), (), None).build_spec_collection(
+            (module_a_path, module_b_path)
+        )
+        items = TestLoader(collection.suite_root).load_from_collection(
+            collection
+        )
+        make_run_context(otel=False, concurrency=2)
+        run = await Runner().run(
+            items=items,
+            resolver=DependencyResolver(registry),
+        )
+    finally:
+        del builtins.rue_module_patch_value
+
+    assert run.result.passed == 2, _failed_executions(run)
 
 
 @pytest.mark.asyncio

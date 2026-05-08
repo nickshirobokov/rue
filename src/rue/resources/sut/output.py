@@ -35,15 +35,11 @@ class _SysStreamDispatcher(io.TextIOBase):
         self,
         original: TextIO,
         sinks: ContextVar[tuple[_OutputSink, ...]],
-        swallow: ContextVar[bool],
-        manager: _SysCaptureManager,
         *,
         is_stdout: bool,
     ) -> None:
         self._original = original
         self._sinks = sinks
-        self._swallow = swallow
-        self._manager = manager
         self._stream: OutputStream = "stdout" if is_stdout else "stderr"
 
     def write(self, s: str) -> int:
@@ -51,11 +47,6 @@ class _SysStreamDispatcher(io.TextIOBase):
         if sinks:
             for sink in sinks:
                 sink(self._stream, s)
-            if self._swallow.get():
-                return len(s)
-        listener = self._manager.global_listener
-        if listener is not None:
-            listener(self._stream, s)
             return len(s)
         self._original.write(s)
         return len(s)
@@ -81,9 +72,6 @@ class _SysCaptureManager:
     """Manages global sys.stdout/stderr replacement with dispatchers."""
 
     def __init__(self) -> None:
-        self._swallow: ContextVar[bool] = ContextVar(
-            "sut_output_swallow", default=True
-        )
         self._sinks: ContextVar[tuple[_OutputSink, ...]] = ContextVar(
             "sut_output_sinks", default=()
         )
@@ -91,30 +79,10 @@ class _SysCaptureManager:
         self._original_stderr: TextIO | None = None
         self._depth: int = 0
         self._lock: RLock = RLock()
-        self._global_listener: _OutputSink | None = None
-
-    def set_global_listener(self, listener: _OutputSink) -> None:
-        self._global_listener = listener
-
-    def clear_global_listener(self) -> None:
-        self._global_listener = None
-
-    @property
-    def global_listener(self) -> _OutputSink | None:
-        return self._global_listener
 
     @property
     def is_installed(self) -> bool:
         return self._depth > 0
-
-    @contextmanager
-    def sys_capture(self, *, swallow: bool) -> Iterator[None]:
-        with self.installed():
-            token = self._swallow.set(swallow)
-            try:
-                yield
-            finally:
-                self._swallow.reset(token)
 
     @contextmanager
     def installed(self) -> Iterator[None]:
@@ -142,15 +110,11 @@ class _SysCaptureManager:
                 sys.stdout = _SysStreamDispatcher(
                     original_stdout,
                     self._sinks,
-                    self._swallow,
-                    self,
                     is_stdout=True,
                 )
                 sys.stderr = _SysStreamDispatcher(
                     original_stderr,
                     self._sinks,
-                    self._swallow,
-                    self,
                     is_stdout=False,
                 )
             self._depth += 1
@@ -179,6 +143,8 @@ _sys_capture = _SysCaptureManager()
 
 
 class SUTOutputCapture:
+    """Captures stdout and stderr while a wrapped SUT method runs."""
+
     def __init__(self) -> None:
         self._execution_id: ContextVar[UUID | None] = ContextVar(
             f"sut_{id(self)}_output_execution_id",
@@ -191,20 +157,25 @@ class SUTOutputCapture:
 
     @property
     def output(self) -> CapturedOutput:
+        """Return all captured output streams."""
         return CapturedOutput.from_events(self._events_list())
 
     @property
     def stdout(self) -> CapturedStream:
+        """Return captured stdout."""
         return self.output.stdout
 
     @property
     def stderr(self) -> CapturedStream:
+        """Return captured stderr."""
         return self.output.stderr
 
     def clear(self) -> None:
+        """Clear captured output for the current execution context."""
         self._events_list().clear()
 
     def reset(self, execution_id: UUID | None) -> None:
+        """Reset captured output when the test execution changes."""
         if (
             self._execution_id.get() == execution_id
             and self._events.get() is not None
@@ -219,6 +190,7 @@ class SUTOutputCapture:
         *,
         is_async: bool,
     ) -> Callable[..., object]:
+        """Wrap a SUT callable with output capture."""
         if is_async:
 
             @functools.wraps(original_callable)
@@ -240,26 +212,14 @@ class SUTOutputCapture:
 
     @contextmanager
     def capturing(self) -> Iterator[None]:
+        """Capture stdout and stderr within this context."""
         with _sys_capture.installed(), _sys_capture.sink(self._append):
             yield
 
     @classmethod
     def is_sys_capture_installed(cls) -> bool:
+        """Return whether stdout and stderr dispatchers are installed."""
         return _sys_capture.is_installed
-
-    @classmethod
-    @contextmanager
-    def sys_capture(cls, *, swallow: bool) -> Iterator[None]:
-        with _sys_capture.sys_capture(swallow=swallow):
-            yield
-
-    @classmethod
-    def set_global_listener(cls, listener: _OutputSink) -> None:
-        _sys_capture.set_global_listener(listener)
-
-    @classmethod
-    def clear_global_listener(cls) -> None:
-        _sys_capture.clear_global_listener()
 
     def _append(self, stream: OutputStream, text: str) -> None:
         self._events_list().append(CapturedEvent(stream, text))

@@ -1,10 +1,7 @@
 """Example: Inspecting SUT-owned stdout/stderr capture.
 
 Run with:
-    rue tests run examples/test_example_captured_output.py
-
-Run with live SUT output visible:
-    rue tests run examples/test_example_captured_output.py -s
+    rue run examples/test_example_captured_output.py
 """
 
 import sys

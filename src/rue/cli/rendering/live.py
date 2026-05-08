@@ -1,6 +1,6 @@
-"""Output mode strategy: QuietMode, CompactMode, VerboseMode."""
+"""Live run output rendering."""
 
-# ruff: noqa: D101,D102,D103
+# ruff: noqa: D102
 
 from __future__ import annotations
 
@@ -8,16 +8,19 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from rich.console import Console, Group, RenderableType
+from rich.panel import Panel
+from rich.progress_bar import ProgressBar
 from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
+from rue.cli.rendering.primitives import STATUS_STYLES
+from rue.cli.rendering.run import ExecutionView
+from rue.cli.rendering.state import TerminalRunState
+from rue.cli.rendering.tests import TestModuleView
 from rue.testing.execution.composite import CompositeTest
 from rue.testing.models import TestStatus
-
-from .shared import STATUS_STYLES
-from .views import ConsoleExecutionView, ConsoleModuleView
 
 
 if TYPE_CHECKING:
@@ -26,10 +29,100 @@ if TYPE_CHECKING:
     from rue.testing.models.executed import ExecutedTest
     from rue.testing.models.loaded import LoadedTestDef
 
-    from .reporter import ConsoleReporter
+
+_PROGRESS_STAT_ORDER: tuple[tuple[TestStatus, str], ...] = (
+    (TestStatus.PASSED, "passed"),
+    (TestStatus.FAILED, "failed"),
+    (TestStatus.ERROR, "errors"),
+    (TestStatus.SKIPPED, "skipped"),
+    (TestStatus.XFAILED, "xfailed"),
+    (TestStatus.XPASSED, "xpassed"),
+)
+
+
+class RunLiveRenderer:
+    """Render live run progress for the selected verbosity."""
+
+    def __init__(
+        self, console: Console, verbosity: int = 0
+    ) -> None:
+        self.console = console
+        self.verbosity = verbosity
+        self.mode: OutputMode = make_mode(verbosity, console)
+
+    @property
+    def show_collected_count(self) -> bool:
+        return self.mode.show_collected_count
+
+    @property
+    def show_failures(self) -> bool:
+        return self.mode.show_failures
+
+    def configure(self, verbosity: int) -> None:
+        self.verbosity = verbosity
+        self.mode = make_mode(verbosity, self.console)
+
+    def render(self, state: TerminalRunState) -> RenderableType:
+        """Return the current live renderable for terminal refresh."""
+        if state.all_modules_complete:
+            return Text("")
+        live = self.mode.render_live(state)
+        if not self.mode.show_progress_bar:
+            return live
+        return Group(self._progress_panel(state), live)
+
+    def print_completed_module(
+        self,
+        path: Path,
+        items: list[LoadedTestDef],
+        state: TerminalRunState,
+    ) -> None:
+        self.mode.print_completed_module(path, items, state)
+
+    def print_test(
+        self,
+        execution: ExecutedTest,
+        state: TerminalRunState,
+    ) -> None:
+        self.mode.print_test(execution, state)
+
+    def _progress_panel(self, state: TerminalRunState) -> Panel:
+        completed = state.completed_count
+        total = state.total_tests
+        pct = completed / total * 100 if total else 0
+        finished = completed == total and total > 0
+        bar = ProgressBar(
+            total=max(total, 1),
+            completed=completed,
+            complete_style="cyan",
+            finished_style="bold green",
+        )
+        info = Text()
+        info.append(f"{completed}/{total}", style="bold")
+        info.append(f" ({pct:.0f}%)", style="dim")
+        for status, label in _PROGRESS_STAT_ORDER:
+            count = state.status_counts.get(status, 0)
+            if not count:
+                continue
+            info.append("  ")
+            style = STATUS_STYLES[status]
+            info.append(f"{style.symbol} {count} {label}", style=style.color)
+        content = Table.grid()
+        content.add_column(ratio=1)
+        content.add_row(bar)
+        content.add_row(info)
+        return Panel(
+            content,
+            title="Running tests...",
+            title_align="left",
+            border_style="green" if finished else "cyan",
+            padding=(0, 1),
+        )
 
 
 class OutputMode(ABC):
+    """Verbosity-specific strategy for live and non-live run output."""
+
     def __init__(self, console: Console) -> None:
         self.console = console
 
@@ -53,18 +146,18 @@ class OutputMode(ABC):
         return line
 
     @abstractmethod
-    def render_live(self, state: ConsoleReporter) -> RenderableType: ...
+    def render_live(self, state: TerminalRunState) -> RenderableType: ...
 
     @abstractmethod
     def print_test(
-        self, execution: ExecutedTest, state: ConsoleReporter
+        self, execution: ExecutedTest, state: TerminalRunState
     ) -> None: ...
 
     def print_completed_module(
         self,
-        path: Path | None,
+        path: Path,
         items: list[LoadedTestDef],
-        state: ConsoleReporter,
+        state: TerminalRunState,
     ) -> None:
         for item in items:
             execution = state.executions.get(item.spec.collection_index)
@@ -73,11 +166,13 @@ class OutputMode(ABC):
 
 
 class QuietMode(OutputMode):
+    """Show only aggregate progress for `-q` output."""
+
     @property
     def show_collected_count(self) -> bool:
         return False
 
-    def render_live(self, state: ConsoleReporter) -> RenderableType:
+    def render_live(self, state: TerminalRunState) -> RenderableType:
         progress = f"{state.completed_count}/{state.total_tests}"
         text = Text.from_markup(
             f"Running tests... {progress} completed"
@@ -85,18 +180,20 @@ class QuietMode(OutputMode):
         return self._render_spinner_line(text)
 
     def print_test(
-        self, execution: ExecutedTest, state: ConsoleReporter
+        self, execution: ExecutedTest, state: TerminalRunState
     ) -> None:
         pass
 
 
 class CompactMode(OutputMode):
-    def render_live(self, state: ConsoleReporter) -> RenderableType:
+    """Print pytest-style compact module symbols at default verbosity."""
+
+    def render_live(self, state: TerminalRunState) -> RenderableType:
         lines: list[RenderableType] = []
         for path, items in state.items_by_file.items():
             if path in state.completed_modules:
                 continue
-            line = ConsoleModuleView(path).compact_text()
+            line = TestModuleView(path).compact_text()
             has_running = False
             for item in items:
                 execution = state.executions.get(item.spec.collection_index)
@@ -112,7 +209,7 @@ class CompactMode(OutputMode):
         return Group(*lines) if lines else Text("")
 
     def print_test(
-        self, execution: ExecutedTest, state: ConsoleReporter
+        self, execution: ExecutedTest, state: TerminalRunState
     ) -> None:
         definition = execution.definition
         style = STATUS_STYLES[execution.result.status]
@@ -120,7 +217,7 @@ class CompactMode(OutputMode):
             if state.current_module is not None:
                 self.console.print()
             self.console.print(
-                ConsoleModuleView(
+                TestModuleView(
                     definition.spec.locator.module_path
                 ).compact_text(),
                 end="",
@@ -130,11 +227,11 @@ class CompactMode(OutputMode):
 
     def print_completed_module(
         self,
-        path: Path | None,
+        path: Path,
         items: list[LoadedTestDef],
-        state: ConsoleReporter,
+        state: TerminalRunState,
     ) -> None:
-        line = ConsoleModuleView(path).compact_text()
+        line = TestModuleView(path).compact_text()
         for item in items:
             execution = state.executions.get(item.spec.collection_index)
             if execution is not None:
@@ -145,6 +242,8 @@ class CompactMode(OutputMode):
 
 
 class VerboseMode(OutputMode):
+    """Render expanded test trees and failure details for verbose output."""
+
     @property
     def show_failures(self) -> bool:
         return True
@@ -166,7 +265,7 @@ class VerboseMode(OutputMode):
                 TestStatus.FAILED,
                 TestStatus.ERROR,
             }:
-                view = ConsoleExecutionView.from_execution(
+                view = ExecutionView.from_execution(
                     sub, verbosity=verbosity
                 )
                 renderables.append(
@@ -180,12 +279,13 @@ class VerboseMode(OutputMode):
                 )
         return renderables
 
-    def render_live(self, state: ConsoleReporter) -> RenderableType:
+    def render_live(self, state: TerminalRunState) -> RenderableType:
+        """Render unfinished modules with pending and completed nodes."""
         trees: list[Tree] = []
         for path, items in state.items_by_file.items():
             if path in state.completed_modules:
                 continue
-            tree = Tree(ConsoleModuleView(path).tree_text())
+            tree = Tree(TestModuleView(path).tree_text())
             for item in items:
                 key = item.spec.collection_index
                 test = state.tests.get(key)
@@ -199,6 +299,7 @@ class VerboseMode(OutputMode):
                     execution is None
                     and isinstance(test, CompositeTest)
                 ):
+                    # Composite tests can reveal completed children early.
                     self._add_live_composite_children(branch, test, state)
                 elif execution is None:
                     early = self._early_sub_executions(item, state)
@@ -208,7 +309,7 @@ class VerboseMode(OutputMode):
         return Group(*trees) if trees else Text("")
 
     def _early_sub_executions(
-        self, item: LoadedTestDef, state: ConsoleReporter
+        self, item: LoadedTestDef, state: TerminalRunState
     ) -> list[ExecutedTest]:
         """Sub-executions that completed before the parent finished."""
         return [
@@ -223,11 +324,11 @@ class VerboseMode(OutputMode):
 
     def print_completed_module(
         self,
-        path: Path | None,
+        path: Path,
         items: list[LoadedTestDef],
-        state: ConsoleReporter,
+        state: TerminalRunState,
     ) -> None:
-        tree = Tree(ConsoleModuleView(path).tree_text())
+        tree = Tree(TestModuleView(path).tree_text())
         for item in items:
             execution = state.executions.get(item.spec.collection_index)
             branch = tree.add(self._build_live_item_line(item, execution))
@@ -239,20 +340,20 @@ class VerboseMode(OutputMode):
         state.current_module = path
 
     def print_test(
-        self, execution: ExecutedTest, state: ConsoleReporter
+        self, execution: ExecutedTest, state: TerminalRunState
     ) -> None:
         definition = execution.definition
         if state.current_module != definition.spec.locator.module_path:
             if state.current_module is not None:
                 self.console.print(Text(""))
             self.console.print(
-                ConsoleModuleView(
+                TestModuleView(
                     definition.spec.locator.module_path
                 ).tree_text()
             )
             state.current_module = definition.spec.locator.module_path
 
-        view = ConsoleExecutionView.from_execution(
+        view = ExecutionView.from_execution(
             execution, verbosity=state.verbosity
         )
         if execution.sub_executions:
@@ -280,13 +381,13 @@ class VerboseMode(OutputMode):
     ) -> RenderableType:
         if execution is None:
             return self._render_spinner_line(
-                ConsoleExecutionView.running_line(item.spec.local_name)
+                ExecutionView.running_line(item.spec.local_name)
             )
-        view = ConsoleExecutionView.from_execution(execution)
+        view = ExecutionView.from_execution(execution)
         return view.render_live_item_line(name=item.spec.local_name)
 
     def _add_live_composite_children(
-        self, parent: Tree, test: CompositeTest, state: ConsoleReporter
+        self, parent: Tree, test: CompositeTest, state: TerminalRunState
     ) -> None:
         for child in test.children:
             child_exec = state.all_executions.get(id(child.definition))
@@ -309,7 +410,7 @@ class VerboseMode(OutputMode):
                         full=state.verbosity >= 2
                     )
                 )
-                pending = ConsoleExecutionView.sub_label_text(
+                pending = ExecutionView.sub_label_text(
                     pending_label or "case"
                 )
                 pending.append("  ⋯", style="dim")
@@ -320,7 +421,7 @@ class VerboseMode(OutputMode):
         self,
         parent: Tree,
         sub_executions: list[ExecutedTest],
-        state: ConsoleReporter,
+        state: TerminalRunState,
     ) -> None:
         for sub in sub_executions:
             node = parent
@@ -340,15 +441,26 @@ class VerboseMode(OutputMode):
     def _render_sub_live_line(
         self, execution: ExecutedTest, *, verbosity: int
     ) -> Text:
-        view = ConsoleExecutionView.from_execution(
+        view = ExecutionView.from_execution(
             execution, verbosity=verbosity
         )
         return view.render_sub_live_line()
 
 
 def make_mode(verbosity: int, console: Console) -> OutputMode:
+    """Select the output strategy matching CLI verbosity."""
     if verbosity < 0:
         return QuietMode(console)
     if verbosity == 0:
         return CompactMode(console)
     return VerboseMode(console)
+
+
+__all__ = [
+    "CompactMode",
+    "OutputMode",
+    "QuietMode",
+    "RunLiveRenderer",
+    "VerboseMode",
+    "make_mode",
+]

@@ -10,6 +10,7 @@ from typing import Any, ParamSpec, TypeVar
 from rue.experiments.models import ExperimentSpec
 from rue.models import Locator
 
+
 _EXPERIMENT_RECEIVER = frozenset({"self", "cls"})
 
 
@@ -43,19 +44,20 @@ class ExperimentRegistry:
             raise ValueError("experiment() ids must match number of values")
 
         def decorator(fn: Callable[P, T]) -> Callable[P, T]:
-            if inspect.isgeneratorfunction(fn) or inspect.isasyncgenfunction(fn):
+            if (
+                inspect.isgeneratorfunction(fn)
+                or inspect.isasyncgenfunction(fn)
+            ):
                 raise ValueError("experiment hooks cannot be generators")
 
             signature = inspect.signature(fn)
             if "value" not in signature.parameters:
-                raise ValueError("experiment hooks must accept a value parameter")
+                raise ValueError(
+                    "experiment hooks must accept a value parameter"
+                )
 
             filename = fn.__code__.co_filename
-            path = (
-                None
-                if filename.startswith("<") and filename.endswith(">")
-                else Path(filename).resolve()
-            )
+            path = Path(filename)
 
             spec = ExperimentSpec(
                 locator=Locator(module_path=path, function_name=fn.__name__),

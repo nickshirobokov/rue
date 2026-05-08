@@ -68,7 +68,9 @@ class RunEventsProcessor(metaclass=RunEventsProcessorMeta):
         _ = graphs
         return None
 
-    async def on_test_start(self, test: ExecutableTest, run: ExecutedRun) -> None:
+    async def on_test_start(
+        self, test: ExecutableTest, run: ExecutedRun
+    ) -> None:
         """Called before a test starts executing."""
         _ = test, run
         return None
@@ -80,7 +82,9 @@ class RunEventsProcessor(metaclass=RunEventsProcessorMeta):
         _ = execution, run
         return None
 
-    async def on_run_stopped_early(self, failure_count: int, run: ExecutedRun) -> None:
+    async def on_run_stopped_early(
+        self, failure_count: int, run: ExecutedRun
+    ) -> None:
         """Called when run stops early due to maxfail limit."""
         _ = failure_count, run
         return None

@@ -19,7 +19,7 @@ from rue.resources.models import (
 
 
 _RECEIVER_PARAMETER_NAMES = {"self", "cls"}
-type _DefinitionsByScope = dict[Scope, dict[Path | None, LoadedResourceDef]]
+type _DefinitionsByScope = dict[Scope, dict[Path, LoadedResourceDef]]
 type _ProviderSelectionPlan = tuple[
     tuple[tuple[Path, LoadedResourceDef], ...],
     LoadedResourceDef,
@@ -72,11 +72,7 @@ class ResourceRegistry:
                 case _:
                     factory_kind = ResourceFactoryKind.SYNC
             filename = (origin_fn or fn).__code__.co_filename
-            origin_path = (
-                None
-                if filename.startswith("<") and filename.endswith(">")
-                else Path(filename).resolve()
-            )
+            origin_path = Path(filename)
 
             definition = LoadedResourceDef(
                 spec=ResourceSpec(
@@ -98,14 +94,14 @@ class ResourceRegistry:
             spec = definition.spec
             by_scope = self._definitions.setdefault(spec.name, {})
             by_path = by_scope.setdefault(spec.scope, {})
-            by_path[spec.module_path] = definition
+            by_path[spec.locator.module_path] = definition
             if builtin:
                 builtin_by_scope = self._builtin_definitions.setdefault(
                     spec.name,
                     {},
                 )
                 builtin_by_scope.setdefault(spec.scope, {})[
-                    spec.module_path
+                    spec.locator.module_path
                 ] = definition
             return fn
 
@@ -129,15 +125,14 @@ class ResourceRegistry:
         definition = (
             self._definitions.get(spec.name, {})
             .get(spec.scope, {})
-            .get(spec.module_path)
+            .get(spec.locator.module_path)
         )
         if definition is None:
             msg = (
                 "Unknown resource identity: "
                 f"{spec.scope.value}:{spec.name}"
             )
-            if spec.module_path is not None:
-                msg = f"{msg}@{spec.module_path}"
+            msg = f"{msg}@{spec.locator.module_path}"
             raise ValueError(msg)
         return definition
 
@@ -166,18 +161,11 @@ class ResourceRegistry:
                 )
             )
         )
-        dir_cache: dict[Path | None, Path | None] = {None: None}
         select_cache: dict[
-            tuple[str, Path | None, tuple[Scope, ...]], LoadedResourceDef
+            tuple[str, Path, tuple[Scope, ...]], LoadedResourceDef
         ] = {}
         plan_cache: dict[tuple[str, Scope], _ProviderSelectionPlan] = {}
         closure_cache: dict[ResourceSpec, tuple[ResourceSpec, ...]] = {}
-
-        def consumer_dir(consumer: Spec) -> Path | None:
-            path = consumer.module_path
-            if path not in dir_cache and path is not None:
-                dir_cache[path] = path.resolve().parent
-            return dir_cache[path]
 
         def selection_plan(
             requested_resource: str,
@@ -206,7 +194,6 @@ class ResourceRegistry:
                 for index, (module_path, definition) in enumerate(
                     by_path.items()
                 )
-                if module_path is not None
             ]
             candidates.sort(
                 key=lambda item: (item[1], item[2]),
@@ -244,7 +231,7 @@ class ResourceRegistry:
             *,
             scopes: frozenset[Scope] | None = None,
         ) -> LoadedResourceDef:
-            directory = consumer_dir(consumer)
+            directory = consumer.locator.module_path.parent
             allowed_scopes = (
                 frozenset(Scope.provider_priority())
                 if scopes is None
@@ -276,9 +263,6 @@ class ResourceRegistry:
                     requested_resource,
                     scope,
                 )
-                if directory is None:
-                    select_cache[cache_key] = fallback
-                    return fallback
                 for provider_dir, definition in candidates:
                     if directory.is_relative_to(provider_dir):
                         select_cache[cache_key] = definition

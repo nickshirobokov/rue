@@ -2,7 +2,6 @@
 
 SCHEMA_VERSION = 1
 TURSO_FEATURES = "custom_types,index_method"
-MAX_STORED_RUNS = 5
 
 REQUIRED_CUSTOM_TYPES = frozenset(
     {
@@ -53,7 +52,7 @@ CREATE TABLE IF NOT EXISTS executions (
     parent_id           uuid REFERENCES executions(execution_id) ON DELETE CASCADE,
 
     function_name       varchar(256) NOT NULL,
-    module_path         TEXT,
+    module_path         TEXT NOT NULL,
     class_name          varchar(256),
     is_async            boolean NOT NULL,
     case_id             uuid,
@@ -87,8 +86,7 @@ CREATE TABLE IF NOT EXISTS metrics (
 
     name                varchar(256) NOT NULL,
     scope               varchar(32) NOT NULL,
-    provider_path       TEXT,
-    provider_dir        TEXT,
+    provider_path       TEXT NOT NULL,
 
     value_integer       INTEGER,
     value_real          REAL,
@@ -107,7 +105,7 @@ CREATE TABLE IF NOT EXISTS metric_consumers (
     metric_id           INTEGER NOT NULL REFERENCES metrics(metric_id) ON DELETE CASCADE,
     kind                varchar(16) NOT NULL,
     function_name       varchar(256) NOT NULL,
-    module_path         TEXT,
+    module_path         TEXT NOT NULL,
     class_name          varchar(256),
     scope               varchar(32),
     suffix              TEXT,
@@ -120,7 +118,7 @@ CREATE TABLE IF NOT EXISTS metric_dependencies (
     id                  INTEGER PRIMARY KEY,
     metric_id           INTEGER NOT NULL REFERENCES metrics(metric_id) ON DELETE CASCADE,
     function_name       varchar(256) NOT NULL,
-    module_path         TEXT,
+    module_path         TEXT NOT NULL,
     scope               varchar(32) NOT NULL
 ) STRICT;
 
