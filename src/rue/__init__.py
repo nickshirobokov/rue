@@ -14,6 +14,7 @@ from .resources.sut import (
 )
 from .testing import (
     Case,
+    CaseFactory,
     CaseGroup,
     ExecutionBackend,
     backend,
@@ -39,6 +40,7 @@ __all__ = [
     "CapturedOutput",
     "CapturedStream",
     "Case",
+    "CaseFactory",
     "CaseGroup",
     "ExecutionBackend",
     "Metric",

@@ -15,6 +15,7 @@ from rue.testing.models.result import TestResult, TestStatus
 
 
 if TYPE_CHECKING:
+    from rue.testing.execution.single import SingleTest
     from rue.testing.models.loaded import LoadedTestDef
 
 
@@ -34,16 +35,39 @@ class ExecutableTest(ABC):
                 nodes.append(node)
         return nodes
 
-    def leaves(self) -> list[ExecutableTest]:
-        """Return executable leaves below this node."""
+    def leaves(self) -> list[SingleTest]:
+        """Return single-test leaves below this node."""
+        from rue.testing.execution.single import SingleTest  # noqa: PLC0415
+
         if not self.children:
+            if not isinstance(self, SingleTest):
+                raise TypeError(
+                    "ExecutableTest leaves must be SingleTest instances"
+                )
             return [self]
 
-        leaves: list[ExecutableTest] = []
+        leaves: list[SingleTest] = []
         for child in self.children:
-            for leaf in child.leaves():
-                leaves.append(leaf)
+            leaves.extend(child.leaves())
         return leaves
+
+    async def not_run(self, reason: str) -> ExecutedTest:
+        """Build and emit a synthetic result for a node that never ran."""
+        sub_executions = [
+            await child.not_run(reason) for child in self.children
+        ]
+        execution = ExecutedTest(
+            definition=self.definition,
+            result=TestResult(
+                status=TestStatus.NOT_RUN,
+                duration_ms=0,
+                error=Exception(reason),
+            ),
+            execution_id=self.execution_id,
+            sub_executions=sub_executions,
+        )
+        await RunEventsReceiver.current().on_execution_complete(execution)
+        return execution
 
     async def execute(
         self,

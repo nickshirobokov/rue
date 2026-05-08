@@ -2,7 +2,7 @@
 
 from rue.context.models import RunEnvironment
 from rue.context.runtime import RunContext
-from rue.testing.models.case import Case, CaseGroup
+from rue.testing.models.case import Case, CaseFactory, CaseGroup
 from rue.testing.models.executed import ExecutedTest
 from rue.testing.models.loaded import LoadedTestDef
 from rue.testing.models.modifiers import (
@@ -27,6 +27,7 @@ from rue.testing.models.spec import (
 __all__ = [
     "BackendModifier",
     "Case",
+    "CaseFactory",
     "CaseGroup",
     "CasesIterateModifier",
     "ExecutedTest",

@@ -29,6 +29,7 @@ STATUS_STYLES: dict[TestStatus, StatusStyle] = {
     TestStatus.FAILED: StatusStyle("✗", "red", "FAILED"),
     TestStatus.ERROR: StatusStyle("!", "yellow", "ERROR"),
     TestStatus.SKIPPED: StatusStyle("-", "yellow", "SKIPPED"),
+    TestStatus.NOT_RUN: StatusStyle("·", "dim", "NOT RUN"),
     TestStatus.XFAILED: StatusStyle("x", "blue", "XFAILED"),
     TestStatus.XPASSED: StatusStyle("!", "magenta", "XPASSED"),
 }

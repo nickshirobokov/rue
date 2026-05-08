@@ -7,6 +7,7 @@ from typing import Any
 
 from rue.testing.models import (
     Case,
+    CaseFactory,
     CaseGroup,
     CasesIterateModifier,
     GroupsIterateModifier,
@@ -163,7 +164,7 @@ class IterateDecorator:
 
     def cases(
         self,
-        *cases: Case[Any, Any],
+        *cases: Case[Any, Any] | CaseFactory,
         min_passes: int | None = None,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         cases_list = list(cases)
@@ -174,14 +175,26 @@ class IterateDecorator:
             None if cases_list else "iterate.cases() requires at least one case"
         )
         modifier = None
-        if cases_list:
+        case_entries: list[Case[Any, Any] | CaseFactory] = []
+        for item in cases_list:
+            match item:
+                case Case() | CaseFactory():
+                    case_entries.append(item)
+                case _:
+                    definition_error = (
+                        "iterate.cases() entries must be Case or "
+                        "CaseFactory instances"
+                    )
+                    break
+
+        if case_entries and definition_error is None:
             actual_min_passes = self._resolve_min_passes(
                 "iterate.cases()",
-                len(cases_list),
+                len(case_entries),
                 min_passes,
             )
             modifier = CasesIterateModifier(
-                cases=tuple(cases_list),
+                cases=tuple(case_entries),
                 min_passes=actual_min_passes,
             )
 

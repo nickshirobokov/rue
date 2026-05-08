@@ -5,8 +5,9 @@ from textwrap import dedent
 import pytest
 
 from rue.resources import DependencyResolver, registry
+from rue.storage import TursoRunRecorder, TursoRunStore
 from rue.testing.discovery import TestLoader, TestSpecCollector
-from rue.testing.models import TestStatus
+from rue.testing.models import CaseFactory, TestStatus
 from rue.testing.runner import Runner
 from tests.helpers import make_run_context, materialize_tests
 
@@ -35,6 +36,16 @@ def _failed_executions(run):
             )
         pending.extend(execution.sub_executions)
     return failures
+
+
+class _InvalidFactory(CaseFactory):
+    async def next_case(self):
+        return None
+
+
+def test_case_factory_rejects_invalid_max_attempts():
+    with pytest.raises(ValueError, match="max_attempts must be >= 1"):
+        _InvalidFactory(max_attempts=0)
 
 
 async def _run_module(
@@ -259,6 +270,243 @@ async def test_nested_iteration_rolls_up_cases_groups_and_params(
         [TestStatus.PASSED, TestStatus.PASSED],
         [TestStatus.PASSED, TestStatus.PASSED],
     ]
+
+
+@pytest.mark.asyncio
+async def test_case_factory_mixes_with_static_cases_and_stops_after_failure(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_case_factory_failure.py"
+    module_path.write_text(
+        dedent(
+            """
+            import builtins
+            import rue
+            from rue import ExecutionBackend
+
+
+            canonical_cases = [
+                rue.Case(inputs={"value": 1}, metadata={"name": "one"}),
+                rue.Case(inputs={"value": 2}, metadata={"name": "two"}),
+            ]
+
+
+            class GeneratedCases(rue.CaseFactory):
+                def __init__(self):
+                    super().__init__(
+                        max_attempts=3,
+                        display_name="generated",
+                    )
+                    self.next_value = 10
+
+                async def next_case(self):
+                    value = self.next_value
+                    self.next_value += 1
+                    return rue.Case(inputs={"value": value})
+
+                async def observe(self, case, execution):
+                    builtins.factory_observations.append(
+                        (
+                            case.inputs["value"],
+                            execution.status.value,
+                            execution.definition.spec.case_id == case.id,
+                        )
+                    )
+
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            @rue.test.iterate.cases(
+                [*canonical_cases, GeneratedCases()],
+                min_passes=2,
+            )
+            @rue.test
+            def test_static_and_generated_cases(case):
+                builtins.seen_case_values.append(case.inputs["value"])
+                assert case.inputs["value"] != 11
+            """
+        )
+    )
+
+    builtins.factory_observations = []
+    builtins.seen_case_values = []
+    try:
+        run = await _run_module(module_path, concurrency=3)
+    finally:
+        observations = builtins.factory_observations
+        seen_values = builtins.seen_case_values
+        del builtins.factory_observations
+        del builtins.seen_case_values
+
+    assert run.result.passed == 1, _failed_executions(run)
+    [execution] = run.result.executions
+    assert [child.status for child in execution.sub_executions] == [
+        TestStatus.PASSED,
+        TestStatus.PASSED,
+        TestStatus.FAILED,
+    ]
+
+    factory_execution = execution.sub_executions[2]
+    assert factory_execution.definition.spec.suffix == "generated"
+    assert [
+        child.definition.spec.suffix
+        for child in factory_execution.sub_executions
+    ] == ["attempt 1", "attempt 2", "attempt 3"]
+    assert [child.status for child in factory_execution.sub_executions] == [
+        TestStatus.PASSED,
+        TestStatus.FAILED,
+        TestStatus.NOT_RUN,
+    ]
+    assert [
+        child.definition.spec.case_id is not None
+        for child in factory_execution.sub_executions
+    ] == [True, True, False]
+    assert observations == [
+        (10, "passed", True),
+        (11, "failed", True),
+    ]
+    assert seen_values == [1, 2, 10, 11]
+
+
+@pytest.mark.asyncio
+async def test_case_factory_marks_remaining_attempts_not_run_when_exhausted(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_case_factory_exhaustion.py"
+    module_path.write_text(
+        dedent(
+            """
+            import builtins
+            import rue
+            from rue import ExecutionBackend
+
+
+            class OneGeneratedCase(rue.CaseFactory):
+                def __init__(self):
+                    super().__init__(
+                        max_attempts=3,
+                        display_name="one generated case",
+                    )
+                    self.emitted = False
+
+                async def next_case(self):
+                    if self.emitted:
+                        return None
+                    self.emitted = True
+                    return rue.Case(inputs={"value": 7})
+
+                async def observe(self, case, execution):
+                    builtins.exhaustion_observations.append(
+                        (case.inputs["value"], execution.status.value)
+                    )
+
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            @rue.test.iterate.cases(OneGeneratedCase())
+            @rue.test
+            def test_generated_case(case):
+                assert case.inputs["value"] == 7
+            """
+        )
+    )
+
+    builtins.exhaustion_observations = []
+    database_path = tmp_path / "rue.turso.db"
+    recorder = TursoRunRecorder()
+    try:
+        make_run_context(
+            otel=False,
+            concurrency=3,
+            database_path=database_path,
+            processors=(recorder,),
+        )
+        run = await Runner().run(
+            items=materialize_tests(module_path),
+            resolver=DependencyResolver(registry),
+        )
+    finally:
+        observations = builtins.exhaustion_observations
+        del builtins.exhaustion_observations
+        recorder.close()
+
+    assert run.result.passed == 1, _failed_executions(run)
+    [execution] = run.result.executions
+    [factory_execution] = execution.sub_executions
+    assert factory_execution.status is TestStatus.PASSED
+    assert [child.status for child in factory_execution.sub_executions] == [
+        TestStatus.PASSED,
+        TestStatus.NOT_RUN,
+        TestStatus.NOT_RUN,
+    ]
+    assert observations == [(7, "passed")]
+
+    with TursoRunStore(database_path).connection() as conn:
+        factory_row = conn.execute(
+            """
+            SELECT execution_id FROM executions
+            WHERE suffix = 'one generated case'
+            """
+        ).fetchone()
+        attempt_rows = conn.execute(
+            """
+            SELECT suffix, status, parent_id
+            FROM executions
+            WHERE suffix LIKE 'attempt%'
+            ORDER BY suffix
+            """
+        ).fetchall()
+
+    assert [
+        (row["suffix"], row["status"], row["parent_id"])
+        for row in attempt_rows
+    ] == [
+        ("attempt 1", "passed", factory_row["execution_id"]),
+        ("attempt 2", "not_run", factory_row["execution_id"]),
+        ("attempt 3", "not_run", factory_row["execution_id"]),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_case_factory_runs_generated_case_with_subprocess_backend(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_case_factory_subprocess.py"
+    module_path.write_text(
+        dedent(
+            """
+            import rue
+            from rue import ExecutionBackend
+
+
+            class SubprocessCase(rue.CaseFactory):
+                def __init__(self):
+                    super().__init__(
+                        max_attempts=1,
+                        display_name="subprocess generated",
+                    )
+
+                async def next_case(self):
+                    return rue.Case(inputs={"value": "subprocess"})
+
+
+            @rue.test.backend(ExecutionBackend.SUBPROCESS)
+            @rue.test.iterate.cases(SubprocessCase())
+            @rue.test
+            def test_generated_subprocess_case(case):
+                assert case.inputs["value"] == "subprocess"
+            """
+        )
+    )
+
+    run = await _run_module(module_path, concurrency=2)
+
+    assert run.result.passed == 1, _failed_executions(run)
+    [execution] = run.result.executions
+    [factory_execution] = execution.sub_executions
+    assert factory_execution.definition.spec.suffix == "subprocess generated"
+    assert [child.status for child in factory_execution.sub_executions] == [
+        TestStatus.PASSED,
+    ]
+    assert factory_execution.sub_executions[0].definition.spec.case_id
 
 
 @pytest.mark.asyncio

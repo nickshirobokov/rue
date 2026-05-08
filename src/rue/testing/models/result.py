@@ -22,6 +22,7 @@ class TestStatus(StrEnum):
     FAILED = "failed"
     ERROR = "error"
     SKIPPED = "skipped"
+    NOT_RUN = "not_run"
     XFAILED = "xfailed"
     XPASSED = "xpassed"
 
@@ -110,6 +111,9 @@ class TestResult:
         if self.status == TestStatus.SKIPPED:
             reason = self.error.args[0] if self.error else "skipped"
             return f"skipped ({reason})"
+        if self.status == TestStatus.NOT_RUN:
+            reason = self.error.args[0] if self.error else "not run"
+            return f"not run ({reason})"
         if self.status == TestStatus.XFAILED:
             reason = self.error.args[0] if self.error else "expected failure"
             return f"xfailed ({reason})"

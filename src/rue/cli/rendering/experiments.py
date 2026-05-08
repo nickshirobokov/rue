@@ -42,6 +42,7 @@ class ExperimentLiveRenderer:
         TestStatus.FAILED,
         TestStatus.ERROR,
         TestStatus.SKIPPED,
+        TestStatus.NOT_RUN,
         TestStatus.XFAILED,
         TestStatus.XPASSED,
     )

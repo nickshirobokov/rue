@@ -35,6 +35,7 @@ _PROGRESS_STAT_ORDER: tuple[tuple[TestStatus, str], ...] = (
     (TestStatus.FAILED, "failed"),
     (TestStatus.ERROR, "errors"),
     (TestStatus.SKIPPED, "skipped"),
+    (TestStatus.NOT_RUN, "not run"),
     (TestStatus.XFAILED, "xfailed"),
     (TestStatus.XPASSED, "xpassed"),
 )
@@ -264,6 +265,7 @@ class VerboseMode(OutputMode):
                 TestStatus.PASSED,
                 TestStatus.FAILED,
                 TestStatus.ERROR,
+                TestStatus.NOT_RUN,
             }:
                 view = ExecutionView.from_execution(
                     sub, verbosity=verbosity
@@ -429,6 +431,7 @@ class VerboseMode(OutputMode):
                 TestStatus.PASSED,
                 TestStatus.FAILED,
                 TestStatus.ERROR,
+                TestStatus.NOT_RUN,
             }:
                 node = parent.add(
                     self._render_sub_live_line(

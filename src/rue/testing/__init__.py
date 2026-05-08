@@ -5,6 +5,7 @@ from .decorators import backend, iterate, tag, test
 from .execution.backend import ExecutionBackend
 from .models import (
     Case,
+    CaseFactory,
     CaseGroup,
     ExecutedRun,
     ExecutedTest,
@@ -18,6 +19,7 @@ from .runner import Runner
 
 __all__ = [
     "Case",
+    "CaseFactory",
     "CaseGroup",
     "ExecutedRun",
     "ExecutedTest",

@@ -19,10 +19,10 @@ from rue.cli.rendering.primitives import (
     STATUS_STYLES,
     StatusStyle,
 )
+from rue.testing.models import TestStatus
 
 
 if TYPE_CHECKING:
-    from rue.testing.models import TestStatus
     from rue.testing.models.executed import ExecutedTest
     from rue.testing.models.run import ExecutedRun
 
@@ -285,6 +285,8 @@ class ExecutionView:
     @property
     def should_show_error(self) -> bool:
         if self.error is None:
+            return False
+        if self.status is TestStatus.NOT_RUN:
             return False
         return not (
             isinstance(self.error, AssertionError)

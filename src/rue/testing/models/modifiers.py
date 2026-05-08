@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from rue.testing.models.case import Case, CaseGroup
+from rue.testing.models.case import Case, CaseFactory, CaseGroup
 
 
 if TYPE_CHECKING:
@@ -50,7 +50,7 @@ class ParamsIterateModifier:
 class CasesIterateModifier:
     """Run the inner execution for each case."""
 
-    cases: tuple[Case[Any, Any], ...]
+    cases: tuple[Case[Any, Any] | CaseFactory, ...]
     min_passes: int
     display_name: str = "cases"
 
