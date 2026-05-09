@@ -11,7 +11,7 @@ from typing_extensions import TypeVar
 
 
 if TYPE_CHECKING:
-    from rue.testing.execution.models import ExecutedTest
+    from rue.testing.execution.models import ExecutedTest, LoadedTestDef
 
 
 InputsT = TypeVar("InputsT", default=dict[str, Any])
@@ -72,7 +72,10 @@ class CaseFactory(ABC):
         self.display_name = display_name
 
     @abstractmethod
-    async def next_case(self) -> Case[Any, Any] | None:
+    async def next_case(
+        self,
+        loaded_test: LoadedTestDef,
+    ) -> Case[Any, Any] | None:
         """Return the next generated case or ``None`` when exhausted."""
         raise NotImplementedError
 
@@ -97,13 +100,13 @@ class CaseGroup(BaseModel, Generic[InputsT, RefsT, GroupRefsT]):
     over multiple groups; each group is executed as a nested case-iterated
     test execution.
 
-    Attributes
+    Attributes:
     ----------
     name : str
         Human-readable label that identifies the group in reports and
         test execution trees.
     cases : list[Case[InputsT, RefsT]]
-        Ordered list of cases belonging to this group. Must contain at
+        Ordered list of cases belonging to the group. Must contain at
         least one case.
     references : GroupRefsT
         Group-level reference data shared across all cases in the group,
@@ -125,7 +128,11 @@ class CaseGroup(BaseModel, Generic[InputsT, RefsT, GroupRefsT]):
 
     @model_validator(mode="after")
     def validate_min_passes(self) -> CaseGroup[InputsT, RefsT, GroupRefsT]:
+        """Ensure the group threshold can be reached by its cases."""
         if self.min_passes > len(self.cases):
-            msg = f"min_passes ({self.min_passes}) cannot exceed cases count ({len(self.cases)})"
+            msg = (
+                f"min_passes ({self.min_passes}) cannot exceed cases count "
+                f"({len(self.cases)})"
+            )
             raise ValueError(msg)
         return self

@@ -8,7 +8,7 @@ from .execution.backend import ExecutionBackend
 from .execution.models import ExecutedTest, LoadedTestDef, TestStatus
 from .execution.suite.executable import ExecutableSuite
 from .execution.suite.models import ExecutedSuite
-from .models import Case, CaseFactory, CaseGroup
+from .models import Case, CaseFactory, CaseGroup, EdgeCaseFactory
 from .outcomes import fail, skip, xfail
 
 
@@ -16,6 +16,7 @@ __all__ = [
     "Case",
     "CaseFactory",
     "CaseGroup",
+    "EdgeCaseFactory",
     "ExecutableSuite",
     "ExecutedSuite",
     "ExecutedTest",

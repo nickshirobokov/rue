@@ -35,7 +35,7 @@ class AdaptiveTest(ExecutableTest):
         sub_test_executions: list[ExecutedTest] = []
 
         for child in self.children:
-            case = await self.factory.next_case()
+            case = await self.factory.next_case(self.definition)
             if case is None:
                 break
 
@@ -48,6 +48,7 @@ class AdaptiveTest(ExecutableTest):
             await self.factory.observe(case, execution)
             if execution.result.status.is_failure:
                 break
+
 
         if len(sub_test_executions) < len(self.children):
             reason = (

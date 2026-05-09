@@ -40,7 +40,8 @@ def _failed_executions(suite):
 
 
 class _InvalidFactory(CaseFactory):
-    async def next_case(self):
+    async def next_case(self, loaded_test):
+        _ = loaded_test
         return None
 
 
@@ -302,7 +303,8 @@ async def test_case_factory_mixes_with_static_cases_and_stops_after_failure(
                     )
                     self.next_value = 10
 
-                async def next_case(self):
+                async def next_case(self, loaded_test):
+                    _ = loaded_test
                     value = self.next_value
                     self.next_value += 1
                     return rue.Case(inputs={"value": value})
@@ -394,7 +396,8 @@ async def test_case_factory_marks_remaining_attempts_not_run_when_exhausted(
                     )
                     self.emitted = False
 
-                async def next_case(self):
+                async def next_case(self, loaded_test):
+                    _ = loaded_test
                     if self.emitted:
                         return None
                     self.emitted = True
@@ -494,7 +497,8 @@ async def test_case_factory_runs_generated_case_with_subprocess_backend(
                         display_name="subprocess generated",
                     )
 
-                async def next_case(self):
+                async def next_case(self, loaded_test):
+                    _ = loaded_test
                     return rue.Case(inputs={"value": "subprocess"})
 
 
