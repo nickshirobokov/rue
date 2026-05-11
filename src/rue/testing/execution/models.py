@@ -22,7 +22,7 @@ from rue.context.runtime import (
 from rue.resources import DependencyResolver
 from rue.resources.models import StateSnapshot
 from rue.telemetry.models import TelemetryArtifact
-from rue.testing.models.spec import SetupFileRef, TestSpec
+from rue.testing.models import SetupFileRef, TestSpec
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
 
 

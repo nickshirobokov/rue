@@ -7,6 +7,7 @@ from uuid import UUID
 
 from rue.resources.resolver import DependencyResolver
 from rue.testing.execution.backend import ExecutionBackend
+from rue.testing.execution.case import CaseFactory
 from rue.testing.execution.models import (
     ExecutedTest,
     LoadedTestDef,
@@ -14,7 +15,6 @@ from rue.testing.execution.models import (
     TestStatus,
 )
 from rue.testing.execution.test.base import ExecutableTest
-from rue.testing.models.case import CaseFactory
 
 
 @dataclass(kw_only=True)

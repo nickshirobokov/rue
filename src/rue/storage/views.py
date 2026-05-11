@@ -15,7 +15,7 @@ import turso
 
 from rue.models import Spec
 from rue.resources import ResourceSpec
-from rue.testing.models.spec import TestSpec
+from rue.testing.models import TestSpec
 
 
 if TYPE_CHECKING:

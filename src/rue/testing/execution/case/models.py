@@ -1,17 +1,12 @@
-"""Test case definitions and decorators."""
+"""Test case data models."""
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Generic
+from typing import Any, Generic
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing_extensions import TypeVar
-
-
-if TYPE_CHECKING:
-    from rue.testing.execution.models import ExecutedTest, LoadedTestDef
 
 
 InputsT = TypeVar("InputsT", default=dict[str, Any])
@@ -48,44 +43,6 @@ class Case(BaseModel, Generic[InputsT, RefsT]):
     )
     inputs: InputsT = Field(default_factory=dict)  # type: ignore[assignment]
     references: RefsT = Field(default_factory=dict)  # type: ignore[assignment]
-
-
-class CaseFactory(ABC):
-    """Stateful engine that emits generated cases during test execution."""
-
-    max_attempts: int
-    display_name: str
-
-    def __init__(
-        self,
-        *,
-        max_attempts: int,
-        display_name: str = "factory",
-    ) -> None:
-        if max_attempts < 1:
-            msg = (
-                "CaseFactory max_attempts must be >= 1, "
-                f"got {max_attempts}"
-            )
-            raise ValueError(msg)
-        self.max_attempts = max_attempts
-        self.display_name = display_name
-
-    @abstractmethod
-    async def next_case(
-        self,
-        loaded_test: LoadedTestDef,
-    ) -> Case[Any, Any] | None:
-        """Return the next generated case or ``None`` when exhausted."""
-        raise NotImplementedError
-
-    async def observe(
-        self,
-        case: Case[Any, Any],
-        execution: ExecutedTest,
-    ) -> None:
-        """Receive the result for a generated case."""
-        _ = case, execution
 
 
 class CaseGroup(BaseModel, Generic[InputsT, RefsT, GroupRefsT]):

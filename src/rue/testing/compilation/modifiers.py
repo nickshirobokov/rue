@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from rue.testing.models.case import Case, CaseFactory, CaseGroup
+from rue.testing.execution.case import Case, CaseFactory, CaseGroup
 
 
 if TYPE_CHECKING:

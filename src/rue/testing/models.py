@@ -146,3 +146,11 @@ class SuiteSpec:
                     seen.add(ref.path)
                     result.append(ref)
         return tuple(result)
+
+
+__all__ = [
+    "Locator",
+    "SetupFileRef",
+    "SuiteSpec",
+    "TestSpec",
+]

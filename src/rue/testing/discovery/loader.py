@@ -25,7 +25,7 @@ from rue.resources.fixtures_collector import (
 )
 from rue.testing.decorators.tag import get_tag_data, merge_tag_data
 from rue.testing.execution.models import LoadedTestDef
-from rue.testing.models.spec import SetupFileRef, SuiteSpec, TestSpec
+from rue.testing.models import SetupFileRef, SuiteSpec, TestSpec
 
 
 TFunction = TypeVar("TFunction", ast.FunctionDef, ast.AsyncFunctionDef)

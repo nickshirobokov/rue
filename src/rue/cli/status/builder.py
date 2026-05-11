@@ -22,7 +22,7 @@ from rue.testing.compilation import DefaultTestFactory
 from rue.testing.discovery import TestLoader
 from rue.testing.execution.test.base import ExecutableTest
 from rue.testing.execution.test.single import SingleTest
-from rue.testing.models.spec import SuiteSpec
+from rue.testing.models import SuiteSpec
 
 
 class TestsStatusBuilder:

@@ -11,7 +11,7 @@ from rue.testing.discovery.loader import (
     TestDefinitionIssue,
     TestLoader,
 )
-from rue.testing.models.spec import SetupFileRef, SuiteSpec
+from rue.testing.models import SetupFileRef, SuiteSpec
 
 
 __all__ = [

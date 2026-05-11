@@ -29,7 +29,7 @@ from rue.telemetry.otel.runtime import OtelTraceSession
 
 
 if TYPE_CHECKING:
-    from rue.testing.models.case import Case
+    from rue.testing.execution.case import Case
 
 
 Message = ModelRequest | ModelResponse

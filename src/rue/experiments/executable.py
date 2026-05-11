@@ -32,7 +32,7 @@ from rue.storage import TursoSuiteRecorder, TursoSuiteStore
 from rue.telemetry.otel import OtelReporter
 from rue.testing.discovery import TestLoader
 from rue.testing.execution.suite.executable import ExecutableSuite
-from rue.testing.models.spec import SuiteSpec
+from rue.testing.models import SuiteSpec
 
 
 DRAIN_TIMEOUT_SECONDS = 5.0

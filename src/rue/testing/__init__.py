@@ -5,10 +5,10 @@ from rue.context.runtime import SuiteContext
 from ..resources import resource
 from .decorators import backend, iterate, tag, test
 from .execution.backend import ExecutionBackend
+from .execution.case import Case, CaseFactory, CaseGroup, EdgeCaseFactory
 from .execution.models import ExecutedTest, LoadedTestDef, TestStatus
 from .execution.suite.executable import ExecutableSuite
 from .execution.suite.models import ExecutedSuite
-from .models import Case, CaseFactory, CaseGroup, EdgeCaseFactory
 from .outcomes import fail, skip, xfail
 
 

@@ -37,7 +37,7 @@ from rue.testing.execution.models import (
     TestStatus,
 )
 from rue.testing.execution.suite.models import ExecutedSuite, SuiteResult
-from rue.testing.models.spec import SuiteSpec
+from rue.testing.models import SuiteSpec
 from tests.helpers import make_definition, make_suite_context
 
 

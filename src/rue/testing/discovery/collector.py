@@ -7,7 +7,7 @@ import os
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
-from rue.testing.models.spec import (
+from rue.testing.models import (
     Locator,
     SetupFileRef,
     SuiteSpec,

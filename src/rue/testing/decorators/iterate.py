@@ -12,7 +12,7 @@ from rue.testing.compilation.modifiers import (
     ParameterSet,
     ParamsIterateModifier,
 )
-from rue.testing.models import Case, CaseFactory, CaseGroup
+from rue.testing.execution.case import Case, CaseFactory, CaseGroup
 
 
 class IterateDecorator:
