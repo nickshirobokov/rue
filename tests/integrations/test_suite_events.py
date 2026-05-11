@@ -21,9 +21,13 @@ from rue.experiments.models import ExperimentVariant
 from rue.resources import DependencyResolver, registry
 from rue.storage import TursoSuiteRecorder, TursoSuiteStore
 from rue.testing.compilation import DefaultTestFactory
-from rue.testing.execution.models import ExecutedTest, TestResult, TestStatus
 from rue.testing.execution.suite.executable import ExecutableSuite
 from rue.testing.execution.suite.models import ExecutedSuite
+from rue.testing.execution.test.models import (
+    ExecutedTest,
+    TestResult,
+    TestStatus,
+)
 from tests.helpers import make_definition, make_suite_context, materialize_tests
 
 

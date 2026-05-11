@@ -14,9 +14,9 @@ from rue.events.processor import SuiteEventsProcessor
 
 if TYPE_CHECKING:
     from rue.resources.models import ResourceGraph
-    from rue.testing.execution.models import ExecutedTest, LoadedTestDef
     from rue.testing.execution.suite.models import ExecutedSuite
     from rue.testing.execution.test.base import ExecutableTest
+    from rue.testing.execution.test.models import ExecutedTest, LoadedTestDef
 
 
 class SuiteEventsReceiver:

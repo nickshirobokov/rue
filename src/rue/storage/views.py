@@ -22,8 +22,8 @@ if TYPE_CHECKING:
     from rue.assertions.models import AssertionResult
     from rue.predicates.models import PredicateResult
     from rue.resources.metrics.models import MetricResult
-    from rue.testing.execution.models import ExecutedTest
     from rue.testing.execution.suite.models import ExecutedSuite
+    from rue.testing.execution.test.models import ExecutedTest
 
 
 MAX_REPR_LENGTH = 2000

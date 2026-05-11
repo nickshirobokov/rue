@@ -17,8 +17,12 @@ from rue.predicates.models import PredicateResult
 from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.models import MetricMetadata, MetricResult
 from rue.storage import TursoSuiteRecorder, TursoSuiteStore
-from rue.testing.execution.models import ExecutedTest, TestResult, TestStatus
 from rue.testing.execution.suite.models import ExecutedSuite, SuiteResult
+from rue.testing.execution.test.models import (
+    ExecutedTest,
+    TestResult,
+    TestStatus,
+)
 from tests.helpers import make_definition, make_suite_context
 
 

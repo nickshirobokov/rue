@@ -10,13 +10,13 @@ from uuid import UUID
 
 from rue.resources.resolver import DependencyResolver
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.execution.models import (
+from rue.testing.execution.test.base import ExecutableTest
+from rue.testing.execution.test.models import (
     ExecutedTest,
     LoadedTestDef,
     TestResult,
     TestStatus,
 )
-from rue.testing.execution.test.base import ExecutableTest
 
 
 @dataclass

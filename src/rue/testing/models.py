@@ -120,7 +120,7 @@ class SuiteSpec:
     :meth:`~rue.testing.discovery.collector.TestSpecCollector.collect_test_specs`
     in the parent process and passed to
     :class:`~rue.testing.discovery.loader.TestLoader` to reconstruct live
-    :class:`~rue.testing.execution.models.LoadedTestDef` objects locally.
+    :class:`~rue.testing.execution.test.models.LoadedTestDef` objects locally.
 
     * ``suite_root`` — used to create a :class:`RueImportSession` with the
       same deterministic synthetic package names as the parent.

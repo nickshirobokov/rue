@@ -16,8 +16,8 @@ from rich.tree import Tree
 from rue.cli.rendering.primitives import STATUS_STYLES, safe_relative_path
 from rue.resources import ResourceSpec
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.execution.models import LoadedTestDef, TestStatus
 from rue.testing.execution.suite.models import ExecutedSuite
+from rue.testing.execution.test.models import LoadedTestDef, TestStatus
 
 
 _BACKEND_STYLE = "dim blue"

@@ -17,9 +17,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from rue.config import Config
-    from rue.testing.execution.models import ExecutedTest
     from rue.testing.execution.suite.models import ExecutedSuite
     from rue.testing.execution.test.base import ExecutableTest
+    from rue.testing.execution.test.models import ExecutedTest
 
 
 MAX_TRANSACTION_ATTEMPTS = 3

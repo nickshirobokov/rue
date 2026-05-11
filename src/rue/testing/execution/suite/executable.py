@@ -18,9 +18,9 @@ from rue.resources.metrics.models import MetricResult
 from rue.telemetry.otel.runtime import otel_runtime
 from rue.testing.compilation.factory import DefaultTestFactory
 from rue.testing.compilation.queue import SuiteQueue, _SuiteStep
-from rue.testing.execution.models import ExecutedTest, LoadedTestDef
 from rue.testing.execution.suite.models import ExecutedSuite
 from rue.testing.execution.test.base import ExecutableTest
+from rue.testing.execution.test.models import ExecutedTest, LoadedTestDef
 from rue.testing.execution.test.single import SingleTest
 
 

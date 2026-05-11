@@ -14,7 +14,7 @@ from rue.telemetry import OtelTraceArtifact
 from rue.testing.compilation.modifiers import BackendModifier, Modifier
 from rue.testing.discovery import TestLoader, TestSpecCollector
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.execution.models import LoadedTestDef
+from rue.testing.execution.test.models import LoadedTestDef
 from rue.testing.models import Locator, SetupFileRef, TestSpec
 
 

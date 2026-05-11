@@ -14,7 +14,7 @@ from rich.text import Text
 
 from rue.cli.rendering.primitives import STATUS_STYLES
 from rue.experiments.models import ExperimentVariantResult
-from rue.testing.execution.models import TestStatus
+from rue.testing.execution.test.models import TestStatus
 
 
 @dataclass

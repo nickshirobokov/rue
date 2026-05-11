@@ -10,11 +10,15 @@ from uuid import UUID
 from rue.events import SuiteEventsReceiver
 from rue.resources.resolver import DependencyResolver
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.execution.models import ExecutedTest, TestResult, TestStatus
+from rue.testing.execution.test.models import (
+    ExecutedTest,
+    TestResult,
+    TestStatus,
+)
 
 
 if TYPE_CHECKING:
-    from rue.testing.execution.models import LoadedTestDef
+    from rue.testing.execution.test.models import LoadedTestDef
     from rue.testing.execution.test.single import SingleTest
 
 

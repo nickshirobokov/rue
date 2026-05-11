@@ -4,8 +4,8 @@ import pytest
 
 from rue.resources import DependencyResolver, registry
 from rue.testing import fail, skip, xfail
-from rue.testing.execution.models import LoadedTestDef, TestStatus
 from rue.testing.execution.suite.executable import ExecutableSuite
+from rue.testing.execution.test.models import LoadedTestDef, TestStatus
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
 from tests.helpers import make_definition, make_suite_context
 

@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 from rue.context.models import SuiteEnvironment
 from rue.resources.metrics.models import MetricResult
-from rue.testing.execution.models import ExecutedTest, TestStatus
+from rue.testing.execution.test.models import ExecutedTest, TestStatus
 
 
 @dataclass

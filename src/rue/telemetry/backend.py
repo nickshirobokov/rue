@@ -10,7 +10,7 @@ from rue.telemetry.models import TelemetryArtifact
 
 
 if TYPE_CHECKING:
-    from rue.testing.execution.models import LoadedTestDef, TestResult
+    from rue.testing.execution.test.models import LoadedTestDef, TestResult
 
 
 class TelemetryBackend(ABC):

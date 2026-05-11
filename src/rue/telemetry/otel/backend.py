@@ -15,7 +15,7 @@ from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
 
 
 if TYPE_CHECKING:
-    from rue.testing.execution.models import LoadedTestDef, TestResult
+    from rue.testing.execution.test.models import LoadedTestDef, TestResult
 
 
 @dataclass(slots=True)

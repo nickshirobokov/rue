@@ -15,7 +15,7 @@ from rue.resources import DependencyResolver
 from rue.resources.registry import registry as default_resource_registry
 from rue.resources.store import ResourceStore
 from rue.testing.discovery.loader import TestLoader
-from rue.testing.execution.models import (
+from rue.testing.execution.test.models import (
     RemoteTestExecutionPayload,
     RemoteTestExecutionResult,
     TestResult,

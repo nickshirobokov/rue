@@ -19,12 +19,12 @@ from rue.cli.rendering.primitives import (
     STATUS_STYLES,
     StatusStyle,
 )
-from rue.testing.execution.models import TestStatus
+from rue.testing.execution.test.models import TestStatus
 
 
 if TYPE_CHECKING:
-    from rue.testing.execution.models import ExecutedTest
     from rue.testing.execution.suite.models import ExecutedSuite
+    from rue.testing.execution.test.models import ExecutedTest
 
 
 _MODIFIER_STYLE = "cyan"

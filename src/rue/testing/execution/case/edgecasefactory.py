@@ -26,7 +26,7 @@ from pydantic_ai.settings import ModelSettings
 from rue.analysis.dep_collector import collect_dependencies
 from rue.testing.execution.case.basefactory import CaseFactory
 from rue.testing.execution.case.models import Case
-from rue.testing.execution.models import ExecutedTest, LoadedTestDef
+from rue.testing.execution.test.models import ExecutedTest, LoadedTestDef
 
 
 class CaseReview(BaseModel):

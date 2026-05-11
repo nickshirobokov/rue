@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from rue.testing.execution.models import TestStatus
+from rue.testing.execution.test.models import TestStatus
 
 
 if TYPE_CHECKING:

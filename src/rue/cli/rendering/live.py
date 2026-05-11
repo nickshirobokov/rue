@@ -19,14 +19,14 @@ from rue.cli.rendering.primitives import STATUS_STYLES
 from rue.cli.rendering.state import TerminalSuiteState
 from rue.cli.rendering.suite import TestExecutionView
 from rue.cli.rendering.tests import TestModuleView
-from rue.testing.execution.models import TestStatus
 from rue.testing.execution.test.composite import CompositeTest
+from rue.testing.execution.test.models import TestStatus
 
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from rue.testing.execution.models import ExecutedTest, LoadedTestDef
+    from rue.testing.execution.test.models import ExecutedTest, LoadedTestDef
 
 
 _PROGRESS_STAT_ORDER: tuple[tuple[TestStatus, str], ...] = (

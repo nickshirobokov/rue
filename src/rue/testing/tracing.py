@@ -10,7 +10,7 @@ from rue.config import Config
 from rue.telemetry.backend import TelemetryBackend
 from rue.telemetry.models import TelemetryArtifact
 from rue.telemetry.otel.backend import OtelTelemetryBackend
-from rue.testing.execution.models import LoadedTestDef, TestResult
+from rue.testing.execution.test.models import LoadedTestDef, TestResult
 
 
 T = TypeVar("T", bound=TelemetryBackend)

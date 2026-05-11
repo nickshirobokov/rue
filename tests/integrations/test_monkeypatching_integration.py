@@ -6,8 +6,8 @@ import pytest
 
 from rue.resources import DependencyResolver, registry
 from rue.testing.discovery import TestLoader, TestSpecCollector
-from rue.testing.execution.models import TestStatus
 from rue.testing.execution.suite.executable import ExecutableSuite
+from rue.testing.execution.test.models import TestStatus
 from tests.helpers import make_suite_context, materialize_tests
 
 

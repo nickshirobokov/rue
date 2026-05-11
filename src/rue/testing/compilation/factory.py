@@ -18,10 +18,10 @@ from rue.testing.compilation.modifiers import (
 from rue.testing.compilation.queue import SuiteQueue
 from rue.testing.execution.backend import ExecutionBackend
 from rue.testing.execution.case import Case, CaseFactory
-from rue.testing.execution.models import LoadedTestDef
 from rue.testing.execution.test.adaptive import AdaptiveTest
 from rue.testing.execution.test.base import ExecutableTest
 from rue.testing.execution.test.composite import CompositeTest
+from rue.testing.execution.test.models import LoadedTestDef
 from rue.testing.execution.test.single import SingleTest
 
 

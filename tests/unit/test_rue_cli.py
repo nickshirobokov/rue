@@ -30,13 +30,13 @@ from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.models import MetricMetadata, MetricResult
 from rue.storage import TursoSuiteRecorder, TursoSuiteStore
 from rue.testing.discovery import TestDefinitionErrors, TestDefinitionIssue
-from rue.testing.execution.models import (
+from rue.testing.execution.suite.models import ExecutedSuite, SuiteResult
+from rue.testing.execution.test.models import (
     ExecutedTest,
     LoadedTestDef,
     TestResult,
     TestStatus,
 )
-from rue.testing.execution.suite.models import ExecutedSuite, SuiteResult
 from rue.testing.models import SuiteSpec
 from tests.helpers import make_definition, make_suite_context
 

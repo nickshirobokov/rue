@@ -18,7 +18,7 @@ from rue.resources.models import ResourceSpec
 from rue.testing.compilation.modifiers import IterateModifier
 from rue.testing.discovery import TestDefinitionErrors, TestSpecCollector
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.execution.models import TestStatus
+from rue.testing.execution.test.models import TestStatus
 from tests.helpers import make_definition
 
 

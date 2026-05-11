@@ -21,14 +21,14 @@ from rue.cli.rendering.state import TerminalSuiteState
 from rue.cli.rendering.suite import SuiteView, TestExecutionView
 from rue.context.runtime import CURRENT_SUITE_CONTEXT
 from rue.events import SuiteEventsProcessor
-from rue.testing.execution.models import TestStatus
+from rue.testing.execution.test.models import TestStatus
 
 
 if TYPE_CHECKING:
     from rue.config import Config
-    from rue.testing.execution.models import ExecutedTest, LoadedTestDef
     from rue.testing.execution.suite.models import ExecutedSuite
     from rue.testing.execution.test.base import ExecutableTest
+    from rue.testing.execution.test.models import ExecutedTest, LoadedTestDef
 
 
 class TerminalLiveSession:

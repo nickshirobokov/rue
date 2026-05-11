@@ -9,7 +9,7 @@ from rue.testing.execution.case.models import Case
 
 
 if TYPE_CHECKING:
-    from rue.testing.execution.models import ExecutedTest, LoadedTestDef
+    from rue.testing.execution.test.models import ExecutedTest, LoadedTestDef
 
 
 class CaseFactory(ABC):
