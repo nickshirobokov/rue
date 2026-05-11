@@ -27,6 +27,7 @@ dependencies = [
     "deepdiff>=9.0.0",
     "pycrdt>=0.12.50",
     "pyturso>=0.5.1",
+    "pydantic-ai-backend>=0.2.6",
 ]
 
 classifiers = [
