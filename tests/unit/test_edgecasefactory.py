@@ -27,11 +27,18 @@ async def test_edge_case_factory_exposes_read_only_backend_tools(
 
     assert model.last_model_request_parameters is not None
     tool_names = {
-        tool.name
-        for tool in model.last_model_request_parameters.function_tools
+        tool.name for tool in model.last_model_request_parameters.function_tools
     }
-    assert tool_names == {"glob", "grep", "ls", "provide_case", "read_file"}
+    assert tool_names == {
+        "compact_conversation",
+        "glob",
+        "grep",
+        "ls",
+        "provide_case",
+        "read_file",
+    }
     assert tool_names - {"provide_case"} == {
+        "compact_conversation",
         "glob",
         "grep",
         "ls",
@@ -57,8 +64,8 @@ async def test_edge_case_factory_backend_is_read_only_and_suite_scoped(
 
     with pytest.raises(UnexpectedModelBehavior):
         await factory.next_case(loaded_test)
-    assert factory._main_agent_deps is not None
-    backend = factory._main_agent_deps.backend
+    assert factory._main_agent_backend is not None
+    backend = factory._main_agent_backend.backend
 
     assert backend.execute_enabled is False
     assert [entry["path"] for entry in backend.glob_info("*.py", ".")] == [
@@ -73,3 +80,18 @@ async def test_edge_case_factory_backend_is_read_only_and_suite_scoped(
     outside_result = backend.grep_raw("needle", str(outside_file))
     assert isinstance(outside_result, str)
     assert "outside allowed directories" in outside_result
+
+
+def test_edge_case_factory_does_not_preload_main_agent_history(
+    tmp_path: Path,
+) -> None:
+    factory = EdgeCaseFactory(case_model=Case, model=TestModel(call_tools=[]))
+    loaded_test = make_definition(
+        fn=lambda: None,
+        module_path=tmp_path / "test_subject.py",
+        suite_root=tmp_path,
+    )
+
+    factory._build_main_agent(loaded_test)
+
+    assert factory.main_agent_messages == []

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from genai_prices import Usage, calc_price
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai import (
     Agent,
@@ -14,18 +15,66 @@ from pydantic_ai import (
     ModelRetry,
     ToolDefinition,
 )
-from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
-from pydantic_ai.models import KnownModelName
-from pydantic_ai.settings import ModelSettings
+from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.messages import ModelMessage, ModelRequest
+from pydantic_ai.models import KnownModelName, Model, infer_model
+from pydantic_ai.settings import ModelSettings, merge_model_settings
 from pydantic_ai_backends import (
     READONLY_RULESET,
     ConsoleCapability,
     LocalBackend,
 )
+from pydantic_ai_summarization import (
+    ContextManagerCapability,
+    LimitWarnerCapability,
+)
 
 from rue.testing.execution.case.basefactory import CaseFactory
+from rue.testing.execution.case.edge_case_factory.prompts import (
+    EDGE_CASE_AGENT_INSTRUCTIONS,
+    EDGE_CASE_REVIEW_INSTRUCTIONS,
+    EDGE_CASE_SUMMARY_PROMPT,
+    FIRST_EDGE_CASE_PROMPT,
+)
 from rue.testing.execution.case.models import Case
 from rue.testing.execution.test.models import ExecutedTest, LoadedTestDef
+
+
+class _InstructionPreservingLimitWarnerCapability(LimitWarnerCapability):
+    """Limit warning that preserves output validator retry instructions.
+
+    Pydantic AI represents output validator retries as an empty ModelRequest
+    with instructions. LimitWarnerCapability can drop that request because it
+    has no parts, which loses the validator's "Agent must use provide_case."
+    retry instruction and lets the next model request drift away from the
+    required tool call.
+    """
+
+    async def before_model_request(
+        self,
+        ctx: Any,
+        request_context: Any,
+    ) -> Any:
+        current_request = (
+            request_context.messages[-1] if request_context.messages else None
+        )
+        request_context = await super().before_model_request(
+            ctx,
+            request_context,
+        )
+
+        if (
+            isinstance(current_request, ModelRequest)
+            and current_request.instructions is not None
+            and not current_request.parts
+            and not any(
+                message is current_request
+                for message in request_context.messages
+            )
+        ):
+            request_context.messages.append(current_request)
+
+        return request_context
 
 
 class CaseReview(BaseModel):
@@ -50,9 +99,9 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
         self,
         *,
         case_model: type[CaseT],
+        model: Model | KnownModelName,
         max_attempts: int = 3,
         display_name: str = "edge_cases",
-        model: KnownModelName | str = "openai:gpt-5.4",
         model_settings: ModelSettings | None = None,
     ) -> None:
         super().__init__(
@@ -82,9 +131,7 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
         if self.generated_cases_count >= self.max_attempts:
             return None
 
-        main_agent = self._main_agent or self._build_main_agent(
-            loaded_test
-        )
+        main_agent = self._main_agent or self._build_main_agent(loaded_test)
         review_agent = self._review_agent or self._build_review_agent(
             loaded_test
         )
@@ -96,6 +143,11 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
         proposed_case = None
         while proposed_case is None:
             result = await main_agent.run(
+                user_prompt=(
+                    FIRST_EDGE_CASE_PROMPT
+                    if not self.main_agent_messages
+                    else None
+                ),
                 message_history=self.main_agent_messages,
                 deferred_tool_results=self.pending_tool_results,
                 deps=main_agent_deps,
@@ -103,7 +155,10 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
             self.pending_tool_results = None
             self.main_agent_messages = list(result.all_messages())
 
-            assert isinstance(result.output, DeferredToolRequests)
+            if isinstance(result.output, str):
+                raise UnexpectedModelBehavior(
+                    "Edge case agent returned text instead of a tool call."
+                )
 
             for tool_call in result.output.calls:
                 if tool_call.tool_name != "provide_case":
@@ -150,24 +205,6 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
         loaded_test: LoadedTestDef,
     ) -> Agent[EdgeCaseAgentDeps, DeferredToolRequests | str]:
         case_schema = self.case_model.model_json_schema()
-        self.main_agent_messages = [
-            ModelRequest(
-                parts=[
-                    UserPromptPart(
-                        content=(
-                            "You generate edge cases for Rue tests. Local "
-                            "context is read-only. Use ls, read_file, "
-                            "glob, and grep if you need local context; "
-                            "do not write, edit, execute code, or request "
-                            "a dependency graph. Call provide_case with a "
-                            "complete Case object when ready.\n"
-                            f"Test code body: {loaded_test.test_code_body}\n"
-                            f"Case JSON schema: {case_schema}"
-                        )
-                    )
-                ]
-            )
-        ]
         provide_case_tool = ToolDefinition(
             name="provide_case",
             description=(
@@ -182,13 +219,9 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
             model=self._model,
             output_type=[DeferredToolRequests, str],
             deps_type=EdgeCaseAgentDeps,
-            instructions=(
-                "Analyze the test and provide Case values that have the "
-                "highest chance of failing assertions in the test body while "
-                "still being valid for the described inputs and references. "
-                "Local context tools are read-only: use ls, read_file, glob, "
-                "and grep when needed. Writing, editing, shell execution, "
-                "and dependency graph tools are unavailable."
+            instructions=EDGE_CASE_AGENT_INSTRUCTIONS.format(
+                test_code_body=loaded_test.test_code_body,
+                case_schema=case_schema,
             ),
             model_settings=self._model_settings,
             toolsets=[external_toolset],
@@ -196,7 +229,18 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
                 ConsoleCapability(
                     include_execute=False,
                     permissions=READONLY_RULESET,
-                )
+                ),
+                ContextManagerCapability(
+                    max_tokens=100_000,
+                    keep=("messages", 20),
+                    summarization_model=self._model,
+                    summary_prompt=EDGE_CASE_SUMMARY_PROMPT,
+                    include_compact_tool=True,
+                ),
+                _InstructionPreservingLimitWarnerCapability(
+                    max_context_tokens=100_000,
+                    warn_on=["context_window"],
+                ),
             ],
             tool_retries=3,
             output_retries=3,
@@ -217,16 +261,13 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
         self._review_agent = Agent(
             self._model,
             output_type=CaseReview,
-            instructions=(
-                "Check whether proposed Case values are valid for the test "
-                "description and schema. Reject invalid, missing, or "
-                "impossible values even if they might fail the test.\n"
-                f"Test code body:{loaded_test.test_code_body}\n"
-                f"Case JSON schema:{self.case_model.model_json_schema()}"
+            instructions=EDGE_CASE_REVIEW_INSTRUCTIONS.format(
+                test_code_body=loaded_test.test_code_body,
+                case_schema=self.case_model.model_json_schema(),
             ),
             model_settings=self._model_settings,
         )
-        
+
         return self._review_agent
 
     def _build_backend(

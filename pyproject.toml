@@ -28,6 +28,8 @@ dependencies = [
     "pycrdt>=0.12.50",
     "pyturso>=0.5.1",
     "pydantic-ai-backend>=0.2.6",
+    "genai-prices>=0.0.59",
+    "summarization-pydantic-ai>=0.1.4",
 ]
 
 classifiers = [

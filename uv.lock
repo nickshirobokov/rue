@@ -2965,6 +2965,7 @@ dependencies = [
     { name = "anthropic", extra = ["vertex"] },
     { name = "cloudpickle" },
     { name = "deepdiff" },
+    { name = "genai-prices" },
     { name = "httpx" },
     { name = "msgspec" },
     { name = "openai" },
@@ -2979,6 +2980,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "pyturso" },
     { name = "rich" },
+    { name = "summarization-pydantic-ai" },
     { name = "tomlkit" },
     { name = "typer" },
 ]
@@ -3000,6 +3002,7 @@ requires-dist = [
     { name = "anthropic", extras = ["vertex"], specifier = ">=0.72.0" },
     { name = "cloudpickle", specifier = ">=3.1.2" },
     { name = "deepdiff", specifier = ">=9.0.0" },
+    { name = "genai-prices", specifier = ">=0.0.59" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "msgspec", specifier = ">=0.21.1" },
     { name = "openai", specifier = ">=2.6.1" },
@@ -3014,6 +3017,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "pyturso", specifier = ">=0.5.1" },
     { name = "rich", specifier = ">=14.2.0" },
+    { name = "summarization-pydantic-ai", specifier = ">=0.1.4" },
     { name = "tomlkit", specifier = ">=0.14.0" },
     { name = "typer", specifier = ">=0.24.1" },
 ]
@@ -3131,6 +3135,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/81/69/17425771797c36cded50b7fe44e850315d039f28b15901ab44839e70b593/starlette-1.0.0.tar.gz", hash = "sha256:6a4beaf1f81bb472fd19ea9b918b50dc3a77a6f2e190a12954b25e6ed5eea149", size = 2655289, upload-time = "2026-03-22T18:29:46.779Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0b/c9/584bc9651441b4ba60cc4d557d8a547b5aff901af35bda3a4ee30c819b82/starlette-1.0.0-py3-none-any.whl", hash = "sha256:d3ec55e0bb321692d275455ddfd3df75fff145d009685eb40dc91fc66b03d38b", size = 72651, upload-time = "2026-03-22T18:29:45.111Z" },
+]
+
+[[package]]
+name = "summarization-pydantic-ai"
+version = "0.1.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic-ai-slim" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/03/85/1f52156090bc4af2f198423c9b7971f6ec864787f601a96d4143afa296e3/summarization_pydantic_ai-0.1.4.tar.gz", hash = "sha256:7d096ed9c3964638bc51dfd7df3a284033d7c5be968a3021a25471b1ab5f7b7e", size = 157290, upload-time = "2026-04-09T11:53:09.183Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/80/90/e6b97a2856c223c58300d7ee99bf7ec10c613bb0de15f40544dd75a7b076/summarization_pydantic_ai-0.1.4-py3-none-any.whl", hash = "sha256:b83a479e7e2c92d58c9da7fae5d7077ba8df4399b02fc9521677251267a8a416", size = 26814, upload-time = "2026-04-09T11:53:07.584Z" },
 ]
 
 [[package]]
