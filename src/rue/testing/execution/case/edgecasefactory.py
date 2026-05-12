@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 from typing import Any
 
@@ -146,17 +145,10 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
             execution.result
         )
 
-    def _load_test_body(self, loaded_test: LoadedTestDef) -> str:
-        try:
-            return inspect.getsource(loaded_test.fn)
-        except OSError:
-            return loaded_test.spec.full_name
-
     def _build_main_agent(
         self,
         loaded_test: LoadedTestDef,
     ) -> Agent[EdgeCaseAgentDeps, DeferredToolRequests | str]:
-        test_body = self._load_test_body(loaded_test)
         case_schema = self.case_model.model_json_schema()
         self.main_agent_messages = [
             ModelRequest(
@@ -169,7 +161,7 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
                             "do not write, edit, execute code, or request "
                             "a dependency graph. Call provide_case with a "
                             "complete Case object when ready.\n"
-                            f"Test code body: {test_body}\n"
+                            f"Test code body: {loaded_test.test_code_body}\n"
                             f"Case JSON schema: {case_schema}"
                         )
                     )
@@ -186,7 +178,7 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
         external_toolset = ExternalToolset[EdgeCaseAgentDeps](
             [provide_case_tool]
         )
-        main_agent = Agent(
+        self._main_agent = Agent(
             model=self._model,
             output_type=[DeferredToolRequests, str],
             deps_type=EdgeCaseAgentDeps,
@@ -209,34 +201,33 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
             tool_retries=3,
             output_retries=3,
         )
-        main_agent.output_validator(
+        self._main_agent.output_validator(
             lambda output: output
             if isinstance(output, DeferredToolRequests)
             else (_ for _ in ()).throw(
                 ModelRetry("Agent must use provide_case.")
             )
         )
-        self._main_agent = main_agent
-        return main_agent
+        return self._main_agent
 
     def _build_review_agent(
         self,
         loaded_test: LoadedTestDef,
     ) -> Agent[None, CaseReview]:
-        review_agent = Agent(
+        self._review_agent = Agent(
             self._model,
             output_type=CaseReview,
             instructions=(
                 "Check whether proposed Case values are valid for the test "
                 "description and schema. Reject invalid, missing, or "
                 "impossible values even if they might fail the test.\n"
-                f"Test code body:{self._load_test_body(loaded_test)}\n"
+                f"Test code body:{loaded_test.test_code_body}\n"
                 f"Case JSON schema:{self.case_model.model_json_schema()}"
             ),
             model_settings=self._model_settings,
         )
-        self._review_agent = review_agent
-        return review_agent
+        
+        return self._review_agent
 
     def _build_backend(
         self,

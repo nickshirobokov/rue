@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -66,7 +67,7 @@ class TestResult:
         error: BaseException | None,
         assertion_results: list[AssertionResult],
     ) -> TestResult:
-        """Build a result from imperative and observed test execution outcomes."""
+        """Build a result from imperative and observed test outcomes."""
         if imperative_outcome is not None:
             return cls(
                 status=imperative_outcome,
@@ -154,6 +155,14 @@ class LoadedTestDef:
     fn: Callable[..., Any]
     suite_root: Path = field(default_factory=Path)
     setup_chain: tuple[SetupFileRef, ...] = field(default_factory=tuple)
+
+    @property
+    def test_code_body(self) -> str:
+        """Return the loaded test function source code."""
+        try:
+            return inspect.getsource(self.fn)
+        except OSError:
+            return self.spec.full_name
 
     async def call_test_fn(
         self,
