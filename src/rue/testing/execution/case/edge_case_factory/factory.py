@@ -16,8 +16,6 @@ from pydantic_ai import (
 )
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import ModelMessage, ModelRequest
-from pydantic_ai.models import KnownModelName, Model
-from pydantic_ai.settings import ModelSettings
 from pydantic_ai_backends import (
     READONLY_RULESET,
     ConsoleCapability,
@@ -29,6 +27,7 @@ from pydantic_ai_summarization import (
 )
 
 from rue.analysis import collect_dependencies
+from rue.config import load_config
 from rue.testing.execution.case.basefactory import CaseFactory
 from rue.testing.execution.case.edge_case_factory.prompts import (
     EDGE_CASE_AGENT_INSTRUCTIONS,
@@ -99,19 +98,20 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
         self,
         *,
         case_model: type[CaseT],
-        model: Model | KnownModelName,
         max_attempts: int = 3,
-        display_name: str = "edge_cases",
-        model_settings: ModelSettings | None = None,
     ) -> None:
         super().__init__(
             max_attempts=max_attempts,
-            display_name=display_name,
+            display_name="edge_cases",
         )
         self.case_model = case_model
 
-        self._model = model
-        self._model_settings = model_settings
+        cfg = load_config().case_factories.edge_case_factory
+        if not cfg:
+            raise RuntimeError("Missing edge-case generation config.")
+        self._model = cfg.model
+        self._model_settings = cfg.model_settings
+
         self._main_agent: (
             Agent[EdgeCaseAgentDeps, DeferredToolRequests | str] | None
         ) = None
@@ -205,11 +205,10 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
         loaded_test: LoadedTestDef,
     ) -> Agent[EdgeCaseAgentDeps, DeferredToolRequests | str]:
         case_schema = self.case_model.model_json_schema()
-        suite_root = loaded_test.suite_root.resolve()
         test_deps = "\n".join(
             str(
-                dependency.file_path.relative_to(suite_root)
-                if dependency.file_path.is_relative_to(suite_root)
+                dependency.file_path.relative_to(loaded_test.suite_root)
+                if dependency.file_path.is_relative_to(loaded_test.suite_root)
                 else dependency.file_path
             )
             for dependency in collect_dependencies(loaded_test.fn)
@@ -257,10 +256,12 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
             output_retries=3,
         )
         self._main_agent.output_validator(
-            lambda output: output
-            if isinstance(output, DeferredToolRequests)
-            else (_ for _ in ()).throw(
-                ModelRetry("Agent must use provide_case.")
+            lambda output: (
+                output
+                if isinstance(output, DeferredToolRequests)
+                else (_ for _ in ()).throw(
+                    ModelRetry("Agent must use provide_case.")
+                )
             )
         )
         return self._main_agent

@@ -1,5 +1,7 @@
 """LLM-backed predicate client."""
 
+from collections.abc import Awaitable, Callable
+
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from pydantic_ai import RunContext
@@ -14,9 +16,9 @@ from pydantic_ai.models import (
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import RunUsage
 
-from rue.config import PredicateConfig, load_config
-from rue.predicates.models import PredicateResult
+from rue.config import AIModelConfig, load_config
 from rue.predicates.decorator import predicate
+from rue.predicates.models import PredicateResult
 
 
 load_dotenv()
@@ -54,7 +56,7 @@ class LLMPredicate:
         normal_prompt: str,
         strict_prompt: str,
         task_template: str,
-        predicate_config: PredicateConfig | None = None,
+        predicate_config: AIModelConfig | None = None,
     ) -> None:
         self.predicate_name = predicate_name
         self.normal_prompt = normal_prompt
@@ -66,8 +68,8 @@ class LLMPredicate:
         self,
         actual: str,
         reference: str,
-        strict: bool = False,  # noqa: FBT001, FBT002
-        with_explanation: bool = False,  # noqa: FBT001, FBT002
+        strict: bool = False,
+        with_explanation: bool = False,
     ) -> PredicateResult:
         """Get the bool value of the predicate from the LLM."""
         model, model_settings = self.get_model_config()
@@ -99,8 +101,8 @@ class LLMPredicate:
             model_settings=model_settings,
         )
         assert output_processor is not None
-        parsed_output = await output_processor.process(
-            model_response.parts[-1].content,  # type: ignore[arg-type]
+        parsed_output = await output_processor.process(  # type: ignore[arg-type]
+            model_response.parts[-1].content,  # type: ignore[attr-defined]
             run_context=RunContext(
                 deps=None,
                 model=infer_model(model),
@@ -122,8 +124,10 @@ class LLMPredicate:
         )
         return result
 
-    def get_model_config(self) -> tuple[KnownModelName, ModelSettings]:
-        """Resolve the configured model and settings for a built-in predicate."""
+    def get_model_config(
+        self,
+    ) -> tuple[KnownModelName, ModelSettings]:
+        """Resolve configured model params for a built-in predicate."""
         if self.predicate_config:
             return (
                 self.predicate_config.model,
@@ -144,7 +148,8 @@ class LLMPredicate:
         self.predicate_config = cfg
         return cfg.model, cfg.model_settings
 
-    def build_predicate(self):
+    def build_predicate(self) -> Callable[..., Awaitable[bool]]:
+        """Build the public callable for this LLM predicate."""
         return predicate(
             self.generate_predicate_result, name=self.predicate_name
         )
