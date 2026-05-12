@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from genai_prices import Usage, calc_price
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai import (
     Agent,
@@ -17,8 +16,8 @@ from pydantic_ai import (
 )
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import ModelMessage, ModelRequest
-from pydantic_ai.models import KnownModelName, Model, infer_model
-from pydantic_ai.settings import ModelSettings, merge_model_settings
+from pydantic_ai.models import KnownModelName, Model
+from pydantic_ai.settings import ModelSettings
 from pydantic_ai_backends import (
     READONLY_RULESET,
     ConsoleCapability,
@@ -29,6 +28,7 @@ from pydantic_ai_summarization import (
     LimitWarnerCapability,
 )
 
+from rue.analysis import collect_dependencies
 from rue.testing.execution.case.basefactory import CaseFactory
 from rue.testing.execution.case.edge_case_factory.prompts import (
     EDGE_CASE_AGENT_INSTRUCTIONS,
@@ -205,6 +205,16 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
         loaded_test: LoadedTestDef,
     ) -> Agent[EdgeCaseAgentDeps, DeferredToolRequests | str]:
         case_schema = self.case_model.model_json_schema()
+        suite_root = loaded_test.suite_root.resolve()
+        test_deps = "\n".join(
+            str(
+                dependency.file_path.relative_to(suite_root)
+                if dependency.file_path.is_relative_to(suite_root)
+                else dependency.file_path
+            )
+            for dependency in collect_dependencies(loaded_test.fn)
+        )
+
         provide_case_tool = ToolDefinition(
             name="provide_case",
             description=(
@@ -222,6 +232,7 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
             instructions=EDGE_CASE_AGENT_INSTRUCTIONS.format(
                 test_code_body=loaded_test.test_code_body,
                 case_schema=case_schema,
+                test_deps=test_deps,
             ),
             model_settings=self._model_settings,
             toolsets=[external_toolset],

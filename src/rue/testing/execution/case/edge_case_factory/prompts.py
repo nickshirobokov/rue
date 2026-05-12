@@ -14,6 +14,7 @@ EDGE_CASE_AGENT_INSTRUCTIONS = (
     "tools are unavailable. If the conversation history grows large, call "
     "compact_conversation with the attempt strategy or constraint that must "
     "be preserved. Call provide_case with a complete Case object when ready.\n"
+    "Local dependency file tree:\n{test_deps}\n"
     "Test code body: {test_code_body}\n"
     "Case JSON schema: {case_schema}"
 )

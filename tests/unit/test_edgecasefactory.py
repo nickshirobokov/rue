@@ -6,7 +6,11 @@ import pytest
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.models.test import TestModel
 
+from rue.analysis import DependencyEntry
 from rue.testing.execution.case import Case, EdgeCaseFactory
+from rue.testing.execution.case.edge_case_factory import (
+    factory as factory_module,
+)
 from tests.helpers import make_definition
 
 
@@ -95,3 +99,40 @@ def test_edge_case_factory_does_not_preload_main_agent_history(
     factory._build_main_agent(loaded_test)
 
     assert factory.main_agent_messages == []
+
+
+def test_edge_case_factory_includes_dependency_paths_in_main_agent_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    suite_root = tmp_path / "suite"
+    dependency_entries = [
+        DependencyEntry("pkg", suite_root / "pkg" / "__init__.py"),
+        DependencyEntry("pkg.subject", suite_root / "pkg" / "subject.py"),
+        DependencyEntry(
+            "tests.test_subject",
+            suite_root / "tests" / "test_subject.py",
+        ),
+    ]
+    monkeypatch.setattr(
+        factory_module,
+        "collect_dependencies",
+        lambda fn: dependency_entries,
+    )
+
+    factory = EdgeCaseFactory(case_model=Case, model=TestModel(call_tools=[]))
+    loaded_test = make_definition(
+        fn=lambda: None,
+        module_path=suite_root / "tests" / "test_subject.py",
+        suite_root=suite_root,
+    )
+
+    agent = factory._build_main_agent(loaded_test)
+
+    assert len(agent._instructions) == 1
+    assert (
+        "Local dependency file tree:\n"
+        "pkg/__init__.py\n"
+        "pkg/subject.py\n"
+        "tests/test_subject.py\n"
+    ) in agent._instructions[0]
