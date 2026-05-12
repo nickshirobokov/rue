@@ -479,7 +479,11 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
 async def test_matches_writing_layout_strict_false_expected_true(
     case: Case[Inputs, Refs],
 ):
-    assert await matches_writing_layout(**case.inputs.model_dump())
+    assert await matches_writing_layout(
+        case.inputs.actual,
+        case.inputs.reference,
+        strict=case.inputs.strict,
+    )
 
 
 @rue.test.iterate.cases(
@@ -493,7 +497,11 @@ async def test_matches_writing_layout_strict_false_expected_true(
 async def test_matches_writing_layout_strict_false_expected_false(
     case: Case[Inputs, Refs],
 ):
-    assert not await matches_writing_layout(**case.inputs.model_dump())
+    assert not await matches_writing_layout(
+        case.inputs.actual,
+        case.inputs.reference,
+        strict=case.inputs.strict,
+    )
 
 
 @rue.test.iterate.cases(
@@ -507,7 +515,11 @@ async def test_matches_writing_layout_strict_false_expected_false(
 async def test_matches_writing_layout_strict_true_expected_true(
     case: Case[Inputs, Refs],
 ):
-    assert await matches_writing_layout(**case.inputs.model_dump())
+    assert await matches_writing_layout(
+        case.inputs.actual,
+        case.inputs.reference,
+        strict=case.inputs.strict,
+    )
 
 
 @rue.test.iterate.cases(
@@ -521,4 +533,8 @@ async def test_matches_writing_layout_strict_true_expected_true(
 async def test_matches_writing_layout_strict_true_expected_false(
     case: Case[Inputs, Refs],
 ):
-    assert not await matches_writing_layout(**case.inputs.model_dump())
+    assert not await matches_writing_layout(
+        case.inputs.actual,
+        case.inputs.reference,
+        strict=case.inputs.strict,
+    )
