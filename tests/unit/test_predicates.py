@@ -9,9 +9,9 @@ from rue.context.collectors import CURRENT_PREDICATE_RESULTS
 from rue.context.runtime import bind
 from rue.predicates import PredicateResult, predicate
 from rue.resources import DependencyResolver, registry
-from rue.storage import TursoRunRecorder, TursoRunStore
-from rue.testing.runner import Runner
-from tests.helpers import make_run_context, materialize_tests
+from rue.storage import TursoSuiteRecorder, TursoSuiteStore
+from rue.testing.execution.suite.executable import ExecutableSuite
+from tests.helpers import make_suite_context, materialize_tests
 
 
 @predicate
@@ -59,13 +59,13 @@ def _write_temp_module(tmp_path: Path, source: str) -> tuple[str, Path]:
 
 def _artifact_payload(artifact) -> dict[str, object]:
     return {
-        "run_id": str(artifact.run_id),
-        "execution_id": str(artifact.execution_id),
+        "suite_execution_id": str(artifact.suite_execution_id),
+        "test_execution_id": str(artifact.test_execution_id),
         "spans": artifact.spans,
     }
 
 
-async def _run_module_with_tracing(
+async def _suite_module_with_tracing(
     *,
     tmp_path: Path,
     trace_processor,
@@ -80,20 +80,20 @@ async def _run_module_with_tracing(
         items = materialize_tests(mod_path)
         processors = [trace_processor]
         if database_path is not None:
-            store = TursoRunStore(database_path)
+            store = TursoSuiteStore(database_path)
             store.initialize()
-            recorder = TursoRunRecorder()
+            recorder = TursoSuiteRecorder()
             processors.append(recorder)
         config = Config(otel=True)
         if database_path is not None:
             config = Config(otel=True, database_path=database_path)
-        make_run_context(config=config, processors=tuple(processors))
-        runner = Runner()
-        run = await runner.run(
+        context = make_suite_context(config=config, processors=tuple(processors))
+        suite = await ExecutableSuite(
             items=items,
+            suite_execution_id=context.suite_execution_id,
             resolver=DependencyResolver(registry),
-        )
-        return mod_name, run, trace_processor.artifacts
+        ).execute()
+        return mod_name, suite, trace_processor.artifacts
     finally:
         sys.modules.pop(mod_name, None)
 
@@ -204,14 +204,14 @@ async def test_predicate_writes_trace_attributes(
     span_name: str,
     expected_attrs: dict[str, object],
 ):
-    mod_name, run, artifacts = await _run_module_with_tracing(
+    mod_name, suite, artifacts = await _suite_module_with_tracing(
         tmp_path=tmp_path,
         trace_processor=trace_processor,
         monkeypatch=monkeypatch,
         source=source,
     )
 
-    assert run.result.passed == 1
+    assert suite.result.passed == 1
     payloads = [_artifact_payload(artifact) for artifact in artifacts]
     attrs = next(
         span["attributes"]
@@ -250,13 +250,13 @@ def test_predicate_accepts_keyword_only_actual_reference_parameters():
 
 
 @pytest.mark.asyncio
-async def test_runner_collects_predicate_results_and_trace_data_into_db(
+async def test_executable_suite_collects_predicate_results_and_trace_data_into_db(
     tmp_path: Path,
     trace_processor,
     monkeypatch: pytest.MonkeyPatch,
 ):
     database_path = tmp_path / "rue.turso.db"
-    mod_name, run, artifacts = await _run_module_with_tracing(
+    mod_name, suite, artifacts = await _suite_module_with_tracing(
         tmp_path=tmp_path,
         trace_processor=trace_processor,
         monkeypatch=monkeypatch,
@@ -282,8 +282,8 @@ def test_sample():
 """,
     )
 
-    execution = run.result.executions[0]
-    assert execution.status.value == "failed"
+    execution = suite.result.test_executions[0]
+    assert execution.result.status.value == "failed"
     assert len(execution.result.assertion_results) == 1
     assert len(execution.result.assertion_results[0].predicate_results) == 1
 
@@ -300,11 +300,11 @@ def test_sample():
         "message": "db-message",
     }
 
-    store = TursoRunStore(database_path)
+    store = TursoSuiteStore(database_path)
     with store.connection() as conn:
         assertion = conn.execute(
-            "SELECT * FROM assertions WHERE execution_id = ?",
-            (str(execution.execution_id),),
+            "SELECT * FROM assertions WHERE test_execution_id = ?",
+            (str(execution.test_execution_id),),
         ).fetchone()
         assert assertion is not None
 
@@ -333,12 +333,12 @@ def test_sample():
 
 
 @pytest.mark.asyncio
-async def test_predicate_does_not_trace_after_runner_configured(
+async def test_predicate_does_not_trace_after_suite_configured(
     tmp_path: Path,
     trace_processor,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    _, _, artifacts = await _run_module_with_tracing(
+    _, _, artifacts = await _suite_module_with_tracing(
         tmp_path=tmp_path,
         trace_processor=trace_processor,
         monkeypatch=monkeypatch,
@@ -364,7 +364,7 @@ async def test_predicate_trace_always_records_content_attributes(
     trace_processor,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    _, run, artifacts = await _run_module_with_tracing(
+    _, suite, artifacts = await _suite_module_with_tracing(
         tmp_path=tmp_path,
         trace_processor=trace_processor,
         monkeypatch=monkeypatch,
@@ -399,7 +399,7 @@ def test_sample():
 """,
     )
 
-    assert run.result.passed == 1
+    assert suite.result.passed == 1
     attrs = next(
         span["attributes"]
         for artifact in artifacts

@@ -10,16 +10,16 @@ from typer.testing import CliRunner
 
 from rue.assertions.models import AssertionRepr, AssertionResult
 from rue.cli import app
-from rue.cli.rendering.state import TerminalRunState
+from rue.cli.rendering.state import TerminalSuiteState
 from rue.cli.rendering.terminal import (
     TerminalExperimentReporter,
-    TerminalRunReporter,
+    TerminalSuiteReporter,
 )
 from rue.cli.rendering.tests import TestReport
 from rue.config import Config
-from rue.context.models import RunEnvironment
-from rue.context.runtime import CURRENT_RUN_CONTEXT
-from rue.events import RunEventsProcessor, RunEventsReceiver
+from rue.context.models import SuiteEnvironment
+from rue.context.runtime import CURRENT_SUITE_CONTEXT
+from rue.events import SuiteEventsProcessor, SuiteEventsReceiver
 from rue.experiments.models import (
     ExperimentSpec,
     ExperimentVariant,
@@ -28,14 +28,17 @@ from rue.experiments.models import (
 from rue.models import Locator
 from rue.resources import ResourceSpec, Scope
 from rue.resources.metrics.models import MetricMetadata, MetricResult
-from rue.storage import TursoRunRecorder, TursoRunStore
-from rue.testing import LoadedTestDef
+from rue.storage import TursoSuiteRecorder, TursoSuiteStore
 from rue.testing.discovery import TestDefinitionErrors, TestDefinitionIssue
-from rue.testing.models import ExecutedTest
-from rue.testing.models.result import TestResult, TestStatus
-from rue.testing.models.run import ExecutedRun, RunResult
-from rue.testing.models.spec import TestSpecCollection
-from tests.helpers import make_definition, make_run_context
+from rue.testing.execution.suite.models import ExecutedSuite, SuiteResult
+from rue.testing.execution.test.models import (
+    ExecutedTest,
+    LoadedTestDef,
+    TestResult,
+    TestStatus,
+)
+from rue.testing.models import SuiteSpec
+from tests.helpers import make_definition, make_suite_context
 
 
 runner = CliRunner()
@@ -75,8 +78,8 @@ def raise_definition_errors(*args, **kwargs) -> None:
     raise make_definition_errors()
 
 
-def make_environment(**updates) -> RunEnvironment:
-    return RunEnvironment(
+def make_environment(**updates) -> SuiteEnvironment:
+    return SuiteEnvironment(
         python_version="3.12.0",
         platform="darwin",
         hostname="host",
@@ -118,15 +121,14 @@ def test_top_level_help_lists_run_and_status():
 def test_root_help_does_not_expose_run_options():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "--run-id" not in result.stdout
+    assert "--suite-execution-id" not in result.stdout
 
 
 def test_run_help_exposes_all_options():
     result = runner.invoke(app, ["run", "--help"])
     assert result.exit_code == 0
-    assert "--run-id" in result.stdout
+    assert "--suite-execution-id" in result.stdout
     assert "--no-db" not in result.stdout
-    assert "--db-path" not in result.stdout
     assert "--otel" in result.stdout
     assert "-exp" in result.stdout
     assert "--experiment" in result.stdout
@@ -141,7 +143,7 @@ def test_tests_status_help_exposes_status_options():
     assert result.exit_code == 0
     assert "--database-path" in result.stdout
     assert "--keyword" in result.stdout
-    assert "--run-id" not in result.stdout
+    assert "--suite-execution-id" not in result.stdout
     assert "--no-db" not in result.stdout
 
 
@@ -157,15 +159,18 @@ def test_cli_no_otel_flag_overrides_config():
     assert overridden.otel is False
 
 
-def test_cli_rejects_invalid_run_id():
-    result = runner.invoke(app, ["run", "--run-id", "not-a-uuid"])
+def test_cli_rejects_invalid_suite_execution_id():
+    result = runner.invoke(app, ["run", "--suite-execution-id", "not-a-uuid"])
     assert result.exit_code == 2
 
 
-def test_exp_with_run_id_exits_2():
-    result = runner.invoke(app, ["run", "-exp", "--run-id", str(uuid4())])
+def test_exp_with_suite_execution_id_exits_2():
+    result = runner.invoke(
+        app,
+        ["run", "-exp", "--suite-execution-id", str(uuid4())],
+    )
     assert result.exit_code == 2
-    assert "--run-id" in result.stdout
+    assert "--suite-execution-id" in result.stdout
 
 
 def test_exp_with_maxfail_exits_2():
@@ -184,21 +189,21 @@ def test_old_experiments_command_is_unknown():
     assert result.exit_code == 2
 
 
-def test_run_tests_returns_2_when_run_id_already_exists(
+def test_run_tests_returns_2_when_suite_execution_id_already_exists(
     database_path: Path,
-    turso_store: TursoRunStore,
+    turso_store: TursoSuiteStore,
     monkeypatch,
 ):
-    existing_run_id = uuid4()
+    existing_suite_execution_id = uuid4()
 
-    recorder = TursoRunRecorder()
+    recorder = TursoSuiteRecorder()
     recorder.configure(Config(database_path=turso_store.path))
     asyncio.run(
-        recorder.on_run_start(
-            ExecutedRun(
-                run_id=existing_run_id,
+        recorder.on_suite_execution_start(
+            ExecutedSuite(
+                suite_execution_id=existing_suite_execution_id,
                 environment=make_environment(),
-                result=RunResult(),
+                result=SuiteResult(),
             )
         )
     )
@@ -213,28 +218,31 @@ def test_run_tests_returns_2_when_run_id_already_exists(
     def _build(self, paths, **kwargs):
         nonlocal planned
         planned = True
-        return TestSpecCollection(suite_root=Path.cwd())
+        return SuiteSpec(suite_root=Path.cwd())
 
-    async def _fail_run(self, items=None, path=None):
-        del self, items, path
-        msg = "Runner.run should not be called when duplicate run_id exists"
+    async def _fail_execute(self):
+        del self
+        msg = (
+            "ExecutableSuite.execute should not be called when duplicate "
+            "suite_execution_id exists"
+        )
         raise AssertionError(msg)
 
     monkeypatch.setattr(
-        "rue.cli.options.TestSpecCollector.build_spec_collection", _build
+        "rue.cli.options.TestSpecCollector.collect_test_specs", _build
     )
     monkeypatch.setattr(
-        "rue.cli.run.TestLoader.load_from_collection",
-        lambda self, collection: [make_item("test_ok", set())],
+        "rue.cli.run.TestLoader.load_tests",
+        lambda self, suitespec: [make_item("test_ok", set())],
     )
-    monkeypatch.setattr("rue.cli.run.Runner.run", _fail_run)
+    monkeypatch.setattr("rue.cli.run.ExecutableSuite.execute", _fail_execute)
 
     result = runner.invoke(
         app,
         [
             "run",
-            "--run-id",
-            str(existing_run_id),
+            "--suite-execution-id",
+            str(existing_suite_execution_id),
         ],
     )
     assert planned is True
@@ -243,16 +251,18 @@ def test_run_tests_returns_2_when_run_id_already_exists(
 
 def test_run_tests_returns_2_when_definition_errors(monkeypatch):
     monkeypatch.setattr(
-        "rue.cli.options.TestSpecCollector.build_spec_collection",
-        lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
+        "rue.cli.options.TestSpecCollector.collect_test_specs",
+        lambda self, paths, **kwargs: SuiteSpec(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.run.TestLoader.load_from_collection",
+        "rue.cli.run.TestLoader.load_tests",
         raise_definition_errors,
     )
     monkeypatch.setattr(
-        "rue.cli.run.Runner",
-        lambda **kwargs: pytest.fail("Runner should not be constructed"),
+        "rue.cli.run.ExecutableSuite",
+        lambda **kwargs: pytest.fail(
+            "ExecutableSuite should not be constructed"
+        ),
     )
 
     result = runner.invoke(app, ["run"])
@@ -274,32 +284,33 @@ def test_cli_resolves_processors_and_injects_turso_recorder(
         ),
     )
 
-    class CustomProcessor(RunEventsProcessor):
+    class CustomProcessor(SuiteEventsProcessor):
         pass
 
     custom = CustomProcessor()
 
-    class FakeRunner:
-        def __init__(self) -> None:
-            context = CURRENT_RUN_CONTEXT.get()
+    class FakeExecutableSuite:
+        def __init__(self, *, items, suite_execution_id, resolver) -> None:
+            context = CURRENT_SUITE_CONTEXT.get()
             captured["context"] = context
             captured["config"] = context.config
-            captured["processors"] = RunEventsReceiver.current().processors
-
-        async def run(self, items, *, resolver):
+            captured["processors"] = SuiteEventsReceiver.current().processors
             captured["items"] = items
+            captured["suite_execution_id"] = suite_execution_id
             captured["resolver"] = resolver
-            return ExecutedRun()
+
+        async def execute(self):
+            return ExecutedSuite()
 
     monkeypatch.setattr(
-        "rue.cli.options.TestSpecCollector.build_spec_collection",
-        lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
+        "rue.cli.options.TestSpecCollector.collect_test_specs",
+        lambda self, paths, **kwargs: SuiteSpec(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.run.TestLoader.load_from_collection",
-        lambda self, collection: [make_item("test_ok", set())],
+        "rue.cli.run.TestLoader.load_tests",
+        lambda self, suitespec: [make_item("test_ok", set())],
     )
-    monkeypatch.setattr("rue.cli.run.Runner", FakeRunner)
+    monkeypatch.setattr("rue.cli.run.ExecutableSuite", FakeExecutableSuite)
 
     result = runner.invoke(
         app,
@@ -315,18 +326,18 @@ def test_cli_resolves_processors_and_injects_turso_recorder(
     assert captured["config"].processors == ["CustomProcessor"]
     assert captured["config"].fail_fast is True
     assert [type(p).__name__ for p in captured["processors"]] == [
-        "TerminalRunReporter",
+        "TerminalSuiteReporter",
         "CustomProcessor",
-        "TursoRunRecorder",
+        "TursoSuiteRecorder",
     ]
     assert captured["processors"][1] is custom
-    assert isinstance(captured["processors"][-1], TursoRunRecorder)
+    assert isinstance(captured["processors"][-1], TursoSuiteRecorder)
     assert captured["processors"][-1].path == tmp_path / "rue.turso.db"
-    assert "TursoRunRecorder" not in RunEventsProcessor.REGISTRY
+    assert "TursoSuiteRecorder" not in SuiteEventsProcessor.REGISTRY
 
 
-def test_terminal_run_reporter_prints_failed_run_and_metrics() -> None:
-    make_run_context(bind_events=False, fail_fast=False)
+def test_terminal_suite_reporter_prints_failed_suite_and_metrics() -> None:
+    make_suite_context(bind_events=False, fail_fast=False)
     output = StringIO()
     console = Console(
         file=output,
@@ -334,7 +345,7 @@ def test_terminal_run_reporter_prints_failed_run_and_metrics() -> None:
         color_system=None,
         width=120,
     )
-    reporter = TerminalRunReporter(console=console, verbosity=1)
+    reporter = TerminalSuiteReporter(console=console, verbosity=1)
     definition = make_definition(
         "test_sample",
         module_path=Path(__file__),
@@ -357,7 +368,7 @@ def test_terminal_run_reporter_prints_failed_run_and_metrics() -> None:
             error=AssertionError("not equal"),
             assertion_results=[assertion],
         ),
-        execution_id=uuid4(),
+        test_execution_id=uuid4(),
     )
     metric = MetricResult(
         metadata=MetricMetadata(
@@ -372,19 +383,19 @@ def test_terminal_run_reporter_prints_failed_run_and_metrics() -> None:
         assertion_results=[assertion],
         value=20,
     )
-    run = ExecutedRun(
+    suite = ExecutedSuite(
         environment=make_environment(),
-        result=RunResult(
-            executions=[execution],
+        result=SuiteResult(
+            test_executions=[execution],
             metric_results=[metric],
             total_duration_ms=5,
         ),
     )
 
     async def drive_reporter() -> None:
-        await reporter.on_collection_complete([definition], run)
-        await reporter.on_execution_complete(execution, run)
-        await reporter.on_run_complete(run)
+        await reporter.on_collection_complete([definition], suite)
+        await reporter.on_test_execution_complete(execution, suite)
+        await reporter.on_suite_execution_complete(suite)
 
     asyncio.run(drive_reporter())
 
@@ -396,8 +407,8 @@ def test_terminal_run_reporter_prints_failed_run_and_metrics() -> None:
     assert "1 failed" in text
 
 
-def test_terminal_run_state_tracks_top_level_progress() -> None:
-    state = TerminalRunState(verbosity=1)
+def test_terminal_suite_state_tracks_top_level_progress() -> None:
+    state = TerminalSuiteState(verbosity=1)
     module_path = Path(__file__)
     top_level = make_definition(
         "test_state",
@@ -413,23 +424,23 @@ def test_terminal_run_state_tracks_top_level_progress() -> None:
     child_execution = ExecutedTest(
         definition=child,
         result=TestResult(status=TestStatus.PASSED, duration_ms=1),
-        execution_id=uuid4(),
+        test_execution_id=uuid4(),
     )
     failed_execution = ExecutedTest(
         definition=top_level,
         result=TestResult(status=TestStatus.FAILED, duration_ms=2),
-        execution_id=uuid4(),
+        test_execution_id=uuid4(),
     )
 
     state.reset_collection([top_level])
 
     assert state.is_top_level_definition(top_level)
     assert not state.is_top_level_definition(child)
-    assert not state.record_execution(child_execution)
+    assert not state.record_test_execution(child_execution)
     assert state.completed_count == 0
     assert not state.is_module_complete(module_path)
 
-    assert state.record_execution(failed_execution)
+    assert state.record_test_execution(failed_execution)
     assert state.completed_count == 1
     assert state.status_counts[TestStatus.FAILED] == 1
     assert state.failures == [failed_execution]
@@ -439,19 +450,19 @@ def test_terminal_run_state_tracks_top_level_progress() -> None:
     assert state.all_modules_complete
 
 
-def test_run_tests_keeps_normal_exit_code_when_run_id_is_unique(
+def test_run_tests_keeps_normal_exit_code_when_suite_execution_id_is_unique(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "rue.cli.options.TestSpecCollector.build_spec_collection",
-        lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
+        "rue.cli.options.TestSpecCollector.collect_test_specs",
+        lambda self, paths, **kwargs: SuiteSpec(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.run.TestLoader.load_from_collection",
-        lambda self, collection: [make_item("test_ok", set())],
+        "rue.cli.run.TestLoader.load_tests",
+        lambda self, suitespec: [make_item("test_ok", set())],
     )
 
-    result = runner.invoke(app, ["run", "--run-id", str(uuid4())])
+    result = runner.invoke(app, ["run", "--suite-execution-id", str(uuid4())])
     assert result.exit_code == 0
 
 
@@ -485,23 +496,23 @@ def test_run_and_status_share_selection_parsing(
 ):
     captured: dict[str, object] = {}
 
-    def build_spec_collection(self, paths, **kwargs):
+    def collect_test_specs(self, paths, **kwargs):
         del kwargs
         captured["paths"] = paths
         captured["include_tags"] = tuple(self.include_tags)
         captured["exclude_tags"] = tuple(self.exclude_tags)
         captured["keyword"] = self.keyword
-        return TestSpecCollection(suite_root=Path.cwd())
+        return SuiteSpec(suite_root=Path.cwd())
 
     monkeypatch.setattr(
-        "rue.cli.options.TestSpecCollector.build_spec_collection",
-        build_spec_collection,
+        "rue.cli.options.TestSpecCollector.collect_test_specs",
+        collect_test_specs,
     )
 
     if status_mode:
         monkeypatch.setattr(
             "rue.cli.status.command.TestsStatusBuilder.build",
-            lambda self, collection: TestReport(),
+            lambda self, suitespec: TestReport(),
         )
         monkeypatch.setattr(
             "rue.cli.status.command.TestTreeRenderer.render",
@@ -509,22 +520,21 @@ def test_run_and_status_share_selection_parsing(
         )
     else:
         monkeypatch.setattr(
-            "rue.cli.run.TestLoader.load_from_collection",
-            lambda self, collection: [make_item("test_ok", set())],
+            "rue.cli.run.TestLoader.load_tests",
+            lambda self, suitespec: [make_item("test_ok", set())],
         )
 
-        class FakeRunner:
-            def __init__(self, **kwargs) -> None:
-                del kwargs
+        class FakeExecutableSuite:
+            def __init__(self, *, items, suite_execution_id, resolver) -> None:
+                del items, suite_execution_id, resolver
                 captured["verbosity"] = (
-                    CURRENT_RUN_CONTEXT.get().config.verbosity
+                    CURRENT_SUITE_CONTEXT.get().config.verbosity
                 )
 
-            async def run(self, items, *, resolver):
-                del items, resolver
-                return ExecutedRun()
+            async def execute(self):
+                return ExecutedSuite()
 
-        monkeypatch.setattr("rue.cli.run.Runner", FakeRunner)
+        monkeypatch.setattr("rue.cli.run.ExecutableSuite", FakeExecutableSuite)
 
     result = runner.invoke(
         app,
@@ -548,7 +558,7 @@ def test_run_and_status_share_selection_parsing(
     assert captured["keyword"] == "fast and not slow"
 
 
-def test_experiments_run_shares_selection_and_preserves_db_config(
+def test_experiments_execute_shares_selection_and_preserves_db_config(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -566,7 +576,7 @@ def test_experiments_run_shares_selection_and_preserves_db_config(
     )
     result = ExperimentVariantResult(
         variant=ExperimentVariant.build_all((experiment,))[1],
-        run_id=uuid4(),
+        suite_execution_id=uuid4(),
         passed=1,
         failed=0,
         errors=0,
@@ -578,47 +588,47 @@ def test_experiments_run_shares_selection_and_preserves_db_config(
         stopped_early=False,
     )
 
-    def build_spec_collection(self, paths, **kwargs):
+    def collect_test_specs(self, paths, **kwargs):
         del kwargs
         captured["paths"] = paths
         captured["include_tags"] = tuple(self.include_tags)
         captured["exclude_tags"] = tuple(self.exclude_tags)
         captured["keyword"] = self.keyword
-        return TestSpecCollection(suite_root=Path.cwd())
+        return SuiteSpec(suite_root=Path.cwd())
 
-    class FakeExperimentRunner:
+    class FakeExecutableExperiment:
         def __init__(self, *, config) -> None:
             captured["config"] = config
 
-        def collect(self, collection):
-            captured["collection"] = collection
+        def collect(self, suitespec):
+            captured["suitespec"] = suitespec
             return (experiment,)
 
-        async def run(self, collection, experiments=None, *, session=None):
-            captured["run_collection"] = collection
+        async def execute(self, suitespec, experiments=None, *, session=None):
+            captured["execute_suitespec"] = suitespec
             captured["experiments"] = experiments
             captured["session"] = session
             return (result,)
 
     monkeypatch.setattr(
-        "rue.cli.options.TestSpecCollector.build_spec_collection",
-        build_spec_collection,
+        "rue.cli.options.TestSpecCollector.collect_test_specs",
+        collect_test_specs,
     )
     monkeypatch.setattr(
-        "rue.cli.run.ExperimentRunner",
-        FakeExperimentRunner,
+        "rue.cli.run.ExecutableExperiment",
+        FakeExecutableExperiment,
     )
 
     mutated_path = tmp_path / "mutated.py"
     mutated_path.write_text("")
 
-    def load_from_collection(self, collection):
-        collection.setup_chains[mutated_path] = ()
+    def load_tests(self, suitespec):
+        suitespec.setup_chains[mutated_path] = ()
         return [make_item("test_ok", set())]
 
     monkeypatch.setattr(
-        "rue.cli.run.TestLoader.load_from_collection",
-        load_from_collection,
+        "rue.cli.run.TestLoader.load_tests",
+        load_tests,
     )
 
     cli_result = runner.invoke(
@@ -644,8 +654,8 @@ def test_experiments_run_shares_selection_and_preserves_db_config(
     assert captured["keyword"] == "smoke"
     assert captured["config"].maxfail is None
     assert captured["config"].processors == []
-    assert mutated_path not in captured["collection"].setup_chains
-    assert mutated_path not in captured["run_collection"].setup_chains
+    assert mutated_path not in captured["suitespec"].setup_chains
+    assert mutated_path not in captured["execute_suitespec"].setup_chains
     assert captured["experiments"] == (experiment,)
     assert isinstance(
         captured["session"].processors[0],
@@ -654,11 +664,11 @@ def test_experiments_run_shares_selection_and_preserves_db_config(
     assert "model=mini" in cli_result.stdout
 
 
-def test_experiments_run_no_experiments_runs_baseline(monkeypatch):
+def test_experiments_execute_no_experiments_executes_baseline(monkeypatch):
     captured: dict[str, object] = {}
     result = ExperimentVariantResult(
         variant=ExperimentVariant.build_all(())[0],
-        run_id=uuid4(),
+        suite_execution_id=uuid4(),
         passed=1,
         failed=0,
         errors=0,
@@ -670,30 +680,30 @@ def test_experiments_run_no_experiments_runs_baseline(monkeypatch):
         stopped_early=False,
     )
 
-    class FakeExperimentRunner:
+    class FakeExecutableExperiment:
         def __init__(self, *, config) -> None:
             self.config = config
 
-        def collect(self, collection):
+        def collect(self, suitespec):
             return ()
 
-        async def run(self, collection, experiments=None, *, session=None):
-            captured["collection"] = collection
+        async def execute(self, suitespec, experiments=None, *, session=None):
+            captured["suitespec"] = suitespec
             captured["experiments"] = experiments
             captured["session"] = session
             return (result,)
 
     monkeypatch.setattr(
-        "rue.cli.options.TestSpecCollector.build_spec_collection",
-        lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
+        "rue.cli.options.TestSpecCollector.collect_test_specs",
+        lambda self, paths, **kwargs: SuiteSpec(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.run.ExperimentRunner",
-        FakeExperimentRunner,
+        "rue.cli.run.ExecutableExperiment",
+        FakeExecutableExperiment,
     )
     monkeypatch.setattr(
-        "rue.cli.run.TestLoader.load_from_collection",
-        lambda self, collection: [make_item("test_ok", set())],
+        "rue.cli.run.TestLoader.load_tests",
+        lambda self, suitespec: [make_item("test_ok", set())],
     )
 
     cli_result = runner.invoke(app, ["run", "-exp"])
@@ -707,19 +717,19 @@ def test_experiments_run_no_experiments_runs_baseline(monkeypatch):
     assert "baseline" in cli_result.stdout
 
 
-def test_experiments_run_returns_2_when_definition_errors(monkeypatch):
+def test_experiments_execute_returns_2_when_definition_errors(monkeypatch):
     monkeypatch.setattr(
-        "rue.cli.options.TestSpecCollector.build_spec_collection",
-        lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
+        "rue.cli.options.TestSpecCollector.collect_test_specs",
+        lambda self, paths, **kwargs: SuiteSpec(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
-        "rue.cli.run.TestLoader.load_from_collection",
+        "rue.cli.run.TestLoader.load_tests",
         raise_definition_errors,
     )
     monkeypatch.setattr(
-        "rue.cli.run.ExperimentRunner",
+        "rue.cli.run.ExecutableExperiment",
         lambda **kwargs: pytest.fail(
-            "ExperimentRunner should not be constructed"
+            "ExecutableExperiment should not be constructed"
         ),
     )
 
@@ -733,8 +743,8 @@ def test_experiments_run_returns_2_when_definition_errors(monkeypatch):
 
 def test_tests_status_returns_2_when_definition_errors(monkeypatch):
     monkeypatch.setattr(
-        "rue.cli.options.TestSpecCollector.build_spec_collection",
-        lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
+        "rue.cli.options.TestSpecCollector.collect_test_specs",
+        lambda self, paths, **kwargs: SuiteSpec(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
         "rue.cli.status.command.TestsStatusBuilder.build",
@@ -752,12 +762,12 @@ def test_tests_status_does_not_create_missing_db(tmp_path, monkeypatch):
     missing_db = tmp_path / "missing.db"
 
     monkeypatch.setattr(
-        "rue.cli.options.TestSpecCollector.build_spec_collection",
-        lambda self, paths, **kwargs: TestSpecCollection(suite_root=Path.cwd()),
+        "rue.cli.options.TestSpecCollector.collect_test_specs",
+        lambda self, paths, **kwargs: SuiteSpec(suite_root=Path.cwd()),
     )
     monkeypatch.setattr(
         "rue.cli.status.command.TestsStatusBuilder.build",
-        lambda self, collection: TestReport(),
+        lambda self, suitespec: TestReport(),
     )
     monkeypatch.setattr(
         "rue.cli.status.command.TestTreeRenderer.render",

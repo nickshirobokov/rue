@@ -1,4 +1,4 @@
-"""Execution queue for runner-owned test scheduling."""
+"""Scheduling queue for suite-owned test execution order."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import UUID
 
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.execution.executable import ExecutableTest
+from rue.testing.execution.test.base import ExecutableTest
 
 
 @dataclass(slots=True)
@@ -55,7 +55,7 @@ class _QueueBatch:
 
 @dataclass(slots=True)
 class _ModuleQueue:
-    """Batch queue for a single module inside one concurrent runner step."""
+    """Batch queue for a single module inside one concurrent suite step."""
 
     batches: list[_QueueBatch] = field(default_factory=list)
     _next_batch_index: int = field(default=0, init=False, repr=False)
@@ -92,8 +92,8 @@ class _ModuleQueue:
 
 
 @dataclass(slots=True)
-class _RunnerStep:
-    """One absolute runner step (main or parallel module region)."""
+class _SuiteStep:
+    """One absolute suite step (main or parallel module region)."""
 
     main_batch: _QueueBatch | None = None
     module_queues: list[_ModuleQueue] = field(default_factory=list)
@@ -158,10 +158,10 @@ class _RunnerStep:
 
 
 @dataclass(slots=True)
-class SessionQueue:
-    """Ordered queue of backend-aware runner steps."""
+class SuiteQueue:
+    """Ordered queue of backend-aware suite steps."""
 
-    steps: list[_RunnerStep] = field(default_factory=list)
+    steps: list[_SuiteStep] = field(default_factory=list)
     _tests: list[ExecutableTest] = field(
         default_factory=list, init=False, repr=False
     )
@@ -174,36 +174,36 @@ class SessionQueue:
         self._tests.append(test)
         module_path = test.definition.spec.locator.module_path
         self._remaining_by_module.setdefault(module_path, set()).add(
-            test.execution_id
+            test.test_execution_id
         )
         match test.backend:
             case ExecutionBackend.MAIN:
                 if self.steps and self.steps[-1].is_main:
-                    runner_step = self.steps[-1]
+                    suite_step = self.steps[-1]
                 else:
-                    runner_step = _RunnerStep(
+                    suite_step = _SuiteStep(
                         main_batch=_QueueBatch(backend=ExecutionBackend.MAIN)
                     )
-                    self.steps.append(runner_step)
+                    self.steps.append(suite_step)
             case _:
                 if self.steps and not self.steps[-1].is_main:
-                    runner_step = self.steps[-1]
+                    suite_step = self.steps[-1]
                 else:
-                    runner_step = _RunnerStep()
-                    self.steps.append(runner_step)
-        runner_step.add(test)
+                    suite_step = _SuiteStep()
+                    self.steps.append(suite_step)
+        suite_step.add(test)
 
     def finish(self, test: ExecutableTest) -> Path | None:
         """Mark a top-level executable complete and return closed module."""
         module_path = test.definition.spec.locator.module_path
         remaining = self._remaining_by_module[module_path]
-        if test.execution_id not in remaining:
+        if test.test_execution_id not in remaining:
             msg = (
                 "Cannot finish an executable that is not pending: "
-                f"{test.execution_id}"
+                f"{test.test_execution_id}"
             )
             raise RuntimeError(msg)
-        remaining.remove(test.execution_id)
+        remaining.remove(test.test_execution_id)
         if remaining:
             return None
         del self._remaining_by_module[module_path]

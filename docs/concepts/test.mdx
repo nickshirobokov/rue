@@ -118,9 +118,9 @@ class SupportBotSuite:
 ## Shared Setup Files
 
 Use `conftest.py` or `confrue_*.py` for setup that should apply to nearby tests:
-- shared `PROCESS` resources
+- shared `SUITE` resources
 - reusable helpers and constants
-- directory-scoped overrides of same-name `PROCESS` resources
+- directory-scoped overrides of same-name `SUITE` resources
 
 Keep test definitions in `test_*.py` files. Keep shared setup in `conftest.py` or `confrue_*.py` files.
 
@@ -208,7 +208,7 @@ Rue handles the async execution automatically - no `asyncio.run()` needed.
 
 ## Iterate Tests
 
-AI systems are inherently non-deterministic, making it essential to test them across multiple scenarios and runs. Rue provides three distinct approaches to iterate the same test definition, each optimized for different use cases: quick parametrization for a few variations, structured cases for large datasets, and repeated execution to assess consistency.
+AI systems are inherently non-deterministic, making it essential to test them across multiple scenarios and repeated test executions. Rue provides three distinct approaches to iterate the same test definition, each optimized for different use cases: quick parametrization for a few variations, structured cases for large datasets, and repeated execution to assess consistency.
 
 ### Iterate with different parameters
 
@@ -271,11 +271,11 @@ def test_from_dataset_pass_at_k(case: Case, classifier):
     assert result == expected
 ```
 
-`min_passes` on `test.iterate.cases` works like `test.iterate`: by default all case executions must pass, but you can require a lower threshold when evaluating large or noisy datasets.
+`min_passes` on `test.iterate.cases` works like `test.iterate`: by default all case test executions must pass, but you can require a lower threshold when evaluating large or noisy datasets.
 
 ### Iterate with grouped cases
 
-When your cases naturally fall into groups (e.g. topics, difficulty tiers, languages), use `@rue.test.iterate.groups` with `CaseGroup` objects. Each group carries its own **group-level references** and a **`min_passes` threshold**, giving you hierarchical reporting (run → groups → cases) and per-group pass/fail semantics.
+When your cases naturally fall into groups (e.g. topics, difficulty tiers, languages), use `@rue.test.iterate.groups` with `CaseGroup` objects. Each group carries its own **group-level references** and a **`min_passes` threshold**, giving you hierarchical reporting (suite → groups → cases) and per-group pass/fail semantics.
 
 ```python
 import rue
@@ -412,12 +412,12 @@ Mark tests expected to fail with `@rue.test.tag.xfail`:
 ```python
 @rue.test.tag.xfail(reason="Known bug #123")
 def test_known_issue():
-    # This failure won't fail the test suite
+    # This failure won't fail the suite execution
     assert False
 
 @rue.test.tag.xfail(reason="Model not accurate yet", strict=True)
 def test_strict_xfail():
-    # If this passes, the test suite FAILS (unexpected pass)
+    # If this passes, the suite execution FAILS (unexpected pass)
     pass
 ```
 

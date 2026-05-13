@@ -1,4 +1,4 @@
-"""Live run output rendering."""
+"""Live suite output rendering."""
 
 # ruff: noqa: D102
 
@@ -16,18 +16,17 @@ from rich.text import Text
 from rich.tree import Tree
 
 from rue.cli.rendering.primitives import STATUS_STYLES
-from rue.cli.rendering.run import ExecutionView
-from rue.cli.rendering.state import TerminalRunState
+from rue.cli.rendering.state import TerminalSuiteState
+from rue.cli.rendering.suite import TestExecutionView
 from rue.cli.rendering.tests import TestModuleView
-from rue.testing.execution.composite import CompositeTest
-from rue.testing.models import TestStatus
+from rue.testing.execution.test.composite import CompositeTest
+from rue.testing.execution.test.models import TestStatus
 
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from rue.testing.models.executed import ExecutedTest
-    from rue.testing.models.loaded import LoadedTestDef
+    from rue.testing.execution.test.models import ExecutedTest, LoadedTestDef
 
 
 _PROGRESS_STAT_ORDER: tuple[tuple[TestStatus, str], ...] = (
@@ -35,13 +34,14 @@ _PROGRESS_STAT_ORDER: tuple[tuple[TestStatus, str], ...] = (
     (TestStatus.FAILED, "failed"),
     (TestStatus.ERROR, "errors"),
     (TestStatus.SKIPPED, "skipped"),
+    (TestStatus.NOT_RUN, "not run"),
     (TestStatus.XFAILED, "xfailed"),
     (TestStatus.XPASSED, "xpassed"),
 )
 
 
-class RunLiveRenderer:
-    """Render live run progress for the selected verbosity."""
+class SuiteLiveRenderer:
+    """Render live suite progress for the selected verbosity."""
 
     def __init__(
         self, console: Console, verbosity: int = 0
@@ -62,7 +62,7 @@ class RunLiveRenderer:
         self.verbosity = verbosity
         self.mode = make_mode(verbosity, self.console)
 
-    def render(self, state: TerminalRunState) -> RenderableType:
+    def render(self, state: TerminalSuiteState) -> RenderableType:
         """Return the current live renderable for terminal refresh."""
         if state.all_modules_complete:
             return Text("")
@@ -75,18 +75,18 @@ class RunLiveRenderer:
         self,
         path: Path,
         items: list[LoadedTestDef],
-        state: TerminalRunState,
+        state: TerminalSuiteState,
     ) -> None:
         self.mode.print_completed_module(path, items, state)
 
     def print_test(
         self,
         execution: ExecutedTest,
-        state: TerminalRunState,
+        state: TerminalSuiteState,
     ) -> None:
         self.mode.print_test(execution, state)
 
-    def _progress_panel(self, state: TerminalRunState) -> Panel:
+    def _progress_panel(self, state: TerminalSuiteState) -> Panel:
         completed = state.completed_count
         total = state.total_tests
         pct = completed / total * 100 if total else 0
@@ -121,7 +121,7 @@ class RunLiveRenderer:
 
 
 class OutputMode(ABC):
-    """Verbosity-specific strategy for live and non-live run output."""
+    """Verbosity-specific strategy for live and non-live suite output."""
 
     def __init__(self, console: Console) -> None:
         self.console = console
@@ -146,21 +146,21 @@ class OutputMode(ABC):
         return line
 
     @abstractmethod
-    def render_live(self, state: TerminalRunState) -> RenderableType: ...
+    def render_live(self, state: TerminalSuiteState) -> RenderableType: ...
 
     @abstractmethod
     def print_test(
-        self, execution: ExecutedTest, state: TerminalRunState
+        self, execution: ExecutedTest, state: TerminalSuiteState
     ) -> None: ...
 
     def print_completed_module(
         self,
         path: Path,
         items: list[LoadedTestDef],
-        state: TerminalRunState,
+        state: TerminalSuiteState,
     ) -> None:
         for item in items:
-            execution = state.executions.get(item.spec.collection_index)
+            execution = state.test_executions.get(item.spec.collection_index)
             if execution is not None:
                 self.print_test(execution, state)
 
@@ -172,7 +172,7 @@ class QuietMode(OutputMode):
     def show_collected_count(self) -> bool:
         return False
 
-    def render_live(self, state: TerminalRunState) -> RenderableType:
+    def render_live(self, state: TerminalSuiteState) -> RenderableType:
         progress = f"{state.completed_count}/{state.total_tests}"
         text = Text.from_markup(
             f"Running tests... {progress} completed"
@@ -180,7 +180,7 @@ class QuietMode(OutputMode):
         return self._render_spinner_line(text)
 
     def print_test(
-        self, execution: ExecutedTest, state: TerminalRunState
+        self, execution: ExecutedTest, state: TerminalSuiteState
     ) -> None:
         pass
 
@@ -188,7 +188,7 @@ class QuietMode(OutputMode):
 class CompactMode(OutputMode):
     """Print pytest-style compact module symbols at default verbosity."""
 
-    def render_live(self, state: TerminalRunState) -> RenderableType:
+    def render_live(self, state: TerminalSuiteState) -> RenderableType:
         lines: list[RenderableType] = []
         for path, items in state.items_by_file.items():
             if path in state.completed_modules:
@@ -196,7 +196,7 @@ class CompactMode(OutputMode):
             line = TestModuleView(path).compact_text()
             has_running = False
             for item in items:
-                execution = state.executions.get(item.spec.collection_index)
+                execution = state.test_executions.get(item.spec.collection_index)
                 if execution is None:
                     has_running = True
                     line.append("⋯", style="dim")
@@ -209,7 +209,7 @@ class CompactMode(OutputMode):
         return Group(*lines) if lines else Text("")
 
     def print_test(
-        self, execution: ExecutedTest, state: TerminalRunState
+        self, execution: ExecutedTest, state: TerminalSuiteState
     ) -> None:
         definition = execution.definition
         style = STATUS_STYLES[execution.result.status]
@@ -229,11 +229,11 @@ class CompactMode(OutputMode):
         self,
         path: Path,
         items: list[LoadedTestDef],
-        state: TerminalRunState,
+        state: TerminalSuiteState,
     ) -> None:
         line = TestModuleView(path).compact_text()
         for item in items:
-            execution = state.executions.get(item.spec.collection_index)
+            execution = state.test_executions.get(item.spec.collection_index)
             if execution is not None:
                 style = STATUS_STYLES[execution.result.status]
                 line.append(style.symbol, style=style.color)
@@ -252,34 +252,35 @@ class VerboseMode(OutputMode):
     def show_progress_bar(self) -> bool:
         return True
 
-    def _iter_sub_executions(
+    def _iter_sub_test_executions(
         self,
-        sub_executions: list[ExecutedTest],
+        sub_test_executions: list[ExecutedTest],
         indent: int,
         verbosity: int,
     ) -> list[RenderableType]:
         renderables: list[RenderableType] = []
-        for sub in sub_executions:
+        for sub in sub_test_executions:
             if sub.result.status in {
                 TestStatus.PASSED,
                 TestStatus.FAILED,
                 TestStatus.ERROR,
+                TestStatus.NOT_RUN,
             }:
-                view = ExecutionView.from_execution(
+                view = TestExecutionView.from_test_execution(
                     sub, verbosity=verbosity
                 )
                 renderables.append(
                     view.render_test_line(indent=indent, sub=True)
                 )
-            if sub.sub_executions:
+            if sub.sub_test_executions:
                 renderables.extend(
-                    self._iter_sub_executions(
-                        sub.sub_executions, indent + 2, verbosity
+                    self._iter_sub_test_executions(
+                        sub.sub_test_executions, indent + 2, verbosity
                     )
                 )
         return renderables
 
-    def render_live(self, state: TerminalRunState) -> RenderableType:
+    def render_live(self, state: TerminalSuiteState) -> RenderableType:
         """Render unfinished modules with pending and completed nodes."""
         trees: list[Tree] = []
         for path, items in state.items_by_file.items():
@@ -289,11 +290,11 @@ class VerboseMode(OutputMode):
             for item in items:
                 key = item.spec.collection_index
                 test = state.tests.get(key)
-                execution = state.executions.get(key)
+                execution = state.test_executions.get(key)
                 branch = tree.add(self._build_live_item_line(item, execution))
-                if execution is not None and execution.sub_executions:
-                    self._add_live_sub_executions(
-                        branch, execution.sub_executions, state
+                if execution is not None and execution.sub_test_executions:
+                    self._add_live_sub_test_executions(
+                        branch, execution.sub_test_executions, state
                     )
                 elif (
                     execution is None
@@ -302,19 +303,19 @@ class VerboseMode(OutputMode):
                     # Composite tests can reveal completed children early.
                     self._add_live_composite_children(branch, test, state)
                 elif execution is None:
-                    early = self._early_sub_executions(item, state)
+                    early = self._early_sub_test_executions(item, state)
                     if early:
-                        self._add_live_sub_executions(branch, early, state)
+                        self._add_live_sub_test_executions(branch, early, state)
             trees.append(tree)
         return Group(*trees) if trees else Text("")
 
-    def _early_sub_executions(
-        self, item: LoadedTestDef, state: TerminalRunState
+    def _early_sub_test_executions(
+        self, item: LoadedTestDef, state: TerminalSuiteState
     ) -> list[ExecutedTest]:
-        """Sub-executions that completed before the parent finished."""
+        """Child test executions that completed before the parent finished."""
         return [
             ex
-            for ex in state.all_executions.values()
+            for ex in state.all_test_executions.values()
             if (
                 ex.definition.spec.collection_index
                 == item.spec.collection_index
@@ -326,21 +327,21 @@ class VerboseMode(OutputMode):
         self,
         path: Path,
         items: list[LoadedTestDef],
-        state: TerminalRunState,
+        state: TerminalSuiteState,
     ) -> None:
         tree = Tree(TestModuleView(path).tree_text())
         for item in items:
-            execution = state.executions.get(item.spec.collection_index)
+            execution = state.test_executions.get(item.spec.collection_index)
             branch = tree.add(self._build_live_item_line(item, execution))
-            if execution is not None and execution.sub_executions:
-                self._add_live_sub_executions(
-                    branch, execution.sub_executions, state
+            if execution is not None and execution.sub_test_executions:
+                self._add_live_sub_test_executions(
+                    branch, execution.sub_test_executions, state
                 )
         self.console.print(tree)
         state.current_module = path
 
     def print_test(
-        self, execution: ExecutedTest, state: TerminalRunState
+        self, execution: ExecutedTest, state: TerminalSuiteState
     ) -> None:
         definition = execution.definition
         if state.current_module != definition.spec.locator.module_path:
@@ -353,15 +354,15 @@ class VerboseMode(OutputMode):
             )
             state.current_module = definition.spec.locator.module_path
 
-        view = ExecutionView.from_execution(
+        view = TestExecutionView.from_test_execution(
             execution, verbosity=state.verbosity
         )
-        if execution.sub_executions:
+        if execution.sub_test_executions:
             self.console.print(
                 view.render_test_line(name=definition.spec.local_name)
             )
-            for renderable in self._iter_sub_executions(
-                execution.sub_executions,
+            for renderable in self._iter_sub_test_executions(
+                execution.sub_test_executions,
                 indent=4,
                 verbosity=state.verbosity,
             ):
@@ -381,16 +382,16 @@ class VerboseMode(OutputMode):
     ) -> RenderableType:
         if execution is None:
             return self._render_spinner_line(
-                ExecutionView.running_line(item.spec.local_name)
+                TestExecutionView.running_line(item.spec.local_name)
             )
-        view = ExecutionView.from_execution(execution)
+        view = TestExecutionView.from_test_execution(execution)
         return view.render_live_item_line(name=item.spec.local_name)
 
     def _add_live_composite_children(
-        self, parent: Tree, test: CompositeTest, state: TerminalRunState
+        self, parent: Tree, test: CompositeTest, state: TerminalSuiteState
     ) -> None:
         for child in test.children:
-            child_exec = state.all_executions.get(id(child.definition))
+            child_exec = state.all_test_executions.get(id(child.definition))
             if child_exec is not None:
                 parent.add(
                     self._render_sub_live_line(
@@ -398,10 +399,10 @@ class VerboseMode(OutputMode):
                         verbosity=state.verbosity,
                     )
                 )
-                if child_exec.sub_executions:
-                    self._add_live_sub_executions(
+                if child_exec.sub_test_executions:
+                    self._add_live_sub_test_executions(
                         parent.children[-1],
-                        child_exec.sub_executions,
+                        child_exec.sub_test_executions,
                         state,
                     )
             elif isinstance(child, CompositeTest):
@@ -410,38 +411,43 @@ class VerboseMode(OutputMode):
                         full=state.verbosity >= 2
                     )
                 )
-                pending = ExecutionView.sub_label_text(
+                pending = TestExecutionView.sub_label_text(
                     pending_label or "case"
                 )
                 pending.append("  ⋯", style="dim")
                 node = parent.add(pending)
                 self._add_live_composite_children(node, child, state)
 
-    def _add_live_sub_executions(
+    def _add_live_sub_test_executions(
         self,
         parent: Tree,
-        sub_executions: list[ExecutedTest],
-        state: TerminalRunState,
+        sub_test_executions: list[ExecutedTest],
+        state: TerminalSuiteState,
     ) -> None:
-        for sub in sub_executions:
+        for sub in sub_test_executions:
             node = parent
             if sub.result.status in {
                 TestStatus.PASSED,
                 TestStatus.FAILED,
                 TestStatus.ERROR,
+                TestStatus.NOT_RUN,
             }:
                 node = parent.add(
                     self._render_sub_live_line(
                         sub, verbosity=state.verbosity
                     )
+            )
+            if sub.sub_test_executions:
+                self._add_live_sub_test_executions(
+                    node,
+                    sub.sub_test_executions,
+                    state,
                 )
-            if sub.sub_executions:
-                self._add_live_sub_executions(node, sub.sub_executions, state)
 
     def _render_sub_live_line(
         self, execution: ExecutedTest, *, verbosity: int
     ) -> Text:
-        view = ExecutionView.from_execution(
+        view = TestExecutionView.from_test_execution(
             execution, verbosity=verbosity
         )
         return view.render_sub_live_line()
@@ -460,7 +466,7 @@ __all__ = [
     "CompactMode",
     "OutputMode",
     "QuietMode",
-    "RunLiveRenderer",
+    "SuiteLiveRenderer",
     "VerboseMode",
     "make_mode",
 ]

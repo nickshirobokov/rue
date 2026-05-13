@@ -8,19 +8,21 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 from uuid import uuid4
 
-from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.execution.composite import CompositeTest
-from rue.testing.execution.executable import ExecutableTest
-from rue.testing.execution.queue import SessionQueue
-from rue.testing.execution.single import SingleTest
-from rue.testing.models import (
+from rue.testing.compilation.modifiers import (
     BackendModifier,
     CasesIterateModifier,
     GroupsIterateModifier,
     IterateModifier,
-    LoadedTestDef,
     ParamsIterateModifier,
 )
+from rue.testing.compilation.queue import SuiteQueue
+from rue.testing.execution.backend import ExecutionBackend
+from rue.testing.execution.case import Case, CaseFactory
+from rue.testing.execution.test.adaptive import AdaptiveTest
+from rue.testing.execution.test.base import ExecutableTest
+from rue.testing.execution.test.composite import CompositeTest
+from rue.testing.execution.test.models import LoadedTestDef
+from rue.testing.execution.test.single import SingleTest
 
 
 @dataclass
@@ -29,7 +31,7 @@ class DefaultTestFactory:
 
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
-    queue: SessionQueue | None = None
+    queue: SuiteQueue | None = None
     _next_sync_actor_id: int = field(default=1, init=False, repr=False)
 
     def build(
@@ -58,10 +60,10 @@ class DefaultTestFactory:
                     | ExecutionBackend.MODULE_MAIN
                     | ExecutionBackend.ASYNCIO
                 ):
-                    test = SingleTest(
+                    test: ExecutableTest = SingleTest(
                         definition=definition,
                         params=params,
-                        execution_id=uuid4(),
+                        test_execution_id=uuid4(),
                         backend=backend,
                         sync_actor_id=sync_actor_id,
                         semaphore=self.semaphore,
@@ -108,36 +110,81 @@ class DefaultTestFactory:
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
-                    execution_id=uuid4(),
+                    test_execution_id=uuid4(),
                     children=children,
                 )
                 if enqueue and self.queue is not None:
                     self.queue.add(test)
                 return test
             case CasesIterateModifier(cases=cases, min_passes=min_passes):
-                children = [
-                    self.build(
-                        replace(
-                            definition,
-                            spec=replace(
-                                definition.spec,
-                                modifiers=rest_tuple,
-                                suffix=repr(c.metadata) if c.metadata else None,
-                                case_id=c.id,
-                            ),
-                        ),
-                        {**params, "case": c},
-                        backend=backend,
-                        enqueue=False,
-                    )
-                    for c in cases
-                ]
+                case_children: list[ExecutableTest] = []
+                for entry in cases:
+                    match entry:
+                        case Case() as c:
+                            case_children.append(
+                                self.build(
+                                    replace(
+                                        definition,
+                                        spec=replace(
+                                            definition.spec,
+                                            modifiers=rest_tuple,
+                                            suffix=repr(c.metadata)
+                                            if c.metadata
+                                            else None,
+                                            case_id=c.id,
+                                        ),
+                                    ),
+                                    {**params, "case": c},
+                                    backend=backend,
+                                    enqueue=False,
+                                )
+                            )
+                        case CaseFactory() as factory:
+                            attempt_children = [
+                                self.build(
+                                    replace(
+                                        definition,
+                                        spec=replace(
+                                            definition.spec,
+                                            modifiers=rest_tuple,
+                                            suffix=f"attempt {i + 1}",
+                                            case_id=None,
+                                        ),
+                                    ),
+                                    {**params, "case": None},
+                                    backend=backend,
+                                    enqueue=False,
+                                )
+                                for i in range(factory.max_attempts)
+                            ]
+                            case_children.append(
+                                AdaptiveTest(
+                                    definition=replace(
+                                        definition,
+                                        spec=replace(
+                                            definition.spec,
+                                            modifiers=(),
+                                            suffix=factory.display_name,
+                                            case_id=None,
+                                        ),
+                                    ),
+                                    backend=backend,
+                                    min_passes=factory.max_attempts,
+                                    test_execution_id=uuid4(),
+                                    children=attempt_children,
+                                    factory=factory,
+                                )
+                            )
+                        case _:
+                            raise NotImplementedError(
+                                f"Unknown case entry: {entry}"
+                            )
                 test = CompositeTest(
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
-                    execution_id=uuid4(),
-                    children=children,
+                    test_execution_id=uuid4(),
+                    children=case_children,
                 )
                 if enqueue and self.queue is not None:
                     self.queue.add(test)
@@ -169,7 +216,7 @@ class DefaultTestFactory:
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
-                    execution_id=uuid4(),
+                    test_execution_id=uuid4(),
                     children=children,
                 )
                 if enqueue and self.queue is not None:
@@ -198,7 +245,7 @@ class DefaultTestFactory:
                     definition=definition,
                     backend=backend,
                     min_passes=min_passes,
-                    execution_id=uuid4(),
+                    test_execution_id=uuid4(),
                     children=children,
                 )
                 if enqueue and self.queue is not None:

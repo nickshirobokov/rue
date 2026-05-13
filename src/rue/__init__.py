@@ -1,6 +1,6 @@
 """Rue - Testing framework for AI agents."""
 
-from .events import RunEventsProcessor, RunEventsReceiver
+from .events import SuiteEventsProcessor, SuiteEventsReceiver
 from .experiments.decorator import experiment
 from .patching import MonkeyPatch
 from .predicates import PredicateResult, predicate
@@ -14,7 +14,9 @@ from .resources.sut import (
 )
 from .testing import (
     Case,
+    CaseFactory,
     CaseGroup,
+    EdgeCaseFactory,
     ExecutionBackend,
     backend,
     fail,
@@ -39,13 +41,15 @@ __all__ = [
     "CapturedOutput",
     "CapturedStream",
     "Case",
+    "CaseFactory",
     "CaseGroup",
+    "EdgeCaseFactory",
     "ExecutionBackend",
     "Metric",
     "MonkeyPatch",
     "PredicateResult",
-    "RunEventsProcessor",
-    "RunEventsReceiver",
+    "SuiteEventsProcessor",
+    "SuiteEventsReceiver",
     "backend",
     "experiment",
     "fail",

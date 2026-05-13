@@ -24,8 +24,8 @@ from rue.resources.fixtures_collector import (
     RewritePytestFixtureDecoratorsTransformer,
 )
 from rue.testing.decorators.tag import get_tag_data, merge_tag_data
-from rue.testing.models.loaded import LoadedTestDef
-from rue.testing.models.spec import SetupFileRef, TestSpec, TestSpecCollection
+from rue.testing.execution.test.models import LoadedTestDef
+from rue.testing.models import SetupFileRef, SuiteSpec, TestSpec
 
 
 TFunction = TypeVar("TFunction", ast.FunctionDef, ast.AsyncFunctionDef)
@@ -90,10 +90,19 @@ class RueImportSession:
 
     def __post_init__(self) -> None:
         self.root = self.root.resolve()
+        root_path = str(self.root)
+        while root_path in sys.path:
+            sys.path.remove(root_path)
+        sys.path.insert(0, root_path)
+
         # Deterministic: same root → same package name in every process.
+        root_hash = hashlib.blake2s(
+            str(self.root).encode(),
+            digest_size=8,
+        ).hexdigest()
         self.root_package = (
             f"{RUE_DISCOVERY_PACKAGE}"
-            f".suite_{hashlib.blake2s(str(self.root).encode(), digest_size=8).hexdigest()}"
+            f".suite_{root_hash}"
         )
         if RUE_DISCOVERY_PACKAGE not in sys.modules:
             module = ModuleType(RUE_DISCOVERY_PACKAGE)
@@ -124,8 +133,12 @@ class RueImportSession:
         current = Path()
         for depth, part in enumerate(relative.parts):
             current /= part
+            directory_hash = hashlib.blake2s(
+                current.as_posix().encode(),
+                digest_size=4,
+            ).hexdigest()
             parts.append(
-                f"pkg_{depth}_{hashlib.blake2s(current.as_posix().encode(), digest_size=4).hexdigest()}"
+                f"pkg_{depth}_{directory_hash}"
             )
         return ".".join(parts)
 
@@ -185,10 +198,10 @@ class RueDiscoveryFinder(importlib.abc.MetaPathFinder):
         module_path = session.module_paths.get(fullname)
         if module_path is None:
             return None
-        return importlib.util.spec_from_loader(
+        return importlib.util.spec_from_file_location(
             fullname,
-            RueModuleLoader(fullname=fullname, path=module_path),
-            origin=str(module_path),
+            module_path,
+            loader=RueModuleLoader(fullname=fullname, path=module_path),
         )
 
     def _match_session(self, fullname: str) -> RueImportSession | None:
@@ -245,7 +258,7 @@ class RueFunctionTransformer(ast.NodeTransformer):
 
 
 def _is_test_decorator(node: ast.expr) -> bool:
-    """Return True if the AST node is any supported @test / @rue.test decorator form."""
+    """Return True for any supported @test / @rue.test decorator form."""
     if isinstance(node, ast.Call):
         return _is_test_decorator(node.func)
     if isinstance(node, ast.Name) and node.id == "test":
@@ -347,9 +360,9 @@ class RueModuleLoader(importlib.abc.SourceLoader):
 
 
 class TestLoader:
-    """Materializes :class:`TestSpec` objects into live :class:`LoadedTestDef` instances.
+    """Materializes :class:`TestSpec` into live definitions.
 
-    Safe to construct in any process.  Given the same :class:`TestSpecCollection`
+    Safe to construct in any process.  Given the same :class:`SuiteSpec`
     (suite root + setup file chain), two ``TestLoader`` instances
     in two different processes will import modules under identical synthetic
     names — a prerequisite for pickle-safe function objects and consistent
@@ -381,21 +394,21 @@ class TestLoader:
         self._session.load_module(path)
         self._prepared_paths.add(path)
 
-    def load_from_collection(
-        self, collection: TestSpecCollection
+    def load_tests(
+        self, suitespec: SuiteSpec
     ) -> list[LoadedTestDef]:
-        """Resolve every spec in a collection to a live LoadedTestDef."""
-        if not collection.specs:
+        """Resolve every spec in a SuiteSpec to a live LoadedTestDef."""
+        if not suitespec.specs:
             return []
 
         by_module: dict[Path, list[TestSpec]] = {}
-        for spec in collection.specs:
+        for spec in suitespec.specs:
             by_module.setdefault(spec.locator.module_path, []).append(spec)
 
         items: list[LoadedTestDef] = []
         issues: list[TestDefinitionIssue] = []
         for module_path, requested_specs in by_module.items():
-            setup_chain = collection.setup_chains[module_path]
+            setup_chain = suitespec.setup_chains[module_path]
             try:
                 for setup_ref in setup_chain:
                     self.prepare_setup(setup_ref.path)
@@ -451,7 +464,9 @@ class TestLoader:
                 )
                 if not isinstance(fn, (FunctionType, MethodType)):
                     raise TypeError(
-                        f"not a function or method: {module.__name__}:{class_name}.{spec.locator.function_name}"
+                        "not a function or method: "
+                        f"{module.__name__}:"
+                        f"{class_name}.{spec.locator.function_name}"
                     )
                 parent_tags = get_tag_data(cls)
             case None:
@@ -460,7 +475,8 @@ class TestLoader:
                 )
                 if not isinstance(fn, (FunctionType, MethodType)):
                     raise TypeError(
-                        f"not a function or method: {module.__name__}:{spec.locator.function_name}"
+                        "not a function or method: "
+                        f"{module.__name__}:{spec.locator.function_name}"
                     )
                 parent_tags = None
 
@@ -469,7 +485,7 @@ class TestLoader:
 
         combined_tags = merge_tag_data(parent_tags, get_tag_data(fn))
         spec.update_tags(combined_tags)
-        spec.get_execution_from_fn(fn)
+        spec.load_callable_metadata(fn)
         return LoadedTestDef(
             spec=spec,
             fn=fn,

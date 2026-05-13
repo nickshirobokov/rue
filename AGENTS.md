@@ -4,7 +4,7 @@
 
 Rue is a testing framework for AI software. It lets developers test AI behavior
 with real engineering tools: `@rue.test`, resources, predicates, SUT tracing,
-scoped monkeypatching, metrics, CLI runs, and persisted run records.
+ scoped monkeypatching, metrics, CLI runs, and persisted suite records.
 
 Rue is not evals. Do not drag this project toward benchmark theater, notebook
 rituals, dashboard worship, dataset cargo cults, or anything that smells like
@@ -42,13 +42,13 @@ confirm them.
 - Terminal UX and Rich view code: `src/rue/cli/rendering/`
 - Static collection: `TestSpecCollector`
 - Loading/import and AST rewrites: `TestLoader`
-- Execution: `Runner`, `RunContext`, `TestContext`
+- Execution: `ExecutableSuite`, `SuiteContext`, `TestContext`
 - Resource DI: `ResourceRegistry`, `DependencyResolver`, `ResourceStore`
 - Scoped patching: `src/rue/patching/`
-- Event side effects: `RunEventsProcessor` implementations
+- Event side effects: `SuiteEventsProcessor` implementations
 
 Keep these lanes clean. If CLI code starts building terminal layouts, it is
-wrong. If rendering code mutates runner/storage state, it is wrong. If runtime
+wrong. If rendering code mutates execution/storage state, it is wrong. If runtime
 context ownership leaks into unrelated modules, it is wrong.
 
 Models are core data contracts. Views are optimized shapes for external

@@ -1,4 +1,4 @@
-"""Internal runner-managed OpenTelemetry runtime."""
+"""Internal suite-managed OpenTelemetry runtime."""
 
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ from rue.context.runtime import CURRENT_SUT_SPAN_IDS
 class OtelTraceSession:
     """OpenTelemetry session bound to a single test execution."""
 
-    run_id: UUID
-    execution_id: UUID
+    suite_execution_id: UUID
+    test_execution_id: UUID
     root_span: Span
     _spans: list[ReadableSpan] = field(default_factory=list)
     _sut_owners: dict[int, int] = field(default_factory=dict)
@@ -53,8 +53,8 @@ class OtelTraceSession:
         """Convert the finished trace session to a JSON-serializable payload."""
         with self._lock:
             return {
-                "run_id": str(self.run_id),
-                "execution_id": str(self.execution_id),
+                "suite_execution_id": str(self.suite_execution_id),
+                "test_execution_id": str(self.test_execution_id),
                 "spans": [
                     json.loads(span.to_json(indent=None))
                     for span in self._spans
@@ -104,7 +104,7 @@ class SessionAwareSpanProcessor(SpanProcessor):
 
 
 class OtelRuntime:
-    """Process-global OpenTelemetry runtime managed by Rue Runner."""
+    """Process-global OpenTelemetry runtime managed by suite execution."""
 
     def __init__(self) -> None:
         self._initialized = False
@@ -134,12 +134,12 @@ class OtelRuntime:
         self,
         root_span: Span,
         *,
-        run_id: UUID,
-        execution_id: UUID,
+        suite_execution_id: UUID,
+        test_execution_id: UUID,
     ) -> OtelTraceSession:
         session = OtelTraceSession(
-            run_id=run_id,
-            execution_id=execution_id,
+            suite_execution_id=suite_execution_id,
+            test_execution_id=test_execution_id,
             root_span=root_span,
         )
         with self._otel_traces_lock:

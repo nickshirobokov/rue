@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from rue.testing.models.case import Case, CaseGroup
+from rue.testing.execution.case import Case, CaseFactory, CaseGroup
 
 
 if TYPE_CHECKING:
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ParameterSet:
-    """Concrete parameter combination for an individual test run."""
+    """Concrete parameter combination for an individual test execution."""
 
     values: dict[str, Any]
     suffix: str
@@ -22,7 +22,7 @@ class ParameterSet:
 
 @dataclass(frozen=True)
 class IterateModifier:
-    """Run the inner execution N times."""
+    """Execute the inner test N times."""
 
     count: int
     min_passes: int
@@ -30,12 +30,13 @@ class IterateModifier:
 
     @property
     def display_summary(self) -> str:
+        """Short label shown next to iterated test names."""
         return f"x {self.count} {self.display_name}"
 
 
 @dataclass(frozen=True)
 class ParamsIterateModifier:
-    """Run the inner execution for each parameter set."""
+    """Execute the inner test once for each parameter set."""
 
     parameter_sets: tuple[ParameterSet, ...]
     min_passes: int
@@ -43,25 +44,27 @@ class ParamsIterateModifier:
 
     @property
     def display_summary(self) -> str:
+        """Short label shown next to iterated test names."""
         return f"x {len(self.parameter_sets)} {self.display_name}"
 
 
 @dataclass(frozen=True)
 class CasesIterateModifier:
-    """Run the inner execution for each case."""
+    """Execute the inner test once for each case."""
 
-    cases: tuple[Case[Any, Any], ...]
+    cases: tuple[Case[Any, Any] | CaseFactory, ...]
     min_passes: int
     display_name: str = "cases"
 
     @property
     def display_summary(self) -> str:
+        """Short label shown next to iterated test names."""
         return f"x {len(self.cases)} {self.display_name}"
 
 
 @dataclass(frozen=True)
 class GroupsIterateModifier:
-    """Run the inner execution for each case group."""
+    """Execute the inner test once for each case group."""
 
     groups: tuple[CaseGroup[Any, Any, Any], ...]
     min_passes: int
@@ -69,6 +72,7 @@ class GroupsIterateModifier:
 
     @property
     def display_summary(self) -> str:
+        """Short label shown next to iterated test names."""
         return f"x {len(self.groups)} {self.display_name}"
 
 
@@ -81,6 +85,7 @@ class BackendModifier:
 
     @property
     def display_summary(self) -> str:
+        """Short label shown next to iterated test names."""
         return ""
 
 

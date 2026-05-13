@@ -6,7 +6,7 @@ process and any worker that materializes and executes tests.
 
 Specs describe module-backed members only; dynamic callables are unsupported.
 
-:class:`TestSpecCollection` bundles suite layout, setup file chains, and the
+:class:`SuiteSpec` bundles suite layout, setup file chains, and the
 ordered list of :class:`TestSpec` objects produced during discovery.
 """
 
@@ -23,8 +23,8 @@ from rue.models import Locator, Spec
 
 
 if TYPE_CHECKING:
+    from rue.testing.compilation.modifiers import Modifier
     from rue.testing.decorators.tag import TagData
-    from rue.testing.models.modifiers import Modifier
 
 
 @dataclass
@@ -92,7 +92,7 @@ class TestSpec(Spec):
         self.xfail_reason = data.xfail_reason
         self.xfail_strict = data.xfail_strict
 
-    def get_execution_from_fn(self, fn: Callable[..., Any]) -> None:
+    def load_callable_metadata(self, fn: Callable[..., Any]) -> None:
         self.is_async = inspect.iscoroutinefunction(fn)
         self.params = tuple(
             name for name in inspect.signature(fn).parameters if name != "self"
@@ -113,14 +113,14 @@ class SetupFileRef:
 
 
 @dataclass(frozen=True)
-class TestSpecCollection:
-    """Serializable description of collected test specs for a run.
+class SuiteSpec:
+    """Serializable description of collected test specs for a suite.
 
     Handoff artifact between discovery and execution: produced by
-    :meth:`~rue.testing.discovery.collector.TestSpecCollector.build_spec_collection`
+    :meth:`~rue.testing.discovery.collector.TestSpecCollector.collect_test_specs`
     in the parent process and passed to
     :class:`~rue.testing.discovery.loader.TestLoader` to reconstruct live
-    :class:`~rue.testing.models.loaded.LoadedTestDef` objects locally.
+    :class:`~rue.testing.execution.test.models.LoadedTestDef` objects locally.
 
     * ``suite_root`` — used to create a :class:`RueImportSession` with the
       same deterministic synthetic package names as the parent.
@@ -146,3 +146,11 @@ class TestSpecCollection:
                     seen.add(ref.path)
                     result.append(ref)
         return tuple(result)
+
+
+__all__ = [
+    "Locator",
+    "SetupFileRef",
+    "SuiteSpec",
+    "TestSpec",
+]

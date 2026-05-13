@@ -1,4 +1,4 @@
-"""Turso run storage management."""
+"""Turso suite storage management."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ from rue.storage.schema import (
 )
 
 
-class TursoRunStore:
-    """Owns the Turso database used for Rue run storage."""
+class TursoSuiteStore:
+    """Owns the Turso database used for Rue suite storage."""
 
     def __init__(
         self,
@@ -93,23 +93,25 @@ class TursoRunStore:
             ).fetchone()
             return 0 if row is None else int(row["version"])
 
-    def run_exists(self, run_id: UUID) -> bool:
-        """Return whether a run row already exists."""
+    def suite_execution_exists(self, suite_execution_id: UUID) -> bool:
+        """Return whether a suite execution row already exists."""
         if not self.exists():
             return False
         with self.connection() as conn:
             row = conn.execute(
-                "SELECT 1 FROM runs WHERE run_id = ?",
-                (str(run_id),),
+                "SELECT 1 FROM suite_executions WHERE suite_execution_id = ?",
+                (str(suite_execution_id),),
             ).fetchone()
             return row is not None
 
-    def run_count(self) -> int:
-        """Return the number of stored runs."""
+    def suite_execution_count(self) -> int:
+        """Return the number of stored suite execution rows."""
         if not self.exists():
             return 0
         with self.connection() as conn:
-            row = conn.execute("SELECT COUNT(*) AS count FROM runs").fetchone()
+            row = conn.execute(
+                "SELECT COUNT(*) AS count FROM suite_executions"
+            ).fetchone()
             return int(row["count"])
 
     @property
@@ -146,5 +148,5 @@ class TursoRunStore:
 __all__ = [
     "SCHEMA_VERSION",
     "TURSO_FEATURES",
-    "TursoRunStore",
+    "TursoSuiteStore",
 ]

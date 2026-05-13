@@ -1,4 +1,4 @@
-"""Session-level forwarding for run lifecycle events."""
+"""Session-level forwarding for suite lifecycle events."""
 
 from __future__ import annotations
 
@@ -8,51 +8,50 @@ from typing import TYPE_CHECKING, Any
 
 import cloudpickle  # type: ignore[import-untyped]
 
-from rue.context.runtime import CURRENT_RUN_CONTEXT, RunContext
-from rue.events.processor import RunEventsProcessor
+from rue.context.runtime import CURRENT_SUITE_CONTEXT, SuiteContext
+from rue.events.processor import SuiteEventsProcessor
 
 
 if TYPE_CHECKING:
     from rue.config import Config
     from rue.resources.models import ResourceGraph
-    from rue.testing import LoadedTestDef
-    from rue.testing.execution.executable import ExecutableTest
-    from rue.testing.models.executed import ExecutedTest
-    from rue.testing.models.run import ExecutedRun
+    from rue.testing.execution.suite.models import ExecutedSuite
+    from rue.testing.execution.test.base import ExecutableTest
+    from rue.testing.execution.test.models import ExecutedTest, LoadedTestDef
 
 
 @dataclass(frozen=True, slots=True)
-class _QueuedRunEvent:
+class _QueuedSuiteEvent:
     method_name: str
     args: tuple[Any, ...]
-    context: RunContext
+    context: SuiteContext
 
 
-class QueueForwarder(RunEventsProcessor):
-    """Forward run events to another process through a queue."""
+class QueueForwarder(SuiteEventsProcessor):
+    """Forward suite events to another process through a queue."""
 
     def __init__(self, queue: Any) -> None:
         self._queue = queue
 
-    async def on_run_start(self, run: ExecutedRun) -> None:
-        """Forward run start."""
-        self._put("on_run_start", run)
+    async def on_suite_execution_start(self, suite: ExecutedSuite) -> None:
+        """Forward suite execution start."""
+        self._put("on_suite_execution_start", suite)
 
-    async def on_no_tests_found(self, run: ExecutedRun) -> None:
+    async def on_no_tests_found(self, suite: ExecutedSuite) -> None:
         """Forward empty collection."""
-        self._put("on_no_tests_found", run)
+        self._put("on_no_tests_found", suite)
 
     async def on_collection_complete(
-        self, items: list[LoadedTestDef], run: ExecutedRun
+        self, items: list[LoadedTestDef], suite: ExecutedSuite
     ) -> None:
         """Forward collection completion."""
-        self._put("on_collection_complete", items, run)
+        self._put("on_collection_complete", items, suite)
 
     async def on_tests_ready(
-        self, tests: list[ExecutableTest], run: ExecutedRun
+        self, tests: list[ExecutableTest], suite: ExecutedSuite
     ) -> None:
         """Forward executable test readiness."""
-        self._put("on_tests_ready", tests, run)
+        self._put("on_tests_ready", tests, suite)
 
     async def on_di_graphs_compiled(
         self, graphs: dict[Any, ResourceGraph]
@@ -60,45 +59,45 @@ class QueueForwarder(RunEventsProcessor):
         """Forward dependency graph compilation."""
         self._put("on_di_graphs_compiled", graphs)
 
-    async def on_test_start(
-        self, test: ExecutableTest, run: ExecutedRun
+    async def on_test_execution_start(
+        self, test: ExecutableTest, suite: ExecutedSuite
     ) -> None:
-        """Forward test start."""
-        self._put("on_test_start", test, run)
+        """Forward test execution start."""
+        self._put("on_test_execution_start", test, suite)
 
-    async def on_execution_complete(
-        self, execution: ExecutedTest, run: ExecutedRun
+    async def on_test_execution_complete(
+        self, execution: ExecutedTest, suite: ExecutedSuite
     ) -> None:
-        """Forward execution completion."""
-        self._put("on_execution_complete", execution, run)
+        """Forward test execution completion."""
+        self._put("on_test_execution_complete", execution, suite)
 
-    async def on_run_stopped_early(
-        self, failure_count: int, run: ExecutedRun
+    async def on_suite_stopped_early(
+        self, failure_count: int, suite: ExecutedSuite
     ) -> None:
-        """Forward early run stop."""
-        self._put("on_run_stopped_early", failure_count, run)
+        """Forward early suite stop."""
+        self._put("on_suite_stopped_early", failure_count, suite)
 
-    async def on_run_complete(self, run: ExecutedRun) -> None:
-        """Forward run completion."""
-        self._put("on_run_complete", run)
+    async def on_suite_execution_complete(self, suite: ExecutedSuite) -> None:
+        """Forward suite execution completion."""
+        self._put("on_suite_execution_complete", suite)
 
     def close(self) -> None:
-        """Signal that this run will not emit more events."""
+        """Signal that this suite will not emit more events."""
         self._queue.put(None)
 
     def _put(self, method_name: str, *args: Any) -> None:
-        event = _QueuedRunEvent(
+        event = _QueuedSuiteEvent(
             method_name=method_name,
             args=args,
-            context=CURRENT_RUN_CONTEXT.get(),
+            context=CURRENT_SUITE_CONTEXT.get(),
         )
         self._queue.put(cloudpickle.dumps(event))
 
 
-class SessionEventsReceiver(RunEventsProcessor):
-    """Receives events from one or more runs and forwards to processors."""
+class SessionEventsReceiver(SuiteEventsProcessor):
+    """Receives events from one or more suites and forwards to processors."""
 
-    def __init__(self, processors: list[RunEventsProcessor]) -> None:
+    def __init__(self, processors: list[SuiteEventsProcessor]) -> None:
         self.processors = tuple(processors)
         self._closed = False
 
@@ -107,56 +106,56 @@ class SessionEventsReceiver(RunEventsProcessor):
         for processor in self.processors:
             processor.configure(config)
 
-    async def on_run_start(self, run: ExecutedRun) -> None:
-        """Called when a child run starts."""
-        await self._emit("on_run_start", run)
+    async def on_suite_execution_start(self, suite: ExecutedSuite) -> None:
+        """Called when child suite execution starts."""
+        await self._emit("on_suite_execution_start", suite)
 
-    async def on_no_tests_found(self, run: ExecutedRun) -> None:
-        """Called when a child run has no tests."""
-        await self._emit("on_no_tests_found", run)
+    async def on_no_tests_found(self, suite: ExecutedSuite) -> None:
+        """Called when a child suite has no tests."""
+        await self._emit("on_no_tests_found", suite)
 
     async def on_collection_complete(
-        self, items: list[LoadedTestDef], run: ExecutedRun
+        self, items: list[LoadedTestDef], suite: ExecutedSuite
     ) -> None:
-        """Called after child run collection completes."""
-        await self._emit("on_collection_complete", items, run)
+        """Called after child suite collection completes."""
+        await self._emit("on_collection_complete", items, suite)
 
     async def on_tests_ready(
-        self, tests: list[ExecutableTest], run: ExecutedRun
+        self, tests: list[ExecutableTest], suite: ExecutedSuite
     ) -> None:
-        """Called after a child run builds executable tests."""
-        await self._emit("on_tests_ready", tests, run)
+        """Called after a child suite builds executable tests."""
+        await self._emit("on_tests_ready", tests, suite)
 
     async def on_di_graphs_compiled(
         self, graphs: dict[Any, ResourceGraph]
     ) -> None:
-        """Called after a child run compiles dependency graphs."""
+        """Called after a child suite compiles dependency graphs."""
         await self._emit("on_di_graphs_compiled", graphs)
 
-    async def on_test_start(
-        self, test: ExecutableTest, run: ExecutedRun
+    async def on_test_execution_start(
+        self, test: ExecutableTest, suite: ExecutedSuite
     ) -> None:
-        """Called before a child run starts a test."""
-        await self._emit("on_test_start", test, run)
+        """Called before a child suite starts test execution."""
+        await self._emit("on_test_execution_start", test, suite)
 
-    async def on_execution_complete(
-        self, execution: ExecutedTest, run: ExecutedRun
+    async def on_test_execution_complete(
+        self, execution: ExecutedTest, suite: ExecutedSuite
     ) -> None:
-        """Called when a child run execution completes."""
-        await self._emit("on_execution_complete", execution, run)
+        """Called when a child suite test execution completes."""
+        await self._emit("on_test_execution_complete", execution, suite)
 
-    async def on_run_stopped_early(
-        self, failure_count: int, run: ExecutedRun
+    async def on_suite_stopped_early(
+        self, failure_count: int, suite: ExecutedSuite
     ) -> None:
-        """Called when a child run stops early."""
-        await self._emit("on_run_stopped_early", failure_count, run)
+        """Called when a child suite stops early."""
+        await self._emit("on_suite_stopped_early", failure_count, suite)
 
-    async def on_run_complete(self, run: ExecutedRun) -> None:
-        """Called after a child run completes."""
-        await self._emit("on_run_complete", run)
+    async def on_suite_execution_complete(self, suite: ExecutedSuite) -> None:
+        """Called after child suite execution completes."""
+        await self._emit("on_suite_execution_complete", suite)
 
     async def drain_queue(self, queue: Any) -> None:
-        """Drain forwarded run events until the queue sentinel arrives."""
+        """Drain forwarded suite events until the queue sentinel arrives."""
         while payload := await asyncio.to_thread(queue.get):
             event = cloudpickle.loads(payload)
             with event.context:

@@ -1,4 +1,4 @@
-"""Runtime context variables for Rue execution."""
+"""Runtime context variables for Rue suite and test execution."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from rue.config import Config
-from rue.context.models import RunEnvironment
+from rue.context.models import SuiteEnvironment
 from rue.context.scopes import ScopeContext
 from rue.models import Spec
 
@@ -30,7 +30,7 @@ class TestContext:
 
     __test__ = False
 
-    execution_id: UUID
+    test_execution_id: UUID
     _tokens: list[Token[TestContext]] = field(
         default_factory=list,
         init=False,
@@ -45,9 +45,9 @@ class TestContext:
     )
 
     def __enter__(self) -> TestContext:
-        """Bind this test context to the current execution scope."""
+        """Bind this test context to the current test execution scope."""
         self._tokens.append(CURRENT_TEST.set(self))
-        scope_context = ScopeContext.for_test(self.execution_id)
+        scope_context = ScopeContext.for_test(self.test_execution_id)
         scope_context.__enter__()
         self._scope_contexts.append(scope_context)
         return self
@@ -76,10 +76,10 @@ class ModuleContext:
     )
 
     def __enter__(self) -> ModuleContext:
-        """Bind this module context to the current execution scope."""
-        run_context = CURRENT_RUN_CONTEXT.get()
+        """Bind this module context to the current module runtime scope."""
+        suite_context = CURRENT_SUITE_CONTEXT.get()
         scope_context = ScopeContext.for_module(
-            run_id=run_context.run_id,
+            suite_execution_id=suite_context.suite_execution_id,
             module_path=self.module_path,
         )
         scope_context.__enter__()
@@ -125,25 +125,25 @@ class ResourceHookContext:
         CURRENT_RESOURCE_HOOK_CONTEXT.reset(self._tokens.pop())
 
 
-class RunContext(BaseModel):
-    """Read-only data resolved before executing one run."""
+class SuiteContext(BaseModel):
+    """Read-only data resolved before executing one suite."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     config: Config = Field(default_factory=Config)
-    run_id: UUID = Field(default_factory=uuid4)
-    environment: RunEnvironment = Field(
-        default_factory=RunEnvironment.build_from_current
+    suite_execution_id: UUID = Field(default_factory=uuid4)
+    environment: SuiteEnvironment = Field(
+        default_factory=SuiteEnvironment.build_from_current
     )
     experiment_variant: Any | None = None
     experiment_setup_chain: tuple[Any, ...] = ()
-    _tokens: list[Token[RunContext]] = PrivateAttr(default_factory=list)
+    _tokens: list[Token[SuiteContext]] = PrivateAttr(default_factory=list)
     _scope_contexts: list[ScopeContext] = PrivateAttr(default_factory=list)
 
-    def __enter__(self) -> RunContext:
-        """Bind this run context to the current execution scope."""
-        self._tokens.append(CURRENT_RUN_CONTEXT.set(self))
-        scope_context = ScopeContext.for_run(self.run_id)
+    def __enter__(self) -> SuiteContext:
+        """Bind this suite context to the current suite execution scope."""
+        self._tokens.append(CURRENT_SUITE_CONTEXT.set(self))
+        scope_context = ScopeContext.for_suite(self.suite_execution_id)
         scope_context.__enter__()
         self._scope_contexts.append(scope_context)
         return self
@@ -154,12 +154,12 @@ class RunContext(BaseModel):
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Restore the previous run context."""
+        """Restore the previous suite context."""
         self._scope_contexts.pop().__exit__(exc_type, exc, traceback)
-        CURRENT_RUN_CONTEXT.reset(self._tokens.pop())
+        CURRENT_SUITE_CONTEXT.reset(self._tokens.pop())
 
     def __getstate__(self) -> dict[str, Any]:
-        """Serialize run data without process-local contextvar tokens."""
+        """Serialize suite data without process-local contextvar tokens."""
         state = super().__getstate__()
         state["__pydantic_private__"] = {
             "_scope_contexts": [],
@@ -169,8 +169,8 @@ class RunContext(BaseModel):
 
 
 CURRENT_TEST: ContextVar[TestContext] = ContextVar("current_test")
-CURRENT_RUN_CONTEXT: ContextVar[RunContext] = ContextVar(
-    "current_run_context"
+CURRENT_SUITE_CONTEXT: ContextVar[SuiteContext] = ContextVar(
+    "current_suite_context"
 )
 CURRENT_TEST_TRACER: ContextVar[TestTracer | None] = ContextVar(
     "current_test_tracer", default=None

@@ -73,6 +73,32 @@ def test_load_config_defaults_when_missing(
     assert config.otel is True
     assert not hasattr(config, "otel_content")
     assert config.database_path == Path(".rue/rue.turso.db")
+    assert config.case_factories.edge_case_factory is None
+
+
+def test_load_config_reads_edge_case_model_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.chdir(tmp_path)
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        """
+[tool.rue.case-factories.edge-case-factory]
+model = "openai:gpt-5.4"
+temperature = 0.2
+max-tokens = 1024
+""".strip()
+    )
+
+    config = load_config()
+
+    edge_case_config = config.case_factories.edge_case_factory
+    assert edge_case_config is not None
+    assert edge_case_config.model == "openai:gpt-5.4"
+    assert edge_case_config.model_settings == {
+        "temperature": 0.2,
+        "max_tokens": 1024,
+    }
 
 
 def test_config_database_path_override_is_parsed_to_path() -> None:

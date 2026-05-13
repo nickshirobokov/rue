@@ -146,8 +146,8 @@ class SUTOutputCapture:
     """Captures stdout and stderr while a wrapped SUT method runs."""
 
     def __init__(self) -> None:
-        self._execution_id: ContextVar[UUID | None] = ContextVar(
-            f"sut_{id(self)}_output_execution_id",
+        self._test_execution_id: ContextVar[UUID | None] = ContextVar(
+            f"sut_{id(self)}_output_test_execution_id",
             default=None,
         )
         self._events: ContextVar[list[CapturedEvent] | None] = ContextVar(
@@ -171,17 +171,17 @@ class SUTOutputCapture:
         return self.output.stderr
 
     def clear(self) -> None:
-        """Clear captured output for the current execution context."""
+        """Clear captured output for the current test execution context."""
         self._events_list().clear()
 
-    def reset(self, execution_id: UUID | None) -> None:
+    def reset(self, test_execution_id: UUID | None) -> None:
         """Reset captured output when the test execution changes."""
         if (
-            self._execution_id.get() == execution_id
+            self._test_execution_id.get() == test_execution_id
             and self._events.get() is not None
         ):
             return
-        self._execution_id.set(execution_id)
+        self._test_execution_id.set(test_execution_id)
         self._events.set([])
 
     def wrap(

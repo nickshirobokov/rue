@@ -17,7 +17,7 @@ def experiment(
     *,
     ids: Sequence[str] | None = None,
 ) -> Callable[[Callable[P, T]], Callable[P, T]]:
-    """Register a run-scoped experiment hook."""
+    """Register a suite-scoped experiment hook."""
     return registry.experiment(values, ids=ids)
 
 

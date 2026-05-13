@@ -16,7 +16,8 @@ from rich.tree import Tree
 from rue.cli.rendering.primitives import STATUS_STYLES, safe_relative_path
 from rue.resources import ResourceSpec
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.models import ExecutedRun, LoadedTestDef, TestStatus
+from rue.testing.execution.suite.models import ExecutedSuite
+from rue.testing.execution.test.models import LoadedTestDef, TestStatus
 
 
 _BACKEND_STYLE = "dim blue"
@@ -54,13 +55,13 @@ class TestReportNode:
 class TestReport:
     """Rendered test report grouped by module."""
 
-    run_window: tuple[ExecutedRun, ...] = ()
+    suite_window: tuple[ExecutedSuite, ...] = ()
     module_nodes: dict[Path, list[TestReportNode]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
 class TestModuleView:
-    """Module label shared by run and status output."""
+    """Module label shared by suite and status output."""
 
     path: Path
 
@@ -123,15 +124,18 @@ class TestTreeRenderer:
             Text(str(issues), style="bold yellow" if issues else "dim"),
         )
         if verbosity >= 2:
-            history_available = report.run_window or any(
+            history_available = report.suite_window or any(
                 node.history
                 for nodes in report.module_nodes.values()
                 for node in nodes
             )
             if history_available:
                 history_text = Text()
-                history_text.append(str(len(report.run_window)), style="bold")
-                history_text.append(" recorded run(s)", style="dim")
+                history_text.append(
+                    str(len(report.suite_window)),
+                    style="bold",
+                )
+                history_text.append(" recorded suite(s)", style="dim")
             else:
                 history_text = Text("Unavailable", style="dim")
             table.add_row("History", history_text)

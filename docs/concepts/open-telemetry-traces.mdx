@@ -2,9 +2,9 @@
 title: "OpenTelemetry Traces"
 ---
 
-An OpenTelemetry trace is the structured execution record of a single test execution. In Rue, **each concrete test execution gets its own OpenTelemetry trace**: a tree of spans showing what happened, when it happened, and how long it took.
+An OpenTelemetry trace is the structured record of a single test execution. In Rue, **each concrete test execution gets its own OpenTelemetry trace**: a tree of spans showing what happened, when it happened, and how long it took.
 
-For `iterate`, `iterate.params`, `iterate.cases`, and `iterate.groups`, each child execution gets its own trace.
+For `iterate`, `iterate.params`, `iterate.cases`, and `iterate.groups`, each child test execution gets its own trace.
 
 <Warning>
 This page uses “trace” in the OpenTelemetry sense (spans you can query and assert on), not a Python exception traceback/stacktrace.
@@ -12,7 +12,7 @@ This page uses “trace” in the OpenTelemetry sense (spans you can query and a
 
 Using traces enables:
 - Debugging and explaining *why* a test failed (what steps ran, in what order, and how long they took)
-- Asserting on **execution behavior**, not just outputs (tool calls happened, retrieval ran, etc.)
+- Asserting on **test execution behavior**, not just outputs (tool calls happened, retrieval ran, etc.)
 - Correlating LLM spans with your SUT spans and predicate spans
 
 ## How Rue OpenTelemetry traces are structured
@@ -33,13 +33,13 @@ OpenTelemetry capture is enabled by default:
 uv run rue run
 ```
 
-Use `--no-otel` to opt out for a run:
+Use `--no-otel` to opt out for a suite execution:
 
 ```bash
 uv run rue run --no-otel
 ```
 
-In the usual fresh-process setup, `uv run rue run` also writes local JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the CLI attaches `OtelReporter` when OpenTelemetry is enabled. Those files are separate from SQLite storage.
+In the usual fresh-process setup, `uv run rue run` also writes local JSON traces under `.rue/traces/<suite_execution_id>/<test_execution_id>.json` because the CLI attaches `OtelReporter` when OpenTelemetry is enabled. Those files are separate from Turso storage.
 
 Use `--otel` to force trace capture back on when config or environment disabled it:
 
@@ -48,7 +48,7 @@ uv run rue run --otel
 ```
 
 <Note>
-During test execution, Rue exposes OpenTelemetry data only through `SUT` instances. When execution completes, run event processors receive finished telemetry artifacts on `ExecutedTest.telemetry_artifacts`.
+During test execution, Rue exposes OpenTelemetry data only through `SUT` instances. When test execution completes, suite event processors receive finished telemetry artifacts on `ExecutedTest.telemetry_artifacts`.
 </Note>
 
 ## Basic Usage
@@ -135,7 +135,7 @@ def test_llm_spans_are_captured(my_agent):
 
 ## Recommendations
 
-### 1. Prefer trace assertions for execution guarantees
+### 1. Prefer trace assertions for test execution guarantees
 
 If correctness depends on *how* the system behaves (e.g., “must call retrieval”, “must call tool X”), asserting on spans is more robust than parsing free-form text output.
 

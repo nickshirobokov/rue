@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 
 _SCOPE_ORDER = {
-    Scope.RUN: 0,
+    Scope.SUITE: 0,
     Scope.MODULE: 1,
     Scope.TEST: 2,
 }
@@ -157,15 +157,15 @@ class MetricGroupView:
         )
         return cases
 
-    def is_interesting(self, run_view: MetricRunView) -> bool:
+    def is_interesting(self, suite_view: MetricSuiteView) -> bool:
         """Return whether this group needs verbose breakdown output."""
         return (
             self.has_failures
             or len(self.metrics) > 1
             or len(self.consumer_modules) > 1
             or len(self.resource_consumers) > 1
-            or self.key in run_view.parents
-            or self.key in run_view.children
+            or self.key in suite_view.parents
+            or self.key in suite_view.children
         )
 
     def instance_label(self, metric: MetricResult) -> str:
@@ -196,11 +196,11 @@ class MetricGroupView:
             self.contributor_counts(),
         )
 
-    def detail_panel(self, run_view: MetricRunView) -> Panel:
+    def detail_panel(self, suite_view: MetricSuiteView) -> Panel:
         """Render the verbose panel for a metric group."""
         renderables: list[RenderableType] = [self.summary_grid()]
 
-        hierarchy = self.hierarchy_tree(run_view)
+        hierarchy = self.hierarchy_tree(suite_view)
         if hierarchy is not None:
             self._append_section(
                 renderables, "Hierarchy", hierarchy, inline=True
@@ -245,21 +245,21 @@ class MetricGroupView:
 
         return table
 
-    def hierarchy_tree(self, run_view: MetricRunView) -> Tree | None:
+    def hierarchy_tree(self, suite_view: MetricSuiteView) -> Tree | None:
         """Render provider dependency hierarchy when this metric has one."""
         if (
-            self.key not in run_view.parents
-            and self.key not in run_view.children
+            self.key not in suite_view.parents
+            and self.key not in suite_view.children
         ):
             return None
 
-        root_key = run_view.find_root(self.key)
-        root_group = run_view.group_lookup[root_key]
+        root_key = suite_view.find_root(self.key)
+        root_group = suite_view.group_lookup[root_key]
         tree = Tree(root_group.tree_label(current=self.key == root_key))
         root_group.populate_tree(
             tree,
             root_key,
-            run_view,
+            suite_view,
             highlight=self.key,
             seen={root_key},
         )
@@ -269,17 +269,17 @@ class MetricGroupView:
         self,
         tree: Tree,
         key: ResourceSpec,
-        run_view: MetricRunView,
+        suite_view: MetricSuiteView,
         *,
         highlight: ResourceSpec,
         seen: set[ResourceSpec],
     ) -> None:
         _ = self
         for child_key in sorted(
-            run_view.children.get(key, set()),
-            key=lambda k: run_view.group_lookup[k].display_name,
+            suite_view.children.get(key, set()),
+            key=lambda k: suite_view.group_lookup[k].display_name,
         ):
-            child_group = run_view.group_lookup[child_key]
+            child_group = suite_view.group_lookup[child_key]
             node = tree.add(
                 child_group.tree_label(current=child_key == highlight)
             )
@@ -287,7 +287,7 @@ class MetricGroupView:
                 child_group.populate_tree(
                     node,
                     child_key,
-                    run_view,
+                    suite_view,
                     highlight=highlight,
                     seen={*seen, child_key},
                 )
@@ -491,8 +491,8 @@ class MetricGroupView:
 
 
 @dataclass(frozen=True, slots=True)
-class MetricRunView:
-    """Render all metric results for one completed run."""
+class MetricSuiteView:
+    """Render all metric results for one completed suite."""
 
     groups: tuple[MetricGroupView, ...]
     group_lookup: dict[ResourceSpec, MetricGroupView]
@@ -503,7 +503,7 @@ class MetricRunView:
     def from_results(
         cls,
         metric_results: list[MetricResult],
-    ) -> MetricRunView:
+    ) -> MetricSuiteView:
         """Group metric results and derive provider relationships."""
         grouped: dict[ResourceSpec, list[MetricResult]] = {}
         for metric in metric_results:
@@ -561,7 +561,7 @@ class MetricRunView:
         )
 
     def render(self, verbosity: int) -> list[RenderableType]:
-        """Render metrics using the same verbosity contract as run output."""
+        """Render metrics using the same verbosity contract as suite output."""
         renderables: list[RenderableType] = [
             Rule(Text("METRICS", style="bold cyan"), characters="=")
         ]
@@ -652,4 +652,4 @@ class MetricRunView:
 
 
 
-__all__ = ["MetricGroupView", "MetricRunView"]
+__all__ = ["MetricGroupView", "MetricSuiteView"]

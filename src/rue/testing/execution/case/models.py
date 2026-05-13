@@ -1,4 +1,4 @@
-"""Test case definitions and decorators."""
+"""Test case data models."""
 
 from __future__ import annotations
 
@@ -55,15 +55,15 @@ class CaseGroup(BaseModel, Generic[InputsT, RefsT, GroupRefsT]):
 
     Use with ``@rue.test.iterate.groups(...)`` to iterate a test function
     over multiple groups; each group is executed as a nested case-iterated
-    run.
+    test execution.
 
-    Attributes
+    Attributes:
     ----------
     name : str
         Human-readable label that identifies the group in reports and
-        execution trees.
+        test execution trees.
     cases : list[Case[InputsT, RefsT]]
-        Ordered list of cases belonging to this group. Must contain at
+        Ordered list of cases belonging to the group. Must contain at
         least one case.
     references : GroupRefsT
         Group-level reference data shared across all cases in the group,
@@ -85,7 +85,11 @@ class CaseGroup(BaseModel, Generic[InputsT, RefsT, GroupRefsT]):
 
     @model_validator(mode="after")
     def validate_min_passes(self) -> CaseGroup[InputsT, RefsT, GroupRefsT]:
+        """Ensure the group threshold can be reached by its cases."""
         if self.min_passes > len(self.cases):
-            msg = f"min_passes ({self.min_passes}) cannot exceed cases count ({len(self.cases)})"
+            msg = (
+                f"min_passes ({self.min_passes}) cannot exceed cases count "
+                f"({len(self.cases)})"
+            )
             raise ValueError(msg)
         return self

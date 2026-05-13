@@ -7,12 +7,10 @@ from pathlib import Path
 from typing import Annotated, Any, Self
 
 from pydantic import (
-    AliasChoices,
     AliasGenerator,
     BaseModel,
     ConfigDict,
     Field,
-    computed_field,
     model_validator,
 )
 from pydantic_ai.models import KnownModelName
@@ -26,11 +24,15 @@ from pydantic_settings import (
 )
 
 
-class PredicateConfig(BaseModel):
-    """Config for a single predicate."""
+class AIModelConfig(BaseModel):
+    """Model and request parameters for an AI-backed Rue component."""
 
     model_config = ConfigDict(
-        protected_namespaces=(), arbitrary_types_allowed=True
+        protected_namespaces=(),
+        populate_by_name=True,
+        alias_generator=AliasGenerator(
+            validation_alias=lambda name: name.replace("_", "-")
+        ),
     )
 
     model: KnownModelName
@@ -44,14 +46,12 @@ class PredicateConfig(BaseModel):
     stop_sequences: list[str] | None = None
     parallel_tool_calls: bool | None = None
 
-    @computed_field
     @property
     def model_settings(self) -> ModelSettings:
-        """OpenAI-style model kwargs derived from optional predicate fields."""
+        """OpenAI-style model kwargs derived from optional config fields."""
         return self.model_dump(
             exclude={"model"},
             exclude_none=True,
-            exclude_computed_fields=True,
         )  # type: ignore[return-value]
 
 
@@ -67,20 +67,15 @@ class PredicateSettings(BaseSettings):
         pyproject_toml_table_header=("tool", "rue", "predicates"),
     )
 
-    all_predicates: PredicateConfig | None = None
-    follows_policy: PredicateConfig | None = None
-    has_conflicting_facts: PredicateConfig | None = None
-    has_facts: PredicateConfig | None = None
-    has_topic: PredicateConfig | None = Field(
-        default=None,
-        validation_alias=AliasChoices(
-            "has_topic", "has-topic", "has_topics", "has-topics"
-        ),
-    )
-    has_unsupported_facts: PredicateConfig | None = None
-    matches_facts: PredicateConfig | None = None
-    matches_writing_layout: PredicateConfig | None = None
-    matches_writing_style: PredicateConfig | None = None
+    all_predicates: AIModelConfig | None = None
+    follows_policy: AIModelConfig | None = None
+    has_conflicting_facts: AIModelConfig | None = None
+    has_facts: AIModelConfig | None = None
+    has_topic: AIModelConfig | None = None
+    has_unsupported_facts: AIModelConfig | None = None
+    matches_facts: AIModelConfig | None = None
+    matches_writing_layout: AIModelConfig | None = None
+    matches_writing_style: AIModelConfig | None = None
 
     @classmethod
     def settings_customise_sources(
@@ -92,6 +87,39 @@ class PredicateSettings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         """Load predicate settings after standard settings sources."""
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+            PyprojectTomlConfigSettingsSource(settings_cls),
+        )
+
+
+class CaseFactorySettings(BaseSettings):
+    """AI-backed case factory config from `[tool.rue.case-factories]`."""
+
+    model_config = SettingsConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+        alias_generator=AliasGenerator(
+            validation_alias=lambda name: name.replace("_", "-")
+        ),
+        pyproject_toml_table_header=("tool", "rue", "case-factories"),
+    )
+
+    edge_case_factory: AIModelConfig | None = None
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Load case factory settings after standard settings sources."""
         return (
             init_settings,
             env_settings,
@@ -128,6 +156,9 @@ class Config(BaseSettings):
     database_path: Path = Path(".rue/rue.turso.db")
     processors: list[str] = Field(default_factory=list)
     predicates: PredicateSettings = Field(default_factory=PredicateSettings)
+    case_factories: CaseFactorySettings = Field(
+        default_factory=CaseFactorySettings
+    )
 
     @model_validator(mode="after")
     def empty_test_paths_use_default(self) -> Self:
@@ -138,8 +169,7 @@ class Config(BaseSettings):
 
     def with_overrides(self, **kwargs: Any) -> Config:
         """Return a copy with non-None kwargs applied."""
-        data = self.model_dump(exclude={"predicates"})
-        data["predicates"] = self.predicates
+        data = self.model_dump()
         data.update({k: v for k, v in kwargs.items() if v is not None})
         return type(self)(**data)
 
@@ -173,8 +203,9 @@ def reset_load_config_cache() -> None:
 
 
 __all__ = [
+    "AIModelConfig",
+    "CaseFactorySettings",
     "Config",
-    "PredicateConfig",
     "load_config",
     "reset_load_config_cache",
 ]

@@ -26,12 +26,12 @@ class ScopeOwner:
     """Runtime owner for resolved injected dependencies."""
 
     scope: Scope
-    execution_id: UUID | None = None
-    run_id: UUID | None = None
+    test_execution_id: UUID | None = None
+    suite_execution_id: UUID | None = None
     module_path: Path | None = None
 
 
-class RunEnvironment(BaseModel):
+class SuiteEnvironment(BaseModel):
     """Metadata about the environment where tests were executed."""
 
     commit_hash: str | None = None
@@ -45,7 +45,7 @@ class RunEnvironment(BaseModel):
     rue_version: str
 
     @classmethod
-    def build_from_current(cls) -> RunEnvironment:
+    def build_from_current(cls) -> SuiteEnvironment:
         """Build environment metadata from the current process."""
         commit_hash = None
         branch = None

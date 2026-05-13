@@ -27,14 +27,14 @@ Register a function as a dependency injection resource.
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `fn` | `Callable \| None` | `None` | The resource factory function |
-| `scope` | `Scope \| str` | `Scope.TEST` | Lifecycle scope: `"test"`, `"module"`, or `"process"` |
+| `scope` | `Scope \| str` | `Scope.TEST` | Lifecycle scope: `"test"`, `"module"`, or `"suite"` |
 | `on_resolve` | `Callable \| None` | `None` | Hook called once when resource is first created |
 | `on_injection` | `Callable \| None` | `None` | Hook called every time resource is injected |
 | `on_teardown` | `Callable \| None` | `None` | Hook called after generator teardown runs |
 
 **Returns:** Decorated function registered as a resource
 
-`PROCESS` resources are hierarchical. Same-name `PROCESS` providers can coexist in different directories, and Rue picks the nearest ancestor provider for the requesting test module. Define those shared providers in `conftest.py` or `confrue_*.py` files.
+`SUITE` resources are hierarchical. Same-name `SUITE` providers can coexist in different directories, and Rue picks the nearest ancestor provider for the requesting test module. Define those shared providers in `conftest.py` or `confrue_*.py` files.
 
 **Example:**
 ```python
@@ -44,7 +44,7 @@ import rue
 def api_client():
     return APIClient()
 
-@rue.resource(scope="process")
+@rue.resource(scope="suite")
 async def database():
     conn = await connect()
     yield conn
@@ -86,7 +86,7 @@ Register a function factory as an OpenTelemetry-observable system-under-test res
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `fn` | `Callable \| None` | `None` | The SUT factory function to register |
-| `scope` | `Scope \| str` | `Scope.TEST` | Resource lifecycle scope: `"test"`, `"module"`, `"process"` |
+| `scope` | `Scope \| str` | `Scope.TEST` | Resource lifecycle scope: `"test"`, `"module"`, `"suite"` |
 
 **Returns:** Decorated function registered as an OpenTelemetry-observable resource. The factory must return or yield `SUT(...)`.
 
@@ -180,7 +180,7 @@ Run a test function with multiple parameter combinations.
 | `argnames` | `str \| Sequence[str]` | - | Parameter name(s) as string or sequence |
 | `argvalues` | `Iterable[Any]` | - | List of value tuples for each parameter combination |
 | `ids` | `Sequence[str] \| None` | `None` | Optional custom IDs for each test case |
-| `min_passes` | `int \| None` | Number of value sets | Minimum number of passing parameter executions required for the parent test to pass |
+| `min_passes` | `int \| None` | Number of value sets | Minimum number of passing parameter test executions required for the parent test to pass |
 
 **Returns:** Decorator that applies parameter iteration to the target function
 
@@ -422,7 +422,7 @@ import rue
 
 @rue.test.tag.xfail(reason="Known bug #123")
 def test_known_issue():
-    # This failure won't fail the test suite
+    # This failure won't fail the suite execution
     assert False
 
 @rue.test.tag.xfail(reason="Model not accurate yet", strict=True)
@@ -571,14 +571,14 @@ Enum defining resource lifecycle scopes.
 |-------|-------------|
 | `Scope.TEST` | Fresh instance per parametrized test case |
 | `Scope.MODULE` | Shared within a single test file/module |
-| `Scope.PROCESS` | Shared across the run for the active provider |
+| `Scope.SUITE` | Shared across the suite for the active provider |
 
 **Example:**
 ```python
 from rue import resource
 from rue.resources import Scope
 
-@resource(scope=Scope.PROCESS)
+@resource(scope=Scope.SUITE)
 def expensive_model():
     return load_model()  # Loaded once for the active provider
 
@@ -594,69 +594,69 @@ def temp_dir():
     shutil.rmtree(tmpdir)  # Fresh per case
 ```
 
-If multiple `PROCESS` resources share the same name, Rue keeps them side by side and selects the nearest ancestor provider relative to the requesting test module. Sibling branches do not see each other's child overrides. Without an active test context, resolution falls back to the flat/latest registered definition.
+If multiple `SUITE` resources share the same name, Rue keeps them side by side and selects the nearest ancestor provider relative to the requesting test module. Sibling branches do not see each other's child overrides. Without an active test context, resolution falls back to the flat/latest registered definition.
 
 ---
 
-### Runner
+### ExecutableSuite
 
-Execute discovered tests and return a `Run`.
+Execute discovered tests and return an `ExecutedSuite`.
 
-**Run methods:**
+**Constructor and method:**
 ```python
-await runner.run(
+suite = await ExecutableSuite(
     items: list[LoadedTestDef],
-    *,
+    suite_execution_id: UUID,
     resolver: DependencyResolver,
-) -> Run
+).execute()
 ```
 
 **Constructor behavior:**
-- `Runner` requires an active `RunContext`.
-- Run event processors are provided by the active `RunEventsReceiver`, not by `Runner`.
-- The CLI always attaches `TerminalRunReporter`; when OpenTelemetry is enabled, it also attaches `OtelReporter`.
+- `ExecutableSuite` requires an active `SuiteContext`.
+- Suite event processors are provided by the active `SuiteEventsReceiver`, not by `ExecutableSuite`.
+- The CLI always attaches `TerminalSuiteReporter`; when OpenTelemetry is enabled, it also attaches `OtelReporter`.
 - CLI `--processor` flags replace configured custom processors; `config.processors` adds custom processors when CLI flags are absent.
-- Official CLI entrypoints append the database recorder; programmatic runs attach storage processors when they want persistence.
+- Official CLI entrypoints append the database recorder; programmatic suites attach storage processors when they want persistence.
 
 **Timeout behavior (`timeout`):**
-- `timeout` is a run-level limit (not per-test).
-- Cancellation is cooperative: on timeout, the run is marked `stopped_early` and no new tests are started.
+- `timeout` is a suite-level limit (not per-test).
+- Cancellation is cooperative: on timeout, the suite is marked `stopped_early` and no new tests are started.
 - In-flight work may not stop immediately, especially synchronous tests already executing in worker threads.
 
-**Run UUID behavior:**
-- `RunContext.run_id` owns the selected UUID.
-- If no run id is provided to `RunContext`, Rue auto-generates one.
-- The CLI accepts `--run-id` and rejects duplicate SQLite run ids before execution.
+**`suite_execution_id` behavior:**
+- `SuiteContext.suite_execution_id` owns the selected UUID.
+- If no `suite_execution_id` is provided to `SuiteContext`, Rue auto-generates one.
+- The CLI accepts `--suite-execution-id` and rejects duplicate Turso `suite_execution_id` values before suite execution starts.
 
 **Example:**
 ```python
 from rue.config import Config
-from rue.context.runtime import RunContext
-from rue.events import RunEventsReceiver
-from rue.cli.rendering.terminal import TerminalRunReporter
+from rue.context.runtime import SuiteContext
+from rue.events import SuiteEventsReceiver
+from rue.cli.rendering.terminal import TerminalSuiteReporter
 from rue.telemetry.otel import OtelReporter
 from rue.resources import DependencyResolver, registry
-from rue.storage import DBWriter
-from rue.storage import DBManager
-from rue.testing import Runner
+from rue.storage import TursoSuiteRecorder, TursoSuiteStore
+from rue.testing import ExecutableSuite
 
-config = Config(db_path=".rue/rue.db")
-db = DBManager(config.db_path)
-db.initialize()
-db_writer = DBWriter()
+config = Config(database_path=".rue/rue.turso.db")
+store = TursoSuiteStore(config.database_path)
+store.initialize()
+db_writer = TursoSuiteRecorder()
 
-with RunContext(config=config), RunEventsReceiver([
-    TerminalRunReporter(),
+with SuiteContext(config=config) as context, SuiteEventsReceiver([
+    TerminalSuiteReporter(),
     OtelReporter(),
     db_writer,
 ]):
-    result = await Runner().run(
+    result = await ExecutableSuite(
         items=items,
+        suite_execution_id=context.suite_execution_id,
         resolver=DependencyResolver(registry),
-    )
+    ).execute()
 ```
 
-OpenTelemetry persistence is configured through run event processors. In a normal fresh process, the CLI attaches `OtelReporter` when OpenTelemetry is enabled; custom processors can also handle `execution.telemetry_artifacts` in `RunEventsProcessor.on_execution_complete()`.
+OpenTelemetry persistence is configured through suite event processors. In a normal fresh process, the CLI attaches `OtelReporter` when OpenTelemetry is enabled; custom processors can also handle test execution telemetry via `execution.telemetry_artifacts` in `SuiteEventsProcessor.on_test_execution_complete()`.
 
 ---
 
@@ -753,7 +753,7 @@ def test_validation_failure(data_processor):
 
 #### xfail
 
-Mark the current test as expected to fail and stop execution.
+Mark the current test as expected to fail and stop test execution.
 
 **Signature:**
 ```python
@@ -816,7 +816,7 @@ test.iterate.cases(
 | Name | Type | Description |
 |------|------|-------------|
 | `*cases` | `Case[InputsT, RefsT]` | One or more test cases to iterate over |
-| `min_passes` | `int \| None` | Minimum number of passing case executions required for the parent test to pass. Defaults to all cases. |
+| `min_passes` | `int \| None` | Minimum number of passing case test executions required for the parent test to pass. Defaults to all cases. |
 
 **Returns:** Decorator that applies case iteration using the cases
 
@@ -878,7 +878,7 @@ test.iterate.groups(
 | `case` | `Case` | The current case within the group |
 
 **Execution semantics:**
-- Each group produces a nested execution; within each group, cases are iterated using the group's `min_passes` threshold.
+- Each group produces a nested test execution; within each group, cases are iterated using the group's `min_passes` threshold.
 - The decorator-level `min_passes` controls how many groups must pass overall.
 
 **Validation:**

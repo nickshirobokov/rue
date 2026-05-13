@@ -32,7 +32,7 @@ class ResourceRegistry:
     def __init__(self) -> None:
         self._definitions: dict[str, _DefinitionsByScope] = {}
         self._builtin_definitions: dict[str, _DefinitionsByScope] = {}
-        self._graphs_by_execution_id: dict[UUID, ResourceGraph] = {}
+        self._graphs_by_test_execution_id: dict[UUID, ResourceGraph] = {}
 
     def register_resource[**P, T](
         self,
@@ -118,7 +118,7 @@ class ResourceRegistry:
             }
             for name, by_scope in self._builtin_definitions.items()
         }
-        self._graphs_by_execution_id.clear()
+        self._graphs_by_test_execution_id.clear()
 
     def get_definition(self, spec: ResourceSpec) -> LoadedResourceDef:
         """Return the exact registered definition for a resource identity."""
@@ -329,7 +329,7 @@ class ResourceRegistry:
                     ordered.append(spec)
             return tuple(ordered)
 
-        for execution_id, (consumer, resource_names) in consumers.items():
+        for test_execution_id, (consumer, resource_names) in consumers.items():
             autouse_specs = (
                 tuple(
                     compile_definition(definition)
@@ -341,7 +341,7 @@ class ResourceRegistry:
                         )
                     ).autouse
                 )
-                if execution_id in autouse_keys
+                if test_execution_id in autouse_keys
                 else ()
             )
             injections = {
@@ -356,7 +356,7 @@ class ResourceRegistry:
             roots = (*autouse_specs, *injections.values())
             order = resolution_order(roots)
             specs = set(order)
-            graphs[execution_id] = ResourceGraph(
+            graphs[test_execution_id] = ResourceGraph(
                 autouse=autouse_specs,
                 injections=injections,
                 dependencies={
@@ -366,20 +366,20 @@ class ResourceRegistry:
                 },
                 resolution_order=order,
             )
-        self._graphs_by_execution_id = graphs
+        self._graphs_by_test_execution_id = graphs
         return graphs
 
-    def get_graph(self, execution_id: UUID) -> ResourceGraph:
+    def get_graph(self, test_execution_id: UUID) -> ResourceGraph:
         """Return the retained compiled graph for one execution."""
-        return self._graphs_by_execution_id[execution_id]
+        return self._graphs_by_test_execution_id[test_execution_id]
 
     def save_graph(
         self,
-        execution_id: UUID,
+        test_execution_id: UUID,
         graph: ResourceGraph,
     ) -> None:
         """Store a hydrated graph for an execution."""
-        self._graphs_by_execution_id[execution_id] = graph
+        self._graphs_by_test_execution_id[test_execution_id] = graph
 
 
 registry = ResourceRegistry()

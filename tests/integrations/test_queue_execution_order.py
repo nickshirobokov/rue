@@ -4,23 +4,23 @@ from textwrap import dedent
 
 import pytest
 
-from rue.events import RunEventsProcessor
+from rue.events import SuiteEventsProcessor
 from rue.resources import DependencyResolver, registry
 from rue.testing.discovery import TestLoader, TestSpecCollector
-from rue.testing.runner import Runner
-from tests.helpers import make_run_context, materialize_tests
+from rue.testing.execution.suite.executable import ExecutableSuite
+from tests.helpers import make_suite_context, materialize_tests
 
 
-class QueueOrderProcessor(RunEventsProcessor):
+class QueueOrderProcessor(SuiteEventsProcessor):
     def __init__(self) -> None:
         self.events: list[tuple[str, str]] = []
 
-    async def on_test_start(self, test, run) -> None:
-        _ = run
+    async def on_test_execution_start(self, test, suite) -> None:
+        _ = suite
         self.events.append(("start", test.definition.spec.full_name))
 
-    async def on_execution_complete(self, execution, run) -> None:
-        _ = run
+    async def on_test_execution_complete(self, execution, suite) -> None:
+        _ = suite
         kind = (
             "complete"
             if execution.definition.spec.suffix is None
@@ -40,12 +40,12 @@ def _full_name(module_path: Path, name: str) -> str:
 
 
 def _materialize_paths(*paths: Path):
-    collection = TestSpecCollector((), (), None).build_spec_collection(paths)
-    return TestLoader(collection.suite_root).load_from_collection(collection)
+    suitespec = TestSpecCollector((), (), None).collect_test_specs(paths)
+    return TestLoader(suitespec.suite_root).load_tests(suitespec)
 
 
 @pytest.mark.asyncio
-async def test_runner_executes_mixed_backends_in_queue_order(
+async def test_executable_suite_executes_mixed_backends_in_queue_order(
     tmp_path: Path,
 ):
     module_path = tmp_path / "test_queue_execution_order_module.py"
@@ -133,20 +133,24 @@ async def test_runner_executes_mixed_backends_in_queue_order(
     items = materialize_tests(module_path)
     processor = QueueOrderProcessor()
 
-    make_run_context(
+    context = make_suite_context(
         otel=False,
         concurrency=4,
         processors=(processor,),
     )
-    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
+    suite = await ExecutableSuite(
+        items=items,
+        suite_execution_id=context.suite_execution_id,
+        resolver=DependencyResolver(registry),
+    ).execute()
 
-    assert run.result.passed == len(expected_order), [
+    assert suite.result.passed == len(expected_order), [
         (
             execution.definition.spec.name,
-            execution.status.value,
+            execution.result.status.value,
             str(execution.result.error) if execution.result.error else None,
         )
-        for execution in run.result.executions
+        for execution in suite.result.test_executions
     ]
 
     assert [
@@ -154,11 +158,11 @@ async def test_runner_executes_mixed_backends_in_queue_order(
     ] == expected_order
     assert [
         execution.definition.spec.full_name
-        for execution in run.result.executions
+        for execution in suite.result.test_executions
     ] == expected_order
     assert {
-        execution.definition.spec.name: len(execution.sub_executions)
-        for execution in run.result.executions
+        execution.definition.spec.name: len(execution.sub_test_executions)
+        for execution in suite.result.test_executions
         if execution.definition.spec.name in expected_subtest_counts
     } == expected_subtest_counts
 
@@ -238,7 +242,7 @@ async def test_runner_executes_mixed_backends_in_queue_order(
 
 
 @pytest.mark.asyncio
-async def test_runner_executes_multiple_modules_in_queue_order(
+async def test_executable_suite_executes_multiple_modules_in_queue_order(
     tmp_path: Path,
 ):
     module_a1_path = tmp_path / "test_a1.py"
@@ -337,25 +341,29 @@ async def test_runner_executes_multiple_modules_in_queue_order(
     items = _materialize_paths(module_a1_path, module_a2_path)
     processor = QueueOrderProcessor()
 
-    make_run_context(
+    context = make_suite_context(
         otel=False,
         concurrency=4,
         processors=(processor,),
     )
-    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
+    suite = await ExecutableSuite(
+        items=items,
+        suite_execution_id=context.suite_execution_id,
+        resolver=DependencyResolver(registry),
+    ).execute()
 
-    assert run.result.passed == len(expected_order), [
+    assert suite.result.passed == len(expected_order), [
         (
             execution.definition.spec.full_name,
-            execution.status.value,
+            execution.result.status.value,
             str(execution.result.error) if execution.result.error else None,
         )
-        for execution in run.result.executions
+        for execution in suite.result.test_executions
     ]
 
     assert [
         execution.definition.spec.full_name
-        for execution in run.result.executions
+        for execution in suite.result.test_executions
     ] == expected_order
 
     a1_a_complete = _event_index(
@@ -389,7 +397,7 @@ async def test_runner_executes_multiple_modules_in_queue_order(
 
 
 @pytest.mark.asyncio
-async def test_runner_keeps_global_main_as_absolute_barrier_across_modules(
+async def test_executable_suite_keeps_global_main_as_absolute_barrier_across_modules(
     tmp_path: Path,
 ):
     module_a1_path = tmp_path / "test_global_a1.py"
@@ -434,14 +442,18 @@ async def test_runner_keeps_global_main_as_absolute_barrier_across_modules(
     items = _materialize_paths(module_a1_path, module_a2_path)
     processor = QueueOrderProcessor()
 
-    make_run_context(
+    context = make_suite_context(
         otel=False,
         concurrency=2,
         processors=(processor,),
     )
-    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
+    suite = await ExecutableSuite(
+        items=items,
+        suite_execution_id=context.suite_execution_id,
+        resolver=DependencyResolver(registry),
+    ).execute()
 
-    assert run.result.passed == 4
+    assert suite.result.passed == 4
 
     main_start = _event_index(
         processor.events, "start", _full_name(module_a1_path, "B")
@@ -484,12 +496,16 @@ async def test_module_main_keeps_iterate_children_concurrent(
     items = materialize_tests(module_path)
 
     start = time.perf_counter()
-    make_run_context(
+    context = make_suite_context(
         otel=False,
         concurrency=3,
     )
-    run = await Runner().run(items=items, resolver=DependencyResolver(registry))
+    suite = await ExecutableSuite(
+        items=items,
+        suite_execution_id=context.suite_execution_id,
+        resolver=DependencyResolver(registry),
+    ).execute()
     duration = time.perf_counter() - start
 
-    assert run.result.passed == 1
+    assert suite.result.passed == 1
     assert duration < 0.32

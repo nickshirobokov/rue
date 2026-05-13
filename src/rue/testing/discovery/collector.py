@@ -7,11 +7,11 @@ import os
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
-from rue.testing.models.spec import (
-    SetupFileRef,
+from rue.testing.models import (
     Locator,
+    SetupFileRef,
+    SuiteSpec,
     TestSpec,
-    TestSpecCollection,
 )
 
 
@@ -176,12 +176,12 @@ class TestSpecCollector:
         self.keyword = keyword
         self._keyword_matcher = KeywordMatcher(keyword) if keyword else None
 
-    def build_spec_collection(
+    def collect_test_specs(
         self,
         paths: Sequence[Path | str],
         *,
         explicit_root: Path | None = None,
-    ) -> TestSpecCollection:
+    ) -> SuiteSpec:
         explicit_root = explicit_root.resolve() if explicit_root else None
         inputs = tuple(Path(path).resolve() for path in paths)
         module_paths = sorted(
@@ -202,13 +202,13 @@ class TestSpecCollector:
 
         if not module_paths:
             if explicit_root is not None:
-                return TestSpecCollection(suite_root=explicit_root)
+                return SuiteSpec(suite_root=explicit_root)
             if len(inputs) == 1:
                 [root] = inputs
-                return TestSpecCollection(
+                return SuiteSpec(
                     suite_root=root if root.is_dir() else root.parent
                 )
-            return TestSpecCollection(suite_root=Path.cwd().resolve())
+            return SuiteSpec(suite_root=Path.cwd().resolve())
 
         collect_root = explicit_root or Path(
             os.path.commonpath(
@@ -260,7 +260,7 @@ class TestSpecCollector:
                 spec.collection_index = offset
             specs.extend(module_specs)
 
-        return TestSpecCollection(
+        return SuiteSpec(
             suite_root=suite_root,
             setup_chains=setup_chains,
             specs=tuple(specs),

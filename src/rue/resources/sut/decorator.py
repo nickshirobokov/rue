@@ -41,9 +41,9 @@ def sut(
 
     def on_injection(sut_instance: SUT) -> SUT:
         test_ctx = CURRENT_TEST.get()
-        execution_id = test_ctx.execution_id
-        sut_instance.reset_output_state(execution_id)
-        sut_instance.reset_trace_state(execution_id)
+        test_execution_id = test_ctx.test_execution_id
+        sut_instance.reset_output_state(test_execution_id)
+        sut_instance.reset_trace_state(test_execution_id)
         tracer = CURRENT_TEST_TRACER.get()
         backend = (
             None

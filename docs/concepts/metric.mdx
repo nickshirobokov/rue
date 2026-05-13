@@ -2,12 +2,12 @@
 title: "Metric"
 ---
 
-`Metric` is an object that records data points and calculates statistical values. Developers use metrics to track system behavior across multiple test runs and make data-driven assertions about performance, accuracy, or other measurable properties.
+`Metric` is an object that records data points and calculates statistical values. Developers use metrics to track system behavior across suite executions and make data-driven assertions about performance, accuracy, or other measurable properties.
 
 Using `Metric` enables:
 - Recording assertion results automatically as True/False values
 - Calculating statistics (mean, std, percentiles) on collected data
-- Tracking metrics at different scopes (session, suite, case)
+- Tracking metrics at different scopes (suite, module, test)
 - Composing metrics via dependency injection for hierarchical analysis
 - Generating quality reports with measurable insights
 
@@ -93,13 +93,13 @@ def test_latency_test(response_time: Metric):
     assert result
 ```
 
-## Scopes: Session, Suite, Case
+## Scopes: Suite, Module, Test
 
-Metrics can be scoped to different lifecycle levels. This enables tracking both local statistics (per test case) and global statistics (across all tests).
+Metrics can be scoped to different lifecycle levels. This enables tracking both local statistics (per test execution) and global statistics (across the suite execution).
 
 ```python
-# Session scope: collects data across the entire test run
-@rue.resource.metric(scope="process")
+# Suite scope: collects data across the entire suite execution
+@rue.resource.metric(scope="suite")
 def average_hallucinations_per_case():
     metric = Metric()
     yield metric
@@ -107,13 +107,13 @@ def average_hallucinations_per_case():
     # Assert on overall performance after all cases complete
     assert metric.mean < 2  # Average hallucinations should be less than 2
 
-# Case scope: creates a new metric instance for each test case
+# Test scope: creates a new metric instance for each test execution
 @rue.resource.metric(scope="test")
 def case_hallucinations_count(average_hallucinations_per_case: Metric):
     metric = Metric()
     yield metric
 
-    # Write case-level data to session-level metric
+    # Write case-level data to suite-level metric
     hallucinations_for_case = metric.counter[False]
     average_hallucinations_per_case.add_record(hallucinations_for_case)
 
@@ -131,7 +131,7 @@ def test_geography_bot(
 ```
 
 Available scopes:
-- `"process"`: One metric instance for the entire test run (default)
+- `"suite"`: One metric instance for the entire suite execution (default)
 - `"module"`: One instance per test file/module
 - `"test"`: New instance for each parametrized test case
 
@@ -191,7 +191,7 @@ def test_negative_cases(input: str, false_positives: Metric):
 
 This creates a hierarchy:
 ```
-accuracy (session-level)
+accuracy (suite-level)
 ├── false_positives (tracks FP, writes to accuracy)
 └── false_negatives (tracks FN, writes to accuracy)
 ```
@@ -235,10 +235,10 @@ def test_test(accuracy: Metric):
 
 ### 2. Scope metrics appropriately for your analysis needs
 
-Choose scope based on what you're measuring. Use case-level metrics for per-test statistics and session-level metrics for aggregate analysis.
+Choose scope based on what you're measuring. Use test-level metrics for per-test-execution statistics and suite-level metrics for aggregate analysis.
 
 ```python
-# Case scope: Track each test case individually
+# Test scope: Track each test execution individually
 @rue.resource.metric(scope="test")
 def case_latency():
     metric = Metric()
@@ -247,8 +247,8 @@ def case_latency():
     # Assert each case completes quickly
     assert metric.p95 < 1000  # Each case's p95 under 1 second
 
-# Session scope: Track overall system performance
-@rue.resource.metric(scope="process")
+# Suite scope: Track overall system performance
+@rue.resource.metric(scope="suite")
 def overall_latency():
     metric = Metric()
     yield metric

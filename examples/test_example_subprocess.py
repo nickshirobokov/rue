@@ -1,10 +1,12 @@
 import time
+
 import rue
 from rue import ExecutionBackend
 from rue.resources import resource
 from rue.resources.models import Scope
 
-@resource(scope=Scope.RUN)
+
+@resource(scope=Scope.SUITE)
 def shared_events():
     return []
 

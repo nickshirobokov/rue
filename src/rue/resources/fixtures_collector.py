@@ -30,8 +30,8 @@ def decorate_pytest_fixture_as_resource(
                 mapped_scope = Scope.TEST
             case "module" | "class":
                 mapped_scope = Scope.MODULE
-            case "run" | "package" | "session":
-                mapped_scope = Scope.RUN
+            case "suite" | "package" | "session":
+                mapped_scope = Scope.SUITE
             case _:
                 mapped_scope = Scope.TEST
         return cast("ResourceFactory", resource(fn, scope=mapped_scope))

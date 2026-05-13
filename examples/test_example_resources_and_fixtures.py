@@ -1,5 +1,6 @@
-import rue
 import pytest
+
+import rue
 
 
 @rue.resource

@@ -25,7 +25,7 @@ class AnswerArticle:
 
 @dataclass(frozen=True, slots=True)
 class AnswerProfile:
-    """Patchable answer-generation behavior for a chatbot run."""
+    """Patchable answer-generation behavior for a chatbot suite."""
 
     name: str
     detailed: bool
@@ -35,7 +35,7 @@ class AnswerProfile:
 
     @classmethod
     def current(cls) -> Self:
-        """Return the baseline profile used outside experiment runs."""
+        """Return the baseline profile used outside experiment suites."""
         return cls(
             name="current",
             detailed=False,
@@ -76,7 +76,7 @@ class AnswerProfile:
 
 @dataclass(frozen=True, slots=True)
 class SafetyPolicy:
-    """Patchable safety behavior for a chatbot run."""
+    """Patchable safety behavior for a chatbot suite."""
 
     name: str
     block_prompt_injection: bool

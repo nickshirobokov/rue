@@ -1,4 +1,4 @@
-"""CLI module for Rue test runner."""
+"""CLI module for Rue."""
 
 from __future__ import annotations
 

@@ -14,7 +14,7 @@ def answer_profile(
     value: conftest.AnswerProfile,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """Patch the module-level answer profile for one experiment run."""
+    """Patch the module-level answer profile for one experiment suite."""
     monkeypatch.setattr(conftest, "ANSWER_PROFILE", value)
 
 
@@ -26,5 +26,5 @@ def safety_policy(
     value: conftest.SafetyPolicy,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """Patch the chatbot class safety policy for one experiment run."""
+    """Patch the chatbot class safety policy for one experiment suite."""
     monkeypatch.setattr(conftest.Chatbot, "safety_policy", value)

@@ -3,11 +3,11 @@
 import pytest
 
 from rue.resources import DependencyResolver, registry
-from rue.testing import TestStatus, fail, skip, xfail
-from rue.testing.models import LoadedTestDef
+from rue.testing import fail, skip, xfail
+from rue.testing.execution.suite.executable import ExecutableSuite
+from rue.testing.execution.test.models import LoadedTestDef, TestStatus
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
-from rue.testing.runner import Runner
-from tests.helpers import make_definition, make_run_context
+from tests.helpers import make_definition, make_suite_context
 
 
 def make_item(
@@ -16,9 +16,13 @@ def make_item(
     return make_definition(name or fn.__name__, fn=fn, is_async=is_async)
 
 
-def make_runner() -> Runner:
-    make_run_context()
-    return Runner()
+async def execute_items(items: list[LoadedTestDef]):
+    context = make_suite_context()
+    return await ExecutableSuite(
+        items=items,
+        suite_execution_id=context.suite_execution_id,
+        resolver=DependencyResolver(registry),
+    ).execute()
 
 
 @pytest.mark.parametrize(
@@ -40,11 +44,8 @@ async def test_imperative_outcome_sets_status_and_reason(
     def outcome_test():
         outcome_fn(reason)
 
-    result = await make_runner().run(
-        items=[make_item(outcome_test)],
-        resolver=DependencyResolver(registry),
-    )
-    execution = result.result.executions[0]
+    result = await execute_items([make_item(outcome_test)])
+    execution = result.result.test_executions[0]
 
     assert getattr(result.result, count_attr) == 1
     assert execution.result.status == status
@@ -69,13 +70,10 @@ async def test_imperative_outcome_without_reason_uses_expected_error_type(
     def outcome_test():
         outcome_fn()
 
-    result = await make_runner().run(
-        items=[make_item(outcome_test)],
-        resolver=DependencyResolver(registry),
-    )
+    result = await execute_items([make_item(outcome_test)])
 
     assert getattr(result.result, count_attr) == 1
-    assert isinstance(result.result.executions[0].result.error, error_type)
+    assert isinstance(result.result.test_executions[0].result.error, error_type)
 
 
 @pytest.mark.parametrize("outcome_fn", [skip, fail, xfail])
@@ -90,9 +88,6 @@ async def test_imperative_outcome_stops_execution(
         outcome_fn("stopping")
         executed.append("after")
 
-    await make_runner().run(
-        items=[make_item(outcome_test)],
-        resolver=DependencyResolver(registry),
-    )
+    await execute_items([make_item(outcome_test)])
 
     assert executed == ["before"]

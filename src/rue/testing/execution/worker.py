@@ -15,17 +15,24 @@ from rue.resources import DependencyResolver
 from rue.resources.registry import registry as default_resource_registry
 from rue.resources.store import ResourceStore
 from rue.testing.discovery.loader import TestLoader
-from rue.testing.execution.models import ExecutorPayload, RemoteExecutionResult
-from rue.testing.models.result import TestResult
+from rue.testing.execution.test.models import (
+    RemoteTestExecutionPayload,
+    RemoteTestExecutionResult,
+    TestResult,
+)
 from rue.testing.tracing import TestTracer
 
 
-def run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
+def execute_remote_test(
+    payload: RemoteTestExecutionPayload,
+) -> RemoteTestExecutionResult:
     """Synchronous entrypoint submitted to a ProcessPoolExecutor worker."""
-    return asyncio.run(_run_remote_test(payload))
+    return asyncio.run(_execute_remote_test(payload))
 
 
-async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
+async def _execute_remote_test(
+    payload: RemoteTestExecutionPayload,
+) -> RemoteTestExecutionResult:
     loader = TestLoader(payload.suite_root)
     resolver = DependencyResolver(
         default_resource_registry,
@@ -49,11 +56,11 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
             payload.spec,
             setup_chain=payload.setup_chain,
         )
-        test_ctx = TestContext(execution_id=payload.execution_id)
+        test_ctx = TestContext(test_execution_id=payload.test_execution_id)
 
     tracer = TestTracer.build(
         config=payload.context.config,
-        run_id=payload.context.run_id,
+        suite_execution_id=payload.context.suite_execution_id,
     )
     with (
         payload.context,
@@ -66,16 +73,19 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
                 payload.snapshot,
                 consumer_spec=definition.spec,
             )
-            tracer.start(definition, execution_id=payload.execution_id)
+            tracer.start(
+                definition,
+                test_execution_id=payload.test_execution_id,
+            )
             (
                 duration_ms,
                 imperative_outcome,
                 error,
                 assertion_results,
-            ) = await definition.run_loaded_test(
+            ) = await definition.execute_loaded_test(
                 params=payload.params,
                 resolver=resolver,
-                run_sync_in_thread=False,
+                execute_sync_in_thread=False,
             )
             result = TestResult.build(
                 definition=definition,
@@ -89,7 +99,7 @@ async def _run_remote_test(payload: ExecutorPayload) -> RemoteExecutionResult:
             sync_update = resolver.transfer.update_since(payload.snapshot)
         finally:
             await resolver.teardown()
-    return RemoteExecutionResult(
+    return RemoteTestExecutionResult(
         result=result,
         telemetry_artifacts=telemetry_artifacts,
         sync_update=sync_update,

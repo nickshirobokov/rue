@@ -14,7 +14,7 @@ from rue.models import Locator
 from rue.resources import DependencyResolver, ResourceSpec, Scope, registry
 from rue.resources.metrics.metric import Metric
 from rue.resources.metrics.models import MetricMetadata, MetricResult
-from tests.helpers import make_run_context, materialize_tests
+from tests.helpers import make_suite_context, materialize_tests
 
 
 def test_rewritten_assert_collects_predicate_results(tmp_path):
@@ -44,7 +44,7 @@ def test_sample():
                     module_path=Path({str(mod_path)!r}),
                     function_name="m",
                 ),
-                scope=Scope.RUN,
+                scope=Scope.SUITE,
             )
         )
     )
@@ -56,8 +56,8 @@ def test_sample():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
-        make_run_context()
-        ctx = TestContext(execution_id=uuid4())
+        make_suite_context()
+        ctx = TestContext(test_execution_id=uuid4())
         with (
             ctx,
             bind(CURRENT_ASSERTION_RESULTS, assertion_results),
@@ -97,8 +97,8 @@ def test_fail():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
-        make_run_context()
-        ctx = TestContext(execution_id=uuid4())
+        make_suite_context()
+        ctx = TestContext(test_execution_id=uuid4())
         with (
             ctx,
             bind(CURRENT_ASSERTION_RESULTS, assertion_results),
@@ -136,8 +136,8 @@ def test_metric_capture_multi():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
-        make_run_context()
-        ctx = TestContext(execution_id=uuid4())
+        make_suite_context()
+        ctx = TestContext(test_execution_id=uuid4())
         m = Metric(
             metadata=MetricMetadata(
                 identity=ResourceSpec(
@@ -145,7 +145,7 @@ def test_metric_capture_multi():
                         module_path=mod_path,
                         function_name="assert_outcomes",
                     ),
-                    scope=Scope.RUN,
+                    scope=Scope.SUITE,
                 )
             )
         )
@@ -191,7 +191,7 @@ def my_metric():
                     module_path=Path({str(mod_path)!r}),
                     function_name="m",
                 ),
-                scope=Scope.RUN,
+                scope=Scope.SUITE,
             )
         )
     )
@@ -207,15 +207,15 @@ def test_dummy():
     try:
         [item] = materialize_tests(mod_path)
         resolver = DependencyResolver(registry)
-        execution_id = uuid4()
-        make_run_context()
-        ctx = TestContext(execution_id=execution_id)
+        test_execution_id = uuid4()
+        make_suite_context()
+        ctx = TestContext(test_execution_id=test_execution_id)
         metric_results: list[MetricResult] = []
         with ctx, bind(CURRENT_METRIC_RESULTS, metric_results):
             graphs = registry.compile_graphs(
-                {execution_id: (item.spec, ("my_metric",))}
+                {test_execution_id: (item.spec, ("my_metric",))}
             )
-            graph = graphs[execution_id]
+            graph = graphs[test_execution_id]
             await resolver.resolve_resource(
                 graph.injections["my_metric"],
                 graph=graph,
@@ -268,8 +268,8 @@ def test_repr_cases():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
-        make_run_context()
-        with TestContext(execution_id=uuid4()), bind(
+        make_suite_context()
+        with TestContext(test_execution_id=uuid4()), bind(
             CURRENT_ASSERTION_RESULTS,
             assertion_results,
         ):
@@ -319,8 +319,8 @@ def test_multiline_assert():
     try:
         [item] = materialize_tests(mod_path)
         assertion_results: list[AssertionResult] = []
-        make_run_context()
-        with TestContext(execution_id=uuid4()), bind(
+        make_suite_context()
+        with TestContext(test_execution_id=uuid4()), bind(
             CURRENT_ASSERTION_RESULTS,
             assertion_results,
         ):

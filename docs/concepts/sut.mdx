@@ -69,7 +69,7 @@ def test_weather_agent_calls_tools(weather_agent):
 ## What `@rue.resource.sut` actually does
 
 ### Injection semantics
-`@rue.resource.sut` registers a resource factory so the Rue runner can inject it into tests by parameter name (by default, a **case-scoped** resource). The injected value is a `SUT` object.
+`@rue.resource.sut` registers a resource factory so Rue can inject it into tests by parameter name (by default, a **case-scoped** resource). The injected value is a `SUT` object.
 
 If constructing your SUT is expensive, you can widen its lifecycle using `scope` (the same values as `@rue.resource`):
 
@@ -78,7 +78,7 @@ import rue
 from rue import SUT
 from demo_app.weather import weather_agent as prod_weather_agent
 
-@rue.resource.sut(scope="process")
+@rue.resource.sut(scope="suite")
 def weather_agent():
     return SUT(prod_weather_agent)
 ```

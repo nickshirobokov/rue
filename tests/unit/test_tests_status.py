@@ -15,10 +15,10 @@ from rue.config import Config
 from rue.models import Locator
 from rue.resources import Scope
 from rue.resources.models import ResourceSpec
+from rue.testing.compilation.modifiers import IterateModifier
 from rue.testing.discovery import TestDefinitionErrors, TestSpecCollector
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.models import TestStatus
-from rue.testing.models.modifiers import IterateModifier
+from rue.testing.execution.test.models import TestStatus
 from tests.helpers import make_definition
 
 
@@ -30,9 +30,9 @@ def write_files(root: Path, files: dict[str, str]) -> None:
 
 
 def build_report(path: Path) -> TestReport:
-    collection = TestSpecCollector((), (), None).build_spec_collection((path,))
+    suitespec = TestSpecCollector((), (), None).collect_test_specs((path,))
     builder = TestsStatusBuilder(Config.model_construct())
-    return builder.build(collection)
+    return builder.build(suitespec)
 
 
 def test_status_builder_matches_execution_tree_shape(tmp_path):
@@ -126,12 +126,12 @@ def test_status_builder_raises_definition_errors(tmp_path):
         },
     )
 
-    collection = TestSpecCollector((), (), None).build_spec_collection(
+    suitespec = TestSpecCollector((), (), None).collect_test_specs(
         (tmp_path,)
     )
     builder = TestsStatusBuilder(Config.model_construct())
     with pytest.raises(TestDefinitionErrors) as raised:
-        builder.build(collection)
+        builder.build(suitespec)
 
     [issue] = raised.value.exceptions
     assert "requires at least one value set" in issue.message
@@ -274,7 +274,7 @@ def test_test_tree_renderer_respects_verbosity_levels():
                         module_path=module_path,
                         function_name="latency",
                     ),
-                    scope=Scope.RUN,
+                    scope=Scope.SUITE,
                 ),
             ),
             "SUT": (

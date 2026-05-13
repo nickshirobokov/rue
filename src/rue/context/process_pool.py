@@ -16,7 +16,7 @@ class LazyProcessPool:
         self._tokens: list[Token[LazyProcessPool | None]] = []
 
     def __enter__(self) -> LazyProcessPool:
-        """Bind this pool holder to the current execution context."""
+        """Bind this pool holder to the current suite execution context."""
         self._tokens.append(CURRENT_PROCESS_POOL.set(self))
         return self
 
@@ -37,7 +37,8 @@ class LazyProcessPool:
         if holder is None:
             raise RuntimeError(
                 "No active process pool scope. "
-                "A subprocess backend was requested outside of Runner.run()."
+                "A subprocess backend was requested outside of "
+                "ExecutableSuite.execute()."
             )
         return holder
 

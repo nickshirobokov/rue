@@ -6,9 +6,9 @@ import pytest
 
 from rue.resources import DependencyResolver, registry
 from rue.testing.discovery import TestLoader, TestSpecCollector
-from rue.testing.models import TestStatus
-from rue.testing.runner import Runner
-from tests.helpers import make_run_context, materialize_tests
+from rue.testing.execution.suite.executable import ExecutableSuite
+from rue.testing.execution.test.models import TestStatus
+from tests.helpers import make_suite_context, materialize_tests
 
 
 @pytest.fixture(autouse=True)
@@ -18,34 +18,35 @@ def clean_registry():
     registry.reset()
 
 
-def _failed_executions(run):
+def _failed_executions(suite):
     rows = []
-    pending = list(run.result.executions)
+    pending = list(suite.result.test_executions)
     while pending:
         execution = pending.pop()
-        if execution.status is not TestStatus.PASSED:
+        if execution.result.status is not TestStatus.PASSED:
             rows.append(
                 (
-                    str(execution.execution_id),
-                    execution.status.value,
+                    str(execution.test_execution_id),
+                    execution.result.status.value,
                     str(execution.result.error)
                     if execution.result.error
                     else None,
                 )
             )
-        pending.extend(execution.sub_executions)
+        pending.extend(execution.sub_test_executions)
     return rows
 
 
-async def _run_module(module_path: Path):
-    make_run_context(
-            otel=False,
-            concurrency=6,
-        )
-    return await Runner().run(
-        items=materialize_tests(module_path),
-        resolver=DependencyResolver(registry),
+async def _suite_module(module_path: Path):
+    context = make_suite_context(
+        otel=False,
+        concurrency=6,
     )
+    return await ExecutableSuite(
+        items=materialize_tests(module_path),
+        suite_execution_id=context.suite_execution_id,
+        resolver=DependencyResolver(registry),
+    ).execute()
 
 
 @pytest.mark.asyncio
@@ -124,9 +125,9 @@ async def test_iterated_patches_to_same_object_are_execution_isolated(
         )
     )
 
-    run = await _run_module(module_path)
+    suite = await _suite_module(module_path)
 
-    assert run.result.passed == 4, _failed_executions(run)
+    assert suite.result.passed == 4, _failed_executions(suite)
 
 
 @pytest.mark.asyncio
@@ -228,9 +229,9 @@ async def test_resource_monkeypatch_and_test_patches_are_execution_isolated(
         )
     )
 
-    run = await _run_module(module_path)
+    suite = await _suite_module(module_path)
 
-    assert run.result.passed == 4, _failed_executions(run)
+    assert suite.result.passed == 4, _failed_executions(suite)
 
 
 @pytest.mark.asyncio
@@ -281,21 +282,22 @@ async def test_module_scoped_monkeypatch_restores_before_next_module(
     )
     builtins.rue_module_patch_value = "original"
     try:
-        collection = TestSpecCollector((), (), None).build_spec_collection(
+        suitespec = TestSpecCollector((), (), None).collect_test_specs(
             (module_a_path, module_b_path)
         )
-        items = TestLoader(collection.suite_root).load_from_collection(
-            collection
+        items = TestLoader(suitespec.suite_root).load_tests(
+            suitespec
         )
-        make_run_context(otel=False, concurrency=2)
-        run = await Runner().run(
+        context = make_suite_context(otel=False, concurrency=2)
+        suite = await ExecutableSuite(
             items=items,
+            suite_execution_id=context.suite_execution_id,
             resolver=DependencyResolver(registry),
-        )
+        ).execute()
     finally:
         del builtins.rue_module_patch_value
 
-    assert run.result.passed == 2, _failed_executions(run)
+    assert suite.result.passed == 2, _failed_executions(suite)
 
 
 @pytest.mark.asyncio
@@ -600,6 +602,6 @@ async def test_all_monkeypatch_operations_conflict_across_backends(
         )
     )
 
-    run = await _run_module(module_path)
+    suite = await _suite_module(module_path)
 
-    assert run.result.passed == 6, _failed_executions(run)
+    assert suite.result.passed == 6, _failed_executions(suite)

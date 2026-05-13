@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from rue.testing.models import TestStatus
+from rue.testing.execution.test.models import TestStatus
 
 
 if TYPE_CHECKING:
@@ -29,6 +29,7 @@ STATUS_STYLES: dict[TestStatus, StatusStyle] = {
     TestStatus.FAILED: StatusStyle("✗", "red", "FAILED"),
     TestStatus.ERROR: StatusStyle("!", "yellow", "ERROR"),
     TestStatus.SKIPPED: StatusStyle("-", "yellow", "SKIPPED"),
+    TestStatus.NOT_RUN: StatusStyle("·", "dim", "NOT RUN"),
     TestStatus.XFAILED: StatusStyle("x", "blue", "XFAILED"),
     TestStatus.XPASSED: StatusStyle("!", "magenta", "XPASSED"),
 }

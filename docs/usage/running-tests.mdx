@@ -114,7 +114,7 @@ uv run rue run --concurrency 0
 - **Unlimited (0)**: Maximum parallelism for large test suites.
 
 Rue plans work in queue stages:
-- `ExecutionBackend.MAIN` tests run on the main thread in discovery order and block all other execution.
+- `ExecutionBackend.MAIN` tests run on the main thread in discovery order and block all other test execution.
 - `ExecutionBackend.MODULE_MAIN` tests block only their own module queue.
 - `ExecutionBackend.ASYNCIO`, `ExecutionBackend.MODULE_MAIN`, and `ExecutionBackend.SUBPROCESS` tests share the same `--concurrency` budget.
 
@@ -122,16 +122,16 @@ For synchronous tests (`def test_*`), the default `ASYNCIO` backend runs test bo
 
 ### Timeout
 
-Set a global timeout for the entire test run:
+Set a global timeout for the entire suite execution:
 
 ```bash
 # Stop after 300 seconds (5 minutes)
 uv run rue run --timeout 300
 ```
 
-The timeout applies to the entire test session, not individual tests.
+The timeout applies to the entire suite execution, not individual tests.
 
-Timeout is cooperative: when the timeout is reached, Rue marks the run as stopped early and stops starting new tests, but in-flight work may not stop immediately (especially synchronous tests already running in worker threads).
+Timeout is cooperative: when the timeout is reached, Rue marks the suite as stopped early and stops starting new tests, but in-flight work may not stop immediately (especially synchronous tests already running in worker threads).
 
 ### Verbosity
 
@@ -172,14 +172,14 @@ Rue enables OpenTelemetry capture by default so spans from your SUT and tests ar
 # Default behavior
 uv run rue run
 
-# Disable OpenTelemetry for this run
+# Disable OpenTelemetry for this suite execution
 uv run rue run --no-otel
 
-# Extra processors are for custom RunEventsProcessor instances
+# Extra processors are for custom SuiteEventsProcessor instances
 uv run rue run --processor CustomProcessor
 ```
 
-In the usual fresh-process setup, `uv run rue run` already writes JSON traces under `.rue/traces/<run_id>/<execution_id>.json` because the CLI attaches `OtelReporter` when OpenTelemetry is enabled. Each file stores `run_id`, `execution_id`, and a nested `trace` tree rooted at the test span.
+In the usual fresh-process setup, `uv run rue run` already writes JSON traces under `.rue/traces/<suite_execution_id>/<test_execution_id>.json` because the CLI attaches `OtelReporter` when OpenTelemetry is enabled. Each file stores `suite_execution_id`, `test_execution_id`, and a nested `trace` tree rooted at the test span.
 
 **Use OpenTelemetry spans for**:
 - Asserting tool calls in agent tests
@@ -188,49 +188,58 @@ In the usual fresh-process setup, `uv run rue run` already writes JSON traces un
 
 See [SUT](/concepts/sut) for OpenTelemetry span assertions.
 
-## Custom Run UUID
+## Custom `suite_execution_id`
 
-By default, Rue generates a run UUID automatically. You can provide one explicitly when you
-need a stable external correlation ID (for example, linking CI jobs to Rue runs).
+By default, Rue generates a `suite_execution_id` automatically. You can provide
+one explicitly when you need a stable external correlation ID (for example,
+linking CI jobs to Rue suite executions).
 
 ### CLI
 
-Provide a UUID with `--run-id`:
+Provide a UUID with `--suite-execution-id`:
 
 ```bash
-uv run rue run --run-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
+uv run rue run --suite-execution-id 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
 ```
 
-If that UUID already exists in the configured SQLite database, the command exits with code `2`
+If that UUID already exists in the configured Turso database, the command exits with code `2`
 and no tests are executed.
 
 ### Python API
 
-Programmatic runs receive their UUID from `RunContext`:
+Programmatic suite executions receive their `suite_execution_id` from `SuiteContext`:
 
 ```python
 from uuid import UUID
 from rue.config import Config
-from rue.context.runtime import RunContext
-from rue.events import RunEventsReceiver
-from rue.cli.rendering.terminal import TerminalRunReporter
-from rue.storage import DBWriter
-from rue.storage import DBManager
-from rue.testing import Runner
+from rue.context.runtime import SuiteContext
+from rue.events import SuiteEventsReceiver
+from rue.cli.rendering.terminal import TerminalSuiteReporter
+from rue.resources import DependencyResolver, registry
+from rue.storage import TursoSuiteRecorder, TursoSuiteStore
+from rue.testing import ExecutableSuite
 
 config = Config()
-db = DBManager(config.db_path)
-db.initialize()
-db_writer = DBWriter()
+store = TursoSuiteStore(config.database_path)
+store.initialize()
 
-with RunContext(
+with SuiteContext(
     config=config,
-    run_id=UUID("00000000-0000-0000-0000-000000000001"),
-), RunEventsReceiver([TerminalRunReporter(), db_writer]):
-    runner = Runner()
+    suite_execution_id=UUID("00000000-0000-0000-0000-000000000001"),
+) as context, SuiteEventsReceiver([
+    TerminalSuiteReporter(),
+    TursoSuiteRecorder(),
+]):
+    suite = await ExecutableSuite(
+        items=items,
+        suite_execution_id=context.suite_execution_id,
+        resolver=DependencyResolver(registry),
+    ).execute()
 ```
 
-Run IDs are currently configured only via CLI `--run-id` or `RunContext`. They are not read from `pyproject.toml`, `rue.toml`, or environment variables.
+`suite_execution_id` values are currently configured only via CLI
+`--suite-execution-id` or `SuiteContext`. They are not read from
+`pyproject.toml`, `rue.toml`, or environment variables.
 
 ## Configuration Files
 
@@ -264,10 +273,10 @@ concurrency = 4
 Rue reports test status as tests complete with a compact line per file by default:
 
 ```
-===== RUE RUN STARTS =====
+===== RUE SUITE STARTS =====
 platform macOS-14.6.1-arm64-arm-64bit -- python 3.12.2 -- rue 0.9.1
 rootdir: /Users/you/workspace/project
-run_id: 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
+suite_execution_id: 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d
 git: main (abc12345) dirty
 
 Collected 12 tests
@@ -277,7 +286,7 @@ tests/unit/test_db.py !-
 tests/unit/test_known_issues.py x
 
 ===== SUMMARY =====
-run_id: 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d | 6 passed, 1 failed, 1 errors, 1 skipped, 1 xfailed in 892ms
+suite_execution_id: 3f5f5e9a-1c2d-4b5f-9c2b-7f6d8a9b0c1d | 6 passed, 1 failed, 1 errors, 1 skipped, 1 xfailed in 892ms
 ==================
 ```
 
@@ -294,7 +303,7 @@ Use `-v` to show per-test lines with durations and detailed sub-results.
 **Exit codes**:
 - `0`: All tests passed (or only skipped/xfailed)
 - `1`: At least one test failed or errored
-- `2`: Invalid CLI usage or configuration error (including duplicate `--run-id`)
+- `2`: Invalid CLI usage or configuration error (including duplicate `--suite-execution-id`)
 
 ### Repeated Tests
 
@@ -305,68 +314,73 @@ For tests with `@rue.test.iterate()`, verbose output shows aggregated results:
   ✗ test_flaky_api (567.8ms) FAILED
 ```
 
-The individual run results are attached to `execution.sub_executions`.
+Child test execution results are attached to
+`ExecutedTest.sub_test_executions`.
 
-## Run Event Processor System
+## Suite Event Processor System
 
-Rue uses async run event processors for output, trace persistence, and other lifecycle integrations.
+Rue uses async suite event processors for output, trace persistence, and other lifecycle integrations.
 
 ### The Processor Interface
 
-Processors subclass `RunEventsProcessor`:
+Processors subclass `SuiteEventsProcessor`:
 
 ```python
-class RunEventsProcessor:
+class SuiteEventsProcessor:
     def configure(self, config: Config) -> None:
         """Adjust processor parameters from runtime config."""
 
-    async def on_run_start(self, run: Run) -> None:
-        """Called when a run starts."""
+    async def on_suite_execution_start(self, suite: ExecutedSuite) -> None:
+        """Called when suite execution starts."""
 
-    async def on_no_tests_found(self, run: Run) -> None:
+    async def on_no_tests_found(self, suite: ExecutedSuite) -> None:
         """Called when test collection finds no tests."""
 
     async def on_collection_complete(
         self,
         items: list[LoadedTestDef],
-        run: Run,
+        suite: ExecutedSuite,
     ) -> None:
         """Called after test collection completes."""
 
-    async def on_test_start(self, test: ExecutableTest, run: Run) -> None:
-        """Called before a test starts executing."""
+    async def on_test_execution_start(
+        self,
+        test: ExecutableTest,
+        suite: ExecutedSuite,
+    ) -> None:
+        """Called before test execution starts."""
 
-    async def on_execution_complete(
+    async def on_test_execution_complete(
         self,
         execution: ExecutedTest,
-        run: Run,
+        suite: ExecutedSuite,
     ) -> None:
-        """Called when any test node completes."""
+        """Called when any test execution node completes."""
 
-    async def on_run_complete(self, run: Run) -> None:
-        """Called after all tests complete."""
+    async def on_suite_execution_complete(self, suite: ExecutedSuite) -> None:
+        """Called after suite execution completes."""
 ```
 
 ### Processor Selection
 
 Processor selection follows this public precedence order:
-- `TerminalRunReporter` is attached by the CLI for normal `rue run` output
+- `TerminalSuiteReporter` is attached by the CLI for normal `rue run` output
 - `OtelReporter` is attached when OpenTelemetry is enabled
 - CLI `--processor` flags replace the configured custom processor list
 - `config.processors` adds custom processors when CLI flags are absent
 
-Official Rue entrypoints append the database recorder so run data streams into Turso as executions complete. Programmatic runs attach one or more processors by opening `RunEventsReceiver([...])` around `Runner`.
+Official Rue entrypoints append the database recorder so suite execution data streams into Turso as test executions complete. Programmatic suite executions attach one or more processors by opening `SuiteEventsReceiver([...])` around `ExecutableSuite`.
 
 ### Built-in Processors
 
-In a normal fresh process, Rue's CLI processor set includes `TerminalRunReporter` and `OtelReporter`.
+In a normal fresh process, Rue's CLI processor set includes `TerminalSuiteReporter` and `OtelReporter`.
 
-**TerminalRunReporter**: Outputs to terminal with Rich formatting.
+**TerminalSuiteReporter**: Outputs to terminal with Rich formatting.
 
 ```python
-from rue.cli.rendering.terminal import TerminalRunReporter
+from rue.cli.rendering.terminal import TerminalSuiteReporter
 
-processor = TerminalRunReporter(verbosity=1)
+processor = TerminalSuiteReporter(verbosity=1)
 ```
 
 **OtelReporter**: Persists OpenTelemetry traces under `.rue/traces`.
@@ -377,32 +391,31 @@ from rue.telemetry.otel import OtelReporter
 processor = OtelReporter()
 ```
 
-**DBWriter**: Streams run and execution data into SQLite.
+**TursoSuiteRecorder**: Streams suite execution and test execution data into Turso.
 
 ```python
-from rue.storage import DBWriter
-from rue.storage import DBManager
+from rue.storage import TursoSuiteRecorder, TursoSuiteStore
 
-db = DBManager()
-db.initialize()
-processor = DBWriter()
+store = TursoSuiteStore()
+store.initialize()
+processor = TursoSuiteRecorder()
 ```
 
 ### Creating Custom Processors
 
-Create custom processors by subclassing `RunEventsProcessor`.
-Override `on_test_start` if you need live in-flight state. Finished telemetry arrives on `execution.telemetry_artifacts` inside `on_execution_complete`:
+Create custom processors by subclassing `SuiteEventsProcessor`.
+Override `on_test_execution_start` if you need live in-flight state. Finished telemetry arrives on `execution.telemetry_artifacts` inside `on_test_execution_complete`:
 
 ```python
 import json
 from pathlib import Path
 
 from rue.config import Config
-from rue.events import RunEventsProcessor
+from rue.events import SuiteEventsProcessor
 from rue.telemetry import OtelTraceArtifact
-from rue.testing import Run, LoadedTestDef, ExecutedTest
+from rue.testing import ExecutedSuite, LoadedTestDef, ExecutedTest
 
-class JsonFileProcessor(RunEventsProcessor):
+class JsonFileProcessor(SuiteEventsProcessor):
     """Custom processor that writes results to JSON file."""
 
     def __init__(self, output_path: str):
@@ -413,64 +426,68 @@ class JsonFileProcessor(RunEventsProcessor):
     def configure(self, config: Config) -> None:
         self.verbosity = config.verbosity
 
-    async def on_no_tests_found(self, run: Run) -> None:
-        _ = run
+    async def on_no_tests_found(self, suite: ExecutedSuite) -> None:
+        _ = suite
         print("No tests found")
 
     async def on_collection_complete(
         self,
         items: list[LoadedTestDef],
-        run: Run,
+        suite: ExecutedSuite,
     ) -> None:
-        _ = run
+        _ = suite
         print(f"Collected {len(items)} tests")
 
-    async def on_test_start(self, test, run: Run) -> None:
-        _ = test, run
+    async def on_test_execution_start(
+        self,
+        test,
+        suite: ExecutedSuite,
+    ) -> None:
+        _ = test, suite
         # Optional lifecycle hook for live/in-flight reporting
         pass
 
-    async def on_execution_complete(
+    async def on_test_execution_complete(
         self,
         execution: ExecutedTest,
-        run: Run,
+        suite: ExecutedSuite,
     ) -> None:
-        _ = run
+        _ = suite
         # Record each test result
         self.results.append({
             "name": execution.definition.spec.full_name,
-            "status": execution.status.value,
+            "status": execution.result.status.value,
             "duration_ms": execution.result.duration_ms,
-            "passed": execution.status.value == "passed"
+            "passed": execution.result.status.value == "passed"
         })
         for artifact in execution.telemetry_artifacts:
             if isinstance(artifact, OtelTraceArtifact):
                 print(
-                    "Collected OpenTelemetry trace for execution "
-                    f"{execution.execution_id}: {artifact.execution_id}"
+                    "Collected OpenTelemetry trace for test execution "
+                    f"{execution.test_execution_id}: {artifact.test_execution_id}"
                 )
 
-    async def on_run_complete(self, run: Run) -> None:
+    async def on_suite_execution_complete(self, suite: ExecutedSuite) -> None:
         # Write all results to JSON file
         output = {
-            "run_id": str(run.run_id),
-            "total": run.result.total,
-            "passed": run.result.passed,
-            "failed": run.result.failed,
-            "duration_ms": run.result.total_duration_ms,
+            "suite_execution_id": str(suite.suite_execution_id),
+            "total": suite.result.total,
+            "passed": suite.result.passed,
+            "failed": suite.result.failed,
+            "duration_ms": suite.result.total_duration_ms,
             "tests": self.results
         }
 
         self.output_path.write_text(json.dumps(output, indent=2))
         print(f"Results written to {self.output_path}")
 
-    async def on_run_stopped_early(
+    async def on_suite_stopped_early(
         self,
         failure_count: int,
-        run: Run,
+        suite: ExecutedSuite,
     ) -> None:
-        _ = run
-        print(f"Run stopped after {failure_count} failures")
+        _ = suite
+        print(f"Suite stopped after {failure_count} failures")
 ```
 
 ### Using Multiple Processors
@@ -480,36 +497,37 @@ Use multiple processors simultaneously with the programmatic API:
 ```python
 import asyncio
 from rue.config import Config
-from rue.context.runtime import RunContext
-from rue.events import RunEventsReceiver
-from rue.testing import Runner
-from rue.cli.rendering.terminal import TerminalRunReporter
+from rue.context.runtime import SuiteContext
+from rue.events import SuiteEventsReceiver
+from rue.testing import ExecutableSuite
+from rue.cli.rendering.terminal import TerminalSuiteReporter
 from rue.telemetry.otel import OtelReporter
-from rue.storage import DBWriter
-from rue.storage import DBManager
+from rue.resources import DependencyResolver, registry
+from rue.storage import TursoSuiteRecorder, TursoSuiteStore
 from my_processors import JsonFileProcessor, SlackProcessor
 
 async def main():
     config = Config()
-    db = DBManager(config.db_path)
-    db.initialize()
-    db_writer = DBWriter()
-    console = TerminalRunReporter(verbosity=1)
+    store = TursoSuiteStore(config.database_path)
+    store.initialize()
+    db_writer = TursoSuiteRecorder()
+    console = TerminalSuiteReporter(verbosity=1)
     otel = OtelReporter()
     json_processor = JsonFileProcessor("results.json")
     slack = SlackProcessor(webhook_url="https://...")
 
-    with RunContext(config=config), RunEventsReceiver([
+    with SuiteContext(config=config) as context, SuiteEventsReceiver([
         console,
         otel,
         db_writer,
         json_processor,
         slack,
     ]):
-        result = await Runner().run(
+        result = await ExecutableSuite(
             items=items,
-            resolver=resolver,
-        )
+            suite_execution_id=context.suite_execution_id,
+            resolver=DependencyResolver(registry),
+        ).execute()
 
     print(f"Results: {result.result.passed}/{result.result.total} passed")
 
@@ -545,34 +563,34 @@ concurrency = 4
 
 ## Database Persistence
 
-Rue automatically persists test run data to a SQLite database for historical tracking and analysis.
+Rue automatically persists suite execution data to a Turso database for historical tracking and analysis.
 
 ### Database Location
 
 By default, Rue stores the database at the project root:
 
 ```
-<project-root>/.rue/rue.db
+<project-root>/.rue/rue.turso.db
 ```
 
 The database location is determined by walking up from the current directory to find the first directory containing `pyproject.toml`.
 
 ### Custom Database Path
 
-Database persistence is required for normal CLI runs. Configure a custom database location in `pyproject.toml`:
+Database persistence is required for normal `rue run` suite executions. Configure a custom database location in `pyproject.toml`:
 
 ```toml
 [tool.rue]
-db-path = "/path/to/custom/rue.db"
+database-path = "/path/to/custom/rue.turso.db"
 ```
 
 ### Database Management Commands
 
-Rue provides CLI commands to manage the database:
+Rue provides CLI commands to inspect, initialize, and reset the database:
 
 #### Check Database Status
 
-View current schema version and pending migrations:
+View current schema state:
 
 ```bash
 uv run rue db status
@@ -580,35 +598,21 @@ uv run rue db status
 
 **Output:**
 ```
-Database: /Users/you/project/.rue/rue.db
-Current version: <current schema version>
+Database: /Users/you/project/.rue/rue.turso.db
+Exists: True
+Schema version: <current schema version>
 Target version: <target schema version>
-Status: Up to date
+Stored suite executions: <count>
+Status: Ready
 ```
 
-#### Run Migrations
+#### Initialize Database
 
-Apply pending schema migrations:
+Create the database schema:
 
 ```bash
-uv run rue db migrate
+uv run rue db init
 ```
-
-**Dry run** (preview without applying):
-
-```bash
-uv run rue db migrate --dry-run
-```
-
-#### Backup Database
-
-Create a timestamped backup:
-
-```bash
-uv run rue db backup
-```
-
-Creates: `.rue/rue.db.backup.YYYYMMDD_HHMMSS`
 
 #### Reset Database
 
@@ -623,24 +627,25 @@ Without `--yes`, Rue prints a warning and exits without resetting the database.
 ### What's Stored
 
 The database stores:
-- Test run metadata (timestamp, environment, git info)
+- Suite execution metadata (timestamp, environment, git info)
 - Individual test executions and results
 - Assertion results and predicate outcomes
 - Metric results and statistical data
 - Error tracebacks for failed tests
 
-OpenTelemetry trace payloads and trace IDs are stored separately under `.rue/traces` when an `OtelReporter` is attached. SQLite does not persist them.
+OpenTelemetry trace payloads and trace IDs are stored separately under `.rue/traces` when an `OtelReporter` is attached. Turso storage does not persist them.
 
 ### Database Schema
 
-The schema is versioned and managed through migrations. Current tables include:
-- `runs` - Test run sessions
-- `test_executions` - Individual test results
+The schema is versioned. Current tables include:
+- `suite_executions` - Suite execution records
+- `test_executions` - Individual test execution records
+- `test_execution_tags` - Tags attached to individual test execution records
 - `metrics` - Aggregated metrics
 - `assertions` - Assertion outcomes
 - `predicates` - Predicate results linked to assertions
 
-Schema version is stored in SQLite `PRAGMA user_version` (shown by `uv run rue db status` as "Current version").
+Schema version is stored in the `rue_schema` table (shown by `uv run rue db status` as "Schema version").
 
 <CardGroup cols={2}>
   <Card title="Writing Tests" icon="code" href="/usage/writing-tests">

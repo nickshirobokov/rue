@@ -90,7 +90,7 @@ class DependencyResolver:
         with self.patches:
             if graph is None:
                 graph = self.registry.get_graph(
-                    CURRENT_TEST.get().execution_id
+                    CURRENT_TEST.get().test_execution_id
                 )
             definition = self.registry.get_definition(spec)
             direct_dependencies = graph.dependencies[spec]

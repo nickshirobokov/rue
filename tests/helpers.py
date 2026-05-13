@@ -7,28 +7,28 @@ from typing import Any
 from uuid import UUID
 
 from rue.config import Config
-from rue.context.runtime import CURRENT_RUN_CONTEXT, RunContext
+from rue.context.runtime import CURRENT_SUITE_CONTEXT, SuiteContext
 from rue.context.scopes import CURRENT_SCOPE_CONTEXT, ScopeContext
-from rue.events import RunEventsProcessor, RunEventsReceiver
+from rue.events import SuiteEventsProcessor, SuiteEventsReceiver
 from rue.telemetry import OtelTraceArtifact
+from rue.testing.compilation.modifiers import BackendModifier, Modifier
 from rue.testing.discovery import TestLoader, TestSpecCollector
 from rue.testing.execution.backend import ExecutionBackend
-from rue.testing.models import BackendModifier, LoadedTestDef
-from rue.testing.models.modifiers import Modifier
-from rue.testing.models.spec import Locator, SetupFileRef, TestSpec
+from rue.testing.execution.test.models import LoadedTestDef
+from rue.testing.models import Locator, SetupFileRef, TestSpec
 
 
 _COLLECTION_INDEX = count()
 
 
-class TraceCollectorProcessor(RunEventsProcessor):
-    """Run events processor that keeps collected OpenTelemetry artifacts."""
+class TraceCollectorProcessor(SuiteEventsProcessor):
+    """Suite events processor that keeps collected OpenTelemetry artifacts."""
 
     def __init__(self) -> None:
         self.artifacts: list[OtelTraceArtifact] = []
 
-    async def on_execution_complete(self, execution, run) -> None:
-        _ = run
+    async def on_test_execution_complete(self, execution, suite) -> None:
+        _ = suite
         self.artifacts.extend(
             artifact
             for artifact in execution.telemetry_artifacts
@@ -93,30 +93,32 @@ def make_definition(
 
 
 def materialize_tests(path: str | Path) -> list[LoadedTestDef]:
-    collection = TestSpecCollector((), (), None).build_spec_collection((path,))
-    return TestLoader(collection.suite_root).load_from_collection(collection)
+    suitespec = TestSpecCollector((), (), None).collect_test_specs((path,))
+    return TestLoader(suitespec.suite_root).load_tests(suitespec)
 
 
-def make_run_context(
+def make_suite_context(
     config: Config | None = None,
     *,
-    run_id: UUID | None = None,
-    processors: tuple[RunEventsProcessor, ...] | None = None,
+    suite_execution_id: UUID | None = None,
+    processors: tuple[SuiteEventsProcessor, ...] | None = None,
     bind_events: bool = True,
     **config_kwargs: Any,
-) -> RunContext:
+) -> SuiteContext:
     if config is None:
         config = Config.model_construct(**config_kwargs)
     context = (
-        RunContext(config=config)
-        if run_id is None
-        else RunContext(config=config, run_id=run_id)
+        SuiteContext(config=config)
+        if suite_execution_id is None
+        else SuiteContext(config=config, suite_execution_id=suite_execution_id)
     )
-    CURRENT_RUN_CONTEXT.set(context)
-    CURRENT_SCOPE_CONTEXT.set(ScopeContext.for_run(context.run_id))
+    CURRENT_SUITE_CONTEXT.set(context)
+    CURRENT_SCOPE_CONTEXT.set(
+        ScopeContext.for_suite(context.suite_execution_id)
+    )
     if bind_events:
         event_processors = (
-            (RunEventsProcessor(),) if processors is None else processors
+            (SuiteEventsProcessor(),) if processors is None else processors
         )
-        RunEventsReceiver(list(event_processors)).__enter__()
+        SuiteEventsReceiver(list(event_processors)).__enter__()
     return context

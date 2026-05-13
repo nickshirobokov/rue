@@ -38,10 +38,10 @@ def status(
         verbose=verbose,
         database_path=database_path,
     )
-    collection = collector.build_spec_collection(resolved_paths)
+    suitespec = collector.collect_test_specs(resolved_paths)
     builder = TestsStatusBuilder(status_config)
     try:
-        report = builder.build(collection)
+        report = builder.build(suitespec)
     except TestDefinitionErrors as errors:
         print_definition_errors(errors)
         raise SystemExit(2) from errors

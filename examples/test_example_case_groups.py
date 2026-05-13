@@ -7,7 +7,7 @@ from typing import Callable
 from pydantic import BaseModel
 
 import rue
-from rue import Case, CaseGroup, SUT
+from rue import SUT, Case, CaseGroup
 
 
 # =============================== Prepare grouped cases ===============================

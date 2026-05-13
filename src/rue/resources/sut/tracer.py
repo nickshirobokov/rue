@@ -27,8 +27,8 @@ class SUTTracer:
             f"sut_{id(self)}_otel_session",
             default=None,
         )
-        self._execution_id: ContextVar[UUID | None] = ContextVar(
-            f"sut_{id(self)}_otel_execution_id",
+        self._test_execution_id: ContextVar[UUID | None] = ContextVar(
+            f"sut_{id(self)}_otel_test_execution_id",
             default=None,
         )
         self._span_ids: ContextVar[tuple[int, ...]] = ContextVar(
@@ -42,10 +42,10 @@ class SUTTracer:
     def deactivate(self) -> None:
         self._session.set(None)
 
-    def reset(self, execution_id: UUID | None) -> None:
-        if self._execution_id.get() == execution_id:
+    def reset(self, test_execution_id: UUID | None) -> None:
+        if self._test_execution_id.get() == test_execution_id:
             return
-        self._execution_id.set(execution_id)
+        self._test_execution_id.set(test_execution_id)
         self._span_ids.set(())
         self._session.set(None)
 
@@ -57,8 +57,8 @@ class SUTTracer:
         ) as root_span:
             session = otel_runtime.start_otel_trace(
                 root_span,
-                run_id=uuid4(),
-                execution_id=uuid4(),
+                suite_execution_id=uuid4(),
+                test_execution_id=uuid4(),
             )
             self.activate(session)
             try:

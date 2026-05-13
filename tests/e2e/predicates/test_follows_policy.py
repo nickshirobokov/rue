@@ -467,7 +467,11 @@ ALL_CASES: list[Case[Inputs, Refs]] = [
 async def test_follows_policy_strict_false_expected_true(
     case: Case[Inputs, Refs],
 ):
-    assert await follows_policy(**case.inputs.model_dump())
+    assert await follows_policy(
+        case.inputs.actual,
+        case.inputs.reference,
+        strict=case.inputs.strict,
+    )
 
 
 @rue.test.iterate.cases(
@@ -481,7 +485,11 @@ async def test_follows_policy_strict_false_expected_true(
 async def test_follows_policy_strict_false_expected_false(
     case: Case[Inputs, Refs],
 ):
-    assert not await follows_policy(**case.inputs.model_dump())
+    assert not await follows_policy(
+        case.inputs.actual,
+        case.inputs.reference,
+        strict=case.inputs.strict,
+    )
 
 
 @rue.test.iterate.cases(
@@ -495,7 +503,11 @@ async def test_follows_policy_strict_false_expected_false(
 async def test_follows_policy_strict_true_expected_true(
     case: Case[Inputs, Refs],
 ):
-    assert await follows_policy(**case.inputs.model_dump())
+    assert await follows_policy(
+        case.inputs.actual,
+        case.inputs.reference,
+        strict=case.inputs.strict,
+    )
 
 
 @rue.test.iterate.cases(
@@ -509,4 +521,8 @@ async def test_follows_policy_strict_true_expected_true(
 async def test_follows_policy_strict_true_expected_false(
     case: Case[Inputs, Refs],
 ):
-    assert not await follows_policy(**case.inputs.model_dump())
+    assert not await follows_policy(
+        case.inputs.actual,
+        case.inputs.reference,
+        strict=case.inputs.strict,
+    )

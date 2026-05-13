@@ -9,7 +9,7 @@ from typer import Option, Typer
 
 from rue.cli.options import DatabasePathOpt
 from rue.config import Config, load_config
-from rue.storage import SCHEMA_VERSION, TursoRunStore
+from rue.storage import SCHEMA_VERSION, TursoSuiteStore
 
 
 db_app = Typer(help="Database management commands")
@@ -21,7 +21,7 @@ class DatabaseCommands:
     def __init__(self, config: Config) -> None:
         self.console = Console()
         self.database_path = config.database_path
-        self.store = TursoRunStore(self.database_path)
+        self.store = TursoSuiteStore(self.database_path)
 
     def status(self) -> int:
         """Print database status without creating it."""
@@ -30,7 +30,9 @@ class DatabaseCommands:
         self.console.print(f"Exists: {self.store.exists()}")
         self.console.print(f"Schema version: {current}")
         self.console.print(f"Target version: {SCHEMA_VERSION}")
-        self.console.print(f"Stored runs: {self.store.run_count()}")
+        self.console.print(
+            f"Stored suite executions: {self.store.suite_execution_count()}"
+        )
 
         if current == SCHEMA_VERSION:
             self.console.print("[green]Status: Ready[/green]")
@@ -56,7 +58,7 @@ class DatabaseCommands:
         """Delete and recreate the database after confirmation."""
         if not confirmed:
             self.console.print(
-                "[bold red]WARNING: This will DELETE all test run "
+                "[bold red]WARNING: This will DELETE all suite execution "
                 "history.[/bold red]"
             )
             self.console.print()

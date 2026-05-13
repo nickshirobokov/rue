@@ -17,7 +17,7 @@ from rue.resources import MonkeyPatch, Scope
 if TYPE_CHECKING:
     from rue.resources.metrics.models import MetricResult
     from rue.resources.resolver import DependencyResolver
-    from rue.testing.models import ExecutedRun
+    from rue.testing.execution.suite.models import ExecutedSuite
 
 
 _RECEIVER_PARAMETER_NAMES = {"self", "cls"}
@@ -33,7 +33,7 @@ class ExperimentSpec(Spec):
     dependencies: tuple[str, ...] = field(default=(), compare=False)
 
     async def apply(self, kwargs: dict[str, Any]) -> None:
-        """Apply this experiment hook to the current run process."""
+        """Apply this experiment hook to the current suite process."""
         result = self.fn(**kwargs)
         if inspect.isawaitable(result):
             await result
@@ -112,7 +112,7 @@ class ExperimentVariant:
                     )
                 )
                 if "monkeypatch" in definition.dependencies:
-                    kwargs["monkeypatch"] = MonkeyPatch.for_scope(Scope.RUN)
+                    kwargs["monkeypatch"] = MonkeyPatch.for_scope(Scope.SUITE)
                 await definition.apply(kwargs)
 
     @property
@@ -141,10 +141,10 @@ class ExperimentVariant:
 
 @dataclass(frozen=True, slots=True)
 class ExperimentVariantResult:
-    """Serializable summary of one variant run."""
+    """Serializable summary of one variant suite."""
 
     variant: ExperimentVariant
-    run_id: UUID
+    suite_execution_id: UUID
     passed: int
     failed: int
     errors: int
@@ -162,41 +162,41 @@ class ExperimentVariantResult:
         cls,
         *,
         variant: ExperimentVariant,
-        run: ExecutedRun,
+        suite: ExecutedSuite,
     ) -> ExperimentVariantResult:
-        """Build a serializable result summary from a Rue run."""
+        """Build a serializable result summary from a Rue suite."""
         failures: list[tuple[str, str, str | None, str | None]] = []
-        stack = list(run.result.executions)
+        stack = list(suite.result.test_executions)
         while stack:
             execution = stack.pop()
-            if execution.status.is_failure:
+            if execution.result.status.is_failure:
                 failures.append(
                     (
                         execution.label,
-                        execution.status.value,
-                        str(execution.execution_id),
+                        execution.result.status.value,
+                        str(execution.test_execution_id),
                         None
                         if execution.result.error is None
                         else str(execution.result.error),
                     )
                 )
-            stack.extend(execution.sub_executions)
+            stack.extend(execution.sub_test_executions)
 
         return cls(
             variant=variant,
-            run_id=run.run_id,
-            passed=run.result.passed,
-            failed=run.result.failed,
-            errors=run.result.errors,
-            skipped=run.result.skipped,
-            xfailed=run.result.xfailed,
-            xpassed=run.result.xpassed,
-            total=run.result.total,
-            total_duration_ms=run.result.total_duration_ms,
-            stopped_early=run.result.stopped_early,
+            suite_execution_id=suite.suite_execution_id,
+            passed=suite.result.passed,
+            failed=suite.result.failed,
+            errors=suite.result.errors,
+            skipped=suite.result.skipped,
+            xfailed=suite.result.xfailed,
+            xpassed=suite.result.xpassed,
+            total=suite.result.total,
+            total_duration_ms=suite.result.total_duration_ms,
+            stopped_early=suite.result.stopped_early,
             metric_values=tuple(
                 cls._metric_value(metric)
-                for metric in run.result.metric_results
+                for metric in suite.result.metric_results
             ),
             failures=tuple(failures),
         )

@@ -15,12 +15,12 @@ from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
 
 
 if TYPE_CHECKING:
-    from rue.testing.models import LoadedTestDef, TestResult
+    from rue.testing.execution.test.models import LoadedTestDef, TestResult
 
 
 @dataclass(slots=True)
 class OtelTelemetryBackend(TelemetryBackend):
-    """Collects one finished OpenTelemetry trace artifact per execution."""
+    """Collects one finished OpenTelemetry trace artifact per test execution."""
 
     _root_span: Span | None = None
     _session: OtelTraceSession | None = None
@@ -35,8 +35,8 @@ class OtelTelemetryBackend(TelemetryBackend):
         self,
         definition: LoadedTestDef,
         *,
-        run_id: UUID,
-        execution_id: UUID,
+        suite_execution_id: UUID,
+        test_execution_id: UUID,
     ) -> None:
         otel_runtime.configure()
         scope = otel_runtime.start_as_current_span(
@@ -46,7 +46,10 @@ class OtelTelemetryBackend(TelemetryBackend):
         self._root_span_scope = scope
         self._root_span = span
         span.set_attribute("test.name", definition.spec.locator.function_name)
-        span.set_attribute("test.module", str(definition.spec.locator.module_path))
+        span.set_attribute(
+            "test.module",
+            str(definition.spec.locator.module_path),
+        )
         if definition.spec.tags:
             span.set_attribute("test.tags", list(definition.spec.tags))
         if definition.spec.suffix:
@@ -55,8 +58,8 @@ class OtelTelemetryBackend(TelemetryBackend):
             span.set_attribute("test.case_id", str(definition.spec.case_id))
         self._session = otel_runtime.start_otel_trace(
             span,
-            run_id=run_id,
-            execution_id=execution_id,
+            suite_execution_id=suite_execution_id,
+            test_execution_id=test_execution_id,
         )
 
     def record_result(self, result: TestResult) -> None:
@@ -84,8 +87,8 @@ class OtelTelemetryBackend(TelemetryBackend):
         payload = self._completed_session.serialize()
         return (
             OtelTraceArtifact(
-                run_id=self._completed_session.run_id,
-                execution_id=self._completed_session.execution_id,
+                suite_execution_id=self._completed_session.suite_execution_id,
+                test_execution_id=self._completed_session.test_execution_id,
                 trace_id=format(
                     self._completed_session.root_span.get_span_context().trace_id,
                     "032x",

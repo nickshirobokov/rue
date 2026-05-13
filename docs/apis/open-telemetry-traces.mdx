@@ -2,7 +2,7 @@
 title: "Rue OpenTelemetry Traces"
 ---
 
-Rue OpenTelemetry capture is **Runner-managed**, while persistence is **processor-managed**. Traces exist only while a test function is executing inside an active OpenTelemetry-enabled test execution created by `Runner` or `uv run rue run`.
+Rue OpenTelemetry capture is **ExecutableSuite-managed**, while persistence is **processor-managed**. Traces exist only while a test function is executing inside an active OpenTelemetry-enabled test execution created by `ExecutableSuite` or `uv run rue run`.
 
 ## OpenTelemetry Defaults
 
@@ -18,7 +18,7 @@ uv run rue run --no-otel
 # Force-enable OpenTelemetry if config or environment disabled it
 uv run rue run --otel
 
-# Extra processors are for custom RunEventsProcessor instances
+# Extra processors are for custom SuiteEventsProcessor instances
 uv run rue run --processor CustomProcessor
 ```
 
@@ -37,26 +37,31 @@ Environment variable:
 
 CLI flags override config and environment.
 
-### Runner
+### ExecutableSuite
 
 ```python
 from rue.config import Config
-from rue.context.runtime import RunContext
-from rue.events import RunEventsReceiver
-from rue.cli.rendering.terminal import TerminalRunReporter
+from rue.context.runtime import SuiteContext
+from rue.events import SuiteEventsReceiver
+from rue.cli.rendering.terminal import TerminalSuiteReporter
+from rue.resources import DependencyResolver, registry
 from rue.telemetry.otel import OtelReporter
-from rue.testing import Runner
+from rue.testing import ExecutableSuite
 
-with RunContext(config=Config()), RunEventsReceiver([
-    TerminalRunReporter(),
+with SuiteContext(config=Config()) as context, SuiteEventsReceiver([
+    TerminalSuiteReporter(),
     OtelReporter(),
 ]):
-    runner = Runner()
+    suite = await ExecutableSuite(
+        items=items,
+        suite_execution_id=context.suite_execution_id,
+        resolver=DependencyResolver(registry),
+    ).execute()
 ```
 
 Use `Config(otel=False)` to disable capture programmatically.
 
-The CLI always attaches `TerminalRunReporter`; when `otel` is enabled, it also attaches `OtelReporter`. `config.processors` and `--processor` add custom `RunEventsProcessor` instances by registry name.
+The CLI always attaches `TerminalSuiteReporter`; when `otel` is enabled, it also attaches `OtelReporter`. `config.processors` and `--processor` add custom `SuiteEventsProcessor` instances by registry name.
 
 ## Public API
 
@@ -85,26 +90,26 @@ Available read-only span accessors on `SUT`:
 - `all_spans`
 - `llm_spans`
 
-`root_spans`, `all_spans`, and `llm_spans` return `[]` until that `SUT` has been called in the current execution.
+`root_spans`, `all_spans`, and `llm_spans` return `[]` until that `SUT` has been called in the current test execution.
 
 ## Behavior
 
 - Rue creates one root span per OpenTelemetry-enabled test execution: `test.<full_name>`.
-- Aggregator executions (`iterate`, `iterate.params`, `iterate.cases`, `iterate.groups`) do not get their own OpenTelemetry roots; each child execution gets its own trace.
+- Aggregator test executions (`iterate`, `iterate.params`, `iterate.cases`, `iterate.groups`) do not get their own OpenTelemetry roots; each child test execution gets its own trace.
 - `@rue.resource.sut` and `@predicate` write spans only when an active OpenTelemetry session exists.
-- Full traces are not exposed to test code during execution; test code can inspect only the subtree of each `SUT`.
+- Full traces are not exposed to test code during test execution; test code can inspect only the subtree of each `SUT`.
 - OpenAI and Anthropic client instrumentation is initialized by the OpenTelemetry runtime and captured only when calls belong to an active OpenTelemetry test session.
 
 ## Storage
 
 - Capture is enabled by default; persistence still happens only when an `OtelReporter` processor is attached
-- In the usual fresh-process setup, `uv run rue run` writes `.rue/traces/<run_id>/<execution_id>.json` because the CLI attaches `OtelReporter` when OpenTelemetry is enabled
-- `OtelReporter` stores compact JSON payloads under `.rue/traces/<run_id>/<execution_id>.json`
-- `OtelReporter` keeps only the 5 most recent run directories under `.rue/traces`
-- Custom OTEL persistence or forwarding belongs in custom processors via `RunEventsProcessor.on_execution_complete(execution, run)` and `execution.telemetry_artifacts`
-- File format: one compact JSON trace payload per execution with `run_id`, `execution_id`, and a nested `trace` tree rooted at the test span
+- In the usual fresh-process setup, `uv run rue run` writes `.rue/traces/<suite_execution_id>/<test_execution_id>.json` because the CLI attaches `OtelReporter` when OpenTelemetry is enabled
+- `OtelReporter` stores compact JSON payloads under `.rue/traces/<suite_execution_id>/<test_execution_id>.json`
+- `OtelReporter` keeps only the 5 most recent suite directories under `.rue/traces`
+- Custom OTEL persistence or forwarding belongs in custom processors via `SuiteEventsProcessor.on_test_execution_complete(execution, suite)` and `execution.telemetry_artifacts`
+- File format: one compact JSON trace payload per test execution with `suite_execution_id`, `test_execution_id`, and a nested `trace` tree rooted at the test span
 - `OtelTraceArtifact.spans` stays flat with the canonical OTEL span payload for artifact consumers
-- SQLite does not persist OpenTelemetry trace payloads or trace IDs
+- Turso storage does not persist OpenTelemetry trace payloads or trace IDs
 
 When OpenTelemetry is active, Rue records these content-bearing SUT and predicate attributes:
 - `sut.input.args`

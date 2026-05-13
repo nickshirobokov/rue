@@ -16,6 +16,7 @@ from rue.analysis.dep_collector import (
     _resolve_from_import,
     collect_dependencies,
 )
+from rue.testing.discovery import TestLoader, TestSpecCollector
 
 
 def test_resolve_from_import_handles_absolute_and_relative_paths():
@@ -264,6 +265,46 @@ def test_collect_dependencies_collects_real_repo_local_dependencies(
     deps = collect_dependencies(entrypoint, mode="module")
 
     assert [dep.module_name for dep in deps] == ["pkg", "pkg.dep", "pkg.module"]
+
+
+def test_collect_dependencies_collects_rue_loaded_test_dependencies(
+    tmp_path: Path,
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    (repo_root / ".git").mkdir()
+    (repo_root / "pyproject.toml").write_text("", encoding="utf-8")
+
+    package_dir = repo_root / "dep_collector_subject"
+    package_dir.mkdir()
+    (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    (package_dir / "dep.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    test_file = repo_root / "tests" / "test_dep_collection.py"
+    test_file.parent.mkdir()
+    test_file.write_text(
+        (
+            "from rue import test\n"
+            "import dep_collector_subject.dep\n\n"
+            "@test\n"
+            "def test_entrypoint():\n"
+            "    assert dep_collector_subject.dep.VALUE == 1\n"
+        ),
+        encoding="utf-8",
+    )
+
+    suitespec = TestSpecCollector((), (), None).collect_test_specs(
+        (test_file,)
+    )
+    [loaded] = TestLoader(suitespec.suite_root).load_tests(suitespec)
+
+    deps = collect_dependencies(loaded.fn, mode="module")
+    paths_by_name = {dep.module_name: dep.file_path for dep in deps}
+
+    assert paths_by_name["dep_collector_subject.dep"] == (
+        package_dir / "dep.py"
+    ).resolve()
+    assert Path(paths_by_name[loaded.fn.__module__]) == test_file.resolve()
 
 
 def test_collect_dependencies_rejects_invalid_mode_value():
