@@ -172,7 +172,9 @@ class EdgeCaseFactory[CaseT: Case[Any, Any]](CaseFactory):
                 )
                 if review_result.output.valid:
                     proposed_case = self.case_model.model_validate(
-                        tool_call.args
+                        json.loads(tool_call.args) 
+                        if isinstance(tool_call.args, str) 
+                        else tool_call.args
                     )
                     self.last_tool_call_id = tool_call.tool_call_id
                     self.generated_cases_count += 1
