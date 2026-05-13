@@ -45,6 +45,31 @@ def materialize(path):
     return TestLoader(suitespec.suite_root).load_tests(suitespec)
 
 
+def test_load_tests_preserves_synthetic_module_file_metadata(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "test_file_metadata.py": """
+                from rue import test
+
+                @test
+                def test_metadata():
+                    assert True
+            """
+        },
+    )
+
+    [loaded] = materialize(tmp_path / "test_file_metadata.py")
+    module = sys.modules[loaded.fn.__module__]
+
+    assert loaded.fn.__module__.startswith("rue_discovery.suite_")
+    assert Path(module.__file__) == (
+        tmp_path / "test_file_metadata.py"
+    ).resolve()
+    assert module.__spec__ is not None
+    assert module.__spec__.has_location is True
+
+
 async def execute_items(items):
     context = make_suite_context()
     return await ExecutableSuite(

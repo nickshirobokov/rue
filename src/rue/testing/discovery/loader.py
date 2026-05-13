@@ -198,10 +198,10 @@ class RueDiscoveryFinder(importlib.abc.MetaPathFinder):
         module_path = session.module_paths.get(fullname)
         if module_path is None:
             return None
-        return importlib.util.spec_from_loader(
+        return importlib.util.spec_from_file_location(
             fullname,
-            RueModuleLoader(fullname=fullname, path=module_path),
-            origin=str(module_path),
+            module_path,
+            loader=RueModuleLoader(fullname=fullname, path=module_path),
         )
 
     def _match_session(self, fullname: str) -> RueImportSession | None:
