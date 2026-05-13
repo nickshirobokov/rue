@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from pydantic_ai import RunContext
 from pydantic_ai._output import OutputSchema
 from pydantic_ai.direct import model_request
-from pydantic_ai.messages import ModelRequest, SystemPromptPart, UserPromptPart
+from pydantic_ai.messages import ModelRequest, SystemPromptPart, UserPromptPart, TextPart
 from pydantic_ai.models import (
     KnownModelName,
     ModelRequestParameters,
@@ -73,16 +73,16 @@ class LLMPredicate:
     ) -> PredicateResult:
         """Get the bool value of the predicate from the LLM."""
         model, model_settings = self.get_model_config()
-
-        if with_explanation:
-            output_processor = (
-                self.bool_with_explanation_output_schema.text_processor
-            )
-            request_parameters = self.bool_with_explanation_request_parameters
-        else:
-            output_processor = self.bool_output_schema.text_processor
-            request_parameters = self.bool_request_parameters
-
+        output_processor = (
+            self.bool_with_explanation_output_schema.text_processor
+            if with_explanation
+            else self.bool_output_schema.text_processor
+        )
+        request_parameters = (
+            self.bool_with_explanation_request_parameters
+            if with_explanation
+            else self.bool_request_parameters
+        )
         task_prompt = self.task_template.format(
             actual=actual, reference=reference
         )
@@ -93,7 +93,6 @@ class LLMPredicate:
                 UserPromptPart(content=task_prompt),
             ],
         )
-
         model_response = await model_request(
             model=model,
             messages=[messages],
@@ -101,15 +100,24 @@ class LLMPredicate:
             model_settings=model_settings,
         )
         assert output_processor is not None
-        parsed_output = await output_processor.process(  # type: ignore[arg-type]
-            model_response.parts[-1].content,  # type: ignore[attr-defined]
-            run_context=RunContext(
-                deps=None,
-                model=infer_model(model),
-                usage=RunUsage(),
-            ),
+        
+        run_context = RunContext(
+            deps=None,
+            model=infer_model(model),
+            usage=RunUsage(),
         )
-        result = PredicateResult(
+        semantic_output, output_state = output_processor.hook_validate(
+            model_response.text,
+            run_context=run_context,
+            allow_partial=False,
+        )
+        parsed_output = await output_processor.hook_execute(
+            semantic_output,
+            output_state,
+            run_context=run_context,
+            wrap_validation_errors=True,
+        )
+        return PredicateResult(
             actual=actual,
             reference=reference,
             name=self.predicate_name,
@@ -122,7 +130,6 @@ class LLMPredicate:
             if isinstance(parsed_output, bool)
             else parsed_output.explanation,
         )
-        return result
 
     def get_model_config(
         self,

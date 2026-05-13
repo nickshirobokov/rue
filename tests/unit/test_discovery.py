@@ -1,4 +1,5 @@
 import builtins
+import sys
 from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
@@ -463,6 +464,54 @@ async def test_materialize_supports_same_dir_setup_without_pyproject(
     suite = await execute_items(materialize(tmp_path))
 
     assert suite.result.passed == 1
+    assert suite.result.failed == 0
+    assert suite.result.errors == 0
+
+
+@pytest.mark.asyncio
+async def test_materialize_supports_setup_imports_from_suite_root(
+    tmp_path,
+    monkeypatch,
+):
+    write_files(
+        tmp_path,
+        {
+            "pyproject.toml": "[project]\nname = 'tmp'\nversion = '0.0.0'\n",
+            "tests/helpers.py": 'VALUE = "project-helper"\n',
+            "tests/conftest.py": """
+                import rue
+
+                from tests.helpers import VALUE
+
+                @rue.resource
+                def project_value():
+                    return VALUE
+            """,
+            "tests/test_sample.py": """
+                import rue
+
+                @rue.test
+                def test_value(project_value):
+                    assert project_value == "project-helper"
+
+                @rue.test.backend("subprocess")
+                def test_subprocess_value(project_value):
+                    assert project_value == "project-helper"
+            """,
+        },
+    )
+    monkeypatch.delitem(sys.modules, "tests.helpers", raising=False)
+
+    items = materialize(tmp_path / "tests")
+    assert {item.spec.name for item in items} == {
+        "test_value",
+        "test_subprocess_value",
+    }
+    assert all("rue_discovery" in item.fn.__module__ for item in items)
+
+    suite = await execute_items(items)
+
+    assert suite.result.passed == 2
     assert suite.result.failed == 0
     assert suite.result.errors == 0
 

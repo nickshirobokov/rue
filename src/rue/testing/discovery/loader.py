@@ -90,6 +90,11 @@ class RueImportSession:
 
     def __post_init__(self) -> None:
         self.root = self.root.resolve()
+        root_path = str(self.root)
+        while root_path in sys.path:
+            sys.path.remove(root_path)
+        sys.path.insert(0, root_path)
+
         # Deterministic: same root → same package name in every process.
         root_hash = hashlib.blake2s(
             str(self.root).encode(),
