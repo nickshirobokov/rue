@@ -5,7 +5,11 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 
-type SyncState = object
+class SyncState(ABC):
+    """State payload that can apply worker-owned transfer effects."""
+
+    def apply_transfer(self) -> None:
+        """Apply transfer effects that do not need a live parent resource."""
 
 
 class SyncableResource[SyncStateT: SyncState](ABC):

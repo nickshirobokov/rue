@@ -108,11 +108,12 @@ def metric[**P](
                         value: CalculatedValue = (
                             math.nan if final_value is None else final_value
                         )
-                        MetricResult(
+                        result = MetricResult(
                             metadata=metric_instance.metadata,
                             assertion_results=assertions_results,
                             value=value,
                         )
+                        metric_instance.result = result
                         break
 
         return registry.register_resource(
@@ -150,11 +151,12 @@ def metric[**P](
                         value: CalculatedValue = (
                             math.nan if final_value is None else final_value
                         )
-                        MetricResult(
+                        result = MetricResult(
                             metadata=metric_instance.metadata,
                             assertion_results=assertions_results,
                             value=value,
                         )
+                        metric_instance.result = result
                         break
 
         return registry.register_resource(

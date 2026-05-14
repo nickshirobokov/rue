@@ -18,6 +18,7 @@ from rue.resources.models import (
     ResourceGraph,
     ResourceSpec,
     ScheduledTeardown,
+    SubprocessResourceError,
     SubprocessResourceSnapshot,
 )
 from rue.resources.registry import ResourceRegistry
@@ -122,7 +123,8 @@ class DependencyResolver:
                 owners = (ScopeContext.current_owner(scope),)
             for owner in owners:
                 teardown_errors.extend(
-                    await self._run_teardowns(
+                    error.error
+                    for error in await self._run_teardowns(
                         self.resources.pop_teardown_records(owner)
                     )
                 )
@@ -164,7 +166,8 @@ class DependencyResolver:
         graph = self.registry.get_graph(test_execution_id)
         states = {}
         for spec in graph.resolution_order:
-            if not self.registry.get_definition(spec).subprocess_sync:
+            definition = self.registry.get_definition(spec)
+            if not definition.subprocess_sync or spec.scope is Scope.TEST:
                 continue
             value = await self.resolve_resource(
                 spec=spec,
@@ -199,22 +202,41 @@ class DependencyResolver:
             assert isinstance(value, SyncableResource)
             value.from_sync_state(state)
 
-    def sync_snapshot(
+    async def sync_snapshot(
         self,
         snapshot: SubprocessResourceSnapshot,
     ) -> SubprocessResourceSnapshot:
         """Collect subprocess-safe updates from this resolver."""
         states = {}
-        for spec in snapshot.states:
-            owner = ScopeContext.current_owner(spec.scope)
-            if not self.resources.has(spec, owner):
-                continue
-            value = self.resources.get(spec, owner)
-            assert isinstance(value, SyncableResource)
-            states[spec] = value.get_sync_state()
+        errors: list[SubprocessResourceError] = []
+
+        for owner in tuple(reversed(tuple(self.resources.scope_owners()))):
+            errors.extend(
+                await self._run_teardowns(
+                    self.resources.pop_teardown_records(owner)
+                )
+            )
+            for spec in snapshot.graph.resolution_order:
+                definition = self.registry.get_definition(spec)
+                if not definition.subprocess_sync:
+                    continue
+                if (
+                    spec.scope is not Scope.TEST
+                    and spec not in snapshot.states
+                ):
+                    continue
+                if not self.resources.has(spec, owner):
+                    continue
+                value = self.resources.get(spec, owner)
+                assert isinstance(value, SyncableResource)
+                states[spec] = value.get_sync_state()
+            self.resources.clear(owner)
+            self.undo_patches(owner=owner)
+        self.undo_patches()
         return SubprocessResourceSnapshot(
             graph=snapshot.graph,
             states=states,
+            errors=tuple(errors),
         )
 
     def update_from_transfer(
@@ -224,13 +246,21 @@ class DependencyResolver:
     ) -> None:
         """Merge worker resource updates into parent-owned resources."""
         for spec, update_state in update.states.items():
-            baseline = snapshot.states[spec]
+            baseline = snapshot.states.get(spec)
+            if baseline is None:
+                update_state.apply_transfer()
+                continue
             owner = ScopeContext.current_owner(spec.scope)
             value = self.resources.get(spec, owner)
             assert isinstance(value, SyncableResource)
             value.merge_sync_states(
                 baseline,
                 update_state,
+            )
+        if update.errors:
+            raise ExceptionGroup(
+                "Subprocess resource errors",
+                [error.error for error in update.errors],
             )
 
     async def _materialize_resource(
@@ -302,8 +332,8 @@ class DependencyResolver:
     async def _run_teardowns(
         self,
         teardowns: Sequence[ScheduledTeardown],
-    ) -> list[Exception]:
-        teardown_errors: list[Exception] = []
+    ) -> list[SubprocessResourceError]:
+        teardown_errors: list[SubprocessResourceError] = []
         process = CURRENT_SUITE_CONTEXT.get().process
 
         for teardown in reversed(teardowns):
@@ -315,6 +345,7 @@ class DependencyResolver:
                     case (
                         LoadedResourceDef(
                             subprocess_sync=True,
+                            spec=ResourceSpec(scope=Scope.MODULE | Scope.SUITE),
                             factory_kind=ResourceFactoryKind.ASYNC_GENERATOR,
                         ),
                         CurrentProcessKind.TEST_SUBPROCESS,
@@ -326,6 +357,7 @@ class DependencyResolver:
                     case (
                         LoadedResourceDef(
                             subprocess_sync=True,
+                            spec=ResourceSpec(scope=Scope.MODULE | Scope.SUITE),
                             factory_kind=ResourceFactoryKind.GENERATOR,
                         ),
                         CurrentProcessKind.TEST_SUBPROCESS,
@@ -362,9 +394,12 @@ class DependencyResolver:
                         )
             except Exception as e:
                 teardown_errors.append(
-                    RuntimeError(
-                        "Generator teardown failed for resource "
-                        f"'{spec.name}': {e}"
+                    SubprocessResourceError(
+                        spec=spec,
+                        error=RuntimeError(
+                            "Generator teardown failed for resource "
+                            f"'{spec.name}': {e}"
+                        ),
                     )
                 )
 
@@ -378,5 +413,10 @@ class DependencyResolver:
                     try:
                         await teardown.definition.on_teardown(value)
                     except Exception as e:
-                        teardown_errors.append(e)
+                        teardown_errors.append(
+                            SubprocessResourceError(
+                                spec=spec,
+                                error=e,
+                            )
+                        )
         return teardown_errors

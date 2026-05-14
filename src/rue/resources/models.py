@@ -103,6 +103,15 @@ class SubprocessResourceSnapshot:
     states: dict[ResourceSpec, SyncState] = field(
         default_factory=dict
     )
+    errors: tuple[SubprocessResourceError, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class SubprocessResourceError:
+    """Resource finalization error returned from a subprocess."""
+
+    spec: ResourceSpec
+    error: Exception
 
 
 @dataclass(slots=True)

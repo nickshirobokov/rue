@@ -167,6 +167,7 @@ class SingleTest(ExecutableTest):
         suite_context = CURRENT_SUITE_CONTEXT.get()
         test_execution_id = CURRENT_TEST.get().test_execution_id
         remote_result: RemoteTestExecutionResult
+        subprocess_result: TestResult
 
         try:
             semaphore = (
@@ -192,16 +193,44 @@ class SingleTest(ExecutableTest):
                     payload,
                 )
                 remote_result = await asyncio.wrap_future(future)
-                resolver.update_from_transfer(
-                    resources,
-                    remote_result.resources,
-                )
+                subprocess_result = remote_result.result
+                try:
+                    resolver.update_from_transfer(
+                        resources,
+                        remote_result.resources,
+                    )
+                except Exception as transfer_error:
+                    result_error = (
+                        transfer_error
+                        if subprocess_result.error is None
+                        else ExceptionGroup(
+                            "Subprocess test and resource errors",
+                            [
+                                subprocess_result.error
+                                if isinstance(
+                                    subprocess_result.error,
+                                    Exception,
+                                )
+                                else RuntimeError(
+                                    str(subprocess_result.error)
+                                ),
+                                transfer_error,
+                            ],
+                        )
+                    )
+                    subprocess_result = TestResult.build(
+                        definition=self.definition,
+                        imperative_outcome=None,
+                        duration_ms=subprocess_result.duration_ms,
+                        error=result_error,
+                        assertion_results=subprocess_result.assertion_results,
+                    )
         finally:
             await resolver.teardown(Scope.TEST)
 
         return ExecutedTest(
             definition=self.definition,
-            result=remote_result.result,
+            result=subprocess_result,
             test_execution_id=test_execution_id,
             telemetry_artifacts=remote_result.telemetry_artifacts,
         )

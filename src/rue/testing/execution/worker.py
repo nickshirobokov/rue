@@ -64,6 +64,7 @@ async def _execute_remote_test(
         test_ctx,
         bind(CURRENT_TEST_TRACER, tracer),
     ):
+        resource_update = None
         try:
             await resolver.update_from_snapshot(
                 payload.resources,
@@ -92,11 +93,12 @@ async def _execute_remote_test(
             )
             tracer.record_result(result)
             telemetry_artifacts = tracer.finish()
-            resource_update = resolver.sync_snapshot(
+            resource_update = await resolver.sync_snapshot(
                 payload.resources,
             )
         finally:
-            await resolver.teardown()
+            if resource_update is None:
+                await resolver.teardown()
     return RemoteTestExecutionResult(
         result=result,
         telemetry_artifacts=telemetry_artifacts,

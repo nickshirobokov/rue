@@ -20,6 +20,7 @@ from pydantic import validate_call
 from rue.resources.metrics.models import (
     CalculatedValue,
     MetricMetadata,
+    MetricResult,
     MetricSyncState,
 )
 from rue.resources.sync import SyncableResource
@@ -97,6 +98,7 @@ class Metric(SyncableResource[MetricSyncState]):
     """
 
     metadata: MetricMetadata = field(default_factory=MetricMetadata)
+    result: MetricResult | None = None
 
     _raw_values: list[int | float | bool] = field(
         default_factory=list, repr=False
@@ -117,6 +119,7 @@ class Metric(SyncableResource[MetricSyncState]):
             return MetricSyncState(
                 raw_values=tuple(self._raw_values),
                 metadata=deepcopy(self.metadata),
+                result=deepcopy(self.result),
             )
 
     def from_sync_state(self, state: MetricSyncState) -> None:

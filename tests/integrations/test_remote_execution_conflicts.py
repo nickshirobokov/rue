@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from textwrap import dedent
 
@@ -340,6 +341,83 @@ async def test_subprocess_sut_trace_state_is_process_local(
         for span in getattr(artifact, "spans", [])
     }
     assert "remote_step" in span_names
+
+
+@pytest.mark.asyncio
+async def test_test_scoped_subprocess_sut_finalization_error_transfers(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_remote_test_sut_finalization.py"
+    module_path.write_text(
+        dedent(
+            """
+            import rue
+            from rue import ExecutionBackend
+            from rue.resources.models import Scope
+
+
+            @rue.resource.sut(scope=Scope.TEST)
+            def checked_pipeline():
+                sut = rue.SUT(lambda: "ok")
+                yield sut
+                raise AssertionError("sut finalized in worker")
+
+
+            @rue.test.backend(ExecutionBackend.SUBPROCESS)
+            def test_remote(checked_pipeline):
+                assert checked_pipeline.instance() == "ok"
+            """
+        )
+    )
+
+    suite = await _suite_module(module_path, concurrency=2)
+
+    assert suite.result.passed == 0
+    [failure] = _failures(suite)
+    assert failure[0] == "test_remote"
+    assert failure[1] == "error"
+    assert "Subprocess resource errors" in (failure[2] or "")
+
+
+@pytest.mark.asyncio
+async def test_suite_scoped_subprocess_sut_finalizes_in_parent(
+    tmp_path: Path,
+):
+    finalized_path = tmp_path / "finalized.txt"
+    module_path = tmp_path / "test_remote_suite_sut_finalization.py"
+    module_path.write_text(
+        dedent(
+            f"""
+            import os
+            from pathlib import Path
+
+            import rue
+            from rue import ExecutionBackend
+            from rue.resources.models import Scope
+
+
+            PARENT_PID = os.getpid()
+            FINALIZED_PATH = Path({str(finalized_path)!r})
+
+
+            @rue.resource.sut(scope=Scope.SUITE)
+            def checked_suite_pipeline():
+                sut = rue.SUT(lambda: "ok")
+                yield sut
+                FINALIZED_PATH.write_text(str(os.getpid()))
+
+
+            @rue.test.backend(ExecutionBackend.SUBPROCESS)
+            def test_remote(checked_suite_pipeline):
+                assert checked_suite_pipeline.instance() == "ok"
+            """
+        )
+    )
+
+    suite = await _suite_module(module_path, concurrency=2)
+
+    assert suite.result.passed == 1, _failures(suite)
+    assert finalized_path.read_text() == str(os.getpid())
 
 
 @pytest.mark.asyncio

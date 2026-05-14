@@ -24,7 +24,7 @@ from rue.resources.sut.output import (
     SUTOutputCapture,
 )
 from rue.resources.sut.tracer import SUTTracer
-from rue.resources.sync import SyncableResource
+from rue.resources.sync import SyncableResource, SyncState
 from rue.telemetry.otel.backend import OtelTelemetryBackend
 from rue.telemetry.otel.runtime import OtelTraceSession
 
@@ -72,7 +72,12 @@ class _CallableProxy:
         setattr(self._target, name, value)
 
 
-class SUT(SyncableResource[None], Generic[InstanceT]):
+@dataclass(frozen=True, slots=True)
+class SUTSyncState(SyncState):
+    """Subprocess-safe SUT state."""
+
+
+class SUT(SyncableResource[SUTSyncState], Generic[InstanceT]):
     def __init__(
         self,
         instance: InstanceT,
@@ -104,15 +109,19 @@ class SUT(SyncableResource[None], Generic[InstanceT]):
             self._tracer.activate(backend.active_session)
         self.instance: InstanceT = self._wrap_instance(instance)
 
-    def get_sync_state(self) -> None:
+    def get_sync_state(self) -> SUTSyncState:
         """Return subprocess-safe SUT state."""
-        return None
+        return SUTSyncState()
 
-    def from_sync_state(self, state: None) -> None:
+    def from_sync_state(self, state: SUTSyncState) -> None:
         """Hydrate subprocess-safe SUT state."""
         _ = state
 
-    def merge_sync_states(self, baseline: None, update: None) -> None:
+    def merge_sync_states(
+        self,
+        baseline: SUTSyncState,
+        update: SUTSyncState,
+    ) -> None:
         """Merge subprocess-safe SUT state."""
         _ = baseline, update
 

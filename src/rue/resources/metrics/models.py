@@ -11,6 +11,7 @@ from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.scopes import Scope
 from rue.models import Locator, Spec
 from rue.resources.models import ResourceSpec
+from rue.resources.sync import SyncState
 
 
 if TYPE_CHECKING:
@@ -64,11 +65,18 @@ class MetricMetadata:
 
 
 @dataclass(slots=True)
-class MetricSyncState:
+class MetricSyncState(SyncState):
     """Serializable metric state moved between parent and subprocess runs."""
 
     raw_values: tuple[int | float | bool, ...]
     metadata: MetricMetadata
+    result: MetricResult | None = None
+
+    def apply_transfer(self) -> None:
+        """Apply worker-owned metric finalization results."""
+        collector = CURRENT_METRIC_RESULTS.get()
+        if collector is not None:
+            collector.extend([self.result] if self.result else [])
 
 
 @dataclass(slots=True)
