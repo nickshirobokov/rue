@@ -6,11 +6,15 @@ import inspect
 from collections.abc import AsyncGenerator, Callable, Generator
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rue.context.models import ScopeOwner
 from rue.context.scopes import Scope
 from rue.models import Spec
+
+
+if TYPE_CHECKING:
+    from rue.resources.sync import SyncState
 
 
 class ResourceFactoryKind(StrEnum):
@@ -38,7 +42,7 @@ class LoadedResourceDef:
     factory_kind: ResourceFactoryKind
     dependencies: tuple[str, ...] = ()
     autouse: bool = False
-    sync: bool = True
+    subprocess_sync: bool = False
     resolve_hook: Callable[[Any], Any] | None = None
     injection_hook: Callable[[Any], Any] | None = None
     teardown_hook: Callable[[Any], Any] | None = None
@@ -92,13 +96,13 @@ class ResourceGraph:
 
 
 @dataclass(frozen=True, slots=True)
-class StateSnapshot:
-    """CRDT-backed transfer payload for reconstructing resources in a worker."""
+class SubprocessResourceSnapshot:
+    """Resource payload for subprocess test execution."""
 
     graph: ResourceGraph
-    graph_update: bytes
-    base_state: bytes
-    actor_id: int = 0
+    states: dict[ResourceSpec, SyncState] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(slots=True)

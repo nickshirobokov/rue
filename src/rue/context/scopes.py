@@ -31,6 +31,14 @@ class Scope(StrEnum):
         return frozenset(scopes[scopes.index(self) :])
 
 
+class CurrentProcessKind(StrEnum):
+    """Runtime process kind for the active suite context."""
+
+    MAIN = auto()
+    TEST_SUBPROCESS = auto()
+    EXPERIMENT_SUBPROCESS = auto()
+
+
 @dataclass(frozen=True, slots=True)
 class ScopeContext:
     """Current runtime owners for resolved injected dependencies."""

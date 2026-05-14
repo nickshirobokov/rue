@@ -14,6 +14,7 @@ import cloudpickle  # type: ignore[import-untyped]
 
 from rue.config import Config
 from rue.context.runtime import SuiteContext
+from rue.context.scopes import CurrentProcessKind
 from rue.events import (
     QueueForwarder,
     SessionEventsReceiver,
@@ -129,6 +130,7 @@ async def _execute_experiment_variant(
 
     context = SuiteContext(
         config=config,
+        process=CurrentProcessKind.EXPERIMENT_SUBPROCESS,
         experiment_variant=variant,
         experiment_setup_chain=suitespec.all_setup_files,
     )

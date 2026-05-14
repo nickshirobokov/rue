@@ -24,6 +24,7 @@ from rue.resources.sut.output import (
     SUTOutputCapture,
 )
 from rue.resources.sut.tracer import SUTTracer
+from rue.resources.sync import SyncableResource
 from rue.telemetry.otel.backend import OtelTelemetryBackend
 from rue.telemetry.otel.runtime import OtelTraceSession
 
@@ -71,7 +72,7 @@ class _CallableProxy:
         setattr(self._target, name, value)
 
 
-class SUT(Generic[InstanceT]):
+class SUT(SyncableResource[None], Generic[InstanceT]):
     def __init__(
         self,
         instance: InstanceT,
@@ -102,6 +103,18 @@ class SUT(Generic[InstanceT]):
         if backend is not None and backend.active_session is not None:
             self._tracer.activate(backend.active_session)
         self.instance: InstanceT = self._wrap_instance(instance)
+
+    def get_sync_state(self) -> None:
+        """Return subprocess-safe SUT state."""
+        return None
+
+    def from_sync_state(self, state: None) -> None:
+        """Hydrate subprocess-safe SUT state."""
+        _ = state
+
+    def merge_sync_states(self, baseline: None, update: None) -> None:
+        """Merge subprocess-safe SUT state."""
+        _ = baseline, update
 
     @property
     def name(self) -> str:
@@ -169,7 +182,8 @@ class SUT(Generic[InstanceT]):
                     }
                 case value:
                     raise TypeError(
-                        "Case inputs must be a dict, mapping, BaseModel, or dataclass instance. "
+                        "Case inputs must be a dict, mapping, BaseModel, or "
+                        "dataclass instance. "
                         f"Got: {type(value).__name__}"
                     )
             parsed_args = ArgsKwargs(args=(), kwargs=input_values)

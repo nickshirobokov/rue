@@ -20,6 +20,5 @@ def register_builtin_resources(registry: ResourceRegistry) -> None:
         registry.register_resource(
             scoped_monkeypatch(scope),
             scope=scope,
-            sync=False,
             builtin=True,
         )

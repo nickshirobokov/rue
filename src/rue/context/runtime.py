@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from rue.config import Config
 from rue.context.models import SuiteEnvironment
-from rue.context.scopes import ScopeContext
+from rue.context.scopes import CurrentProcessKind, ScopeContext
 from rue.models import Spec
 
 
@@ -135,6 +135,7 @@ class SuiteContext(BaseModel):
     environment: SuiteEnvironment = Field(
         default_factory=SuiteEnvironment.build_from_current
     )
+    process: CurrentProcessKind = CurrentProcessKind.MAIN
     experiment_variant: Any | None = None
     experiment_setup_chain: tuple[Any, ...] = ()
     _tokens: list[Token[SuiteContext]] = PrivateAttr(default_factory=list)

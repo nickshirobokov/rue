@@ -6,7 +6,7 @@ from typing import Any
 
 from rue.context.runtime import CURRENT_TEST, CURRENT_TEST_TRACER
 from rue.context.scopes import Scope
-from rue.resources.registry import resource
+from rue.resources.registry import registry
 from rue.resources.sut.wrapper import SUT
 from rue.telemetry.otel.backend import OtelTelemetryBackend
 
@@ -54,9 +54,10 @@ def sut(
             sut_instance.activate_trace(backend.active_session)
         return sut_instance
 
-    return resource(
+    return registry.register_resource(
         fn,
         scope=scope,
         on_resolve=on_resolve,
         on_injection=on_injection,
+        subprocess_sync=True,
     )

@@ -32,7 +32,6 @@ class DefaultTestFactory:
     semaphore: asyncio.Semaphore | None = None
     is_stopped: Callable[[], bool] = field(default=lambda: False)
     queue: SuiteQueue | None = None
-    _next_sync_actor_id: int = field(default=1, init=False, repr=False)
 
     def build(
         self,
@@ -48,11 +47,6 @@ class DefaultTestFactory:
         modifiers = definition.spec.modifiers
 
         if not modifiers:
-            if backend is ExecutionBackend.SUBPROCESS:
-                sync_actor_id = self._next_sync_actor_id
-                self._next_sync_actor_id += 1
-            else:
-                sync_actor_id = 1
             match backend:
                 case (
                     ExecutionBackend.SUBPROCESS
@@ -65,7 +59,6 @@ class DefaultTestFactory:
                         params=params,
                         test_execution_id=uuid4(),
                         backend=backend,
-                        sync_actor_id=sync_actor_id,
                         semaphore=self.semaphore,
                         is_stopped=self.is_stopped,
                     )

@@ -64,6 +64,14 @@ class MetricMetadata:
 
 
 @dataclass(slots=True)
+class MetricSyncState:
+    """Serializable metric state moved between parent and subprocess runs."""
+
+    raw_values: tuple[int | float | bool, ...]
+    metadata: MetricMetadata
+
+
+@dataclass(slots=True)
 class MetricResult:
     """Result of evaluating a `Metric` resource.
 

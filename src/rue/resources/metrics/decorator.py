@@ -16,7 +16,7 @@ from rue.context.runtime import (
 from rue.context.scopes import Scope
 from rue.resources.metrics.metric import Metric
 from rue.resources.metrics.models import CalculatedValue, MetricResult
-from rue.resources.registry import resource
+from rue.resources.registry import registry
 
 
 if TYPE_CHECKING:
@@ -115,12 +115,13 @@ def metric[**P](
                         )
                         break
 
-        return resource(
+        return registry.register_resource(
             wrapped_gen,
             scope=resource_scope,
             on_resolve=on_resolve_hook,
             on_injection=on_injection_hook,
             origin_fn=fn,
+            subprocess_sync=True,
         )
 
     if is_async_generator:
@@ -156,12 +157,13 @@ def metric[**P](
                         )
                         break
 
-        return resource(
+        return registry.register_resource(
             wrapped_async_gen,
             scope=resource_scope,
             on_resolve=on_resolve_hook,
             on_injection=on_injection_hook,
             origin_fn=fn,
+            subprocess_sync=True,
         )
 
     msg = (

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -13,7 +12,6 @@ from rue.resources.models import (
     ResourceSpec,
     ScheduledTeardown,
 )
-from rue.resources.snapshot import SyncGraph
 
 
 @dataclass(slots=True)
@@ -31,25 +29,7 @@ class ResolverScopeState:
 class ResourceStore:
     """Mutable resource state shared by resolver execution views."""
 
-    _shadow: bool
-    sync_graph: SyncGraph
-    sync_lock: threading.RLock = field(default_factory=threading.RLock)
     _scopes: dict[ScopeOwner, ResolverScopeState] = field(default_factory=dict)
-
-    @classmethod
-    def main(cls, *, sync_actor_id: int = 0) -> ResourceStore:
-        """Create live resource state."""
-        return cls(_shadow=False, sync_graph=SyncGraph(actor_id=sync_actor_id))
-
-    @classmethod
-    def shadow(cls, *, sync_actor_id: int = 0) -> ResourceStore:
-        """Create shadow resource state for worker hydration."""
-        return cls(_shadow=True, sync_graph=SyncGraph(actor_id=sync_actor_id))
-
-    @property
-    def is_shadow(self) -> bool:
-        """Return whether this state skips live teardown execution."""
-        return self._shadow
 
     def state_for_owner(self, owner: ScopeOwner) -> ResolverScopeState:
         """Return mutable state for one owner."""
@@ -96,9 +76,8 @@ class ResourceStore:
         pending.exception()
 
     def record_teardown(self, teardown: ScheduledTeardown) -> None:
-        """Record a generator teardown for live state."""
-        if not self.is_shadow:
-            self.state_for_owner(teardown.owner).teardowns.append(teardown)
+        """Record a generator teardown."""
+        self.state_for_owner(teardown.owner).teardowns.append(teardown)
 
     def set(self, spec: ResourceSpec, owner: ScopeOwner, value: Any) -> None:
         """Set a cached runtime value."""

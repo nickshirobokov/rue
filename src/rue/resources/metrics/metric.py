@@ -11,12 +11,18 @@ import statistics
 import threading
 import warnings
 from collections import Counter
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from pydantic import validate_call
 
-from rue.resources.metrics.models import CalculatedValue, MetricMetadata
+from rue.resources.metrics.models import (
+    CalculatedValue,
+    MetricMetadata,
+    MetricSyncState,
+)
+from rue.resources.sync import SyncableResource
 
 
 @dataclass(slots=True)
@@ -78,8 +84,8 @@ class MetricState:
 
 
 @dataclass(slots=True)
-class Metric:
-    """Thread-safe class for recording data points and computing statistical metrics.
+class Metric(SyncableResource[MetricSyncState]):
+    """Thread-safe metric recorder.
 
     This class maintains a list of raw values and provides properties to compute
     various statistics (mean, std, percentiles, etc.) on demand.
@@ -104,6 +110,49 @@ class Metric:
     @property
     def _identity_name(self) -> str:
         return self.metadata.identity.locator.function_name or "unnamed metric"
+
+    def get_sync_state(self) -> MetricSyncState:
+        """Return metric state safe for subprocess transport."""
+        with self._values_lock:
+            return MetricSyncState(
+                raw_values=tuple(self._raw_values),
+                metadata=deepcopy(self.metadata),
+            )
+
+    def from_sync_state(self, state: MetricSyncState) -> None:
+        """Replace this metric with transported state."""
+        with self._values_lock:
+            self.metadata = deepcopy(state.metadata)
+            self._raw_values = list(state.raw_values)
+            self._float_values = [float(value) for value in state.raw_values]
+            self._cache = MetricState()
+
+    def merge_sync_states(
+        self,
+        baseline: MetricSyncState,
+        update: MetricSyncState,
+    ) -> None:
+        """Merge subprocess metric records added after a baseline snapshot."""
+        baseline_count = len(baseline.raw_values)
+        new_values = update.raw_values[baseline_count:]
+        with self._values_lock:
+            if new_values:
+                self._raw_values.extend(new_values)
+                self._float_values.extend(float(value) for value in new_values)
+                self._cache = MetricState()
+                self.metadata.last_item_recorded_at = (
+                    update.metadata.last_item_recorded_at
+                )
+                if self.metadata.first_item_recorded_at is None:
+                    self.metadata.first_item_recorded_at = (
+                        update.metadata.first_item_recorded_at
+                    )
+            for consumer in update.metadata.consumers:
+                if consumer not in self.metadata.consumers:
+                    self.metadata.consumers.append(consumer)
+            for provider in update.metadata.direct_providers:
+                if provider not in self.metadata.direct_providers:
+                    self.metadata.direct_providers.append(provider)
 
     def _warn_not_enough_values(self, statistic: str) -> None:
         warnings.warn(

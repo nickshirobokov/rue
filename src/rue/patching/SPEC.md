@@ -146,5 +146,6 @@ and the matching records disappear.
   `AttributeError`, `KeyError`, or `IndexError` when selected.
 - Undo removes handles in reverse teardown order. The original value is restored
   only after the final record for that target member is removed.
-- Built-in `monkeypatch` is `sync=False`; subprocess workers create their own
-  scoped patch state instead of syncing patch handles across process boundaries.
+- Built-in `monkeypatch` is a normal process-local resource. Subprocess workers
+  create their own scoped patch state instead of syncing patch handles across
+  process boundaries.

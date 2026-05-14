@@ -21,7 +21,7 @@ from rue.context.runtime import (
     bind,
 )
 from rue.resources import DependencyResolver
-from rue.resources.models import StateSnapshot
+from rue.resources.models import SubprocessResourceSnapshot
 from rue.telemetry.models import TelemetryArtifact
 from rue.testing.models import SetupFileRef, TestSpec
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
@@ -286,7 +286,7 @@ class RemoteTestExecutionPayload:
     suite_root: Path
     setup_chain: tuple[SetupFileRef, ...]
     params: dict[str, Any]
-    snapshot: StateSnapshot
+    resources: SubprocessResourceSnapshot
     context: SuiteContext
     test_execution_id: UUID
 
@@ -297,4 +297,4 @@ class RemoteTestExecutionResult:
 
     result: TestResult
     telemetry_artifacts: tuple[TelemetryArtifact, ...]
-    sync_update: bytes
+    resources: SubprocessResourceSnapshot

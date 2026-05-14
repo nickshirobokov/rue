@@ -48,7 +48,6 @@ class SingleTest(ExecutableTest):
     params: dict[str, Any]
     test_execution_id: UUID
     backend: ExecutionBackend = ExecutionBackend.ASYNCIO
-    sync_actor_id: int = 1
     children: list[ExecutableTest] = field(
         default_factory=list, init=False, repr=False
     )
@@ -135,8 +134,7 @@ class SingleTest(ExecutableTest):
                     execute_sync_in_thread=self.backend
                     is not ExecutionBackend.MAIN,
                     is_stopped=self.is_stopped,
-                )
-            resolver.transfer.flush_visible_shared_resources()
+            )
             try:
                 await resolver.teardown(Scope.TEST)
             except Exception as teardown_error:
@@ -175,15 +173,8 @@ class SingleTest(ExecutableTest):
                 self.semaphore if self.semaphore else contextlib.nullcontext()
             )
             async with semaphore:
-                await resolver.resolve_graph_deps(
-                    resolver.registry.get_graph(test_execution_id),
-                    {},
+                resources = await resolver.get_snapshot(
                     consumer_spec=self.definition.spec,
-                    preload=True,
-                )
-                snapshot = resolver.transfer.export_snapshot(
-                    test_execution_id,
-                    actor_id=self.sync_actor_id,
                 )
 
                 payload = RemoteTestExecutionPayload(
@@ -191,7 +182,7 @@ class SingleTest(ExecutableTest):
                     suite_root=self.definition.suite_root,
                     setup_chain=self.definition.setup_chain,
                     params=dict(self.params),
-                    snapshot=snapshot,
+                    resources=resources,
                     context=suite_context,
                     test_execution_id=test_execution_id,
                 )
@@ -201,9 +192,9 @@ class SingleTest(ExecutableTest):
                     payload,
                 )
                 remote_result = await asyncio.wrap_future(future)
-                resolver.transfer.apply_update(
-                    snapshot,
-                    remote_result.sync_update,
+                resolver.update_from_transfer(
+                    resources,
+                    remote_result.resources,
                 )
         finally:
             await resolver.teardown(Scope.TEST)

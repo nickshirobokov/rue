@@ -144,7 +144,7 @@ open, and MUST NOT resolve `Scope.MODULE` unless a `ModuleContext` or
 
 | Context API | Purpose | Binder / owner | Available during | Required behavior | Main consumers |
 | --- | --- | --- | --- | --- | --- |
-| `SuiteContext` / `CURRENT_SUITE_CONTEXT` | Suite-level config, `suite_execution_id`, environment, experiment variant metadata | Opened by CLI, experiment execution, status builder, or tests before constructing/calling execution APIs | Whole Rue suite | Required; missing lookup MUST fail | `ExecutableSuite`, `SingleTest`, assertions, suite event processors, subprocess payloads |
+| `SuiteContext` / `CURRENT_SUITE_CONTEXT` | Suite-level config, `suite_execution_id`, environment, process kind, experiment variant metadata | Opened by CLI, experiment execution, status builder, or tests before constructing/calling execution APIs | Whole Rue suite | Required; missing lookup MUST fail | `ExecutableSuite`, `SingleTest`, assertions, suite event processors, subprocess payloads |
 | `SuiteEnvironment` | Serializable metadata for the process that owns the suite | Built by `SuiteContext` | As `SuiteContext.environment` | Not a context binding | Suite result persistence and reports |
 | `ModuleContext` | Current module path without test metadata | Opened by `ExecutableSuite` around top-level module work and module teardown | Top-level test dispatch and module teardown | Required for module-scoped resources and patches outside a test body | `ExecutableSuite`, `DependencyResolver`, patch dispatch |
 | `TestContext` / `CURRENT_TEST` | Current `test_execution_id` | Opened by `SingleTest._execute`, subprocess worker, and status preflight | One test execution | Required for test execution, graph lookup, SUT injection, and test-scoped resources | `LoadedTestDef`, `DependencyResolver`, SUT resources, transfer |
@@ -191,7 +191,11 @@ graphs are keyed by `test_execution_id`.
 
 Subprocess test execution requires `LazyProcessPool` to be open in the
 executable suite and reopens serialized `SuiteContext` and `TestContext` inside
-the worker process.
+the worker process. Normal resources are resolved and torn down inside the
+process that needs them. Only resources opted into `subprocess_sync` transport
+state back to the parent resolver. `SuiteContext.process` identifies whether
+the active suite is running in the main process, a test subprocess, or an
+experiment subprocess.
 
 Module teardown opens `ModuleContext` for the completed module so
 `ScopeContext.current_owner(Scope.MODULE)` selects the correct module owner
