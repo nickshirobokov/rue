@@ -61,8 +61,9 @@ filesystem/env-var sandboxes to the active Rue owner. Resources that opt into
 use that contract to aggregate records from subprocess tests. SUT resources
 use the same contract with no arbitrary wrapped-instance state transfer;
 Rue-owned trace/output state is scoped to the active test. The `environment`
-builtin uses `subprocess_sync` to reflink-clone parent state into workers and
-ship deltas back; see `src/rue/environment/SPEC.md` for the wire protocol.
+builtin uses `subprocess_sync` for process-local object state while scoped
+environment files are shared by path; see `src/rue/environment/SPEC.md` for
+the wire protocol.
 
 ## Hooks
 

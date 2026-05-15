@@ -35,8 +35,8 @@ class ScopeOwner:
     def key(self) -> str:
         """Stable short id for this owner (paths, cache keys, workers).
 
-        Deterministic across parent and worker processes so reflink-clone
-        targets land at the same path on both sides.
+        Deterministic across parent and worker processes so scoped
+        environment roots land at the same path on both sides.
         """
         parts: list[str] = [self.scope.value]
         match self.scope:

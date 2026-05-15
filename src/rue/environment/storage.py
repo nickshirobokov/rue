@@ -145,24 +145,16 @@ class EnvironmentStorage:
     ) -> Path:
         """Return a new on-disk root for an environment.
 
-        Parent and worker processes get distinct paths by appending a
-        per-process tag, so a worker's reflink-clone target never collides
-        with the parent's live root. Only the parent (`MAIN`) holds the
-        suite lock; workers skip it because the parent already does.
+        The root is canonical for the logical scope owner, so parent and
+        worker processes see the same real files. Only the parent (`MAIN`)
+        holds the suite lock; workers skip it because the parent already does.
         """
         if process_kind is CurrentProcessKind.MAIN:
             self._ensure_suite_lock(suite_id)
         scope_dir = self.suite_dir(suite_id) / owner.scope.value
         scope_dir.mkdir(parents=True, exist_ok=True)
-        process_tag = (
-            "main"
-            if process_kind is CurrentProcessKind.MAIN
-            else f"p{os.getpid()}"
-        )
-        env_root = scope_dir / owner.key / process_tag
-        if env_root.exists():
-            shutil.rmtree(env_root)
-        env_root.mkdir(parents=True)
+        env_root = scope_dir / owner.key
+        env_root.mkdir(parents=True, exist_ok=True)
         return env_root
 
     def release(self, root: Path) -> None:

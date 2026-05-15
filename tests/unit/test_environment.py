@@ -395,24 +395,42 @@ def test_environment_storage_allocate_and_release(tmp_path: Path) -> None:
     EnvironmentStorage.release_suite(suite_id, base_dir=tmp_path)
 
 
-def test_environment_storage_worker_path_differs_from_main(
+def test_environment_storage_uses_shared_owner_roots_without_reallocating(
     tmp_path: Path,
 ) -> None:
     storage = EnvironmentStorage(base_dir=tmp_path)
     suite_id = uuid4()
-    owner = ScopeOwner(
+    module_owner = ScopeOwner(
         scope=Scope.MODULE,
         suite_execution_id=suite_id,
         module_path=Path("/fake/module.py"),
     )
     main_root = storage.allocate(
-        suite_id, owner, process_kind=CurrentProcessKind.MAIN
+        suite_id, module_owner, process_kind=CurrentProcessKind.MAIN
     )
+    (main_root / "kept.txt").write_text("kept")
     worker_root = storage.allocate(
-        suite_id, owner, process_kind=CurrentProcessKind.TEST_SUBPROCESS
+        suite_id, module_owner, process_kind=CurrentProcessKind.TEST_SUBPROCESS
     )
-    assert main_root != worker_root
-    assert main_root.parent == worker_root.parent
+
+    assert main_root == worker_root
+    assert (worker_root / "kept.txt").read_text() == "kept"
+
+    assert storage.allocate(
+        suite_id,
+        ScopeOwner(
+            scope=Scope.TEST,
+            test_execution_id=uuid4(),
+            suite_execution_id=suite_id,
+        ),
+    ) != storage.allocate(
+        suite_id,
+        ScopeOwner(
+            scope=Scope.TEST,
+            test_execution_id=uuid4(),
+            suite_execution_id=suite_id,
+        ),
+    )
     EnvironmentStorage.release_suite(suite_id, base_dir=tmp_path)
 
 
@@ -437,42 +455,45 @@ def test_gc_stale_removes_unlocked_dirs(tmp_path: Path) -> None:
     EnvironmentStorage.release_suite(held_suite_id, base_dir=tmp_path)
 
 
-def test_environment_sync_round_trip(tmp_path: Path) -> None:
+def test_environment_sync_shares_root_and_merges_object_state(
+    tmp_path: Path,
+) -> None:
     parent_root = tmp_path / "parent"
     parent_root.mkdir()
-    (parent_root / "kept.txt").write_text("kept")
     (parent_root / "baseline.txt").write_text("baseline")
     parent = Environment._build(root=parent_root, scope=Scope.MODULE)
     parent.vars["X"] = "ovl"
     parent.set_baseline()
 
     state = parent.get_sync_state()
-
-    worker_root = tmp_path / "worker"
-    worker_root.mkdir()
-    worker = Environment._build(root=worker_root, scope=Scope.MODULE)
+    worker = Environment._build(root=tmp_path / "worker", scope=Scope.MODULE)
     worker.from_sync_state(state)
 
-    assert (worker_root / "kept.txt").read_text() == "kept"
+    assert worker.root == parent_root.resolve()
     assert worker.vars["X"] == "ovl"
 
-    (worker_root / "added.txt").write_text("from-worker")
-    (worker_root / "kept.txt").write_text("changed")
+    worker.vars.restore("X")
+    worker.vars["Y"] = "worker"
+    (parent_root / "work").mkdir()
+    worker.chdir("work")
+    worker.set_baseline()
+    (parent_root / "work" / "added.txt").write_text("from-worker")
 
     update = worker.get_sync_state()
-    assert update.deltas
-    assert worker.diff.added == (PurePosixPath("added.txt"),)
+    assert not hasattr(update, "deltas")
 
     parent.merge_sync_states(state, update)
-    assert (parent_root / "added.txt").read_text() == "from-worker"
-    assert (parent_root / "kept.txt").read_text() == "changed"
-    assert parent.diff.added == (PurePosixPath("added.txt"),)
+    assert (parent_root / "work" / "added.txt").read_text() == "from-worker"
+    assert parent.diff.added == (PurePosixPath("work/added.txt"),)
+    with pytest.raises(KeyError):
+        _ = parent.vars["X"]
+    assert parent.vars["Y"] == "worker"
+    assert parent.cwd == parent.root / "work"
 
 
 def test_environment_sync_state_apply_transfer_is_noop() -> None:
     state = EnvironmentSyncState(
-        parent_root=Path("/nonexistent"),
-        baseline_manifest=(),
+        root=Path("/nonexistent"),
     )
     state.apply_transfer()
 

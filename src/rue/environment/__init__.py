@@ -12,7 +12,7 @@ from rue.environment.sources import (
     GitSource,
     Source,
 )
-from rue.environment.sync import EnvironmentSyncState, FileDelta
+from rue.environment.sync import EnvironmentSyncState
 
 
 __all__ = [
@@ -24,7 +24,6 @@ __all__ = [
     "Environment",
     "EnvironmentSyncState",
     "EnvironmentVars",
-    "FileDelta",
     "FileEntry",
     "GitSource",
     "Source",

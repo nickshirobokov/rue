@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 import subprocess
 import threading
 from collections.abc import Iterator, Mapping, MutableMapping, Sequence
@@ -16,14 +15,9 @@ from rue.environment.checkpoint import Checkpoint, Diff
 from rue.environment.sources import Source
 from rue.environment.storage import (
     EnvironmentStorage,
-    clone_tree,
     empty_tree,
 )
-from rue.environment.sync import (
-    EnvironmentSyncState,
-    FileDelta,
-    FileDeltaKind,
-)
+from rue.environment.sync import EnvironmentSyncState
 
 
 if TYPE_CHECKING:
@@ -134,7 +128,6 @@ class Environment:
         "_saved_cwd",
         "_saved_environ",
         "_scope",
-        "_subprocess_checkpoint",
         "_vars",
     )
 
@@ -145,7 +138,6 @@ class Environment:
         self._vars = EnvironmentVars()
         self._provider_spec: ResourceSpec | None = None
         self._baseline: Checkpoint | None = None
-        self._subprocess_checkpoint: Checkpoint | None = None
 
     @classmethod
     def _build(cls, *, root: Path, scope: Scope) -> Environment:
@@ -299,45 +291,13 @@ class Environment:
         return completed
 
     def get_sync_state(self) -> EnvironmentSyncState:
-        """Return state safe for subprocess transport.
-
-        Direction matters:
-          * Parent → worker: ships ``parent_root`` and a baseline manifest
-            so the worker can reflink-clone.
-          * Worker → parent: ships ``deltas`` computed against the baseline
-            captured by ``from_sync_state``.
-        """
-        baseline_checkpoint = self._subprocess_checkpoint
-        manifest_checkpoint = baseline_checkpoint or Checkpoint.from_root(
-            self._root
-        )
-        deltas: tuple[FileDelta, ...] = ()
-        if baseline_checkpoint is not None:
-            current = Checkpoint.from_root(self._root)
-            diff = Diff.from_checkpoints(baseline_checkpoint, current)
-            delta_list: list[FileDelta] = []
-            for path in diff.added:
-                delta_list.append(
-                    FileDelta.from_path(self._root, path, FileDeltaKind.ADDED)
-                )
-            for path in diff.modified:
-                delta_list.append(
-                    FileDelta.from_path(
-                        self._root, path, FileDeltaKind.MODIFIED
-                    )
-                )
-            for path in diff.deleted:
-                delta_list.append(
-                    FileDelta(path=path, kind=FileDeltaKind.DELETED)
-                )
-            deltas = tuple(delta_list)
+        """Return object state safe for subprocess transport."""
         relative_cwd = PurePosixPath(
             self._cwd.resolve().relative_to(self._root).as_posix() or "."
         )
         return EnvironmentSyncState(
-            parent_root=self._root,
-            baseline_manifest=tuple(manifest_checkpoint.entries.values()),
-            diff_baseline_manifest=(
+            root=self._root,
+            baseline_manifest=(
                 tuple(self._baseline.entries.values())
                 if self._baseline is not None
                 else None
@@ -345,16 +305,11 @@ class Environment:
             overrides=dict(self._vars.overrides),
             hidden=frozenset(self._vars.hidden),
             cwd=relative_cwd,
-            scope_value=self._scope.value,
-            deltas=deltas,
         )
 
     def from_sync_state(self, state: EnvironmentSyncState) -> None:
-        """Hydrate this worker-side env from a parent-shipped state."""
-        if state.parent_root != self._root:
-            empty_tree(self._root)
-            self._root.rmdir()
-            clone_tree(state.parent_root, self._root)
+        """Hydrate this env from subprocess-safe object state."""
+        self._root = state.root.resolve()
         self._vars = EnvironmentVars()
         for key, value in state.overrides.items():
             self._vars[key] = value
@@ -364,12 +319,9 @@ class Environment:
         if not target_cwd.is_relative_to(self._root):
             target_cwd = self._root
         self._cwd = target_cwd
-        self._subprocess_checkpoint = Checkpoint.from_manifest(
-            self._root, state.baseline_manifest
-        )
         self._baseline = (
-            Checkpoint.from_manifest(self._root, state.diff_baseline_manifest)
-            if state.diff_baseline_manifest is not None
+            Checkpoint.from_manifest(self._root, state.baseline_manifest)
+            if state.baseline_manifest is not None
             else None
         )
 
@@ -378,37 +330,21 @@ class Environment:
         baseline: EnvironmentSyncState,
         update: EnvironmentSyncState,
     ) -> None:
-        """Apply worker-emitted deltas back into the parent root."""
+        """Apply worker-emitted object state back into the parent env."""
         del baseline
-        for delta in update.deltas:
-            target = self._root / delta.path
-            match delta.kind:
-                case FileDeltaKind.DELETED:
-                    if target.is_symlink() or target.exists():
-                        if target.is_dir() and not target.is_symlink():
-                            shutil.rmtree(target)
-                        else:
-                            target.unlink()
-                case FileDeltaKind.ADDED | FileDeltaKind.MODIFIED:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    if target.is_symlink() or target.exists():
-                        if target.is_dir() and not target.is_symlink():
-                            shutil.rmtree(target)
-                        else:
-                            target.unlink()
-                    if delta.symlink_target is not None:
-                        os.symlink(delta.symlink_target, target)
-                        continue
-                    payload = delta.content or b""
-                    target.write_bytes(payload)
-                    os.chmod(target, delta.mode)
+        self._root = update.root.resolve()
+        target_cwd = (self._root / Path(update.cwd)).resolve()
+        if not target_cwd.is_relative_to(self._root):
+            target_cwd = self._root
+        self._cwd = target_cwd
+        self._vars = EnvironmentVars()
         for key, value in update.overrides.items():
             self._vars[key] = value
         for key in update.hidden:
             self._vars.unset(key)
         self._baseline = (
-            Checkpoint.from_manifest(self._root, update.diff_baseline_manifest)
-            if update.diff_baseline_manifest is not None
+            Checkpoint.from_manifest(self._root, update.baseline_manifest)
+            if update.baseline_manifest is not None
             else None
         )
 

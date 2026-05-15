@@ -8,7 +8,7 @@ from rue.context.runtime import (
     RESOURCE_TRANSACTION_CONTEXT,
     SUITE_EXECUTION_CONTEXT,
 )
-from rue.context.scopes import Scope, ScopeContext
+from rue.context.scopes import CurrentProcessKind, Scope, ScopeContext
 from rue.environment.runtime import Environment
 from rue.environment.storage import EnvironmentStorage
 from rue.environment.sync import EnvironmentSyncState
@@ -44,7 +44,11 @@ def register_builtin_resources(registry: ResourceRegistry) -> None:
             try:
                 yield env
             finally:
-                storage.release(root)
+                if not (
+                    suite_context.process is CurrentProcessKind.TEST_SUBPROCESS
+                    and scope in {Scope.MODULE, Scope.SUITE}
+                ):
+                    storage.release(root)
 
         environment.__name__ = "environment"
         environment.__qualname__ = "environment"

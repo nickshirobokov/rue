@@ -144,20 +144,24 @@ BLAKE2b content hash so timestamps cannot lie.
   environment-cache/<source-fingerprint>/    # content-addressed source materializations
   environment-run/<suite-uuid>/
     lock                                      # advisory lock held by parent for the suite lifetime
-    suite/<owner-key>/<process-tag>/
-    module/<owner-key>/<process-tag>/
-    test/<owner-key>/<process-tag>/
+    suite/<owner-key>/
+    module/<owner-key>/
+    test/<owner-key>/
 ```
 
-`<process-tag>` is `main` for the parent process and `p<pid>` for worker
-processes, so a worker's reflink-clone target never collides with the
-parent's live root. `<owner-key>` is a deterministic BLAKE2b digest of
+`<owner-key>` is a deterministic BLAKE2b digest of
 `(scope, suite_execution_id, module_path | test_execution_id)` so the
-same logical owner always lands at the same path within one process.
+same logical owner always lands at the same path in every process.
+Parent and worker processes share the same real files for module/suite
+environment scopes. If tests race on shared environment files, that is user
+test design, not Rue isolation behavior. Users who want isolated files use a
+test-scoped environment resource.
 
 `EnvironmentStorage.allocate` is cheap: a single `mkdir`. The parent
 acquires `flock(LOCK_EX | LOCK_NB)` on `lock` once per suite; workers
-skip the lock because the parent already holds it.
+skip the lock because the parent already holds it. Allocation MUST NOT
+remove an existing environment root; only explicit `Environment.reset()`,
+`Environment.load(...)`, or final suite cleanup clear environment files.
 
 `EnvironmentStorage.gc_stale()` runs at the start of every parent
 `SuiteContext.__enter__`. It walks `environment-run/<*>/` and removes any
@@ -173,23 +177,25 @@ directory.
 
 `Environment` is registered with `subprocess_sync=True` and implements
 the `SyncableResource[EnvironmentSyncState]` protocol via virtual ABC
-registration. The wire payload contains no file bytes parent → worker;
-worker → parent ships only changed file content.
+registration. Environment files are shared by path, so the wire payload
+contains no file bytes and no file deltas. It only carries process-local
+object state: root path, explicit diff baseline, environment variable overlay,
+and cwd.
 
 | Direction | Method | Content |
 | --- | --- | --- |
-| Parent → worker | `get_sync_state()` | `parent_root`, sync baseline manifest, explicit diff baseline manifest, vars, cwd. |
-| Worker hydrate | `from_sync_state(state)` | Reflink-clones `parent_root` into the worker's root, applies vars overlay. |
-| Worker → parent | `get_sync_state()` | `deltas` computed against the baseline manifest captured during hydrate. |
-| Parent merge | `merge_sync_states(baseline, update)` | Applies `update.deltas` to the parent root in place. |
+| Parent → worker | `get_sync_state()` | `root`, explicit diff baseline manifest, vars, cwd. |
+| Worker hydrate | `from_sync_state(state)` | Points the worker handle at `root`, applies vars/cwd/baseline. |
+| Worker → parent | `get_sync_state()` | Updated vars/cwd/baseline. |
+| Parent merge | `merge_sync_states(baseline, update)` | Replaces vars/cwd/baseline from the worker update. |
 
 For `Scope.TEST` envs the resolver short-circuits at `get_snapshot`, so
 test-scope environments never sync; their `apply_transfer()` is a no-op
 when the resolver receives unmatched test-scope state from a worker.
 
-Reflink-clones use `cp -c -R` on Darwin (APFS clonefile, O(1)),
-`cp --reflink=auto -r` on Linux, and `shutil.copytree(symlinks=True)`
-otherwise. The strategy is detected once at module import.
+The parent keeps ownership of module/suite environment roots. Worker
+teardown MUST NOT release borrowed module/suite roots; parent suite cleanup
+removes the run directory.
 
 ## Builtin Registration
 
@@ -199,7 +205,8 @@ async-generator factory that:
 1. Reads `SUITE_EXECUTION_CONTEXT` and the current owner.
 2. Calls `EnvironmentStorage.allocate(suite_id, owner, process_kind=...)`.
 3. `yield`s an `Environment._build(root=..., scope=...)`.
-4. Calls `EnvironmentStorage.release(root)` in `finally`.
+4. Calls `EnvironmentStorage.release(root)` in `finally`, except for borrowed
+   module/suite roots inside test subprocesses.
 
 `on_resolve` stamps the provider spec onto the env (telemetry hook). There is
 no injection-time diff baseline capture; consumers call `set_baseline()`

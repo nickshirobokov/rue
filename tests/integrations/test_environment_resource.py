@@ -162,6 +162,48 @@ async def test_module_scope_env_persists_across_tests(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_module_scope_env_is_shared_with_subprocess(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_module_env_subprocess.py"
+    module_path.write_text(
+        dedent(
+            """
+            import rue
+            from rue import ExecutionBackend
+
+            @rue.resource(scope='module')
+            def shared_env(environment: rue.Environment) -> rue.Environment:
+                environment.vars['PARENT_ONLY'] = 'parent'
+                (environment.root / 'setup.txt').write_text('setup')
+                environment.set_baseline()
+                return environment
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_001_prepare(shared_env: rue.Environment):
+                assert (shared_env.root / 'setup.txt').read_text() == 'setup'
+
+            @rue.test.backend(ExecutionBackend.SUBPROCESS)
+            def test_002_remote_writes(shared_env: rue.Environment):
+                shared_env.vars.restore('PARENT_ONLY')
+                shared_env.vars['WORKER_ONLY'] = 'worker'
+                (shared_env.root / 'remote.txt').write_text('remote')
+
+            @rue.test.backend(ExecutionBackend.MAIN)
+            def test_003_main_sees_remote_write(shared_env: rue.Environment):
+                assert (shared_env.root / 'remote.txt').read_text() == 'remote'
+                assert shared_env.vars['WORKER_ONLY'] == 'worker'
+                assert 'PARENT_ONLY' not in shared_env.vars
+                assert {p.name for p in shared_env.diff.added} == {'remote.txt'}
+            """
+        )
+    )
+
+    suite = await _run_module(module_path)
+    assert suite.result.passed == 3, _failed(suite)
+
+
+@pytest.mark.asyncio
 async def test_per_test_env_diff_resets_for_test_scope(tmp_path: Path):
     """Direct test-scope env injection gives each test a fresh env."""
     module_path = tmp_path / "test_per_test_env_diff.py"
@@ -183,6 +225,32 @@ async def test_per_test_env_diff_resets_for_test_scope(tmp_path: Path):
                 environment.set_baseline()
                 (environment.root / 'beta.txt').write_text('b')
                 assert environment.diff.added == (PurePosixPath('beta.txt'),)
+            """
+        )
+    )
+
+    suite = await _run_module(module_path)
+    assert suite.result.passed == 2, _failed(suite)
+
+
+@pytest.mark.asyncio
+async def test_subprocess_test_scope_environment_is_isolated_per_test(
+    tmp_path: Path,
+):
+    module_path = tmp_path / "test_subprocess_test_env_isolation.py"
+    module_path.write_text(
+        dedent(
+            """
+            import rue
+            from rue import ExecutionBackend
+
+            @rue.test.backend(ExecutionBackend.SUBPROCESS)
+            def test_remote_a(environment: rue.Environment):
+                (environment.root / 'a.txt').write_text('a')
+
+            @rue.test.backend(ExecutionBackend.SUBPROCESS)
+            def test_remote_b(environment: rue.Environment):
+                assert list(environment.root.iterdir()) == []
             """
         )
     )
