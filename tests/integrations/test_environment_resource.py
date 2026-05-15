@@ -95,36 +95,27 @@ async def test_environment_diff_after_path_write(tmp_path: Path):
             @rue.test
             def test_diff_reports_added_files(environment: rue.Environment):
                 environment.path('input.txt').write_text('input')
-                environment.set_baseline()
+                before = environment.get_checkpoint()
                 with environment:
                     (environment.root / 'output.txt').write_text('hi')
-                assert environment.diff.added == (PurePosixPath('output.txt'),)
-
-            @rue.test
-            async def test_async_diff(environment: rue.Environment):
-                target = environment.path('nested/data.json')
-                target.parent.mkdir(parents=True)
-                target.write_text('{"ok": false}')
-                environment.set_baseline()
-                target.write_text('{"ok": true}')
-                assert environment.diff.modified == (
-                    PurePosixPath('nested/data.json'),
+                assert before.compare(environment.get_checkpoint()).added == (
+                    PurePosixPath('output.txt'),
                 )
             """
         )
     )
 
     suite = await _run_module(module_path)
-    assert suite.result.passed == 2, _failed(suite)
+    assert suite.result.passed == 1, _failed(suite)
 
 
 @pytest.mark.asyncio
 async def test_module_scope_env_persists_across_tests(tmp_path: Path):
     """Module-scope env keeps state across tests in the same module.
 
-    `env.diff` here reports changes since the wrapper resource explicitly
-    captured its baseline, not per-test. Per-test isolation belongs to the
-    default TEST-scope env.
+    The wrapper resource returns both the shared environment and the
+    user-owned checkpoint that later tests compare against explicitly.
+    Per-test isolation belongs to the default TEST-scope env.
     """
     module_path = tmp_path / "test_module_env.py"
     module_path.write_text(
@@ -135,24 +126,24 @@ async def test_module_scope_env_persists_across_tests(tmp_path: Path):
             import rue
 
             @rue.resource(scope='module')
-            def shared_env(environment: rue.Environment) -> rue.Environment:
+            def shared_env(environment: rue.Environment):
                 (environment.root / 'shared.txt').write_text('shared')
-                environment.set_baseline()
-                return environment
+                return environment, environment.get_checkpoint()
 
             @rue.test
-            def test_first(shared_env: rue.Environment):
-                assert (shared_env.root / 'shared.txt').exists()
-                (shared_env.root / 'first.txt').write_text('1')
+            def test_first(shared_env):
+                environment, _checkpoint = shared_env
+                (environment.root / 'first.txt').write_text('1')
 
             @rue.test
-            def test_second(shared_env: rue.Environment):
-                assert (shared_env.root / 'shared.txt').exists()
-                assert (shared_env.root / 'first.txt').exists()
-                (shared_env.root / 'second.txt').write_text('2')
-                added = shared_env.diff.added
-                assert PurePosixPath('second.txt') in added
-                assert PurePosixPath('first.txt') in added
+            def test_second(shared_env):
+                environment, checkpoint = shared_env
+                (environment.root / 'second.txt').write_text('2')
+                added = checkpoint.compare(environment.get_checkpoint()).added
+                assert set(added) == {
+                    PurePosixPath('first.txt'),
+                    PurePosixPath('second.txt'),
+                }
             """
         )
     )
@@ -173,64 +164,37 @@ async def test_module_scope_env_is_shared_with_subprocess(
             from rue import ExecutionBackend
 
             @rue.resource(scope='module')
-            def shared_env(environment: rue.Environment) -> rue.Environment:
+            def shared_env(environment: rue.Environment):
                 environment.vars['PARENT_ONLY'] = 'parent'
                 (environment.root / 'setup.txt').write_text('setup')
-                environment.set_baseline()
-                return environment
+                return environment, environment.get_checkpoint()
 
             @rue.test.backend(ExecutionBackend.MAIN)
-            def test_001_prepare(shared_env: rue.Environment):
-                assert (shared_env.root / 'setup.txt').read_text() == 'setup'
+            def test_001_prepare(shared_env):
+                environment, _checkpoint = shared_env
+                assert (environment.root / 'setup.txt').read_text() == 'setup'
 
             @rue.test.backend(ExecutionBackend.SUBPROCESS)
-            def test_002_remote_writes(shared_env: rue.Environment):
-                shared_env.vars.restore('PARENT_ONLY')
-                shared_env.vars['WORKER_ONLY'] = 'worker'
-                (shared_env.root / 'remote.txt').write_text('remote')
+            def test_002_remote_writes(shared_env):
+                environment, _checkpoint = shared_env
+                environment.vars.restore('PARENT_ONLY')
+                environment.vars['WORKER_ONLY'] = 'worker'
+                (environment.root / 'remote.txt').write_text('remote')
 
             @rue.test.backend(ExecutionBackend.MAIN)
-            def test_003_main_sees_remote_write(shared_env: rue.Environment):
-                assert (shared_env.root / 'remote.txt').read_text() == 'remote'
-                assert shared_env.vars['WORKER_ONLY'] == 'worker'
-                assert 'PARENT_ONLY' not in shared_env.vars
-                assert {p.name for p in shared_env.diff.added} == {'remote.txt'}
+            def test_003_main_sees_remote_write(shared_env):
+                environment, checkpoint = shared_env
+                assert (environment.root / 'remote.txt').read_text() == 'remote'
+                assert environment.vars['WORKER_ONLY'] == 'worker'
+                assert 'PARENT_ONLY' not in environment.vars
+                diff = checkpoint.compare(environment.get_checkpoint())
+                assert {p.name for p in diff.added} == {'remote.txt'}
             """
         )
     )
 
     suite = await _run_module(module_path)
     assert suite.result.passed == 3, _failed(suite)
-
-
-@pytest.mark.asyncio
-async def test_per_test_env_diff_resets_for_test_scope(tmp_path: Path):
-    """Direct test-scope env injection gives each test a fresh env."""
-    module_path = tmp_path / "test_per_test_env_diff.py"
-    module_path.write_text(
-        dedent(
-            """
-            from pathlib import PurePosixPath
-
-            import rue
-
-            @rue.test
-            def test_alpha(environment: rue.Environment):
-                environment.set_baseline()
-                (environment.root / 'alpha.txt').write_text('a')
-                assert environment.diff.added == (PurePosixPath('alpha.txt'),)
-
-            @rue.test
-            def test_beta(environment: rue.Environment):
-                environment.set_baseline()
-                (environment.root / 'beta.txt').write_text('b')
-                assert environment.diff.added == (PurePosixPath('beta.txt'),)
-            """
-        )
-    )
-
-    suite = await _run_module(module_path)
-    assert suite.result.passed == 2, _failed(suite)
 
 
 @pytest.mark.asyncio

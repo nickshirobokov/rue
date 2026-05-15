@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, Callable
 
 from rue.context.runtime import (
-    RESOURCE_TRANSACTION_CONTEXT,
     SUITE_EXECUTION_CONTEXT,
 )
 from rue.context.scopes import CurrentProcessKind, Scope, ScopeContext
@@ -54,10 +53,6 @@ def register_builtin_resources(registry: ResourceRegistry) -> None:
         environment.__qualname__ = "environment"
         return environment
 
-    def environment_on_resolve(env: Environment) -> Environment:
-        env._provider_spec = RESOURCE_TRANSACTION_CONTEXT.get().provider_spec
-        return env
-
     for scope in Scope:
         registry.register_resource(
             scoped_monkeypatch(scope),
@@ -69,5 +64,4 @@ def register_builtin_resources(registry: ResourceRegistry) -> None:
             scope=scope,
             builtin=True,
             subprocess_sync=True,
-            on_resolve=environment_on_resolve,
         )

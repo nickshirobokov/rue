@@ -8,20 +8,16 @@ import subprocess
 import threading
 from collections.abc import Iterator, Mapping, MutableMapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from rue.context.scopes import Scope
-from rue.environment.checkpoint import Checkpoint, Diff
+from rue.environment.checkpoint import Checkpoint
 from rue.environment.sources import Source
 from rue.environment.storage import (
     EnvironmentStorage,
     empty_tree,
 )
 from rue.environment.sync import EnvironmentSyncState
-
-
-if TYPE_CHECKING:
-    from rue.resources.models import ResourceSpec
 
 
 _ACTIVATION_LOCK = threading.Lock()
@@ -121,9 +117,7 @@ class Environment:
     """
 
     __slots__ = (
-        "_baseline",
         "_cwd",
-        "_provider_spec",
         "_root",
         "_saved_cwd",
         "_saved_environ",
@@ -136,8 +130,6 @@ class Environment:
         self._scope = scope
         self._cwd = self._root
         self._vars = EnvironmentVars()
-        self._provider_spec: ResourceSpec | None = None
-        self._baseline: Checkpoint | None = None
 
     @classmethod
     def _build(cls, *, root: Path, scope: Scope) -> Environment:
@@ -164,29 +156,9 @@ class Environment:
         """The scope that owns this environment."""
         return self._scope
 
-    @property
-    def baseline(self) -> Checkpoint:
-        """Checkpoint captured by the most recent `set_baseline` call."""
-        if self._baseline is None:
-            msg = (
-                "Environment baseline is not set. Call "
-                "`environment.set_baseline()` before reading "
-                "`environment.baseline` or `environment.diff`."
-            )
-            raise RuntimeError(msg)
-        return self._baseline
-
-    @property
-    def diff(self) -> Diff:
-        """Diff the current filesystem against the explicit baseline."""
-        baseline = self.baseline
-        return Diff.from_checkpoints(
-            baseline, Checkpoint.from_root(self._root)
-        )
-
-    def set_baseline(self) -> None:
-        """Capture the current filesystem state for future `diff` calls."""
-        self._baseline = Checkpoint.from_root(self._root)
+    def get_checkpoint(self) -> Checkpoint:
+        """Return a filesystem checkpoint without mutating environment state."""
+        return Checkpoint.from_root(self._root)
 
     def path(self, p: str | Path = ".") -> Path:
         """Resolve `p` against the sandbox root and reject escapes."""
@@ -211,19 +183,17 @@ class Environment:
             os.chdir(target)
 
     def reset(self) -> None:
-        """Empty the sandbox, clear the cwd and explicit baseline."""
+        """Empty the sandbox and reset the cwd."""
         empty_tree(self._root)
         self._cwd = self._root
-        self._baseline = None
 
     async def load(self, source: Source) -> None:
-        """Materialize `source` into the sandbox and clear the baseline."""
+        """Materialize `source` into the sandbox and reset the cwd."""
         storage = EnvironmentStorage()
         await source.materialize(
             cache_root=storage.cache_dir,
             dst=self._root,
         )
-        self._baseline = None
         self._cwd = self._root
 
     async def exec(
@@ -297,11 +267,6 @@ class Environment:
         )
         return EnvironmentSyncState(
             root=self._root,
-            baseline_manifest=(
-                tuple(self._baseline.entries.values())
-                if self._baseline is not None
-                else None
-            ),
             overrides=dict(self._vars.overrides),
             hidden=frozenset(self._vars.hidden),
             cwd=relative_cwd,
@@ -319,11 +284,6 @@ class Environment:
         if not target_cwd.is_relative_to(self._root):
             target_cwd = self._root
         self._cwd = target_cwd
-        self._baseline = (
-            Checkpoint.from_manifest(self._root, state.baseline_manifest)
-            if state.baseline_manifest is not None
-            else None
-        )
 
     def merge_sync_states(
         self,
@@ -342,11 +302,6 @@ class Environment:
             self._vars[key] = value
         for key in update.hidden:
             self._vars.unset(key)
-        self._baseline = (
-            Checkpoint.from_manifest(self._root, update.baseline_manifest)
-            if update.baseline_manifest is not None
-            else None
-        )
 
     def __enter__(self) -> Environment:
         """Bind this env to the current process: cwd + os.environ.

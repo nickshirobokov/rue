@@ -20,7 +20,7 @@ a `rue.Environment` handle. The handle owns:
 - A default cwd inside the root.
 - An async subprocess helper (`environment.exec`).
 - A `Source` loader for materializing fixtures from empty / dir / git.
-- A diff API that reports what the consumer test added/modified/deleted.
+- A stateless checkpoint API for explicit filesystem comparisons.
 
 The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and
 **MAY** are normative.
@@ -35,10 +35,11 @@ async def test_agent(environment: rue.Environment):
     environment.vars["OPENAI_API_KEY"] = "test-key"
     await environment.load(rue.env.dir("fixtures/workspace"))
     environment.path("input.txt").write_text("seed")
-    environment.set_baseline()
+    before = environment.get_checkpoint()
     with environment:
         await my_agent.run()
-    assert "output.txt" in environment.diff.added
+    diff = before.compare(environment.get_checkpoint())
+    assert "output.txt" in {path.name for path in diff.added}
 
 
 @rue.resource(scope="module")
@@ -48,8 +49,7 @@ async def docs(environment):
         ref="0.115.0",
         subpath="docs_src",
     ))
-    environment.set_baseline()
-    yield environment
+    yield environment, environment.get_checkpoint()
 ```
 
 The public symbols are:
@@ -57,7 +57,8 @@ The public symbols are:
 - `rue.Environment` — the handle type.
 - `rue.env.empty()` / `rue.env.dir(path)` / `rue.env.git(url, ref=..., subpath=...)` —
   source constructors; pass results to `Environment.load(...)`.
-- `Environment.set_baseline()` — explicit diff baseline capture after setup.
+- `Environment.get_checkpoint()` — capture a fresh filesystem checkpoint.
+- `Checkpoint.compare(checkpoint)` — compare two user-owned checkpoints.
 - `rue.EnvironmentVars` (re-exported via `rue.environment`) — the env-var overlay type.
 
 There is no new decorator. Custom env shapers use `@rue.resource`.
@@ -115,27 +116,28 @@ source dedupe. Cache acquisition uses `fcntl.flock` wrapped in
   into a temp dir, drops `.git`, narrows by `subpath`, then clones the
   result into the cache.
 
-After materialization `load` MUST reset `cwd` to `root` and clear the
-explicit diff baseline. `load` MUST NOT capture a diff baseline.
+After materialization `load` MUST reset `cwd` to `root`. `load` MUST NOT
+capture or store a checkpoint.
 
-### Diff
+### Checkpoints And Diffs
 
-`Environment.set_baseline()` MUST capture the current filesystem state under
-`Environment.root`. `environment.diff` MUST report changes between that
-explicit baseline and the current filesystem. This is intentionally explicit:
-users may populate fixtures with `load(...)`, `path(...).write_text(...)`,
-plain `Path` operations, or custom resources before deciding which state the
+`Environment.get_checkpoint()` MUST capture the current filesystem state under
+`Environment.root` and return it to the caller. It MUST NOT store that
+checkpoint on `Environment` or mutate any environment state. Users may populate
+fixtures with `load(...)`, `path(...).write_text(...)`, plain `Path`
+operations, or custom resources before deciding which user-owned checkpoint the
 system under test should be compared against.
 
-`Environment.load(source)`, resource injection, and environment construction
-MUST NOT set the diff baseline. If `environment.diff` or
-`environment.baseline` is read before `set_baseline()` has been called, Rue
-MUST raise `RuntimeError`.
+`Checkpoint.compare(checkpoint)` MUST report changes from `self` to
+`checkpoint`. Direction is intentionally explicit:
+`before.compare(after)` reports what was added, modified, or deleted in
+`after` relative to `before`.
 
 `Diff.added`, `Diff.modified`, `Diff.deleted` are sorted tuples of
 `PurePosixPath`. A path is considered modified when size, mode, or
-symlink target differ; ties on `(size, mtime_ns)` are broken with a
-BLAKE2b content hash so timestamps cannot lie.
+symlink target differ, or when regular-file BLAKE2b content hashes captured
+inside the checkpoints differ. Checkpoint comparison MUST use checkpoint data,
+not filesystem reads from an older root state.
 
 ## Storage Layout
 
@@ -179,15 +181,14 @@ directory.
 the `SyncableResource[EnvironmentSyncState]` protocol via virtual ABC
 registration. Environment files are shared by path, so the wire payload
 contains no file bytes and no file deltas. It only carries process-local
-object state: root path, explicit diff baseline, environment variable overlay,
-and cwd.
+object state: root path, environment variable overlay, and cwd.
 
 | Direction | Method | Content |
 | --- | --- | --- |
-| Parent → worker | `get_sync_state()` | `root`, explicit diff baseline manifest, vars, cwd. |
-| Worker hydrate | `from_sync_state(state)` | Points the worker handle at `root`, applies vars/cwd/baseline. |
-| Worker → parent | `get_sync_state()` | Updated vars/cwd/baseline. |
-| Parent merge | `merge_sync_states(baseline, update)` | Replaces vars/cwd/baseline from the worker update. |
+| Parent → worker | `get_sync_state()` | `root`, vars, cwd. |
+| Worker hydrate | `from_sync_state(state)` | Points the worker handle at `root`, applies vars/cwd. |
+| Worker → parent | `get_sync_state()` | Updated vars/cwd. |
+| Parent merge | `merge_sync_states(baseline, update)` | Replaces vars/cwd from the worker update. |
 
 For `Scope.TEST` envs the resolver short-circuits at `get_snapshot`, so
 test-scope environments never sync; their `apply_transfer()` is a no-op
@@ -208,7 +209,6 @@ async-generator factory that:
 4. Calls `EnvironmentStorage.release(root)` in `finally`, except for borrowed
    module/suite roots inside test subprocesses.
 
-`on_resolve` stamps the provider spec onto the env (telemetry hook). There is
-no injection-time diff baseline capture; consumers call `set_baseline()`
-explicitly. The factory is intentionally cheap because subprocess workers
-re-run it.
+There is no injection-time checkpoint capture, observability hook, or hidden
+diff state. Consumers call `get_checkpoint()` explicitly. The factory is
+intentionally cheap because subprocess workers re-run it.

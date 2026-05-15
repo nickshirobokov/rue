@@ -22,7 +22,7 @@ from rue.environment import (
     EnvironmentVars,
     GitSource,
 )
-from rue.environment.checkpoint import Checkpoint, Diff
+from rue.environment.checkpoint import Checkpoint
 from rue.environment.sources import (
     dir as env_dir,
     empty as env_empty,
@@ -114,12 +114,12 @@ def test_diff_added_modified_deleted(env_root: Path) -> None:
     (env_root / "kept.txt").write_text("same")
     (env_root / "modified.txt").write_text("before")
     (env_root / "removed.txt").write_text("bye")
-    baseline = Checkpoint.from_root(env_root)
+    before = Checkpoint.from_root(env_root)
     (env_root / "modified.txt").write_text("after-after")
     (env_root / "removed.txt").unlink()
     (env_root / "added.txt").write_text("hi")
-    current = Checkpoint.from_root(env_root)
-    diff = Diff.from_checkpoints(baseline, current)
+    diff = before.compare(Checkpoint.from_root(env_root))
+
     assert diff.added == (PurePosixPath("added.txt"),)
     assert diff.modified == (PurePosixPath("modified.txt"),)
     assert diff.deleted == (PurePosixPath("removed.txt"),)
@@ -131,120 +131,45 @@ def test_diff_detects_symlink_target_change(env_root: Path) -> None:
     target_a.write_text("a")
     target_b.write_text("b")
     (env_root / "link").symlink_to("a.txt")
-    baseline = Checkpoint.from_root(env_root)
+    before = Checkpoint.from_root(env_root)
     (env_root / "link").unlink()
     (env_root / "link").symlink_to("b.txt")
-    current = Checkpoint.from_root(env_root)
-    diff = Diff.from_checkpoints(baseline, current)
-    assert diff.modified == (PurePosixPath("link"),)
 
-
-def test_diff_uses_hash_when_mtime_differs_across_trees(
-    tmp_path: Path,
-) -> None:
-    """Hash fallback breaks size/mtime ties between two distinct roots."""
-    parent_root = tmp_path / "parent"
-    parent_root.mkdir()
-    worker_root = tmp_path / "worker"
-    worker_root.mkdir()
-    (parent_root / "x.txt").write_text("aaaa")
-    (worker_root / "x.txt").write_text("aaaa")
-    new_mtime = (
-        Checkpoint.from_root(parent_root)
-        .entries[PurePosixPath("x.txt")]
-        .mtime_ns
-        + 1_000_000
+    assert before.compare(Checkpoint.from_root(env_root)).modified == (
+        PurePosixPath("link"),
     )
-    os.utime(worker_root / "x.txt", ns=(new_mtime, new_mtime))
-    parent = Checkpoint.from_root(parent_root)
-    worker = Checkpoint.from_root(worker_root)
-    assert Diff.from_checkpoints(parent, worker).modified == ()
 
 
-def test_diff_detects_real_change_across_trees(tmp_path: Path) -> None:
-    parent_root = tmp_path / "parent"
-    parent_root.mkdir()
-    worker_root = tmp_path / "worker"
-    worker_root.mkdir()
-    (parent_root / "x.txt").write_text("aaaa")
-    (worker_root / "x.txt").write_text("zzzz")
-    parent_mtime = (
-        Checkpoint.from_root(parent_root)
-        .entries[PurePosixPath("x.txt")]
-        .mtime_ns
-    )
-    os.utime(
-        worker_root / "x.txt",
-        ns=(parent_mtime + 1_000_000, parent_mtime + 1_000_000),
-    )
-    parent = Checkpoint.from_root(parent_root)
-    worker = Checkpoint.from_root(worker_root)
-    diff = Diff.from_checkpoints(parent, worker)
-    assert diff.modified == (PurePosixPath("x.txt"),)
-
-
-def test_environment_diff_requires_explicit_baseline(env: Environment) -> None:
-    with pytest.raises(RuntimeError, match="baseline is not set"):
-        _ = env.diff
-
-
-def test_environment_set_baseline_includes_prior_path_writes(
-    env: Environment, env_root: Path
+def test_checkpoint_is_value_snapshot(
+    env_root: Path,
 ) -> None:
-    (env_root / "out.txt").write_text("hi")
-    env.set_baseline()
-    (env_root / "result.txt").write_text("done")
+    target = env_root / "x.txt"
+    target.write_text("aaaa")
+    before = Checkpoint.from_root(env_root)
+    target.write_text("zzzz")
+    after = Checkpoint.from_root(env_root)
 
-    diff = env.diff
-    assert diff.added == (PurePosixPath("result.txt"),)
-
-
-@pytest.mark.asyncio
-async def test_environment_load_does_not_set_baseline(
-    env: Environment, env_root: Path, tmp_path: Path
-) -> None:
-    src = tmp_path / "src"
-    src.mkdir()
-    (src / "fixture.txt").write_text("fixture")
-
-    await env.load(DirSource(path=src))
-
-    assert (env_root / "fixture.txt").read_text() == "fixture"
-    with pytest.raises(RuntimeError, match="baseline is not set"):
-        _ = env.diff
+    assert before.compare(after).modified == (PurePosixPath("x.txt"),)
 
 
-def test_environment_reset_clears_baseline(
+def test_environment_get_checkpoint_is_side_effect_free(
     env: Environment, env_root: Path
 ) -> None:
     (env_root / "before.txt").write_text("before")
-    env.set_baseline()
-    env.reset()
-
-    with pytest.raises(RuntimeError, match="baseline is not set"):
-        _ = env.diff
-
-
-def test_environment_baseline_property_returns_explicit_baseline(
-    env: Environment, env_root: Path
-) -> None:
-    (env_root / "tracked.txt").write_text("tracked")
-    env.set_baseline()
-
-    assert PurePosixPath("tracked.txt") in env.baseline.entries
-
-
-def test_environment_diff_uses_latest_explicit_baseline(
-    env: Environment, env_root: Path
-) -> None:
-    (env_root / "setup.txt").write_text("setup")
-    env.set_baseline()
-    (env_root / "ignored.txt").write_text("ignored")
-    env.set_baseline()
+    before = env.get_checkpoint()
+    assert before.compare(env.get_checkpoint()).empty
     (env_root / "after.txt").write_text("after")
 
-    diff = env.diff
-    assert diff.added == (PurePosixPath("after.txt"),)
+    assert before.compare(env.get_checkpoint()).added == (
+        PurePosixPath("after.txt"),
+    )
+
+
+def test_environment_reset_leaves_fresh_checkpoint(env: Environment) -> None:
+    env.path("before.txt").write_text("before")
+    env.reset()
+
+    assert env.get_checkpoint().entries == {}
 
 
 def test_activation_binds_environ_and_cwd(
@@ -463,9 +388,14 @@ def test_environment_sync_shares_root_and_merges_object_state(
     (parent_root / "baseline.txt").write_text("baseline")
     parent = Environment._build(root=parent_root, scope=Scope.MODULE)
     parent.vars["X"] = "ovl"
-    parent.set_baseline()
 
     state = parent.get_sync_state()
+    assert set(EnvironmentSyncState.__dataclass_fields__) == {
+        "root",
+        "overrides",
+        "hidden",
+        "cwd",
+    }
     worker = Environment._build(root=tmp_path / "worker", scope=Scope.MODULE)
     worker.from_sync_state(state)
 
@@ -476,7 +406,6 @@ def test_environment_sync_shares_root_and_merges_object_state(
     worker.vars["Y"] = "worker"
     (parent_root / "work").mkdir()
     worker.chdir("work")
-    worker.set_baseline()
     (parent_root / "work" / "added.txt").write_text("from-worker")
 
     update = worker.get_sync_state()
@@ -484,7 +413,6 @@ def test_environment_sync_shares_root_and_merges_object_state(
 
     parent.merge_sync_states(state, update)
     assert (parent_root / "work" / "added.txt").read_text() == "from-worker"
-    assert parent.diff.added == (PurePosixPath("work/added.txt"),)
     with pytest.raises(KeyError):
         _ = parent.vars["X"]
     assert parent.vars["Y"] == "worker"
