@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import subprocess
 import threading
 from collections.abc import Iterator, Mapping, MutableMapping, Sequence
@@ -21,9 +22,7 @@ from rue.environment.storage import (
 from rue.environment.sync import (
     EnvironmentSyncState,
     FileDelta,
-    apply_deltas,
-    compute_deltas,
-    manifest_to_snapshot,
+    FileDeltaKind,
 )
 
 
@@ -120,7 +119,7 @@ class Environment:
 
     Implements the ``SyncableResource[EnvironmentSyncState]`` protocol
     structurally; the ABC subclass relationship is established lazily by
-    ``rue.environment.builtin`` to break a module-load cycle with
+    ``rue.resources.builtins`` to break a module-load cycle with
     ``rue.resources``.
 
     Construction is restricted to ``_build`` because each instance needs to
@@ -193,9 +192,7 @@ class Environment:
         baseline = self._load_baseline
         if self._consumer_order:
             baseline = self._baselines[self._consumer_order[-1]]
-        return Diff.from_snapshots(
-            baseline, Snapshot.from_root(self._root)
-        )
+        return Diff.from_snapshots(baseline, Snapshot.from_root(self._root))
 
     def path(self, p: str | Path = ".") -> Path:
         """Resolve `p` against the sandbox root and reject escapes."""
@@ -322,10 +319,24 @@ class Environment:
         manifest_snapshot = baseline_snapshot or Snapshot.from_root(self._root)
         deltas: tuple[FileDelta, ...] = ()
         if baseline_snapshot is not None:
-            deltas = compute_deltas(
-                baseline=baseline_snapshot,
-                current_root=self._root,
-            )
+            current = Snapshot.from_root(self._root)
+            diff = Diff.from_snapshots(baseline_snapshot, current)
+            delta_list: list[FileDelta] = []
+            for path in diff.added:
+                delta_list.append(
+                    FileDelta.from_path(self._root, path, FileDeltaKind.ADDED)
+                )
+            for path in diff.modified:
+                delta_list.append(
+                    FileDelta.from_path(
+                        self._root, path, FileDeltaKind.MODIFIED
+                    )
+                )
+            for path in diff.deleted:
+                delta_list.append(
+                    FileDelta(path=path, kind=FileDeltaKind.DELETED)
+                )
+            deltas = tuple(delta_list)
         relative_cwd = PurePosixPath(
             self._cwd.resolve().relative_to(self._root).as_posix() or "."
         )
@@ -354,7 +365,7 @@ class Environment:
         if not target_cwd.is_relative_to(self._root):
             target_cwd = self._root
         self._cwd = target_cwd
-        self._subprocess_baseline = manifest_to_snapshot(
+        self._subprocess_baseline = Snapshot.from_manifest(
             self._root, state.baseline_manifest
         )
         self._load_baseline = self._subprocess_baseline
@@ -368,7 +379,28 @@ class Environment:
     ) -> None:
         """Apply worker-emitted deltas back into the parent root."""
         del baseline
-        apply_deltas(root=self._root, deltas=update.deltas)
+        for delta in update.deltas:
+            target = self._root / delta.path
+            match delta.kind:
+                case FileDeltaKind.DELETED:
+                    if target.is_symlink() or target.exists():
+                        if target.is_dir() and not target.is_symlink():
+                            shutil.rmtree(target)
+                        else:
+                            target.unlink()
+                case FileDeltaKind.ADDED | FileDeltaKind.MODIFIED:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    if target.is_symlink() or target.exists():
+                        if target.is_dir() and not target.is_symlink():
+                            shutil.rmtree(target)
+                        else:
+                            target.unlink()
+                    if delta.symlink_target is not None:
+                        os.symlink(delta.symlink_target, target)
+                        continue
+                    payload = delta.content or b""
+                    target.write_bytes(payload)
+                    os.chmod(target, delta.mode)
         for key, value in update.overrides.items():
             self._vars[key] = value
         for key in update.hidden:

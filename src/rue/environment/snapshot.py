@@ -84,6 +84,18 @@ class Snapshot:
                 )
         return cls(root=root, entries=entries)
 
+    @classmethod
+    def from_manifest(
+        cls,
+        root: Path,
+        manifest: tuple[FileEntry, ...],
+    ) -> Snapshot:
+        """Build a snapshot keyed by path from a manifest tuple."""
+        return cls(
+            root=root,
+            entries={entry.path: entry for entry in manifest},
+        )
+
 
 def hash_file(path: Path) -> str:
     """Return a BLAKE2b digest of `path`'s byte contents."""
