@@ -10,7 +10,7 @@ from uuid import UUID
 
 from rue.context.collectors import CURRENT_METRIC_RESULTS
 from rue.context.process_pool import LazyProcessPool
-from rue.context.runtime import CURRENT_SUITE_CONTEXT, ModuleContext, bind
+from rue.context.runtime import SUITE_EXECUTION_CONTEXT, ModuleContext, bind
 from rue.context.scopes import Scope
 from rue.events import SuiteEventsReceiver
 from rue.resources import DependencyResolver
@@ -45,7 +45,7 @@ class ExecutableSuite:
     result: ExecutedSuite | None = field(default=None, init=False)
 
     def _concurrency_limit(self) -> int:
-        context = CURRENT_SUITE_CONTEXT.get()
+        context = SUITE_EXECUTION_CONTEXT.get()
         config = context.config
         return (
             config.concurrency
@@ -55,7 +55,7 @@ class ExecutableSuite:
 
     async def execute(self) -> ExecutedSuite:
         """Execute this suite and return results."""
-        context = CURRENT_SUITE_CONTEXT.get()
+        context = SUITE_EXECUTION_CONTEXT.get()
         config = context.config
         self.result = ExecutedSuite(
             suite_execution_id=self.suite_execution_id,
@@ -158,7 +158,7 @@ class ExecutableSuite:
                 self._queue.tests
             )
             self._completed_test_executions = {}
-            context = CURRENT_SUITE_CONTEXT.get()
+            context = SUITE_EXECUTION_CONTEXT.get()
             config = context.config
             try:
                 for step in self._queue.steps:
@@ -271,7 +271,7 @@ class ExecutableSuite:
         if not execution.result.status.is_failure:
             return
         self._failure_count += 1
-        context = CURRENT_SUITE_CONTEXT.get()
+        context = SUITE_EXECUTION_CONTEXT.get()
         maxfail = context.config.maxfail
         if maxfail and self._failure_count >= maxfail:
             self.stop_flag = True

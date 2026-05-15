@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import fcntl
-import hashlib
 import os
 import platform
 import shutil
@@ -16,7 +15,7 @@ from pathlib import Path
 from uuid import UUID
 
 from rue.context.models import ScopeOwner
-from rue.context.scopes import CurrentProcessKind, Scope
+from rue.context.scopes import CurrentProcessKind
 
 
 class _CloneStrategy(StrEnum):
@@ -155,13 +154,12 @@ class EnvironmentStorage:
             self._ensure_suite_lock(suite_id)
         scope_dir = self.suite_dir(suite_id) / owner.scope.value
         scope_dir.mkdir(parents=True, exist_ok=True)
-        owner_key = _owner_key(owner)
         process_tag = (
             "main"
             if process_kind is CurrentProcessKind.MAIN
             else f"p{os.getpid()}"
         )
-        env_root = scope_dir / owner_key / process_tag
+        env_root = scope_dir / owner.key / process_tag
         if env_root.exists():
             shutil.rmtree(env_root)
         env_root.mkdir(parents=True)
@@ -248,25 +246,6 @@ class EnvironmentStorage:
                 pass
             os.close(lock.file_handle)
         shutil.rmtree(suite_dir, ignore_errors=True)
-
-
-def _owner_key(owner: ScopeOwner) -> str:
-    """Return a deterministic short key identifying a scope owner.
-
-    Keys are stable across parent and worker processes so that reflink-clone
-    targets land at the same path on both sides.
-    """
-    parts: list[str] = [owner.scope.value]
-    match owner.scope:
-        case Scope.SUITE:
-            parts.append(str(owner.suite_execution_id))
-        case Scope.MODULE:
-            parts.append(str(owner.suite_execution_id))
-            parts.append(str(owner.module_path))
-        case Scope.TEST:
-            parts.append(str(owner.test_execution_id))
-    raw = "|".join(parts).encode("utf-8")
-    return hashlib.blake2b(raw, digest_size=12).hexdigest()
 
 
 __all__ = [

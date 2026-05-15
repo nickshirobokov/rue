@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 
 from rue.context.runtime import (
-    CURRENT_TEST,
+    TEST_EXECUTION_CONTEXT,
     ModuleContext,
     SuiteContext,
     TestContext,
@@ -27,7 +27,7 @@ def test_module_context_exposes_module_owner_without_test_owner(
             with pytest.raises(RuntimeError, match="Test-scoped resources"):
                 ScopeContext.current_owner(Scope.TEST)
             with pytest.raises(LookupError):
-                CURRENT_TEST.get()
+                TEST_EXECUTION_CONTEXT.get()
 
 
 def test_test_context_layers_test_owner_over_active_module(

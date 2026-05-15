@@ -19,7 +19,7 @@ from rue.cli.rendering.live import SuiteLiveRenderer
 from rue.cli.rendering.metrics import MetricSuiteView
 from rue.cli.rendering.state import TerminalSuiteState
 from rue.cli.rendering.suite import SuiteView, TestExecutionView
-from rue.context.runtime import CURRENT_SUITE_CONTEXT
+from rue.context.runtime import SUITE_EXECUTION_CONTEXT
 from rue.events import SuiteEventsProcessor
 from rue.testing.execution.test.models import TestStatus
 
@@ -253,7 +253,7 @@ class TerminalExperimentReporter(SuiteEventsProcessor):
 
     async def on_suite_execution_start(self, suite: ExecutedSuite) -> None:
         """Start tracking an experiment variant suite."""
-        variant = CURRENT_SUITE_CONTEXT.get().experiment_variant
+        variant = SUITE_EXECUTION_CONTEXT.get().experiment_variant
         label = "suite" if variant is None else variant.label
         async with self._lock:
             self._renderer.states[suite.suite_execution_id] = ExperimentSuiteState(

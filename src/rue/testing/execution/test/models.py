@@ -16,7 +16,7 @@ from uuid import UUID
 from rue.assertions.models import AssertionResult
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
-    CURRENT_TEST,
+    TEST_EXECUTION_CONTEXT,
     SuiteContext,
     bind,
 )
@@ -218,7 +218,7 @@ class LoadedTestDef:
             try:
                 kwargs = await resolver.resolve_graph_deps(
                     resolver.registry.get_graph(
-                        CURRENT_TEST.get().test_execution_id
+                        TEST_EXECUTION_CONTEXT.get().test_execution_id
                     ),
                     params,
                     consumer_spec=self.spec,

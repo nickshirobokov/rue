@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
-    CURRENT_RESOURCE_HOOK_CONTEXT,
+    RESOURCE_TRANSACTION_CONTEXT,
     bind,
 )
 from rue.context.scopes import Scope
@@ -70,11 +70,11 @@ def metric[**P](
     is_async_generator = inspect.isasyncgenfunction(fn)
 
     def on_resolve_hook(m: Metric) -> Metric:
-        m.metadata.identity = CURRENT_RESOURCE_HOOK_CONTEXT.get().provider_spec
+        m.metadata.identity = RESOURCE_TRANSACTION_CONTEXT.get().provider_spec
         return m
 
     def on_injection_hook(m: Metric) -> Metric:
-        hook_context = CURRENT_RESOURCE_HOOK_CONTEXT.get()
+        hook_context = RESOURCE_TRANSACTION_CONTEXT.get()
         consumer = hook_context.consumer_spec
         if consumer not in m.metadata.consumers:
             m.metadata.consumers.append(consumer)

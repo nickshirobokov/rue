@@ -18,7 +18,7 @@ from pydantic_ai import ModelRequest, ModelResponse
 from pydantic_core import ArgsKwargs, SchemaValidator
 from typing_extensions import TypeVar
 
-from rue.context.runtime import CURRENT_TEST_TRACER
+from rue.context.runtime import AVAILABLE_TEST_TRACER
 from rue.resources.sut.models import CapturedOutput, CapturedStream
 from rue.resources.sut.output import (
     SUTOutputCapture,
@@ -99,7 +99,7 @@ class SUT(SyncableResource[SUTSyncState], Generic[InstanceT]):
         self._output_capture = SUTOutputCapture()
         self._tracer = SUTTracer(resolved_sut_name)
         self._name = resolved_sut_name
-        test_tracer = CURRENT_TEST_TRACER.get()
+        test_tracer = AVAILABLE_TEST_TRACER.get()
         backend = (
             None
             if test_tracer is None

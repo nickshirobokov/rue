@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import platform
 import shutil
@@ -29,6 +30,25 @@ class ScopeOwner:
     test_execution_id: UUID | None = None
     suite_execution_id: UUID | None = None
     module_path: Path | None = None
+
+    @property
+    def key(self) -> str:
+        """Stable short id for this owner (paths, cache keys, workers).
+
+        Deterministic across parent and worker processes so reflink-clone
+        targets land at the same path on both sides.
+        """
+        parts: list[str] = [self.scope.value]
+        match self.scope:
+            case Scope.SUITE:
+                parts.append(str(self.suite_execution_id))
+            case Scope.MODULE:
+                parts.append(str(self.suite_execution_id))
+                parts.append(str(self.module_path))
+            case Scope.TEST:
+                parts.append(str(self.test_execution_id))
+        raw = "|".join(parts).encode("utf-8")
+        return hashlib.blake2b(raw, digest_size=12).hexdigest()
 
 
 class SuiteHost(BaseModel):
@@ -96,3 +116,6 @@ class SuiteHost(BaseModel):
                 "0.0.0",
             ),
         )
+
+
+from rue.context.scopes import Scope  # noqa: E402

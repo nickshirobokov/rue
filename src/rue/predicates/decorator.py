@@ -7,7 +7,7 @@ from inspect import BoundArguments, Parameter, signature
 from typing import Any, Protocol, TypeVar, overload, ParamSpec, Concatenate
 
 from rue.context.collectors import CURRENT_PREDICATE_RESULTS
-from rue.context.runtime import CURRENT_TEST_TRACER
+from rue.context.runtime import AVAILABLE_TEST_TRACER
 from rue.predicates.models import PredicateResult
 from rue.telemetry.otel.backend import OtelTelemetryBackend
 from rue.telemetry.otel.runtime import otel_runtime
@@ -135,7 +135,7 @@ def predicate(
             async def async_wrapper(*args: Any, **kwargs: Any) -> bool:
                 bound = sig.bind(*args, **kwargs)
                 bound.apply_defaults()
-                tracer = CURRENT_TEST_TRACER.get()
+                tracer = AVAILABLE_TEST_TRACER.get()
                 backend = (
                     None
                     if tracer is None
@@ -168,7 +168,7 @@ def predicate(
         def sync_wrapper(*args: Any, **kwargs: Any) -> bool:
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
-            tracer = CURRENT_TEST_TRACER.get()
+            tracer = AVAILABLE_TEST_TRACER.get()
             backend = (
                 None
                 if tracer is None

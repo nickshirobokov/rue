@@ -5,8 +5,8 @@ from typing import Any, cast
 
 from rue.context.models import ScopeOwner
 from rue.context.runtime import (
-    CURRENT_SUITE_CONTEXT,
-    CURRENT_TEST,
+    SUITE_EXECUTION_CONTEXT,
+    TEST_EXECUTION_CONTEXT,
     ResourceHookContext,
 )
 from rue.context.scopes import CurrentProcessKind, Scope, ScopeContext
@@ -79,7 +79,7 @@ class DependencyResolver:
         with self.patches:
             if graph is None:
                 graph = self.registry.get_graph(
-                    CURRENT_TEST.get().test_execution_id
+                    TEST_EXECUTION_CONTEXT.get().test_execution_id
                 )
             definition = self.registry.get_definition(spec)
             direct_dependencies = graph.dependencies[spec]
@@ -162,7 +162,7 @@ class DependencyResolver:
         consumer_spec: Spec,
     ) -> SubprocessResourceSnapshot:
         """Build the subprocess resource payload for one test execution."""
-        test_execution_id = CURRENT_TEST.get().test_execution_id
+        test_execution_id = TEST_EXECUTION_CONTEXT.get().test_execution_id
         graph = self.registry.get_graph(test_execution_id)
         states = {}
         for spec in graph.resolution_order:
@@ -189,7 +189,7 @@ class DependencyResolver:
         consumer_spec: Spec,
     ) -> None:
         """Hydrate subprocess-safe resources into this resolver."""
-        test_execution_id = CURRENT_TEST.get().test_execution_id
+        test_execution_id = TEST_EXECUTION_CONTEXT.get().test_execution_id
         graph = snapshot.graph
         self.registry.save_graph(test_execution_id, graph)
         for spec, state in snapshot.states.items():
@@ -334,7 +334,7 @@ class DependencyResolver:
         teardowns: Sequence[ScheduledTeardown],
     ) -> list[SubprocessResourceError]:
         teardown_errors: list[SubprocessResourceError] = []
-        process = CURRENT_SUITE_CONTEXT.get().process
+        process = SUITE_EXECUTION_CONTEXT.get().process
 
         for teardown in reversed(teardowns):
             spec = teardown.spec

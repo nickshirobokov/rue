@@ -4,7 +4,7 @@ from textwrap import dedent
 import pytest
 
 from rue.config import Config
-from rue.context.runtime import CURRENT_SUITE_CONTEXT
+from rue.context.runtime import SUITE_EXECUTION_CONTEXT
 from rue.events import SessionEventsReceiver, SuiteEventsProcessor
 from rue.experiments import registry as experiment_registry
 from rue.experiments.executable import ExecutableExperiment
@@ -29,18 +29,18 @@ class SessionCaptureProcessor(SuiteEventsProcessor):
 
     async def on_suite_execution_start(self, suite) -> None:
         _ = suite
-        self.started.append(CURRENT_SUITE_CONTEXT.get().experiment_variant.label)
+        self.started.append(SUITE_EXECUTION_CONTEXT.get().experiment_variant.label)
 
     async def on_test_execution_complete(self, execution, suite) -> None:
         _ = suite
         spec = execution.definition.spec
         if spec.suffix is None and spec.case_id is None:
             self.test_executions.append(
-                CURRENT_SUITE_CONTEXT.get().experiment_variant.label
+                SUITE_EXECUTION_CONTEXT.get().experiment_variant.label
             )
 
     async def on_suite_execution_complete(self, suite) -> None:
-        variant = CURRENT_SUITE_CONTEXT.get().experiment_variant
+        variant = SUITE_EXECUTION_CONTEXT.get().experiment_variant
         self.completed.append((variant.label, suite.result.total))
 
 

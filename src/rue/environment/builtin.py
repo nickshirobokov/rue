@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, Callable
 
 from rue.context.runtime import (
-    CURRENT_RESOURCE_HOOK_CONTEXT,
-    CURRENT_SUITE_CONTEXT,
+    RESOURCE_TRANSACTION_CONTEXT,
+    SUITE_EXECUTION_CONTEXT,
 )
 from rue.context.scopes import Scope, ScopeContext
 from rue.environment.runtime import Environment
@@ -30,7 +30,7 @@ def make_environment_factory(
     """
 
     async def environment() -> AsyncGenerator[Environment, None]:
-        suite_context = CURRENT_SUITE_CONTEXT.get()
+        suite_context = SUITE_EXECUTION_CONTEXT.get()
         owner = ScopeContext.current_owner(scope)
         storage = EnvironmentStorage()
         root = storage.allocate(
@@ -51,13 +51,13 @@ def make_environment_factory(
 
 def on_resolve(env: Environment) -> Environment:
     """Stamp the provider spec onto the env for telemetry/debugging."""
-    env._provider_spec = CURRENT_RESOURCE_HOOK_CONTEXT.get().provider_spec
+    env._provider_spec = RESOURCE_TRANSACTION_CONTEXT.get().provider_spec
     return env
 
 
 def on_injection(env: Environment) -> Environment:
     """Record the per-consumer baseline used by ``env.diff``."""
-    consumer = CURRENT_RESOURCE_HOOK_CONTEXT.get().consumer_spec
+    consumer = RESOURCE_TRANSACTION_CONTEXT.get().consumer_spec
     env._mark_consumer_baseline(consumer)
     return env
 

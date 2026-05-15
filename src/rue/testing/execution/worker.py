@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from rue.context.runtime import (
-    CURRENT_TEST_TRACER,
+    AVAILABLE_TEST_TRACER,
     ModuleContext,
     TestContext,
     bind,
@@ -62,7 +62,7 @@ async def _execute_remote_test(
         payload.context,
         ModuleContext(payload.spec.locator.module_path),
         test_ctx,
-        bind(CURRENT_TEST_TRACER, tracer),
+        bind(AVAILABLE_TEST_TRACER, tracer),
     ):
         resource_update = None
         try:

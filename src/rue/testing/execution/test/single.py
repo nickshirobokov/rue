@@ -12,9 +12,9 @@ from uuid import UUID
 
 from rue.context.process_pool import LazyProcessPool
 from rue.context.runtime import (
-    CURRENT_SUITE_CONTEXT,
-    CURRENT_TEST,
-    CURRENT_TEST_TRACER,
+    AVAILABLE_TEST_TRACER,
+    SUITE_EXECUTION_CONTEXT,
+    TEST_EXECUTION_CONTEXT,
     TestContext,
     bind,
 )
@@ -59,7 +59,7 @@ class SingleTest(ExecutableTest):
         """Initialize derived execution collaborators."""
         if self.definition.spec.modifiers:
             raise ValueError("SingleTest should not have modifiers")
-        context = CURRENT_SUITE_CONTEXT.get()
+        context = SUITE_EXECUTION_CONTEXT.get()
         self.tracer = TestTracer.build(
             config=context.config,
             suite_execution_id=context.suite_execution_id,
@@ -112,12 +112,12 @@ class SingleTest(ExecutableTest):
         self,
         resolver: DependencyResolver,
     ) -> ExecutedTest:
-        test_execution_id = CURRENT_TEST.get().test_execution_id
+        test_execution_id = TEST_EXECUTION_CONTEXT.get().test_execution_id
         semaphore = (
             self.semaphore if self.semaphore else contextlib.nullcontext()
         )
 
-        with bind(CURRENT_TEST_TRACER, self.tracer):
+        with bind(AVAILABLE_TEST_TRACER, self.tracer):
             self.tracer.start(
                 self.definition,
                 test_execution_id=test_execution_id,
@@ -164,8 +164,8 @@ class SingleTest(ExecutableTest):
         self,
         resolver: DependencyResolver,
     ) -> ExecutedTest:
-        suite_context = CURRENT_SUITE_CONTEXT.get()
-        test_execution_id = CURRENT_TEST.get().test_execution_id
+        suite_context = SUITE_EXECUTION_CONTEXT.get()
+        test_execution_id = TEST_EXECUTION_CONTEXT.get().test_execution_id
         remote_result: RemoteTestExecutionResult
         subprocess_result: TestResult
 

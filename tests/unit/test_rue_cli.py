@@ -18,7 +18,7 @@ from rue.cli.rendering.terminal import (
 from rue.cli.rendering.tests import TestReport
 from rue.config import Config
 from rue.context.models import SuiteHost
-from rue.context.runtime import CURRENT_SUITE_CONTEXT
+from rue.context.runtime import SUITE_EXECUTION_CONTEXT
 from rue.events import SuiteEventsProcessor, SuiteEventsReceiver
 from rue.experiments.models import (
     ExperimentSpec,
@@ -291,7 +291,7 @@ def test_cli_resolves_processors_and_injects_turso_recorder(
 
     class FakeExecutableSuite:
         def __init__(self, *, items, suite_execution_id, resolver) -> None:
-            context = CURRENT_SUITE_CONTEXT.get()
+            context = SUITE_EXECUTION_CONTEXT.get()
             captured["context"] = context
             captured["config"] = context.config
             captured["processors"] = SuiteEventsReceiver.current().processors
@@ -528,7 +528,7 @@ def test_run_and_status_share_selection_parsing(
             def __init__(self, *, items, suite_execution_id, resolver) -> None:
                 del items, suite_execution_id, resolver
                 captured["verbosity"] = (
-                    CURRENT_SUITE_CONTEXT.get().config.verbosity
+                    SUITE_EXECUTION_CONTEXT.get().config.verbosity
                 )
 
             async def execute(self):

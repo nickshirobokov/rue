@@ -16,7 +16,7 @@ from opentelemetry.sdk.trace import (
 )
 from opentelemetry.trace import Span
 
-from rue.context.runtime import CURRENT_SUT_SPAN_IDS, bind
+from rue.context.runtime import SUT_SPAN_IDS, bind
 from rue.telemetry.otel.runtime import OtelTraceSession, otel_runtime
 
 
@@ -180,8 +180,8 @@ class SUTTracer:
             f"sut.{self.name}.{method_name}"
         ) as span:
             span_id = self._set_span_attrs(span, method_name)
-            span_ids = (*CURRENT_SUT_SPAN_IDS.get(), span_id)
-            with bind(CURRENT_SUT_SPAN_IDS, span_ids):
+            span_ids = (*SUT_SPAN_IDS.get(), span_id)
+            with bind(SUT_SPAN_IDS, span_ids):
                 _set_input_attrs(span, args, kwargs)
                 result = original_callable(*args, **kwargs)
                 _set_output_attrs(span, result)
@@ -198,8 +198,8 @@ class SUTTracer:
             f"sut.{self.name}.{method_name}"
         ) as span:
             span_id = self._set_span_attrs(span, method_name)
-            span_ids = (*CURRENT_SUT_SPAN_IDS.get(), span_id)
-            with bind(CURRENT_SUT_SPAN_IDS, span_ids):
+            span_ids = (*SUT_SPAN_IDS.get(), span_id)
+            with bind(SUT_SPAN_IDS, span_ids):
                 _set_input_attrs(span, args, kwargs)
                 result = await cast(
                     "Awaitable[object]",

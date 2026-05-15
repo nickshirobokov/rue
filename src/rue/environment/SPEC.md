@@ -185,7 +185,7 @@ otherwise. The strategy is detected once at module import.
 For every `Scope`, `register_builtin_resources` registers an
 async-generator factory that:
 
-1. Reads `CURRENT_SUITE_CONTEXT` and the current owner.
+1. Reads `SUITE_EXECUTION_CONTEXT` and the current owner.
 2. Calls `EnvironmentStorage.allocate(suite_id, owner, process_kind=...)`.
 3. `yield`s an `Environment._build(root=..., scope=...)`.
 4. Calls `EnvironmentStorage.release(root)` in `finally`.
