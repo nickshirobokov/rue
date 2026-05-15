@@ -31,8 +31,8 @@ class ScopeOwner:
     module_path: Path | None = None
 
 
-class SuiteEnvironment(BaseModel):
-    """Metadata about the environment where tests were executed."""
+class SuiteHost(BaseModel):
+    """Metadata about the host machine where tests were executed."""
 
     commit_hash: str | None = None
     branch: str | None = None
@@ -45,8 +45,8 @@ class SuiteEnvironment(BaseModel):
     rue_version: str
 
     @classmethod
-    def build_from_current(cls) -> SuiteEnvironment:
-        """Build environment metadata from the current process."""
+    def build_from_current(cls) -> SuiteHost:
+        """Build host metadata from the current process."""
         commit_hash = None
         branch = None
         dirty = None

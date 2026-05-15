@@ -59,7 +59,7 @@ class ExecutableSuite:
         config = context.config
         self.result = ExecutedSuite(
             suite_execution_id=self.suite_execution_id,
-            environment=context.environment,
+            host=context.host,
         )
         receiver = SuiteEventsReceiver.current()
         await receiver.on_suite_execution_start(self.result)

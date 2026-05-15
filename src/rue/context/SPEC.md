@@ -43,7 +43,7 @@ block-beta
   final["Suite result<br/>DependencyResolver.teardown()<br/>TursoSuiteRecorder.on_suite_execution_complete"]
 
   space:3
-  suite_ctx["SuiteContext<br/>CURRENT_SUITE_CONTEXT<br/>config, suite_execution_id, environment"]:9
+  suite_ctx["SuiteContext<br/>CURRENT_SUITE_CONTEXT<br/>config, suite_execution_id, host"]:9
 
   space:3
   suite_owner["ScopeContext<br/>SUITE owner"]:9
@@ -145,7 +145,7 @@ open, and MUST NOT resolve `Scope.MODULE` unless a `ModuleContext` or
 | Context API | Purpose | Binder / owner | Available during | Required behavior | Main consumers |
 | --- | --- | --- | --- | --- | --- |
 | `SuiteContext` / `CURRENT_SUITE_CONTEXT` | Suite-level config, `suite_execution_id`, environment, process kind, experiment variant metadata | Opened by CLI, experiment execution, status builder, or tests before constructing/calling execution APIs | Whole Rue suite | Required; missing lookup MUST fail | `ExecutableSuite`, `SingleTest`, assertions, suite event processors, subprocess payloads |
-| `SuiteEnvironment` | Serializable metadata for the process that owns the suite | Built by `SuiteContext` | As `SuiteContext.environment` | Not a context binding | Suite result persistence and reports |
+| `SuiteHost` | Serializable metadata for the process that owns the suite | Built by `SuiteContext` | As `SuiteContext.host` | Not a context binding | Suite result persistence and reports |
 | `ModuleContext` | Current module path without test metadata | Opened by `ExecutableSuite` around top-level module work and module teardown | Top-level test dispatch and module teardown | Required for module-scoped resources and patches outside a test body | `ExecutableSuite`, `DependencyResolver`, patch dispatch |
 | `TestContext` / `CURRENT_TEST` | Current `test_execution_id` | Opened by `SingleTest._execute`, subprocess worker, and status preflight | One test execution | Required for test execution, graph lookup, SUT injection, and test-scoped resources | `LoadedTestDef`, `DependencyResolver`, SUT resources, transfer |
 | `ScopeContext` / `CURRENT_SCOPE_CONTEXT` | Current `ScopeOwner` values for `Scope.SUITE`, `Scope.MODULE`, and `Scope.TEST` | Opened by `SuiteContext`, `ModuleContext`, and `TestContext` | Suite context for `SUITE`; module context for `MODULE`; test context for `TEST` plus active wider owners | Required for scoped resources and patches; invalid scope ownership MUST fail | Resource store, resolver, patch dispatch |

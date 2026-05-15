@@ -55,11 +55,14 @@ and parent-owned normal resource state is never snapshotted or merged.
 
 Specialized user-facing APIs are still resources: `@rue.metric` records quality
 signals, `@rue.sut` wraps systems under test with tracing/output capture, and
-the built-in `monkeypatch` resource scopes patches to the active Rue owner.
-Resources that opt into `subprocess_sync` must resolve to `SyncableResource`
-instances. Rue metrics use that contract to aggregate records from subprocess
-tests. SUT resources use the same contract with no arbitrary wrapped-instance
-state transfer; Rue-owned trace/output state is scoped to the active test.
+the built-in `monkeypatch` and `environment` resources scope patches and
+filesystem/env-var sandboxes to the active Rue owner. Resources that opt into
+`subprocess_sync` must resolve to `SyncableResource` instances. Rue metrics
+use that contract to aggregate records from subprocess tests. SUT resources
+use the same contract with no arbitrary wrapped-instance state transfer;
+Rue-owned trace/output state is scoped to the active test. The `environment`
+builtin uses `subprocess_sync` to reflink-clone parent state into workers and
+ship deltas back; see `src/rue/environment/SPEC.md` for the wire protocol.
 
 ## Hooks
 

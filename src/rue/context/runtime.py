@@ -14,8 +14,9 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from rue.config import Config
-from rue.context.models import SuiteEnvironment
+from rue.context.models import SuiteHost
 from rue.context.scopes import CurrentProcessKind, ScopeContext
+from rue.environment.storage import EnvironmentStorage
 from rue.models import Spec
 
 
@@ -132,9 +133,7 @@ class SuiteContext(BaseModel):
 
     config: Config = Field(default_factory=Config)
     suite_execution_id: UUID = Field(default_factory=uuid4)
-    environment: SuiteEnvironment = Field(
-        default_factory=SuiteEnvironment.build_from_current
-    )
+    host: SuiteHost = Field(default_factory=SuiteHost.build_from_current)
     process: CurrentProcessKind = CurrentProcessKind.MAIN
     experiment_variant: Any | None = None
     experiment_setup_chain: tuple[Any, ...] = ()
@@ -147,6 +146,8 @@ class SuiteContext(BaseModel):
         scope_context = ScopeContext.for_suite(self.suite_execution_id)
         scope_context.__enter__()
         self._scope_contexts.append(scope_context)
+        if self.process is CurrentProcessKind.MAIN:
+            EnvironmentStorage().gc_stale()
         return self
 
     def __exit__(
@@ -157,6 +158,8 @@ class SuiteContext(BaseModel):
     ) -> None:
         """Restore the previous suite context."""
         self._scope_contexts.pop().__exit__(exc_type, exc, traceback)
+        if self.process is CurrentProcessKind.MAIN:
+            EnvironmentStorage.release_suite(self.suite_execution_id)
         CURRENT_SUITE_CONTEXT.reset(self._tokens.pop())
 
     def __getstate__(self) -> dict[str, Any]:
@@ -179,9 +182,7 @@ CURRENT_TEST_TRACER: ContextVar[TestTracer | None] = ContextVar(
 CURRENT_SUT_SPAN_IDS: ContextVar[tuple[int, ...]] = ContextVar(
     "current_sut_span_ids", default=()
 )
-CURRENT_RESOURCE_HOOK_CONTEXT: ContextVar[
-    ResourceHookContext
-] = ContextVar(
+CURRENT_RESOURCE_HOOK_CONTEXT: ContextVar[ResourceHookContext] = ContextVar(
     "current_resource_hook_context",
 )
 

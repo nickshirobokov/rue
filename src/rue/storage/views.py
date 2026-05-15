@@ -55,7 +55,7 @@ class StoredSuiteView:
 
     @classmethod
     def from_suite(cls, suite: ExecutedSuite) -> StoredSuiteView:
-        environment = suite.environment
+        host = suite.host
         return cls(
             suite_execution_id=str(suite.suite_execution_id),
             start_time=suite.start_time.isoformat(),
@@ -69,14 +69,14 @@ class StoredSuiteView:
             xpassed=suite.result.xpassed,
             total=suite.result.total,
             stopped_early=suite.result.stopped_early,
-            commit_hash=environment.commit_hash,
-            branch=environment.branch,
-            dirty=environment.dirty,
-            python_version=environment.python_version,
-            platform=environment.platform,
-            hostname=environment.hostname,
-            working_directory=environment.working_directory,
-            rue_version=environment.rue_version,
+            commit_hash=host.commit_hash,
+            branch=host.branch,
+            dirty=host.dirty,
+            python_version=host.python_version,
+            platform=host.platform,
+            hostname=host.hostname,
+            working_directory=host.working_directory,
+            rue_version=host.rue_version,
             metrics=tuple(
                 StoredMetricView.from_metric(suite.suite_execution_id, metric)
                 for metric in suite.result.metric_results
@@ -657,9 +657,7 @@ class _StoredPredicateRow:
 
     def _values(self, assertion_id: int | None = None) -> tuple[object, ...]:
         assertion_ref = (
-            self.assertion_id
-            if self.assertion_id is not None
-            else assertion_id
+            self.assertion_id if self.assertion_id is not None else assertion_id
         )
         assert assertion_ref is not None
         return (

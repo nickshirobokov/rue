@@ -17,7 +17,7 @@ from rue.cli.rendering.terminal import (
 )
 from rue.cli.rendering.tests import TestReport
 from rue.config import Config
-from rue.context.models import SuiteEnvironment
+from rue.context.models import SuiteHost
 from rue.context.runtime import CURRENT_SUITE_CONTEXT
 from rue.events import SuiteEventsProcessor, SuiteEventsReceiver
 from rue.experiments.models import (
@@ -78,8 +78,8 @@ def raise_definition_errors(*args, **kwargs) -> None:
     raise make_definition_errors()
 
 
-def make_environment(**updates) -> SuiteEnvironment:
-    return SuiteEnvironment(
+def make_host(**updates) -> SuiteHost:
+    return SuiteHost(
         python_version="3.12.0",
         platform="darwin",
         hostname="host",
@@ -202,7 +202,7 @@ def test_run_tests_returns_2_when_suite_execution_id_already_exists(
         recorder.on_suite_execution_start(
             ExecutedSuite(
                 suite_execution_id=existing_suite_execution_id,
-                environment=make_environment(),
+                host=make_host(),
                 result=SuiteResult(),
             )
         )
@@ -384,7 +384,7 @@ def test_terminal_suite_reporter_prints_failed_suite_and_metrics() -> None:
         value=20,
     )
     suite = ExecutedSuite(
-        environment=make_environment(),
+        host=make_host(),
         result=SuiteResult(
             test_executions=[execution],
             metric_results=[metric],

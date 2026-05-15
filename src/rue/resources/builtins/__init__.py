@@ -3,6 +3,11 @@
 from collections.abc import Callable
 
 from rue.context.scopes import Scope
+from rue.environment.builtin import (
+    make_environment_factory,
+    on_injection as environment_on_injection,
+    on_resolve as environment_on_resolve,
+)
 from rue.patching import MonkeyPatch
 from rue.resources.registry import ResourceRegistry
 
@@ -21,4 +26,12 @@ def register_builtin_resources(registry: ResourceRegistry) -> None:
             scoped_monkeypatch(scope),
             scope=scope,
             builtin=True,
+        )
+        registry.register_resource(
+            make_environment_factory(scope),
+            scope=scope,
+            builtin=True,
+            subprocess_sync=True,
+            on_resolve=environment_on_resolve,
+            on_injection=environment_on_injection,
         )

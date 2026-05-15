@@ -11,7 +11,7 @@ import turso
 
 from rue.assertions.models import AssertionRepr, AssertionResult
 from rue.config import Config
-from rue.context.models import SuiteEnvironment
+from rue.context.models import SuiteHost
 from rue.models import Locator
 from rue.predicates.models import PredicateResult
 from rue.resources import ResourceSpec, Scope
@@ -26,8 +26,8 @@ from rue.testing.execution.test.models import (
 from tests.helpers import make_definition, make_suite_context
 
 
-def make_environment() -> SuiteEnvironment:
-    return SuiteEnvironment(
+def make_host() -> SuiteHost:
+    return SuiteHost(
         python_version="3.12.0",
         platform="darwin",
         hostname="host",
@@ -164,7 +164,7 @@ def test_recorder_persists_normalized_suite_data(database_path: Path) -> None:
         suite_execution_id=suite_execution_id,
         start_time=start_time,
         end_time=end_time,
-        environment=make_environment(),
+        host=make_host(),
         result=SuiteResult(
             test_executions=[execution],
             metric_results=[metric],
