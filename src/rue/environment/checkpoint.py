@@ -1,4 +1,4 @@
-"""Filesystem snapshots and diffs for Rue environments."""
+"""Filesystem checkpoints and diffs for Rue environments."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ _HASH_CHUNK_BYTES = 1 << 20
 
 @dataclass(frozen=True, slots=True)
 class FileEntry:
-    """One entry in an environment snapshot manifest.
+    """One entry in an environment checkpoint manifest.
 
     Symlinks carry their target in `symlink_target` and have an empty
     `content_hash`. Directories are not recorded as their own entries; their
@@ -35,10 +35,10 @@ class FileEntry:
 
 
 @dataclass(frozen=True, slots=True)
-class Snapshot:
-    """Filesystem snapshot rooted at a single directory.
+class Checkpoint:
+    """Filesystem checkpoint rooted at a single directory.
 
-    Entries are keyed by path so equality checks across two snapshots only
+    Entries are keyed by path so equality checks across two checkpoints only
     need a dict lookup. The root path is informational and not part of any
     diff.
     """
@@ -47,8 +47,8 @@ class Snapshot:
     entries: dict[PurePosixPath, FileEntry] = field(default_factory=dict)
 
     @classmethod
-    def from_root(cls, root: Path) -> Snapshot:
-        """Walk `root` and snapshot every file and symlink under it.
+    def from_root(cls, root: Path) -> Checkpoint:
+        """Walk `root` and checkpoint every file and symlink under it.
 
         Directories are skipped because their existence is implied by entries
         inside them. Symlinks are recorded but never followed.
@@ -89,8 +89,8 @@ class Snapshot:
         cls,
         root: Path,
         manifest: tuple[FileEntry, ...],
-    ) -> Snapshot:
-        """Build a snapshot keyed by path from a manifest tuple."""
+    ) -> Checkpoint:
+        """Build a checkpoint keyed by path from a manifest tuple."""
         return cls(
             root=root,
             entries={entry.path: entry for entry in manifest},
@@ -108,19 +108,19 @@ def hash_file(path: Path) -> str:
 
 @dataclass(frozen=True, slots=True)
 class Diff:
-    """Diff between two snapshots."""
+    """Diff between two checkpoints."""
 
     added: tuple[PurePosixPath, ...] = ()
     modified: tuple[PurePosixPath, ...] = ()
     deleted: tuple[PurePosixPath, ...] = ()
 
     @classmethod
-    def from_snapshots(
+    def from_checkpoints(
         cls,
-        base: Snapshot,
-        modified: Snapshot,
+        base: Checkpoint,
+        modified: Checkpoint,
     ) -> Diff:
-        """Compare `base` to `modified` snapshot manifests.
+        """Compare `base` to `modified` checkpoint manifests.
 
         A path is considered modified when size, mode, symlink target, or
         `(size, mtime_ns)` differ. When metadata is identical content is
@@ -178,8 +178,8 @@ class Diff:
 
 
 __all__ = [
+    "Checkpoint",
     "Diff",
     "FileEntry",
-    "Snapshot",
     "hash_file",
 ]

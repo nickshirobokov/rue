@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from pathlib import Path, PurePosixPath
 
-from rue.environment.snapshot import FileEntry
+from rue.environment.checkpoint import FileEntry
 
 
 class FileDeltaKind(StrEnum):
@@ -64,7 +64,7 @@ class FileDelta:
 
 @dataclass(frozen=True, slots=True)
 class EnvironmentSyncState:
-    """Subprocess-safe snapshot of an `Environment` resource."""
+    """Subprocess-safe checkpoint of an `Environment` resource."""
 
     parent_root: Path
     baseline_manifest: tuple[FileEntry, ...]

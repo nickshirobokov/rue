@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from rue.environment import sources
+from rue.environment.checkpoint import Checkpoint, Diff, FileEntry
 from rue.environment.runtime import Environment, EnvironmentVars
-from rue.environment.snapshot import Diff, FileEntry, Snapshot
 from rue.environment.sources import (
     DirSource,
     EmptySource,
@@ -16,6 +16,7 @@ from rue.environment.sync import EnvironmentSyncState, FileDelta
 
 
 __all__ = [
+    "Checkpoint",
     "Diff",
     "DirSource",
     "EmptySource",
@@ -26,7 +27,6 @@ __all__ = [
     "FileDelta",
     "FileEntry",
     "GitSource",
-    "Snapshot",
     "Source",
     "sources",
 ]

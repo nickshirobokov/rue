@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from rue.context.scopes import Scope
-from rue.environment.snapshot import Diff, Snapshot
+from rue.environment.checkpoint import Checkpoint, Diff
 from rue.environment.sources import Source
 from rue.environment.storage import (
     EnvironmentStorage,
@@ -131,13 +131,13 @@ class Environment:
         "_baselines",
         "_consumer_order",
         "_cwd",
-        "_load_baseline",
+        "_load_checkpoint",
         "_provider_spec",
         "_root",
         "_saved_cwd",
         "_saved_environ",
         "_scope",
-        "_subprocess_baseline",
+        "_subprocess_checkpoint",
         "_vars",
     )
 
@@ -146,11 +146,11 @@ class Environment:
         self._scope = scope
         self._cwd = self._root
         self._vars = EnvironmentVars()
-        self._baselines: dict[Spec, Snapshot] = {}
+        self._baselines: dict[Spec, Checkpoint] = {}
         self._consumer_order: list[Spec] = []
         self._provider_spec: ResourceSpec | None = None
-        self._load_baseline: Snapshot = Snapshot.from_root(self._root)
-        self._subprocess_baseline: Snapshot | None = None
+        self._load_checkpoint: Checkpoint = Checkpoint.from_root(self._root)
+        self._subprocess_checkpoint: Checkpoint | None = None
 
     @classmethod
     def _build(cls, *, root: Path, scope: Scope) -> Environment:
@@ -178,9 +178,9 @@ class Environment:
         return self._scope
 
     @property
-    def baseline(self) -> Snapshot:
-        """Snapshot taken at the most recent `load`/`reset`."""
-        return self._load_baseline
+    def baseline(self) -> Checkpoint:
+        """Checkpoint taken at the most recent `load`/`reset`."""
+        return self._load_checkpoint
 
     @property
     def diff(self) -> Diff:
@@ -189,10 +189,12 @@ class Environment:
         When the environment has not been injected yet this falls back to
         the load-time baseline so simple usage from a test body still works.
         """
-        baseline = self._load_baseline
+        baseline = self._load_checkpoint
         if self._consumer_order:
             baseline = self._baselines[self._consumer_order[-1]]
-        return Diff.from_snapshots(baseline, Snapshot.from_root(self._root))
+        return Diff.from_checkpoints(
+            baseline, Checkpoint.from_root(self._root)
+        )
 
     def path(self, p: str | Path = ".") -> Path:
         """Resolve `p` against the sandbox root and reject escapes."""
@@ -222,7 +224,7 @@ class Environment:
         self._cwd = self._root
         self._consumer_order.clear()
         self._baselines.clear()
-        self._load_baseline = Snapshot.from_root(self._root)
+        self._load_checkpoint = Checkpoint.from_root(self._root)
 
     async def load(self, source: Source) -> None:
         """Materialize `source` into the sandbox and reset baselines."""
@@ -231,7 +233,7 @@ class Environment:
             cache_root=storage.cache_dir,
             dst=self._root,
         )
-        self._load_baseline = Snapshot.from_root(self._root)
+        self._load_checkpoint = Checkpoint.from_root(self._root)
         self._baselines.clear()
         self._consumer_order.clear()
         self._cwd = self._root
@@ -302,7 +304,7 @@ class Environment:
 
     def _mark_consumer_baseline(self, consumer: Spec) -> None:
         """Record the per-consumer baseline used by `env.diff`."""
-        self._baselines[consumer] = Snapshot.from_root(self._root)
+        self._baselines[consumer] = Checkpoint.from_root(self._root)
         if consumer not in self._consumer_order:
             self._consumer_order.append(consumer)
 
@@ -315,12 +317,14 @@ class Environment:
           * Worker → parent: ships ``deltas`` computed against the baseline
             captured by ``from_sync_state``.
         """
-        baseline_snapshot = self._subprocess_baseline
-        manifest_snapshot = baseline_snapshot or Snapshot.from_root(self._root)
+        baseline_checkpoint = self._subprocess_checkpoint
+        manifest_checkpoint = baseline_checkpoint or Checkpoint.from_root(
+            self._root
+        )
         deltas: tuple[FileDelta, ...] = ()
-        if baseline_snapshot is not None:
-            current = Snapshot.from_root(self._root)
-            diff = Diff.from_snapshots(baseline_snapshot, current)
+        if baseline_checkpoint is not None:
+            current = Checkpoint.from_root(self._root)
+            diff = Diff.from_checkpoints(baseline_checkpoint, current)
             delta_list: list[FileDelta] = []
             for path in diff.added:
                 delta_list.append(
@@ -342,7 +346,7 @@ class Environment:
         )
         return EnvironmentSyncState(
             parent_root=self._root,
-            baseline_manifest=tuple(manifest_snapshot.entries.values()),
+            baseline_manifest=tuple(manifest_checkpoint.entries.values()),
             overrides=dict(self._vars.overrides),
             hidden=frozenset(self._vars.hidden),
             cwd=relative_cwd,
@@ -365,10 +369,10 @@ class Environment:
         if not target_cwd.is_relative_to(self._root):
             target_cwd = self._root
         self._cwd = target_cwd
-        self._subprocess_baseline = Snapshot.from_manifest(
+        self._subprocess_checkpoint = Checkpoint.from_manifest(
             self._root, state.baseline_manifest
         )
-        self._load_baseline = self._subprocess_baseline
+        self._load_checkpoint = self._subprocess_checkpoint
         self._baselines.clear()
         self._consumer_order.clear()
 
