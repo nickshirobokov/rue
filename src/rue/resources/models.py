@@ -26,11 +26,14 @@ class ResourceFactoryKind(StrEnum):
     ASYNC_GENERATOR = auto()
 
 
-@dataclass(slots=True, unsafe_hash=True)
+@dataclass(slots=True)
 class ResourceSpec(Spec):
     """Canonical spec for one resolved resource provider."""
 
     scope: Scope
+
+    def __hash__(self) -> int:
+        return hash((self.locator, self.scope))
 
 
 @dataclass(slots=True, eq=False)

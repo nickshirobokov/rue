@@ -32,6 +32,9 @@ class Spec(ABC):
 
     locator: Locator
 
+    def __hash__(self) -> int:
+        return hash(self.locator)
+
     @property
     def name(self) -> str:
         """Return the callable name represented by this spec."""

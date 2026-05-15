@@ -49,6 +49,20 @@ class TestSpec(Spec):
     case_id: UUID | None = None
     collection_index: int = -1
 
+    def __hash__(self) -> int:
+        return hash((
+            self.locator,
+            self.is_async,
+            self.params,
+            self.tags,
+            self.skip_reason,
+            self.xfail_reason,
+            self.xfail_strict,
+            self.suffix,
+            self.case_id,
+            self.collection_index,
+        ))
+
     @property
     def full_name(self) -> str:
         return str(self.locator)
