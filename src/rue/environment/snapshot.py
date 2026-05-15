@@ -46,55 +46,43 @@ class Snapshot:
     root: Path
     entries: dict[PurePosixPath, FileEntry] = field(default_factory=dict)
 
+    @classmethod
+    def from_root(cls, root: Path) -> Snapshot:
+        """Walk `root` and snapshot every file and symlink under it.
 
-@dataclass(frozen=True, slots=True)
-class Diff:
-    """Diff between two snapshots."""
+        Directories are skipped because their existence is implied by entries
+        inside them. Symlinks are recorded but never followed.
+        """
+        root = root.resolve()
+        entries: dict[PurePosixPath, FileEntry] = {}
+        if not root.exists():
+            return cls(root=root, entries=entries)
 
-    added: tuple[PurePosixPath, ...] = ()
-    modified: tuple[PurePosixPath, ...] = ()
-    deleted: tuple[PurePosixPath, ...] = ()
-
-    @property
-    def empty(self) -> bool:
-        """True when there are no changes."""
-        return not (self.added or self.modified or self.deleted)
-
-
-def scan_snapshot(root: Path) -> Snapshot:
-    """Walk `root` and produce a snapshot of every file and symlink under it.
-
-    Directories are skipped because their existence is implied by entries
-    inside them. Symlinks are recorded but never followed.
-    """
-    root = root.resolve()
-    entries: dict[PurePosixPath, FileEntry] = {}
-    if not root.exists():
-        return Snapshot(root=root, entries=entries)
-
-    for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
-        for name in filenames:
-            absolute = Path(dirpath, name)
-            try:
-                stat_result = os.lstat(absolute)
-            except FileNotFoundError:
-                continue
-            mode = stat_result.st_mode
-            relative = PurePosixPath(absolute.relative_to(root).as_posix())
-            symlink_target: str | None = None
-            if stat.S_ISLNK(mode):
+        for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+            for name in filenames:
+                absolute = Path(dirpath, name)
                 try:
-                    symlink_target = os.readlink(absolute)
-                except OSError:
-                    symlink_target = ""
-            entries[relative] = FileEntry(
-                path=relative,
-                size=stat_result.st_size,
-                mtime_ns=stat_result.st_mtime_ns,
-                mode=stat.S_IMODE(mode),
-                symlink_target=symlink_target,
-            )
-    return Snapshot(root=root, entries=entries)
+                    stat_result = os.lstat(absolute)
+                except FileNotFoundError:
+                    continue
+                mode = stat_result.st_mode
+                relative = PurePosixPath(
+                    absolute.relative_to(root).as_posix()
+                )
+                symlink_target: str | None = None
+                if stat.S_ISLNK(mode):
+                    try:
+                        symlink_target = os.readlink(absolute)
+                    except OSError:
+                        symlink_target = ""
+                entries[relative] = FileEntry(
+                    path=relative,
+                    size=stat_result.st_size,
+                    mtime_ns=stat_result.st_mtime_ns,
+                    mode=stat.S_IMODE(mode),
+                    symlink_target=symlink_target,
+                )
+        return cls(root=root, entries=entries)
 
 
 def hash_file(path: Path) -> str:
@@ -106,76 +94,80 @@ def hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def diff_snapshots(baseline: Snapshot, current: Snapshot) -> Diff:
-    """Compute added/modified/deleted paths between two snapshots.
+@dataclass(frozen=True, slots=True)
+class Diff:
+    """Diff between two snapshots."""
 
-    A path is considered modified when size, mode, symlink target, or
-    `(size, mtime_ns)` differ. When metadata is identical content is assumed
-    identical; when only mtime differs we hash both files to break the tie.
-    Hash comparisons run inside `current.root` and `baseline.root`.
-    """
-    added: list[PurePosixPath] = []
-    modified: list[PurePosixPath] = []
-    deleted: list[PurePosixPath] = []
+    added: tuple[PurePosixPath, ...] = ()
+    modified: tuple[PurePosixPath, ...] = ()
+    deleted: tuple[PurePosixPath, ...] = ()
 
-    for path, current_entry in current.entries.items():
-        baseline_entry = baseline.entries.get(path)
-        if baseline_entry is None:
-            added.append(path)
-            continue
-        if _entries_differ(
-            baseline=baseline_entry,
-            current=current_entry,
-            baseline_root=baseline.root,
-            current_root=current.root,
-        ):
-            modified.append(path)
+    @classmethod
+    def from_snapshots(
+        cls,
+        base: Snapshot,
+        modified: Snapshot,
+    ) -> Diff:
+        """Compare `base` to `modified` snapshot manifests.
 
-    for path in baseline.entries:
-        if path not in current.entries:
-            deleted.append(path)
+        A path is considered modified when size, mode, symlink target, or
+        `(size, mtime_ns)` differ. When metadata is identical content is
+        assumed identical; when only mtime differs we hash both files to break
+        the tie. Hash comparisons run inside `base.root` and `modified.root`.
+        """
+        added_paths: list[PurePosixPath] = []
+        modified_paths: list[PurePosixPath] = []
+        deleted_paths: list[PurePosixPath] = []
 
-    added.sort()
-    modified.sort()
-    deleted.sort()
-    return Diff(
-        added=tuple(added),
-        modified=tuple(modified),
-        deleted=tuple(deleted),
-    )
+        for path, current_entry in modified.entries.items():
+            baseline_entry = base.entries.get(path)
+            if baseline_entry is None:
+                added_paths.append(path)
+                continue
+            if baseline_entry.symlink_target != current_entry.symlink_target:
+                modified_paths.append(path)
+                continue
+            if baseline_entry.is_symlink:
+                continue
+            if (
+                baseline_entry.mode != current_entry.mode
+                or baseline_entry.size != current_entry.size
+            ):
+                modified_paths.append(path)
+                continue
+            if baseline_entry.mtime_ns == current_entry.mtime_ns:
+                continue
+            baseline_hash = baseline_entry.content_hash or hash_file(
+                base.root / baseline_entry.path
+            )
+            current_hash = current_entry.content_hash or hash_file(
+                modified.root / current_entry.path
+            )
+            if baseline_hash != current_hash:
+                modified_paths.append(path)
 
+        for path in base.entries:
+            if path not in modified.entries:
+                deleted_paths.append(path)
 
-def _entries_differ(
-    *,
-    baseline: FileEntry,
-    current: FileEntry,
-    baseline_root: Path,
-    current_root: Path,
-) -> bool:
-    if baseline.symlink_target != current.symlink_target:
-        return True
-    if baseline.is_symlink:
-        return False
-    if baseline.mode != current.mode:
-        return True
-    if baseline.size != current.size:
-        return True
-    if baseline.mtime_ns == current.mtime_ns:
-        return False
-    baseline_hash = baseline.content_hash or hash_file(
-        baseline_root / baseline.path
-    )
-    current_hash = current.content_hash or hash_file(
-        current_root / current.path
-    )
-    return baseline_hash != current_hash
+        added_paths.sort()
+        modified_paths.sort()
+        deleted_paths.sort()
+        return cls(
+            added=tuple(added_paths),
+            modified=tuple(modified_paths),
+            deleted=tuple(deleted_paths),
+        )
+
+    @property
+    def empty(self) -> bool:
+        """True when there are no changes."""
+        return not (self.added or self.modified or self.deleted)
 
 
 __all__ = [
     "Diff",
     "FileEntry",
     "Snapshot",
-    "diff_snapshots",
     "hash_file",
-    "scan_snapshot",
 ]

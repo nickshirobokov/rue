@@ -22,7 +22,7 @@ from rue.environment import (
     EnvironmentVars,
     GitSource,
 )
-from rue.environment.snapshot import diff_snapshots, scan_snapshot
+from rue.environment.snapshot import Diff, Snapshot
 from rue.environment.sources import (
     dir as env_dir,
     empty as env_empty,
@@ -114,12 +114,12 @@ def test_diff_added_modified_deleted(env_root: Path) -> None:
     (env_root / "kept.txt").write_text("same")
     (env_root / "modified.txt").write_text("before")
     (env_root / "removed.txt").write_text("bye")
-    baseline = scan_snapshot(env_root)
+    baseline = Snapshot.from_root(env_root)
     (env_root / "modified.txt").write_text("after-after")
     (env_root / "removed.txt").unlink()
     (env_root / "added.txt").write_text("hi")
-    current = scan_snapshot(env_root)
-    diff = diff_snapshots(baseline, current)
+    current = Snapshot.from_root(env_root)
+    diff = Diff.from_snapshots(baseline, current)
     assert diff.added == (PurePosixPath("added.txt"),)
     assert diff.modified == (PurePosixPath("modified.txt"),)
     assert diff.deleted == (PurePosixPath("removed.txt"),)
@@ -131,11 +131,11 @@ def test_diff_detects_symlink_target_change(env_root: Path) -> None:
     target_a.write_text("a")
     target_b.write_text("b")
     (env_root / "link").symlink_to("a.txt")
-    baseline = scan_snapshot(env_root)
+    baseline = Snapshot.from_root(env_root)
     (env_root / "link").unlink()
     (env_root / "link").symlink_to("b.txt")
-    current = scan_snapshot(env_root)
-    diff = diff_snapshots(baseline, current)
+    current = Snapshot.from_root(env_root)
+    diff = Diff.from_snapshots(baseline, current)
     assert diff.modified == (PurePosixPath("link"),)
 
 
@@ -150,13 +150,13 @@ def test_diff_uses_hash_when_mtime_differs_across_trees(
     (parent_root / "x.txt").write_text("aaaa")
     (worker_root / "x.txt").write_text("aaaa")
     new_mtime = (
-        scan_snapshot(parent_root).entries[PurePosixPath("x.txt")].mtime_ns
+        Snapshot.from_root(parent_root).entries[PurePosixPath("x.txt")].mtime_ns
         + 1_000_000
     )
     os.utime(worker_root / "x.txt", ns=(new_mtime, new_mtime))
-    parent = scan_snapshot(parent_root)
-    worker = scan_snapshot(worker_root)
-    assert diff_snapshots(parent, worker).modified == ()
+    parent = Snapshot.from_root(parent_root)
+    worker = Snapshot.from_root(worker_root)
+    assert Diff.from_snapshots(parent, worker).modified == ()
 
 
 def test_diff_detects_real_change_across_trees(tmp_path: Path) -> None:
@@ -167,15 +167,15 @@ def test_diff_detects_real_change_across_trees(tmp_path: Path) -> None:
     (parent_root / "x.txt").write_text("aaaa")
     (worker_root / "x.txt").write_text("zzzz")
     parent_mtime = (
-        scan_snapshot(parent_root).entries[PurePosixPath("x.txt")].mtime_ns
+        Snapshot.from_root(parent_root).entries[PurePosixPath("x.txt")].mtime_ns
     )
     os.utime(
         worker_root / "x.txt",
         ns=(parent_mtime + 1_000_000, parent_mtime + 1_000_000),
     )
-    parent = scan_snapshot(parent_root)
-    worker = scan_snapshot(worker_root)
-    diff = diff_snapshots(parent, worker)
+    parent = Snapshot.from_root(parent_root)
+    worker = Snapshot.from_root(worker_root)
+    diff = Diff.from_snapshots(parent, worker)
     assert diff.modified == (PurePosixPath("x.txt"),)
 
 

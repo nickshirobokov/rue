@@ -11,12 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from rue.context.scopes import Scope
-from rue.environment.snapshot import (
-    Diff,
-    Snapshot,
-    diff_snapshots,
-    scan_snapshot,
-)
+from rue.environment.snapshot import Diff, Snapshot
 from rue.environment.sources import Source
 from rue.environment.storage import (
     EnvironmentStorage,
@@ -155,7 +150,7 @@ class Environment:
         self._baselines: dict[Spec, Snapshot] = {}
         self._consumer_order: list[Spec] = []
         self._provider_spec: ResourceSpec | None = None
-        self._load_baseline: Snapshot = scan_snapshot(self._root)
+        self._load_baseline: Snapshot = Snapshot.from_root(self._root)
         self._subprocess_baseline: Snapshot | None = None
 
     @classmethod
@@ -198,7 +193,9 @@ class Environment:
         baseline = self._load_baseline
         if self._consumer_order:
             baseline = self._baselines[self._consumer_order[-1]]
-        return diff_snapshots(baseline, scan_snapshot(self._root))
+        return Diff.from_snapshots(
+            baseline, Snapshot.from_root(self._root)
+        )
 
     def path(self, p: str | Path = ".") -> Path:
         """Resolve `p` against the sandbox root and reject escapes."""
@@ -228,7 +225,7 @@ class Environment:
         self._cwd = self._root
         self._consumer_order.clear()
         self._baselines.clear()
-        self._load_baseline = scan_snapshot(self._root)
+        self._load_baseline = Snapshot.from_root(self._root)
 
     async def load(self, source: Source) -> None:
         """Materialize `source` into the sandbox and reset baselines."""
@@ -237,7 +234,7 @@ class Environment:
             cache_root=storage.cache_dir,
             dst=self._root,
         )
-        self._load_baseline = scan_snapshot(self._root)
+        self._load_baseline = Snapshot.from_root(self._root)
         self._baselines.clear()
         self._consumer_order.clear()
         self._cwd = self._root
@@ -308,7 +305,7 @@ class Environment:
 
     def _mark_consumer_baseline(self, consumer: Spec) -> None:
         """Record the per-consumer baseline used by `env.diff`."""
-        self._baselines[consumer] = scan_snapshot(self._root)
+        self._baselines[consumer] = Snapshot.from_root(self._root)
         if consumer not in self._consumer_order:
             self._consumer_order.append(consumer)
 
@@ -322,7 +319,7 @@ class Environment:
             captured by ``from_sync_state``.
         """
         baseline_snapshot = self._subprocess_baseline
-        manifest_snapshot = baseline_snapshot or scan_snapshot(self._root)
+        manifest_snapshot = baseline_snapshot or Snapshot.from_root(self._root)
         deltas: tuple[FileDelta, ...] = ()
         if baseline_snapshot is not None:
             deltas = compute_deltas(

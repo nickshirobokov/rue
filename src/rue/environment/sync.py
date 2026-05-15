@@ -15,12 +15,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from pathlib import Path, PurePosixPath
 
-from rue.environment.snapshot import (
-    FileEntry,
-    Snapshot,
-    diff_snapshots,
-    scan_snapshot,
-)
+from rue.environment.snapshot import Diff, FileEntry, Snapshot
 
 
 class FileDeltaKind(StrEnum):
@@ -81,8 +76,8 @@ def compute_deltas(
     current_root: Path,
 ) -> tuple[FileDelta, ...]:
     """Diff `current_root` against `baseline` and capture file content."""
-    current = scan_snapshot(current_root)
-    diff = diff_snapshots(baseline, current)
+    current = Snapshot.from_root(current_root)
+    diff = Diff.from_snapshots(baseline, current)
     deltas: list[FileDelta] = []
 
     for path in diff.added:
