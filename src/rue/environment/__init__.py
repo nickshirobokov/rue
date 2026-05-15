@@ -8,6 +8,7 @@ from rue.environment.snapshot import Diff, FileEntry, Snapshot
 from rue.environment.sources import (
     DirSource,
     EmptySource,
+    EnvSource,
     GitSource,
     Source,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "Diff",
     "DirSource",
     "EmptySource",
+    "EnvSource",
     "Environment",
     "EnvironmentSyncState",
     "EnvironmentVars",

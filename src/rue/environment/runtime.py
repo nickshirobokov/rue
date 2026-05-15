@@ -17,7 +17,7 @@ from rue.environment.snapshot import (
     diff_snapshots,
     scan_snapshot,
 )
-from rue.environment.sources import Source, materialize
+from rue.environment.sources import Source
 from rue.environment.storage import (
     EnvironmentStorage,
     clone_tree,
@@ -233,8 +233,7 @@ class Environment:
     async def load(self, source: Source) -> None:
         """Materialize `source` into the sandbox and reset baselines."""
         storage = EnvironmentStorage()
-        await materialize(
-            source,
+        await source.materialize(
             cache_root=storage.cache_dir,
             dst=self._root,
         )

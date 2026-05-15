@@ -27,7 +27,6 @@ from rue.environment.sources import (
     dir as env_dir,
     empty as env_empty,
     git as env_git,
-    materialize,
 )
 from rue.environment.storage import (
     EnvironmentStorage,
@@ -315,8 +314,8 @@ async def test_materialize_dir_source_caches_and_dedupes(
     dst2 = tmp_path / "dst2"
     source = DirSource(path=src)
     await asyncio.gather(
-        materialize(source, cache_root=cache_root, dst=dst1),
-        materialize(source, cache_root=cache_root, dst=dst2),
+        source.materialize(cache_root=cache_root, dst=dst1),
+        source.materialize(cache_root=cache_root, dst=dst2),
     )
     assert (dst1 / "file.txt").read_text() == "source-payload"
     assert (dst2 / "file.txt").read_text() == "source-payload"
@@ -328,7 +327,7 @@ async def test_materialize_dir_source_caches_and_dedupes(
 async def test_materialize_empty_source(tmp_path: Path) -> None:
     cache_root = tmp_path / "cache"
     dst = tmp_path / "dst"
-    await materialize(EmptySource(), cache_root=cache_root, dst=dst)
+    await EmptySource().materialize(cache_root=cache_root, dst=dst)
     assert dst.is_dir()
     assert list(dst.iterdir()) == []
 
