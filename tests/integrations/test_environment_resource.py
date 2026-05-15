@@ -94,17 +94,22 @@ async def test_environment_diff_after_path_write(tmp_path: Path):
 
             @rue.test
             def test_diff_reports_added_files(environment: rue.Environment):
+                environment.path('input.txt').write_text('input')
+                environment.set_baseline()
                 with environment:
                     (environment.root / 'output.txt').write_text('hi')
-                assert PurePosixPath('output.txt') in environment.diff.added
+                assert environment.diff.added == (PurePosixPath('output.txt'),)
 
             @rue.test
             async def test_async_diff(environment: rue.Environment):
                 target = environment.path('nested/data.json')
                 target.parent.mkdir(parents=True)
+                target.write_text('{"ok": false}')
+                environment.set_baseline()
                 target.write_text('{"ok": true}')
-                added = environment.diff.added
-                assert PurePosixPath('nested/data.json') in added
+                assert environment.diff.modified == (
+                    PurePosixPath('nested/data.json'),
+                )
             """
         )
     )
@@ -117,9 +122,9 @@ async def test_environment_diff_after_path_write(tmp_path: Path):
 async def test_module_scope_env_persists_across_tests(tmp_path: Path):
     """Module-scope env keeps state across tests in the same module.
 
-    `env.diff` here reports changes since the wrapper resource's injection
-    (which is the actual consumer of the underlying env builtin), not
-    per-test. Per-test isolation belongs to the default TEST-scope env.
+    `env.diff` here reports changes since the wrapper resource explicitly
+    captured its baseline, not per-test. Per-test isolation belongs to the
+    default TEST-scope env.
     """
     module_path = tmp_path / "test_module_env.py"
     module_path.write_text(
@@ -132,6 +137,7 @@ async def test_module_scope_env_persists_across_tests(tmp_path: Path):
             @rue.resource(scope='module')
             def shared_env(environment: rue.Environment) -> rue.Environment:
                 (environment.root / 'shared.txt').write_text('shared')
+                environment.set_baseline()
                 return environment
 
             @rue.test
@@ -157,7 +163,7 @@ async def test_module_scope_env_persists_across_tests(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_per_test_env_diff_resets_for_test_scope(tmp_path: Path):
-    """Direct test-scope env injection gives per-test diffs trivially."""
+    """Direct test-scope env injection gives each test a fresh env."""
     module_path = tmp_path / "test_per_test_env_diff.py"
     module_path.write_text(
         dedent(
@@ -168,11 +174,13 @@ async def test_per_test_env_diff_resets_for_test_scope(tmp_path: Path):
 
             @rue.test
             def test_alpha(environment: rue.Environment):
+                environment.set_baseline()
                 (environment.root / 'alpha.txt').write_text('a')
                 assert environment.diff.added == (PurePosixPath('alpha.txt'),)
 
             @rue.test
             def test_beta(environment: rue.Environment):
+                environment.set_baseline()
                 (environment.root / 'beta.txt').write_text('b')
                 assert environment.diff.added == (PurePosixPath('beta.txt'),)
             """

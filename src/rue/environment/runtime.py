@@ -27,7 +27,6 @@ from rue.environment.sync import (
 
 
 if TYPE_CHECKING:
-    from rue.models import Spec
     from rue.resources.models import ResourceSpec
 
 
@@ -128,10 +127,8 @@ class Environment:
     """
 
     __slots__ = (
-        "_baselines",
-        "_consumer_order",
+        "_baseline",
         "_cwd",
-        "_load_checkpoint",
         "_provider_spec",
         "_root",
         "_saved_cwd",
@@ -146,10 +143,8 @@ class Environment:
         self._scope = scope
         self._cwd = self._root
         self._vars = EnvironmentVars()
-        self._baselines: dict[Spec, Checkpoint] = {}
-        self._consumer_order: list[Spec] = []
         self._provider_spec: ResourceSpec | None = None
-        self._load_checkpoint: Checkpoint = Checkpoint.from_root(self._root)
+        self._baseline: Checkpoint | None = None
         self._subprocess_checkpoint: Checkpoint | None = None
 
     @classmethod
@@ -179,22 +174,27 @@ class Environment:
 
     @property
     def baseline(self) -> Checkpoint:
-        """Checkpoint taken at the most recent `load`/`reset`."""
-        return self._load_checkpoint
+        """Checkpoint captured by the most recent `set_baseline` call."""
+        if self._baseline is None:
+            msg = (
+                "Environment baseline is not set. Call "
+                "`environment.set_baseline()` before reading "
+                "`environment.baseline` or `environment.diff`."
+            )
+            raise RuntimeError(msg)
+        return self._baseline
 
     @property
     def diff(self) -> Diff:
-        """Diff against the baseline of the most recent consumer.
-
-        When the environment has not been injected yet this falls back to
-        the load-time baseline so simple usage from a test body still works.
-        """
-        baseline = self._load_checkpoint
-        if self._consumer_order:
-            baseline = self._baselines[self._consumer_order[-1]]
+        """Diff the current filesystem against the explicit baseline."""
+        baseline = self.baseline
         return Diff.from_checkpoints(
             baseline, Checkpoint.from_root(self._root)
         )
+
+    def set_baseline(self) -> None:
+        """Capture the current filesystem state for future `diff` calls."""
+        self._baseline = Checkpoint.from_root(self._root)
 
     def path(self, p: str | Path = ".") -> Path:
         """Resolve `p` against the sandbox root and reject escapes."""
@@ -219,23 +219,19 @@ class Environment:
             os.chdir(target)
 
     def reset(self) -> None:
-        """Empty the sandbox, clear the cwd and per-consumer baselines."""
+        """Empty the sandbox, clear the cwd and explicit baseline."""
         empty_tree(self._root)
         self._cwd = self._root
-        self._consumer_order.clear()
-        self._baselines.clear()
-        self._load_checkpoint = Checkpoint.from_root(self._root)
+        self._baseline = None
 
     async def load(self, source: Source) -> None:
-        """Materialize `source` into the sandbox and reset baselines."""
+        """Materialize `source` into the sandbox and clear the baseline."""
         storage = EnvironmentStorage()
         await source.materialize(
             cache_root=storage.cache_dir,
             dst=self._root,
         )
-        self._load_checkpoint = Checkpoint.from_root(self._root)
-        self._baselines.clear()
-        self._consumer_order.clear()
+        self._baseline = None
         self._cwd = self._root
 
     async def exec(
@@ -302,12 +298,6 @@ class Environment:
             completed.check_returncode()
         return completed
 
-    def _mark_consumer_baseline(self, consumer: Spec) -> None:
-        """Record the per-consumer baseline used by `env.diff`."""
-        self._baselines[consumer] = Checkpoint.from_root(self._root)
-        if consumer not in self._consumer_order:
-            self._consumer_order.append(consumer)
-
     def get_sync_state(self) -> EnvironmentSyncState:
         """Return state safe for subprocess transport.
 
@@ -347,6 +337,11 @@ class Environment:
         return EnvironmentSyncState(
             parent_root=self._root,
             baseline_manifest=tuple(manifest_checkpoint.entries.values()),
+            diff_baseline_manifest=(
+                tuple(self._baseline.entries.values())
+                if self._baseline is not None
+                else None
+            ),
             overrides=dict(self._vars.overrides),
             hidden=frozenset(self._vars.hidden),
             cwd=relative_cwd,
@@ -372,9 +367,11 @@ class Environment:
         self._subprocess_checkpoint = Checkpoint.from_manifest(
             self._root, state.baseline_manifest
         )
-        self._load_checkpoint = self._subprocess_checkpoint
-        self._baselines.clear()
-        self._consumer_order.clear()
+        self._baseline = (
+            Checkpoint.from_manifest(self._root, state.diff_baseline_manifest)
+            if state.diff_baseline_manifest is not None
+            else None
+        )
 
     def merge_sync_states(
         self,
@@ -409,6 +406,11 @@ class Environment:
             self._vars[key] = value
         for key in update.hidden:
             self._vars.unset(key)
+        self._baseline = (
+            Checkpoint.from_manifest(self._root, update.diff_baseline_manifest)
+            if update.diff_baseline_manifest is not None
+            else None
+        )
 
     def __enter__(self) -> Environment:
         """Bind this env to the current process: cwd + os.environ.

@@ -33,6 +33,9 @@ import rue
 @rue.test
 async def test_agent(environment: rue.Environment):
     environment.vars["OPENAI_API_KEY"] = "test-key"
+    await environment.load(rue.env.dir("fixtures/workspace"))
+    environment.path("input.txt").write_text("seed")
+    environment.set_baseline()
     with environment:
         await my_agent.run()
     assert "output.txt" in environment.diff.added
@@ -45,6 +48,7 @@ async def docs(environment):
         ref="0.115.0",
         subpath="docs_src",
     ))
+    environment.set_baseline()
     yield environment
 ```
 
@@ -53,6 +57,7 @@ The public symbols are:
 - `rue.Environment` — the handle type.
 - `rue.env.empty()` / `rue.env.dir(path)` / `rue.env.git(url, ref=..., subpath=...)` —
   source constructors; pass results to `Environment.load(...)`.
+- `Environment.set_baseline()` — explicit diff baseline capture after setup.
 - `rue.EnvironmentVars` (re-exported via `rue.environment`) — the env-var overlay type.
 
 There is no new decorator. Custom env shapers use `@rue.resource`.
@@ -110,16 +115,22 @@ source dedupe. Cache acquisition uses `fcntl.flock` wrapped in
   into a temp dir, drops `.git`, narrows by `subpath`, then clones the
   result into the cache.
 
-After materialization `load` MUST reset `cwd` to `root`, drop per-consumer
-baselines, and re-scan the load-time baseline.
+After materialization `load` MUST reset `cwd` to `root` and clear the
+explicit diff baseline. `load` MUST NOT capture a diff baseline.
 
 ### Diff
 
-Each consumer (test or resource) MUST get its own baseline so
-`environment.diff` reports only changes since that consumer started. The
-baseline is captured by the `on_injection` hook attached to the builtin.
-For test-scope envs each consumer gets a fresh env so the per-consumer
-baseline equals the load-time baseline.
+`Environment.set_baseline()` MUST capture the current filesystem state under
+`Environment.root`. `environment.diff` MUST report changes between that
+explicit baseline and the current filesystem. This is intentionally explicit:
+users may populate fixtures with `load(...)`, `path(...).write_text(...)`,
+plain `Path` operations, or custom resources before deciding which state the
+system under test should be compared against.
+
+`Environment.load(source)`, resource injection, and environment construction
+MUST NOT set the diff baseline. If `environment.diff` or
+`environment.baseline` is read before `set_baseline()` has been called, Rue
+MUST raise `RuntimeError`.
 
 `Diff.added`, `Diff.modified`, `Diff.deleted` are sorted tuples of
 `PurePosixPath`. A path is considered modified when size, mode, or
@@ -167,7 +178,7 @@ worker → parent ships only changed file content.
 
 | Direction | Method | Content |
 | --- | --- | --- |
-| Parent → worker | `get_sync_state()` | `parent_root`, baseline manifest, vars, cwd. |
+| Parent → worker | `get_sync_state()` | `parent_root`, sync baseline manifest, explicit diff baseline manifest, vars, cwd. |
 | Worker hydrate | `from_sync_state(state)` | Reflink-clones `parent_root` into the worker's root, applies vars overlay. |
 | Worker → parent | `get_sync_state()` | `deltas` computed against the baseline manifest captured during hydrate. |
 | Parent merge | `merge_sync_states(baseline, update)` | Applies `update.deltas` to the parent root in place. |
@@ -190,7 +201,7 @@ async-generator factory that:
 3. `yield`s an `Environment._build(root=..., scope=...)`.
 4. Calls `EnvironmentStorage.release(root)` in `finally`.
 
-`on_resolve` stamps the provider spec onto the env (telemetry hook).
-`on_injection` calls `env._mark_consumer_baseline(consumer)` so
-`env.diff` is per-consumer. The factory is intentionally cheap because
-subprocess workers re-run it.
+`on_resolve` stamps the provider spec onto the env (telemetry hook). There is
+no injection-time diff baseline capture; consumers call `set_baseline()`
+explicitly. The factory is intentionally cheap because subprocess workers
+re-run it.

@@ -183,26 +183,68 @@ def test_diff_detects_real_change_across_trees(tmp_path: Path) -> None:
     assert diff.modified == (PurePosixPath("x.txt"),)
 
 
-def test_environment_diff_falls_back_to_load_baseline(
+def test_environment_diff_requires_explicit_baseline(env: Environment) -> None:
+    with pytest.raises(RuntimeError, match="baseline is not set"):
+        _ = env.diff
+
+
+def test_environment_set_baseline_includes_prior_path_writes(
     env: Environment, env_root: Path
 ) -> None:
     (env_root / "out.txt").write_text("hi")
+    env.set_baseline()
+    (env_root / "result.txt").write_text("done")
+
     diff = env.diff
-    assert PurePosixPath("out.txt") in diff.added
+    assert diff.added == (PurePosixPath("result.txt"),)
 
 
-def test_environment_diff_uses_consumer_baseline(
+@pytest.mark.asyncio
+async def test_environment_load_does_not_set_baseline(
+    env: Environment, env_root: Path, tmp_path: Path
+) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "fixture.txt").write_text("fixture")
+
+    await env.load(DirSource(path=src))
+
+    assert (env_root / "fixture.txt").read_text() == "fixture"
+    with pytest.raises(RuntimeError, match="baseline is not set"):
+        _ = env.diff
+
+
+def test_environment_reset_clears_baseline(
     env: Environment, env_root: Path
 ) -> None:
-    (env_root / "shared.txt").write_text("shared")
+    (env_root / "before.txt").write_text("before")
+    env.set_baseline()
+    env.reset()
 
-    spec = type("FakeSpec", (), {})()
-    env._mark_consumer_baseline(spec)
+    with pytest.raises(RuntimeError, match="baseline is not set"):
+        _ = env.diff
 
+
+def test_environment_baseline_property_returns_explicit_baseline(
+    env: Environment, env_root: Path
+) -> None:
+    (env_root / "tracked.txt").write_text("tracked")
+    env.set_baseline()
+
+    assert PurePosixPath("tracked.txt") in env.baseline.entries
+
+
+def test_environment_diff_uses_latest_explicit_baseline(
+    env: Environment, env_root: Path
+) -> None:
+    (env_root / "setup.txt").write_text("setup")
+    env.set_baseline()
+    (env_root / "ignored.txt").write_text("ignored")
+    env.set_baseline()
     (env_root / "after.txt").write_text("after")
+
     diff = env.diff
-    assert PurePosixPath("after.txt") in diff.added
-    assert PurePosixPath("shared.txt") not in diff.added
+    assert diff.added == (PurePosixPath("after.txt"),)
 
 
 def test_activation_binds_environ_and_cwd(
@@ -399,8 +441,10 @@ def test_environment_sync_round_trip(tmp_path: Path) -> None:
     parent_root = tmp_path / "parent"
     parent_root.mkdir()
     (parent_root / "kept.txt").write_text("kept")
+    (parent_root / "baseline.txt").write_text("baseline")
     parent = Environment._build(root=parent_root, scope=Scope.MODULE)
     parent.vars["X"] = "ovl"
+    parent.set_baseline()
 
     state = parent.get_sync_state()
 
@@ -417,10 +461,12 @@ def test_environment_sync_round_trip(tmp_path: Path) -> None:
 
     update = worker.get_sync_state()
     assert update.deltas
+    assert worker.diff.added == (PurePosixPath("added.txt"),)
 
     parent.merge_sync_states(state, update)
     assert (parent_root / "added.txt").read_text() == "from-worker"
     assert (parent_root / "kept.txt").read_text() == "changed"
+    assert parent.diff.added == (PurePosixPath("added.txt"),)
 
 
 def test_environment_sync_state_apply_transfer_is_noop() -> None:

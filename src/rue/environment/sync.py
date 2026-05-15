@@ -68,6 +68,7 @@ class EnvironmentSyncState:
 
     parent_root: Path
     baseline_manifest: tuple[FileEntry, ...]
+    diff_baseline_manifest: tuple[FileEntry, ...] | None = None
     overrides: dict[str, str] = field(default_factory=dict)
     hidden: frozenset[str] = frozenset()
     cwd: PurePosixPath = field(default_factory=lambda: PurePosixPath("."))

@@ -54,11 +54,6 @@ def register_builtin_resources(registry: ResourceRegistry) -> None:
         env._provider_spec = RESOURCE_TRANSACTION_CONTEXT.get().provider_spec
         return env
 
-    def environment_on_injection(env: Environment) -> Environment:
-        consumer = RESOURCE_TRANSACTION_CONTEXT.get().consumer_spec
-        env._mark_consumer_baseline(consumer)
-        return env
-
     for scope in Scope:
         registry.register_resource(
             scoped_monkeypatch(scope),
@@ -71,5 +66,4 @@ def register_builtin_resources(registry: ResourceRegistry) -> None:
             builtin=True,
             subprocess_sync=True,
             on_resolve=environment_on_resolve,
-            on_injection=environment_on_injection,
         )
