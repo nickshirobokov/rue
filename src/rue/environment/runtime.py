@@ -15,6 +15,7 @@ from rue.environment.checkpoint import Checkpoint
 from rue.environment.sources import Source
 from rue.environment.storage import (
     EnvironmentStorage,
+    clone_tree,
     empty_tree,
 )
 from rue.environment.sync import EnvironmentSyncState
@@ -111,12 +112,11 @@ class Environment:
     ``rue.resources.builtins`` to break a module-load cycle with
     ``rue.resources``.
 
-    Construction is restricted to ``_build`` because each instance needs to
-    know its scope owner; resource factories use that classmethod, tests
-    should never call it directly.
+    Each instance knows the scope owner for its filesystem root.
     """
 
     __slots__ = (
+        "_cache_path",
         "_cwd",
         "_root",
         "_saved_cwd",
@@ -127,14 +127,10 @@ class Environment:
 
     def __init__(self, *, root: Path, scope: Scope) -> None:
         self._root = root.resolve()
+        self._cache_path: Path | None = None
         self._scope = scope
         self._cwd = self._root
         self._vars = EnvironmentVars()
-
-    @classmethod
-    def _build(cls, *, root: Path, scope: Scope) -> Environment:
-        """Construct an environment rooted at `root` for resource factories."""
-        return cls(root=root, scope=scope)
 
     @property
     def root(self) -> Path:
@@ -158,7 +154,7 @@ class Environment:
 
     def get_checkpoint(self) -> Checkpoint:
         """Return a filesystem checkpoint without mutating environment state."""
-        return Checkpoint.from_root(self._root)
+        return Checkpoint.from_root(self._root, self._cache_path)
 
     def path(self, p: str | Path = ".") -> Path:
         """Resolve `p` against the sandbox root and reject escapes."""
@@ -183,14 +179,19 @@ class Environment:
             os.chdir(target)
 
     def reset(self) -> None:
-        """Empty the sandbox and reset the cwd."""
+        """Restore the sandbox from its cached baseline and reset the cwd."""
         empty_tree(self._root)
+        if self._cache_path is not None:
+            for child in self._cache_path.iterdir():
+                clone_tree(child, self._root / child.name)
         self._cwd = self._root
+        if _ACTIVE_ENVIRONMENT is self:
+            os.chdir(self._root)
 
     async def load(self, source: Source) -> None:
         """Materialize `source` into the sandbox and reset the cwd."""
         storage = EnvironmentStorage()
-        await source.materialize(
+        self._cache_path = await source.materialize(
             cache_root=storage.cache_dir,
             dst=self._root,
         )

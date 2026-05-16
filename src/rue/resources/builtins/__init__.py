@@ -39,7 +39,7 @@ def register_builtin_resources(registry: ResourceRegistry) -> None:
                 owner,
                 process_kind=suite_context.process,
             )
-            env = Environment._build(root=root, scope=scope)
+            env = Environment(root=root, scope=scope)
             try:
                 yield env
             finally:

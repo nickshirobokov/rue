@@ -43,14 +43,13 @@ class EnvSource(ABC):
         called; implementations are responsible for creating it.
         """
 
-    async def materialize(self, *, cache_root: Path, dst: Path) -> None:
+    async def materialize(self, *, cache_root: Path, dst: Path) -> Path:
         """Materialize this source into `dst` via a content-addressed cache.
 
-        ``dst`` must not already exist. The cache entry for this source is
-        created on first call and reused on subsequent ones. Concurrent
-        calls for the same fingerprint are deduplicated via an exclusive
-        ``fcntl.flock`` acquired inside a thread-pool worker so other
-        coroutines stay responsive.
+        The cache entry for this source is created on first call and reused
+        on subsequent ones. Concurrent calls for the same fingerprint are
+        deduplicated via an exclusive ``fcntl.flock`` acquired inside a
+        thread-pool worker so other coroutines stay responsive.
         """
         fingerprint = await asyncio.to_thread(self.fingerprint)
         cache_dir = cache_root / fingerprint
@@ -61,7 +60,12 @@ class EnvSource(ABC):
             cache_dir=cache_dir,
             lock_path=lock_path,
         )
-        await asyncio.to_thread(_install_into_dst, cache_dir=cache_dir, dst=dst)
+        await asyncio.to_thread(
+            _install_into_dst,
+            cache_dir=cache_dir,
+            dst=dst,
+        )
+        return cache_dir
 
     def _ensure_cache_populated(
         self,

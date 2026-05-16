@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import pytest
 
+import bsdiff4
 from rue.context.models import ScopeOwner
 from rue.context.scopes import CurrentProcessKind, Scope
 from rue.environment import (
@@ -21,6 +22,7 @@ from rue.environment import (
     EnvironmentSyncState,
     EnvironmentVars,
     GitSource,
+    UpdatedPath,
 )
 from rue.environment.checkpoint import Checkpoint
 from rue.environment.sources import (
@@ -44,7 +46,7 @@ def env_root(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def env(env_root: Path) -> Environment:
-    return Environment._build(root=env_root, scope=Scope.TEST)
+    return Environment(root=env_root, scope=Scope.TEST)
 
 
 def test_path_resolves_under_root(env: Environment, env_root: Path) -> None:
@@ -152,6 +154,107 @@ def test_checkpoint_is_value_snapshot(
     assert before.compare(after).modified == (PurePosixPath("x.txt"),)
 
 
+def test_checkpoint_from_root_emits_only_changed_paths(
+    tmp_path: Path,
+) -> None:
+    baseline = tmp_path / "baseline"
+    current = tmp_path / "current"
+    baseline.mkdir()
+    current.mkdir()
+    (baseline / "same.txt").write_text("same")
+    (current / "same.txt").write_text("same")
+    (baseline / "changed.txt").write_text("before")
+    (current / "changed.txt").write_text("after")
+
+    checkpoint = Checkpoint.from_root(current, baseline)
+
+    assert tuple(path.path for path in checkpoint.updated_paths) == (
+        PurePosixPath("changed.txt"),
+    )
+
+
+def test_checkpoint_mode_only_change_has_no_bsdiff_patch(
+    tmp_path: Path,
+) -> None:
+    baseline = tmp_path / "baseline"
+    current = tmp_path / "current"
+    baseline.mkdir()
+    current.mkdir()
+    baseline_file = baseline / "script.sh"
+    current_file = current / "script.sh"
+    baseline_file.write_text("echo hi\n")
+    current_file.write_text("echo hi\n")
+    os.chmod(baseline_file, 0o644)
+    os.chmod(current_file, 0o755)
+
+    checkpoint = Checkpoint.from_root(current, baseline)
+
+    assert checkpoint.updated_paths == (
+        UpdatedPath.file(
+            path=PurePosixPath("script.sh"),
+            mode=0o755,
+            bsdiff_patch=None,
+        ),
+    )
+
+
+def test_checkpoint_byte_change_payload_round_trips_with_bsdiff(
+    tmp_path: Path,
+) -> None:
+    baseline = tmp_path / "baseline"
+    current = tmp_path / "current"
+    baseline.mkdir()
+    current.mkdir()
+    baseline_bytes = b"before"
+    current_bytes = b"after-after"
+    (baseline / "file.txt").write_bytes(baseline_bytes)
+    (current / "file.txt").write_bytes(current_bytes)
+
+    checkpoint = Checkpoint.from_root(current, baseline)
+    updated_path = checkpoint.updated_paths[0]
+
+    assert isinstance(updated_path.bsdiff_patch, bytes)
+    assert (
+        bsdiff4.patch(baseline_bytes, updated_path.bsdiff_patch)
+        == current_bytes
+    )
+
+
+def test_checkpoint_added_empty_file_reconstructs_from_empty_baseline(
+    tmp_path: Path,
+) -> None:
+    empty = tmp_path / "empty"
+    current = tmp_path / "current"
+    empty.mkdir()
+    current.mkdir()
+    (current / "empty.txt").touch()
+
+    assert Checkpoint.from_root(empty).compare(
+        Checkpoint.from_root(current)
+    ).added == (PurePosixPath("empty.txt"),)
+
+
+def test_checkpoint_compare_uses_reconstructed_final_state(
+    tmp_path: Path,
+) -> None:
+    baseline_a = tmp_path / "baseline-a"
+    current_a = tmp_path / "current-a"
+    baseline_b = tmp_path / "baseline-b"
+    current_b = tmp_path / "current-b"
+    for directory in (baseline_a, current_a, baseline_b, current_b):
+        directory.mkdir()
+    (baseline_a / "same.txt").write_text("same")
+    (current_a / "same.txt").write_text("same")
+    (current_b / "same.txt").write_text("same")
+
+    checkpoint_a = Checkpoint.from_root(current_a, baseline_a)
+    checkpoint_b = Checkpoint.from_root(current_b, baseline_b)
+
+    assert checkpoint_a.updated_paths == ()
+    assert checkpoint_b.updated_paths
+    assert checkpoint_a.compare(checkpoint_b).empty
+
+
 def test_environment_get_checkpoint_is_side_effect_free(
     env: Environment, env_root: Path
 ) -> None:
@@ -169,7 +272,45 @@ def test_environment_reset_leaves_fresh_checkpoint(env: Environment) -> None:
     env.path("before.txt").write_text("before")
     env.reset()
 
-    assert env.get_checkpoint().entries == {}
+    assert env.get_checkpoint().updated_paths == ()
+
+
+@pytest.mark.asyncio
+async def test_environment_get_checkpoint_uses_loaded_cache_baseline(
+    env: Environment,
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "seed.txt").write_text("seed")
+    await env.load(DirSource(path=source_dir))
+    env.path("seed.txt").write_text("changed")
+
+    checkpoint = env.get_checkpoint()
+
+    assert checkpoint.baseline is not None
+    assert (checkpoint.baseline / "seed.txt").read_text() == "seed"
+    assert tuple(path.path for path in checkpoint.updated_paths) == (
+        PurePosixPath("seed.txt"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_environment_reset_restores_loaded_cache_state(
+    env: Environment,
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "seed.txt").write_text("seed")
+    await env.load(DirSource(path=source_dir))
+
+    env.path("seed.txt").write_text("mutated")
+    env.path("extra.txt").write_text("extra")
+    env.reset()
+
+    assert env.path("seed.txt").read_text() == "seed"
+    assert not env.path("extra.txt").exists()
 
 
 def test_activation_binds_environ_and_cwd(
@@ -189,7 +330,7 @@ def test_activation_binds_environ_and_cwd(
 
 
 def test_activation_rejects_reentry(env: Environment, env_root: Path) -> None:
-    other = Environment._build(root=env_root.parent / "other", scope=Scope.TEST)
+    other = Environment(root=env_root.parent / "other", scope=Scope.TEST)
     (env_root.parent / "other").mkdir()
     with env:
         with pytest.raises(RuntimeError, match="already active"):
@@ -284,12 +425,13 @@ async def test_materialize_dir_source_caches_and_dedupes(
     dst1 = tmp_path / "dst1"
     dst2 = tmp_path / "dst2"
     source = DirSource(path=src)
-    await asyncio.gather(
+    cache_paths = await asyncio.gather(
         source.materialize(cache_root=cache_root, dst=dst1),
         source.materialize(cache_root=cache_root, dst=dst2),
     )
     assert (dst1 / "file.txt").read_text() == "source-payload"
     assert (dst2 / "file.txt").read_text() == "source-payload"
+    assert cache_paths[0] == cache_paths[1]
     cache_dirs = [child for child in cache_root.iterdir() if child.is_dir()]
     assert len(cache_dirs) == 1
 
@@ -298,9 +440,13 @@ async def test_materialize_dir_source_caches_and_dedupes(
 async def test_materialize_empty_source(tmp_path: Path) -> None:
     cache_root = tmp_path / "cache"
     dst = tmp_path / "dst"
-    await EmptySource().materialize(cache_root=cache_root, dst=dst)
+    cache_path = await EmptySource().materialize(
+        cache_root=cache_root,
+        dst=dst,
+    )
     assert dst.is_dir()
     assert list(dst.iterdir()) == []
+    assert cache_path == cache_root / EmptySource().fingerprint()
 
 
 def test_environment_storage_allocate_and_release(tmp_path: Path) -> None:
@@ -386,7 +532,7 @@ def test_environment_sync_shares_root_and_merges_object_state(
     parent_root = tmp_path / "parent"
     parent_root.mkdir()
     (parent_root / "baseline.txt").write_text("baseline")
-    parent = Environment._build(root=parent_root, scope=Scope.MODULE)
+    parent = Environment(root=parent_root, scope=Scope.MODULE)
     parent.vars["X"] = "ovl"
 
     state = parent.get_sync_state()
@@ -396,7 +542,10 @@ def test_environment_sync_shares_root_and_merges_object_state(
         "hidden",
         "cwd",
     }
-    worker = Environment._build(root=tmp_path / "worker", scope=Scope.MODULE)
+    worker = Environment(
+        root=tmp_path / "worker",
+        scope=Scope.MODULE,
+    )
     worker.from_sync_state(state)
 
     assert worker.root == parent_root.resolve()

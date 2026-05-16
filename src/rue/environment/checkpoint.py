@@ -2,108 +2,128 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import stat
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Any
 
-
-_HASH_CHUNK_BYTES = 1 << 20
+import bsdiff4
 
 
 @dataclass(frozen=True, slots=True)
-class FileEntry:
-    """One entry in an environment checkpoint manifest.
-
-    Symlinks carry their target in `symlink_target` and have an empty
-    `content_hash`. Directories are not recorded as their own entries; their
-    presence is implied by their children.
-    """
+class UpdatedPath:
+    """One changed path in an environment checkpoint."""
 
     path: PurePosixPath
-    size: int
-    mtime_ns: int
-    mode: int
-    symlink_target: str | None = None
-    content_hash: str | None = None
+    deleted: bool
+    symlink: bool
+    mode: int | None
+    bsdiff_patch: bytes | str | None
+
+    @classmethod
+    def deleted_path(cls, path: PurePosixPath) -> UpdatedPath:
+        """Create an update for a removed path."""
+        return cls(
+            path=path,
+            deleted=True,
+            symlink=False,
+            mode=None,
+            bsdiff_patch=None,
+        )
+
+    @classmethod
+    def file(
+        cls,
+        path: PurePosixPath,
+        *,
+        mode: int | None,
+        bsdiff_patch: bytes | None,
+    ) -> UpdatedPath:
+        """Create an update or reconstructed state for a regular file."""
+        return cls(
+            path=path,
+            deleted=False,
+            symlink=False,
+            mode=mode,
+            bsdiff_patch=bsdiff_patch,
+        )
+
+    @classmethod
+    def symlink_path(cls, path: PurePosixPath, target: str) -> UpdatedPath:
+        """Create an update or reconstructed state for a symlink."""
+        return cls(
+            path=path,
+            deleted=False,
+            symlink=True,
+            mode=None,
+            bsdiff_patch=target,
+        )
 
     @property
-    def is_symlink(self) -> bool:
-        """True if this entry represents a symbolic link."""
-        return self.symlink_target is not None
+    def bytes(self) -> Any:
+        """Regular-file bytes or bsdiff payload."""
+        return self.bsdiff_patch
+
+    @property
+    def target(self) -> Any:
+        """Symlink target payload."""
+        return self.bsdiff_patch
 
 
 @dataclass(frozen=True, slots=True)
 class Checkpoint:
-    """Filesystem checkpoint rooted at a single directory.
+    """Filesystem checkpoint as updates over an optional baseline tree."""
 
-    Entries are keyed by path so equality checks across two checkpoints only
-    need a dict lookup. The root path is informational and not part of any
-    diff.
-    """
-
-    root: Path
-    entries: dict[PurePosixPath, FileEntry] = field(default_factory=dict)
+    baseline: Path | None
+    updated_paths: tuple[UpdatedPath, ...]
 
     @classmethod
-    def from_root(cls, root: Path) -> Checkpoint:
-        """Walk `root` and checkpoint every file and symlink under it.
+    def from_root(cls, root: Path, baseline: Path | None = None) -> Checkpoint:
+        """Capture changed files and symlinks under `root`.
 
-        Directories are skipped because their existence is implied by entries
-        inside them. Symlinks are recorded but never followed. Regular files
-        store their content hash at capture time, so the checkpoint is a value
-        snapshot even when the underlying root is mutated later.
+        `baseline=None` represents an empty baseline. Directories are skipped
+        because their presence is implied by files and symlinks.
         """
         root = root.resolve()
-        entries: dict[PurePosixPath, FileEntry] = {}
-        if not root.exists():
-            return cls(root=root, entries=entries)
+        baseline = baseline.resolve() if baseline is not None else None
+        baseline_states = _read_states(baseline)
+        current_states = _read_states(root)
+        updated_paths: list[UpdatedPath] = []
 
-        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-            for name in [*dirnames, *filenames]:
-                absolute = Path(dirpath, name)
-                try:
-                    stat_result = os.lstat(absolute)
-                except FileNotFoundError:
-                    continue
-                mode = stat_result.st_mode
-                if stat.S_ISDIR(mode):
-                    continue
-                relative = PurePosixPath(absolute.relative_to(root).as_posix())
-                symlink_target: str | None = None
-                content_hash: str | None = None
-                if stat.S_ISLNK(mode):
-                    try:
-                        symlink_target = os.readlink(absolute)
-                    except OSError:
-                        symlink_target = ""
-                elif stat.S_ISREG(mode):
-                    try:
-                        content_hash = hash_file(absolute)
-                    except FileNotFoundError:
-                        continue
-                entries[relative] = FileEntry(
-                    path=relative,
-                    size=stat_result.st_size,
-                    mtime_ns=stat_result.st_mtime_ns,
-                    mode=stat.S_IMODE(mode),
-                    symlink_target=symlink_target,
-                    content_hash=content_hash,
+        for path in sorted(baseline_states.keys() | current_states.keys()):
+            baseline_state = baseline_states.get(path)
+            current_state = current_states.get(path)
+            if current_state is None:
+                updated_paths.append(UpdatedPath.deleted_path(path))
+                continue
+            if current_state == baseline_state:
+                continue
+            if current_state.symlink:
+                updated_paths.append(
+                    UpdatedPath.symlink_path(
+                        path,
+                        current_state.target,
+                    )
                 )
-        return cls(root=root, entries=entries)
+                continue
 
-    @classmethod
-    def from_manifest(
-        cls,
-        root: Path,
-        manifest: tuple[FileEntry, ...],
-    ) -> Checkpoint:
-        """Build a checkpoint keyed by path from a manifest tuple."""
-        return cls(
-            root=root,
-            entries={entry.path: entry for entry in manifest},
-        )
+            baseline_bytes = b""
+            if baseline_state is not None and not baseline_state.symlink:
+                baseline_bytes = baseline_state.bytes
+            current_bytes = current_state.bytes
+            updated_paths.append(
+                UpdatedPath.file(
+                    path=path,
+                    mode=current_state.mode,
+                    bsdiff_patch=(
+                        bsdiff4.diff(baseline_bytes, current_bytes)
+                        if baseline_bytes != current_bytes
+                        else None
+                    ),
+                )
+            )
+        return cls(baseline=baseline, updated_paths=tuple(updated_paths))
 
     def compare(self, checkpoint: Checkpoint) -> Diff:
         """Return the diff from this checkpoint to `checkpoint`.
@@ -111,58 +131,77 @@ class Checkpoint:
         `self` is the earlier/reference checkpoint. `checkpoint` is the later
         checkpoint being compared against it.
         """
-        added_paths: list[PurePosixPath] = []
-        modified_paths: list[PurePosixPath] = []
-        deleted_paths: list[PurePosixPath] = []
-
-        for path, current_entry in checkpoint.entries.items():
-            baseline_entry = self.entries.get(path)
-            if baseline_entry is None:
-                added_paths.append(path)
-                continue
-            if baseline_entry.symlink_target != current_entry.symlink_target:
-                modified_paths.append(path)
-                continue
-            if baseline_entry.is_symlink:
-                continue
-            if (
-                baseline_entry.mode != current_entry.mode
-                or baseline_entry.size != current_entry.size
-            ):
-                modified_paths.append(path)
-                continue
-            if baseline_entry.content_hash != current_entry.content_hash:
-                modified_paths.append(path)
-                continue
-            if (
-                baseline_entry.content_hash is None
-                and current_entry.content_hash is None
-                and baseline_entry.mtime_ns != current_entry.mtime_ns
-            ):
-                modified_paths.append(path)
-
-        for path in self.entries:
-            if path not in checkpoint.entries:
-                deleted_paths.append(path)
-
-        added_paths.sort()
-        modified_paths.sort()
-        deleted_paths.sort()
+        baseline_states = self._final_states()
+        current_states = checkpoint._final_states()
         return Diff(
-            added=tuple(added_paths),
-            modified=tuple(modified_paths),
-            deleted=tuple(deleted_paths),
+            added=tuple(sorted(current_states.keys() - baseline_states.keys())),
+            modified=tuple(
+                sorted(
+                    path
+                    for path in baseline_states.keys() & current_states.keys()
+                    if baseline_states[path] != current_states[path]
+                )
+            ),
+            deleted=tuple(
+                sorted(baseline_states.keys() - current_states.keys())
+            ),
         )
 
+    def _final_states(self) -> dict[PurePosixPath, UpdatedPath]:
+        states = _read_states(self.baseline)
+        for updated_path in self.updated_paths:
+            if updated_path.deleted:
+                states.pop(updated_path.path, None)
+                continue
+            if updated_path.symlink:
+                states[updated_path.path] = UpdatedPath.symlink_path(
+                    updated_path.path,
+                    updated_path.target,
+                )
+                continue
 
-def hash_file(path: Path) -> str:
-    """Return a BLAKE2b digest of `path`'s byte contents."""
-    digest = hashlib.blake2b()
-    with path.open("rb") as handle:
-        while chunk := handle.read(_HASH_CHUNK_BYTES):
-            digest.update(chunk)
-    return digest.hexdigest()
+            baseline_state = states.get(updated_path.path)
+            baseline_bytes = b""
+            if baseline_state is not None and not baseline_state.symlink:
+                baseline_bytes = baseline_state.bytes
+            if updated_path.bsdiff_patch is None:
+                payload = baseline_bytes
+            else:
+                payload = bsdiff4.patch(baseline_bytes, updated_path.bytes)
+            states[updated_path.path] = UpdatedPath.file(
+                path=updated_path.path,
+                mode=updated_path.mode,
+                bsdiff_patch=payload,
+            )
+        return states
 
+
+def _read_states(root: Path | None) -> dict[PurePosixPath, UpdatedPath]:
+    states: dict[PurePosixPath, UpdatedPath] = {}
+    if root is None:
+        return states
+
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in [*dirnames, *filenames]:
+            absolute = Path(dirpath, name)
+            stat_result = os.lstat(absolute)
+            mode = stat_result.st_mode
+            if stat.S_ISDIR(mode):
+                continue
+            relative = PurePosixPath(absolute.relative_to(root).as_posix())
+            if stat.S_ISLNK(mode):
+                states[relative] = UpdatedPath.symlink_path(
+                    relative,
+                    os.readlink(absolute),
+                )
+                continue
+            if stat.S_ISREG(mode):
+                states[relative] = UpdatedPath.file(
+                    path=relative,
+                    mode=stat.S_IMODE(mode),
+                    bsdiff_patch=absolute.read_bytes(),
+                )
+    return states
 
 @dataclass(frozen=True, slots=True)
 class Diff:
@@ -181,6 +220,5 @@ class Diff:
 __all__ = [
     "Checkpoint",
     "Diff",
-    "FileEntry",
-    "hash_file",
+    "UpdatedPath",
 ]

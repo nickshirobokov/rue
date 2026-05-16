@@ -116,8 +116,14 @@ source dedupe. Cache acquisition uses `fcntl.flock` wrapped in
   into a temp dir, drops `.git`, narrows by `subpath`, then clones the
   result into the cache.
 
-After materialization `load` MUST reset `cwd` to `root`. `load` MUST NOT
+After materialization `load` MUST remember the content-addressed cache
+directory it installed from and reset `cwd` to `root`. `load` MUST NOT
 capture or store a checkpoint.
+
+Before the first `load(...)`, `Environment.reset()` MUST empty
+`Environment.root`. After `load(...)`, `Environment.reset()` MUST restore
+`Environment.root` from the remembered cache directory. In both cases it
+resets `cwd` to `root`. It MUST NOT invalidate or mutate the source cache.
 
 ### Checkpoints And Diffs
 
@@ -133,11 +139,18 @@ system under test should be compared against.
 `before.compare(after)` reports what was added, modified, or deleted in
 `after` relative to `before`.
 
+`Checkpoint` stores an optional immutable `baseline` directory and a sorted
+tuple of `UpdatedPath` records. `baseline=None` means the checkpoint is based on
+an empty directory. Updated records include only changed regular files and
+symlinks; directories are implied and are not tracked. Regular-file updates
+store the final mode and a bsdiff patch when file bytes changed. Symlink
+updates store the final target string. Deletions store no payload.
+
 `Diff.added`, `Diff.modified`, `Diff.deleted` are sorted tuples of
-`PurePosixPath`. A path is considered modified when size, mode, or
-symlink target differ, or when regular-file BLAKE2b content hashes captured
-inside the checkpoints differ. Checkpoint comparison MUST use checkpoint data,
-not filesystem reads from an older root state.
+`PurePosixPath`. `Checkpoint.compare(checkpoint)` MUST reconstruct both final
+path states from `baseline + updated_paths` and derive status from those final
+states. Regular-file equality uses final mode and final bytes. Symlink equality
+uses final target.
 
 ## Storage Layout
 
@@ -179,9 +192,9 @@ directory.
 
 `Environment` is registered with `subprocess_sync=True` and implements
 the `SyncableResource[EnvironmentSyncState]` protocol via virtual ABC
-registration. Environment files are shared by path, so the wire payload
-contains no file bytes and no file deltas. It only carries process-local
-object state: root path, environment variable overlay, and cwd.
+registration. Environment files and source cache are shared by path, so the
+wire payload contains no file bytes and no file deltas. It only carries
+process-local object state: root path, environment variable overlay, and cwd.
 
 | Direction | Method | Content |
 | --- | --- | --- |
@@ -205,7 +218,7 @@ async-generator factory that:
 
 1. Reads `SUITE_EXECUTION_CONTEXT` and the current owner.
 2. Calls `EnvironmentStorage.allocate(suite_id, owner, process_kind=...)`.
-3. `yield`s an `Environment._build(root=..., scope=...)`.
+3. `yield`s an `Environment(root=..., scope=...)`.
 4. Calls `EnvironmentStorage.release(root)` in `finally`, except for borrowed
    module/suite roots inside test subprocesses.
 
