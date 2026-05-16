@@ -523,6 +523,97 @@ async def test_environment_get_checkpoint_uses_loaded_cache_baseline(
     )
 
 
+def test_environment_get_diff_without_load_treats_root_as_added(
+    env: Environment, env_root: Path
+) -> None:
+    (env_root / "a.txt").write_text("hello")
+
+    diff = env.get_diff()
+
+    assert diff.added == (PurePosixPath("a.txt"),)
+    assert diff.modified == ()
+    assert diff.deleted == ()
+
+
+@pytest.mark.asyncio
+async def test_environment_get_diff_is_empty_when_unchanged(
+    env: Environment,
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "seed.txt").write_text("seed")
+    await env.load(DirSource(path=source_dir))
+
+    assert env.get_diff().empty
+
+
+@pytest.mark.asyncio
+async def test_environment_get_diff_after_load_detects_modification(
+    env: Environment,
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "seed.txt").write_text("seed")
+    await env.load(DirSource(path=source_dir))
+    env.path("seed.txt").write_text("changed")
+
+    diff = env.get_diff()
+
+    assert diff.modified == (PurePosixPath("seed.txt"),)
+    assert diff.added == ()
+    assert diff.deleted == ()
+    file_diff = diff.diff("seed.txt")
+    assert file_diff.before == b"seed"
+    assert file_diff.after == b"changed"
+
+
+@pytest.mark.asyncio
+async def test_environment_get_diff_after_load_detects_add_and_delete(
+    env: Environment,
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "seed.txt").write_text("seed")
+    await env.load(DirSource(path=source_dir))
+    env.path("seed.txt").unlink()
+    env.path("new.txt").write_text("new")
+
+    diff = env.get_diff()
+
+    assert diff.added == (PurePosixPath("new.txt"),)
+    assert diff.deleted == (PurePosixPath("seed.txt"),)
+    assert diff.modified == ()
+
+
+def test_environment_get_diff_is_side_effect_free(
+    env: Environment, env_root: Path
+) -> None:
+    assert env.get_diff().empty
+    (env_root / "a.txt").write_text("hello")
+
+    assert env.get_diff().added == (PurePosixPath("a.txt"),)
+    assert env.get_diff().added == (PurePosixPath("a.txt"),)
+
+
+def test_environment_get_diff_with_explicit_baseline(
+    env: Environment, env_root: Path
+) -> None:
+    (env_root / "seed.txt").write_text("seed")
+    before = env.get_checkpoint()
+    (env_root / "seed.txt").write_text("changed")
+    (env_root / "new.txt").write_text("new")
+
+    diff = env.get_diff(baseline=before)
+
+    assert diff.added == (PurePosixPath("new.txt"),)
+    assert diff.modified == (PurePosixPath("seed.txt"),)
+    assert diff.deleted == ()
+    assert diff.diff("seed.txt").after == b"changed"
+
+
 @pytest.mark.asyncio
 async def test_environment_reset_restores_loaded_cache_state(
     env: Environment,

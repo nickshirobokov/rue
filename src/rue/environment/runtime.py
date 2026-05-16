@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from rue.context.scopes import Scope
-from rue.environment.checkpoint import Checkpoint
+from rue.environment.checkpoint import Checkpoint, Diff
 from rue.environment.sources import Source
 from rue.environment.storage import (
     EnvironmentStorage,
@@ -155,6 +155,20 @@ class Environment:
     def get_checkpoint(self) -> Checkpoint:
         """Return a filesystem checkpoint without mutating environment state."""
         return Checkpoint.from_root(self._root, self._cache_path)
+
+    def get_diff(self, baseline: Checkpoint | None = None) -> Diff:
+        """Return a diff from ``baseline`` to the current sandbox state.
+
+        When ``baseline`` is omitted, the diff is taken against the loaded
+        source's cache (set by the most recent ``load()`` call); if no source
+        has been loaded the baseline is empty, so every file currently under
+        the sandbox root appears as ``added``.
+        """
+        if baseline is None:
+            baseline = Checkpoint(
+                baseline=self._cache_path, updated_paths=()
+            )
+        return baseline.compare(self.get_checkpoint())
 
     def path(self, p: str | Path = ".") -> Path:
         """Resolve `p` against the sandbox root and reject escapes."""
