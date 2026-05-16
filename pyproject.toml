@@ -29,7 +29,6 @@ dependencies = [
     "genai-prices>=0.0.59",
     "summarization-pydantic-ai>=0.1.4",
     "bsdiff4>=1.2.6",
-    "fast-diff-match-patch>=2.1.0",
     "jsonpatch>=1.33",
 ]
 

@@ -781,23 +781,6 @@ wheels = [
 ]
 
 [[package]]
-name = "fast-diff-match-patch"
-version = "2.1.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/8f/ad/5c0159353022637afaeac3a5bd2d9e5e84336d4efa631310a7a81e9357ac/fast_diff_match_patch-2.1.0.tar.gz", hash = "sha256:ac402d7bff04a84f363cc5bfa948509bc4ef8442c6ebdd564c44dc39613bec40", size = 35960, upload-time = "2024-04-23T15:40:27.747Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/64/e2/22a40f72476b6f7725af98c79bb6e50df7f39d3c1ebaaaa1eef367b7091f/fast_diff_match_patch-2.1.0-cp312-cp312-macosx_10_9_universal2.whl", hash = "sha256:a89a17b2033c945f7f77a0b604cc03293e3ae76dda782e4205399922955c9f79", size = 171147, upload-time = "2024-04-23T15:38:56.767Z" },
-    { url = "https://files.pythonhosted.org/packages/83/2f/0ca26f028a7d86fd8ed61b97e4d744ed42bd8a40e7af32f37eafc9e0a7e9/fast_diff_match_patch-2.1.0-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:0abc5fddf847c7321f03e5a506bb3846c34bd7d507a50646bf68251604f03b60", size = 97647, upload-time = "2024-04-23T15:38:58.51Z" },
-    { url = "https://files.pythonhosted.org/packages/64/70/9894ef70d4693355cb925f75d6f7bcee77aa90fda9b0f18f019ed596074a/fast_diff_match_patch-2.1.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:293ea619cedd7e13be650cc35b80b91a832498789d0fc11c11115f744cec33ac", size = 83280, upload-time = "2024-04-23T15:39:00.328Z" },
-    { url = "https://files.pythonhosted.org/packages/ca/ef/86e7795e324658039c2706a7afebc75c831ccd29ec5bb528b69110459e5b/fast_diff_match_patch-2.1.0-cp312-cp312-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:0a50221736889467d6ca2f19739768c5544b98df1896643710d37d27a39ecee3", size = 834457, upload-time = "2024-04-23T15:39:02.019Z" },
-    { url = "https://files.pythonhosted.org/packages/6f/7c/5b6afec911786032f53d61c06aa16feed36e6a758f5a9884ce8a3550a3c6/fast_diff_match_patch-2.1.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9252b9f37fe82316f7e4761aa8a58c16a199a6980ce11b027b41dfcf2eb2bef5", size = 855492, upload-time = "2024-04-23T15:39:03.638Z" },
-    { url = "https://files.pythonhosted.org/packages/47/9e/f3b714ea800e300edf4c4a77837e7cc679a868aa9a9a48d2afb5cfd8e298/fast_diff_match_patch-2.1.0-cp312-cp312-musllinux_1_1_i686.whl", hash = "sha256:ce93336536d641dd8d026c12dde4ae77f5c895ae62a1dca5a6d757eb8cc632d2", size = 1494271, upload-time = "2024-04-23T15:39:05.622Z" },
-    { url = "https://files.pythonhosted.org/packages/d9/0c/2556f0e50ac475c17f6e4bad4dcd1ca74456feb547959d6a896da9594688/fast_diff_match_patch-2.1.0-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:b7f6860aa225ab0ed2ad8e8cfb8278e1014d6326552174c0c6d795b75e3ea90b", size = 1472365, upload-time = "2024-04-23T15:39:07.322Z" },
-    { url = "https://files.pythonhosted.org/packages/24/f5/1a4c4fb78c6c3b7973c1759fdee3e8ebf80785e19ef0e6380b9114985bee/fast_diff_match_patch-2.1.0-cp312-cp312-win32.whl", hash = "sha256:7c0e4f5d46792b1d662f49fe9ad19344497b6cdab8ff311c94e03797cbc04c88", size = 67807, upload-time = "2024-04-23T15:39:09.324Z" },
-    { url = "https://files.pythonhosted.org/packages/ba/31/8a22c95a791f3e6f0aa5b09e3932b176c85057dc9ed054b909bee76d250b/fast_diff_match_patch-2.1.0-cp312-cp312-win_amd64.whl", hash = "sha256:3a0262e7ed3eaef27ef43650f9fed68e755a06943ad36af34d5ee8a925fb655f", size = 76469, upload-time = "2024-04-23T15:39:11.593Z" },
-]
-
-[[package]]
 name = "fastavro"
 version = "1.12.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2950,7 +2933,6 @@ dependencies = [
     { name = "bsdiff4" },
     { name = "cloudpickle" },
     { name = "deepdiff" },
-    { name = "fast-diff-match-patch" },
     { name = "genai-prices" },
     { name = "httpx" },
     { name = "jsonpatch" },
@@ -2988,7 +2970,6 @@ requires-dist = [
     { name = "bsdiff4", specifier = ">=1.2.6" },
     { name = "cloudpickle", specifier = ">=3.1.2" },
     { name = "deepdiff", specifier = ">=9.0.0" },
-    { name = "fast-diff-match-patch", specifier = ">=2.1.0" },
     { name = "genai-prices", specifier = ">=0.0.59" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jsonpatch", specifier = ">=1.33" },

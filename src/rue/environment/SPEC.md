@@ -140,39 +140,54 @@ system under test should be compared against.
 `after` relative to `before`.
 
 `Checkpoint` stores an optional immutable `baseline` directory and a sorted
-tuple of `UpdatedPath` records. `baseline=None` means the checkpoint is based on
-an empty directory. Updated records include only changed regular files and
-symlinks; directories are implied and are not tracked. Regular-file updates
-store the final mode and a bsdiff patch when file bytes changed. Symlink
-updates store the final target string. Deletions store no payload.
+tuple of `PathDelta` records. `baseline=None` means the checkpoint is based on
+an empty directory. Each delta is one of three tagged variants:
+
+- `FileDelta(path, mode, patch)` — `patch` is a bsdiff payload when bytes
+  changed, or `None` for a mode-only change.
+- `SymlinkDelta(path, target)` — the final symlink target string.
+- `Deletion(path)` — a path that existed in the baseline and no longer does.
+
+Directories are implied and are not tracked.
+
+`Checkpoint.final_states` MUST be a property returning the fully-reconstructed
+state of every live path as a read-only `Mapping[PurePosixPath, PathState]`,
+where each value is a `FileState(path, mode, content)` or
+`SymlinkState(path, target)`. The result MAY be memoized on the checkpoint
+instance. Both variants expose a `content` attribute of type `bytes`: file
+bytes for `FileState`, UTF-8-encoded target for `SymlinkState`.
 
 `Diff.added`, `Diff.modified`, `Diff.deleted` are sorted tuples of
-`PurePosixPath`. `Checkpoint.compare(checkpoint)` MUST reconstruct both final
-path states from `baseline + updated_paths` and derive status from those final
-states. Regular-file equality uses final mode and final bytes. Symlink equality
-uses final target.
+`PurePosixPath`. `Checkpoint.compare(checkpoint)` MUST derive these from both
+checkpoints' `final_states()`. Regular-file equality uses final mode and final
+bytes. Symlink equality uses final target. File content for changed paths is
+reconstructed on demand through the source checkpoints — `Diff` itself does
+not eagerly materialize before/after byte maps.
 
-`Diff` MUST also carry the byte content of every changed path in two mappings,
-`before_files` and `after_files`, keyed by `PurePosixPath`. `before_files` holds
-pre-state bytes for `modified ∪ deleted`. `after_files` holds post-state bytes
-for `modified ∪ added`. Symlink "content" MUST be the UTF-8-encoded target.
+`Diff` MUST implement the standard collection protocol:
+
+- `iter(diff)` yields every changed path (`added ∪ modified ∪ deleted`) in
+  sorted order, exactly once each.
+- `len(diff)` is the count of changed paths.
+- `path in diff` accepts `str` or `PurePosixPath` and returns whether the path
+  is in any of the three sets; any other type returns `False`.
+- `bool(diff)` is `False` when there are no changes; `diff.empty` is preserved
+  as the inverse property.
 
 `Diff.diff(path)` MUST return a `FileDiff` for any path in
-`added ∪ modified ∪ deleted` and MUST raise `KeyError` otherwise. Missing sides
-(before-state for added, after-state for deleted) MUST default to `b""` on the
-returned `FileDiff`.
-
-`Diff.content(path)` MUST return the after-state bytes for added or modified
-paths and the before-state bytes for deleted paths. Unknown paths MUST raise
-`KeyError`.
+`added ∪ modified ∪ deleted` and MUST raise `PathNotInDiff` (a subclass of
+`KeyError`) otherwise. On the returned `FileDiff`, the missing side
+(before-state for added, after-state for deleted) MUST be `b""`. Symlink
+"content" on either side MUST be the UTF-8-encoded target.
 
 `FileDiff` exposes three views over its `before` / `after` bytes:
 
 - `FileDiff.unified` MUST return `difflib.unified_diff` output as a single
   string, labelled with the file path on both sides.
 - `FileDiff.words` MUST return a tuple of `(op, text)` pairs produced by
-  `fast_diff_match_patch.diff` over whitespace-delimited tokens, where `op` is
-  one of `"="`, `"-"`, `"+"`.
+  `difflib.SequenceMatcher` over whitespace-delimited tokens, where `op` is
+  one of `"="`, `"-"`, `"+"`. Replace opcodes MUST be split into a `"-"`
+  followed by a `"+"` pair.
 - `FileDiff.json` MUST return an RFC 6902 JSON Patch (list of operation
   dictionaries) computed via `jsonpatch.make_patch`, treating an empty side as
   JSON `null`.

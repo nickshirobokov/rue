@@ -7,227 +7,267 @@ import json
 import os
 import re
 import stat
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, cast
+from types import MappingProxyType
+from typing import Any
 
-import fast_diff_match_patch  # type: ignore[import-not-found]
 import jsonpatch  # type: ignore[import-untyped]
 
 import bsdiff4
 
 
+# --- Storage variants (deltas relative to a baseline) ----------------------
+
+
 @dataclass(frozen=True, slots=True)
-class UpdatedPath:
-    """One changed path in an environment checkpoint."""
+class FileDelta:
+    """File mode and/or byte change relative to the baseline tree."""
 
     path: PurePosixPath
-    deleted: bool
-    symlink: bool
-    mode: int | None
-    bsdiff_patch: bytes | str | None
+    mode: int
+    patch: bytes | None  # None when only the mode changed
 
-    @classmethod
-    def deleted_path(cls, path: PurePosixPath) -> UpdatedPath:
-        """Create an update for a removed path."""
-        return cls(
-            path=path,
-            deleted=True,
-            symlink=False,
-            mode=None,
-            bsdiff_patch=None,
-        )
 
-    @classmethod
-    def file(
-        cls,
-        path: PurePosixPath,
-        *,
-        mode: int | None,
-        bsdiff_patch: bytes | None,
-    ) -> UpdatedPath:
-        """Create an update or reconstructed state for a regular file."""
-        return cls(
-            path=path,
-            deleted=False,
-            symlink=False,
-            mode=mode,
-            bsdiff_patch=bsdiff_patch,
-        )
+@dataclass(frozen=True, slots=True)
+class SymlinkDelta:
+    """Final target of a created or retargeted symlink."""
 
-    @classmethod
-    def symlink_path(cls, path: PurePosixPath, target: str) -> UpdatedPath:
-        """Create an update or reconstructed state for a symlink."""
-        return cls(
-            path=path,
-            deleted=False,
-            symlink=True,
-            mode=None,
-            bsdiff_patch=target,
-        )
+    path: PurePosixPath
+    target: str
+
+
+@dataclass(frozen=True, slots=True)
+class Deletion:
+    """Marker for a path that existed in the baseline and no longer does."""
+
+    path: PurePosixPath
+
+
+PathDelta = FileDelta | SymlinkDelta | Deletion
+
+
+# --- Reconstructed view variants -------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class FileState:
+    """Fully-materialized regular file."""
+
+    path: PurePosixPath
+    mode: int
+    content: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class SymlinkState:
+    """Fully-materialized symlink."""
+
+    path: PurePosixPath
+    target: str
 
     @property
-    def bytes(self) -> Any:
-        """Regular-file bytes or bsdiff payload."""
-        return self.bsdiff_patch
+    def content(self) -> bytes:
+        """UTF-8-encoded target; mirrors ``FileState.content`` for unions."""
+        return self.target.encode()
 
-    @property
-    def target(self) -> Any:
-        """Symlink target payload."""
-        return self.bsdiff_patch
+
+PathState = FileState | SymlinkState
+
+
+# --- User-facing exception -------------------------------------------------
+
+
+class PathNotInDiff(KeyError):  # noqa: N818 — user-facing name, no Error suffix
+    """Raised when a path is not part of a ``Diff``."""
+
+
+# --- Filesystem walk -------------------------------------------------------
+
+
+def _read_states(
+    root: Path | None,
+    *,
+    reuse: Mapping[PurePosixPath, PathState] | None = None,
+    reuse_fingerprints: Mapping[PurePosixPath, tuple[int, int]] | None = None,
+) -> tuple[
+    dict[PurePosixPath, PathState],
+    dict[PurePosixPath, tuple[int, int]],
+]:
+    """Walk ``root`` and return reconstructed states plus file fingerprints.
+
+    A regular file whose live ``(size, mtime_ns)`` matches an entry in
+    ``reuse_fingerprints`` and whose ``reuse`` entry is a ``FileState`` of the
+    same mode reuses that entry's content instead of re-reading the bytes.
+    """
+    reuse = reuse or {}
+    reuse_fingerprints = reuse_fingerprints or {}
+    states: dict[PurePosixPath, PathState] = {}
+    fingerprints: dict[PurePosixPath, tuple[int, int]] = {}
+    if root is None:
+        return states, fingerprints
+
+    def walk(
+        current: Path,
+    ) -> Iterator[tuple[PurePosixPath, str, os.stat_result]]:
+        with os.scandir(current) as entries:
+            for entry in entries:
+                st = entry.stat(follow_symlinks=False)
+                if stat.S_ISDIR(st.st_mode):
+                    yield from walk(Path(entry.path))
+                    continue
+                relative = PurePosixPath(
+                    Path(entry.path).relative_to(root).as_posix()
+                )
+                yield relative, entry.path, st
+
+    for relative, entry_path, st in walk(root):
+        mode = st.st_mode
+        if stat.S_ISLNK(mode):
+            states[relative] = SymlinkState(
+                path=relative, target=os.readlink(entry_path)
+            )
+            continue
+        if not stat.S_ISREG(mode):
+            continue
+        file_mode = stat.S_IMODE(mode)
+        fingerprint = (st.st_size, st.st_mtime_ns)
+        fingerprints[relative] = fingerprint
+        reused = reuse.get(relative)
+        if (
+            isinstance(reused, FileState)
+            and reused.mode == file_mode
+            and reuse_fingerprints.get(relative) == fingerprint
+        ):
+            states[relative] = reused
+            continue
+        states[relative] = FileState(
+            path=relative,
+            mode=file_mode,
+            content=Path(entry_path).read_bytes(),
+        )
+    return states, fingerprints
+
+
+# --- Checkpoint ------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
 class Checkpoint:
-    """Filesystem checkpoint as updates over an optional baseline tree."""
+    """Filesystem checkpoint stored as deltas over an optional baseline tree."""
 
     baseline: Path | None
-    updated_paths: tuple[UpdatedPath, ...]
+    updated_paths: tuple[PathDelta, ...]
+    _states_cache: Mapping[PurePosixPath, PathState] | None = field(
+        default=None, compare=False, repr=False
+    )
 
     @classmethod
-    def from_root(cls, root: Path, baseline: Path | None = None) -> Checkpoint:
-        """Capture changed files and symlinks under `root`.
+    def from_root(
+        cls, root: Path, baseline: Path | None = None
+    ) -> Checkpoint:
+        """Capture changed files and symlinks under ``root``.
 
-        `baseline=None` represents an empty baseline. Directories are skipped
-        because their presence is implied by files and symlinks.
+        ``baseline=None`` represents an empty baseline. When a baseline is
+        supplied, files whose live ``(size, mtime_ns)`` matches the baseline's
+        recorded fingerprint reuse the baseline content without a re-read.
         """
         root = root.resolve()
         baseline = baseline.resolve() if baseline is not None else None
-        baseline_states = _read_states(baseline)
-        current_states = _read_states(root)
-        updated_paths: list[UpdatedPath] = []
+        baseline_states, baseline_fingerprints = _read_states(baseline)
+        current_states, _ = _read_states(
+            root,
+            reuse=baseline_states,
+            reuse_fingerprints=baseline_fingerprints,
+        )
 
+        deltas: list[PathDelta] = []
         for path in sorted(baseline_states.keys() | current_states.keys()):
             baseline_state = baseline_states.get(path)
             current_state = current_states.get(path)
             if current_state is None:
-                updated_paths.append(UpdatedPath.deleted_path(path))
+                deltas.append(Deletion(path=path))
                 continue
             if current_state == baseline_state:
                 continue
-            if current_state.symlink:
-                updated_paths.append(
-                    UpdatedPath.symlink_path(
-                        path,
-                        current_state.target,
-                    )
+            if isinstance(current_state, SymlinkState):
+                deltas.append(
+                    SymlinkDelta(path=path, target=current_state.target)
                 )
                 continue
-
-            baseline_bytes = b""
-            if baseline_state is not None and not baseline_state.symlink:
-                baseline_bytes = baseline_state.bytes
-            current_bytes = current_state.bytes
-            updated_paths.append(
-                UpdatedPath.file(
-                    path=path,
-                    mode=current_state.mode,
-                    bsdiff_patch=(
-                        bsdiff4.diff(baseline_bytes, current_bytes)
-                        if baseline_bytes != current_bytes
-                        else None
-                    ),
-                )
+            baseline_bytes = (
+                baseline_state.content
+                if isinstance(baseline_state, FileState)
+                else b""
             )
-        return cls(baseline=baseline, updated_paths=tuple(updated_paths))
+            patch: bytes | None = (
+                None
+                if baseline_bytes == current_state.content
+                else bsdiff4.diff(baseline_bytes, current_state.content)
+            )
+            deltas.append(
+                FileDelta(path=path, mode=current_state.mode, patch=patch)
+            )
+
+        return cls(baseline=baseline, updated_paths=tuple(deltas))
 
     def compare(self, checkpoint: Checkpoint) -> Diff:
-        """Return the diff from this checkpoint to `checkpoint`.
+        """Return the diff from ``self`` to ``checkpoint``.
 
-        `self` is the earlier/reference checkpoint. `checkpoint` is the later
-        checkpoint being compared against it.
+        ``self`` is the earlier/reference checkpoint. ``checkpoint`` is the
+        later one being compared against it.
         """
-        baseline_states = self._final_states()
-        current_states = checkpoint._final_states()
-        added = tuple(
-            sorted(current_states.keys() - baseline_states.keys())
-        )
-        deleted = tuple(
-            sorted(baseline_states.keys() - current_states.keys())
-        )
-        modified = tuple(
-            sorted(
-                path
-                for path in baseline_states.keys() & current_states.keys()
-                if baseline_states[path] != current_states[path]
-            )
-        )
+        before = self.final_states
+        after = checkpoint.final_states
         return Diff(
-            added=added,
-            modified=modified,
-            deleted=deleted,
-            before_files={
-                path: _state_payload(baseline_states[path])
-                for path in (*modified, *deleted)
-            },
-            after_files={
-                path: _state_payload(current_states[path])
-                for path in (*modified, *added)
-            },
+            added=tuple(sorted(after.keys() - before.keys())),
+            modified=tuple(
+                sorted(
+                    p
+                    for p in before.keys() & after.keys()
+                    if before[p] != after[p]
+                )
+            ),
+            deleted=tuple(sorted(before.keys() - after.keys())),
+            _before=self,
+            _after=checkpoint,
         )
 
-    def _final_states(self) -> dict[PurePosixPath, UpdatedPath]:
-        states = _read_states(self.baseline)
-        for updated_path in self.updated_paths:
-            if updated_path.deleted:
-                states.pop(updated_path.path, None)
+    @property
+    def final_states(self) -> Mapping[PurePosixPath, PathState]:
+        """Fully-reconstructed final state, memoized per instance."""
+        cached = self._states_cache
+        if cached is not None:
+            return cached
+        states, _ = _read_states(self.baseline)
+        for delta in self.updated_paths:
+            if isinstance(delta, Deletion):
+                states.pop(delta.path, None)
                 continue
-            if updated_path.symlink:
-                states[updated_path.path] = UpdatedPath.symlink_path(
-                    updated_path.path,
-                    updated_path.target,
+            if isinstance(delta, SymlinkDelta):
+                states[delta.path] = SymlinkState(
+                    path=delta.path, target=delta.target
                 )
                 continue
-
-            baseline_state = states.get(updated_path.path)
             baseline_bytes = b""
-            if baseline_state is not None and not baseline_state.symlink:
-                baseline_bytes = baseline_state.bytes
-            if updated_path.bsdiff_patch is None:
-                payload = baseline_bytes
-            else:
-                payload = bsdiff4.patch(baseline_bytes, updated_path.bytes)
-            states[updated_path.path] = UpdatedPath.file(
-                path=updated_path.path,
-                mode=updated_path.mode,
-                bsdiff_patch=payload,
+            existing = states.get(delta.path)
+            if isinstance(existing, FileState):
+                baseline_bytes = existing.content
+            content = (
+                baseline_bytes
+                if delta.patch is None
+                else bsdiff4.patch(baseline_bytes, delta.patch)
             )
-        return states
+            states[delta.path] = FileState(
+                path=delta.path, mode=delta.mode, content=content
+            )
+        result = MappingProxyType(states)
+        object.__setattr__(self, "_states_cache", result)
+        return result
 
 
-def _read_states(root: Path | None) -> dict[PurePosixPath, UpdatedPath]:
-    states: dict[PurePosixPath, UpdatedPath] = {}
-    if root is None:
-        return states
-
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        for name in [*dirnames, *filenames]:
-            absolute = Path(dirpath, name)
-            stat_result = os.lstat(absolute)
-            mode = stat_result.st_mode
-            if stat.S_ISDIR(mode):
-                continue
-            relative = PurePosixPath(absolute.relative_to(root).as_posix())
-            if stat.S_ISLNK(mode):
-                states[relative] = UpdatedPath.symlink_path(
-                    relative,
-                    os.readlink(absolute),
-                )
-                continue
-            if stat.S_ISREG(mode):
-                states[relative] = UpdatedPath.file(
-                    path=relative,
-                    mode=stat.S_IMODE(mode),
-                    bsdiff_patch=absolute.read_bytes(),
-                )
-    return states
-
-def _state_payload(state: UpdatedPath) -> bytes:
-    """Return file bytes or the UTF-8-encoded symlink target."""
-    if state.symlink:
-        return cast(str, state.target).encode()
-    return cast(bytes, state.bytes)
+# --- FileDiff (per-file diff views) ----------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,7 +280,7 @@ class FileDiff:
 
     @property
     def unified(self) -> str:
-        """Return ``difflib.unified_diff`` output as a single string."""
+        """``difflib.unified_diff`` output as a single string."""
         label = str(self.path)
         return "".join(
             difflib.unified_diff(
@@ -253,87 +293,114 @@ class FileDiff:
 
     @property
     def words(self) -> tuple[tuple[str, str], ...]:
-        """Return word-level diff as raw DMP ``(op, text)`` tuples."""
-        before_chars, after_chars, vocab = _tokens_to_chars(
-            self.before.decode(),
-            self.after.decode(),
+        """Word-level diff as ``(op, text)`` tuples; op in ``{=, -, +}``."""
+        before_tokens = re.findall(r"\s+|\S+", self.before.decode())
+        after_tokens = re.findall(r"\s+|\S+", self.after.decode())
+        out: list[tuple[str, str]] = []
+        matcher = difflib.SequenceMatcher(
+            a=before_tokens, b=after_tokens, autojunk=False
         )
-        raw = fast_diff_match_patch.diff(
-            before_chars,
-            after_chars,
-            counts_only=False,
-            cleanup="Semantic",
-        )
-        return tuple(
-            (op, "".join(vocab[ord(c)] for c in chars)) for op, chars in raw
-        )
+        for op, i1, i2, j1, j2 in matcher.get_opcodes():
+            if op == "equal":
+                out.append(("=", "".join(before_tokens[i1:i2])))
+            elif op == "delete":
+                out.append(("-", "".join(before_tokens[i1:i2])))
+            elif op == "insert":
+                out.append(("+", "".join(after_tokens[j1:j2])))
+            else:  # replace
+                out.append(("-", "".join(before_tokens[i1:i2])))
+                out.append(("+", "".join(after_tokens[j1:j2])))
+        return tuple(out)
 
     @property
     def json(self) -> list[dict[str, Any]]:
-        """Return an RFC 6902 JSON Patch between ``before`` and ``after``."""
+        """RFC 6902 JSON Patch between ``before`` and ``after``."""
         before = json.loads(self.before) if self.before else None
         after = json.loads(self.after) if self.after else None
         return list(jsonpatch.make_patch(before, after))
 
 
-def _tokens_to_chars(
-    text_a: str, text_b: str
-) -> tuple[str, str, list[str]]:
-    """Rebase whitespace/word tokens to single Unicode codepoints for DMP."""
-    vocab: list[str] = []
-    index: dict[str, int] = {}
-
-    def rebase(text: str) -> str:
-        chars: list[str] = []
-        for token in re.findall(r"\s+|\S+", text):
-            i = index.get(token)
-            if i is None:
-                i = len(vocab)
-                index[token] = i
-                vocab.append(token)
-            chars.append(chr(i))
-        return "".join(chars)
-
-    return rebase(text_a), rebase(text_b), vocab
+# --- Diff ------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
 class Diff:
-    """Diff between two checkpoints."""
+    """Diff between two checkpoints. File content is reconstructed lazily."""
 
     added: tuple[PurePosixPath, ...] = ()
     modified: tuple[PurePosixPath, ...] = ()
     deleted: tuple[PurePosixPath, ...] = ()
-    before_files: Mapping[PurePosixPath, bytes] = field(default_factory=dict)
-    after_files: Mapping[PurePosixPath, bytes] = field(default_factory=dict)
+    _before: Checkpoint | None = field(
+        default=None, compare=False, repr=False
+    )
+    _after: Checkpoint | None = field(
+        default=None, compare=False, repr=False
+    )
 
     @property
     def empty(self) -> bool:
         """True when there are no changes."""
         return not (self.added or self.modified or self.deleted)
 
+    def __bool__(self) -> bool:
+        """True when there is at least one change."""
+        return not self.empty
+
+    def __len__(self) -> int:
+        """Total number of changed paths."""
+        return len(self.added) + len(self.modified) + len(self.deleted)
+
+    def __iter__(self) -> Iterator[PurePosixPath]:
+        """Yield every changed path in sorted order."""
+        yield from sorted({*self.added, *self.modified, *self.deleted})
+
+    def __contains__(self, path: object) -> bool:
+        """Whether ``path`` is among the changed paths."""
+        try:
+            key = PurePosixPath(path)  # type: ignore[arg-type]
+        except TypeError:
+            return False
+        return (
+            key in self.added
+            or key in self.modified
+            or key in self.deleted
+        )
+
     def diff(self, path: str | PurePosixPath) -> FileDiff:
         """Return a per-file diff view for a changed path."""
         key = PurePosixPath(path)
-        if key not in self.before_files and key not in self.after_files:
-            raise KeyError(key)
+        if key not in self:
+            raise PathNotInDiff(
+                f"{key} not in this diff "
+                f"(changed: {[str(p) for p in self]})"
+            )
+        before_state = (
+            self._before.final_states.get(key)
+            if self._before is not None
+            else None
+        )
+        after_state = (
+            self._after.final_states.get(key)
+            if self._after is not None
+            else None
+        )
         return FileDiff(
             path=key,
-            before=self.before_files.get(key, b""),
-            after=self.after_files.get(key, b""),
+            before=before_state.content if before_state else b"",
+            after=after_state.content if after_state else b"",
         )
-
-    def content(self, path: str | PurePosixPath) -> bytes:
-        """Return surviving bytes: after-state, or before-state for deleted."""
-        key = PurePosixPath(path)
-        if key in self.after_files:
-            return self.after_files[key]
-        return self.before_files[key]
 
 
 __all__ = [
     "Checkpoint",
+    "Deletion",
     "Diff",
+    "FileDelta",
     "FileDiff",
-    "UpdatedPath",
+    "FileState",
+    "PathDelta",
+    "PathNotInDiff",
+    "PathState",
+    "SymlinkDelta",
+    "SymlinkState",
 ]

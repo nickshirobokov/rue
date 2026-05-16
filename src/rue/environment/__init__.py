@@ -3,7 +3,19 @@
 from __future__ import annotations
 
 from rue.environment import sources
-from rue.environment.checkpoint import Checkpoint, Diff, FileDiff, UpdatedPath
+from rue.environment.checkpoint import (
+    Checkpoint,
+    Deletion,
+    Diff,
+    FileDelta,
+    FileDiff,
+    FileState,
+    PathDelta,
+    PathNotInDiff,
+    PathState,
+    SymlinkDelta,
+    SymlinkState,
+)
 from rue.environment.runtime import Environment, EnvironmentVars
 from rue.environment.sources import (
     DirSource,
@@ -17,6 +29,7 @@ from rue.environment.sync import EnvironmentSyncState
 
 __all__ = [
     "Checkpoint",
+    "Deletion",
     "Diff",
     "DirSource",
     "EmptySource",
@@ -24,9 +37,15 @@ __all__ = [
     "Environment",
     "EnvironmentSyncState",
     "EnvironmentVars",
+    "FileDelta",
     "FileDiff",
+    "FileState",
     "GitSource",
+    "PathDelta",
+    "PathNotInDiff",
+    "PathState",
     "Source",
-    "UpdatedPath",
+    "SymlinkDelta",
+    "SymlinkState",
     "sources",
 ]

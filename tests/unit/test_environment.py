@@ -18,14 +18,19 @@ import bsdiff4
 from rue.context.models import ScopeOwner
 from rue.context.scopes import CurrentProcessKind, Scope
 from rue.environment import (
+    Deletion,
     DirSource,
     EmptySource,
     Environment,
     EnvironmentSyncState,
     EnvironmentVars,
+    FileDelta,
     FileDiff,
+    FileState,
     GitSource,
-    UpdatedPath,
+    PathNotInDiff,
+    SymlinkDelta,
+    SymlinkState,
 )
 from rue.environment.checkpoint import Checkpoint
 from rue.environment.sources import (
@@ -193,10 +198,10 @@ def test_checkpoint_mode_only_change_has_no_bsdiff_patch(
     checkpoint = Checkpoint.from_root(current, baseline)
 
     assert checkpoint.updated_paths == (
-        UpdatedPath.file(
+        FileDelta(
             path=PurePosixPath("script.sh"),
             mode=0o755,
-            bsdiff_patch=None,
+            patch=None,
         ),
     )
 
@@ -214,13 +219,11 @@ def test_checkpoint_byte_change_payload_round_trips_with_bsdiff(
     (current / "file.txt").write_bytes(current_bytes)
 
     checkpoint = Checkpoint.from_root(current, baseline)
-    updated_path = checkpoint.updated_paths[0]
+    delta = checkpoint.updated_paths[0]
 
-    assert isinstance(updated_path.bsdiff_patch, bytes)
-    assert (
-        bsdiff4.patch(baseline_bytes, updated_path.bsdiff_patch)
-        == current_bytes
-    )
+    assert isinstance(delta, FileDelta)
+    assert isinstance(delta.patch, bytes)
+    assert bsdiff4.patch(baseline_bytes, delta.patch) == current_bytes
 
 
 def test_checkpoint_added_empty_file_reconstructs_from_empty_baseline(
@@ -258,36 +261,43 @@ def test_checkpoint_compare_uses_reconstructed_final_state(
     assert checkpoint_a.compare(checkpoint_b).empty
 
 
-def test_diff_content_returns_after_state_for_added(env_root: Path) -> None:
+def test_filediff_before_after_for_added(env_root: Path) -> None:
     before = Checkpoint.from_root(env_root)
     (env_root / "added.txt").write_bytes(b"new content")
 
-    diff = before.compare(Checkpoint.from_root(env_root))
+    file_diff = before.compare(Checkpoint.from_root(env_root)).diff(
+        "added.txt"
+    )
 
-    assert diff.content("added.txt") == b"new content"
+    assert file_diff.before == b""
+    assert file_diff.after == b"new content"
 
 
-def test_diff_content_returns_after_state_for_modified(env_root: Path) -> None:
+def test_filediff_before_after_for_modified(env_root: Path) -> None:
     (env_root / "f.txt").write_bytes(b"before")
     before = Checkpoint.from_root(env_root)
     (env_root / "f.txt").write_bytes(b"after-after")
 
-    diff = before.compare(Checkpoint.from_root(env_root))
+    file_diff = before.compare(Checkpoint.from_root(env_root)).diff("f.txt")
 
-    assert diff.content("f.txt") == b"after-after"
+    assert file_diff.before == b"before"
+    assert file_diff.after == b"after-after"
 
 
-def test_diff_content_returns_before_state_for_deleted(env_root: Path) -> None:
+def test_filediff_before_after_for_deleted(env_root: Path) -> None:
     (env_root / "gone.txt").write_bytes(b"will be gone")
     before = Checkpoint.from_root(env_root)
     (env_root / "gone.txt").unlink()
 
-    diff = before.compare(Checkpoint.from_root(env_root))
+    file_diff = before.compare(Checkpoint.from_root(env_root)).diff(
+        "gone.txt"
+    )
 
-    assert diff.content("gone.txt") == b"will be gone"
+    assert file_diff.before == b"will be gone"
+    assert file_diff.after == b""
 
 
-def test_diff_content_raises_keyerror_for_unchanged_path(
+def test_diff_diff_raises_path_not_in_diff_for_unchanged_path(
     env_root: Path,
 ) -> None:
     (env_root / "kept.txt").write_bytes(b"same")
@@ -296,19 +306,49 @@ def test_diff_content_raises_keyerror_for_unchanged_path(
 
     diff = before.compare(Checkpoint.from_root(env_root))
 
-    with pytest.raises(KeyError):
-        diff.content("kept.txt")
+    with pytest.raises(PathNotInDiff) as excinfo:
+        diff.diff("kept.txt")
+    msg = str(excinfo.value)
+    assert "kept.txt" in msg
+    assert "added.txt" in msg
+    # PathNotInDiff is a KeyError, so generic handlers still catch it.
+    assert isinstance(excinfo.value, KeyError)
 
 
-def test_diff_diff_raises_keyerror_for_unchanged_path(env_root: Path) -> None:
-    (env_root / "kept.txt").write_bytes(b"same")
+def test_diff_supports_iter_len_contains_bool(env_root: Path) -> None:
+    (env_root / "kept.txt").write_text("same")
+    (env_root / "edited.txt").write_text("v1")
+    (env_root / "gone.txt").write_text("bye")
     before = Checkpoint.from_root(env_root)
-    (env_root / "added.txt").write_bytes(b"new")
+    (env_root / "edited.txt").write_text("v2")
+    (env_root / "gone.txt").unlink()
+    (env_root / "added.txt").write_text("hi")
 
     diff = before.compare(Checkpoint.from_root(env_root))
 
-    with pytest.raises(KeyError):
-        diff.diff("kept.txt")
+    assert bool(diff) is True
+    assert len(diff) == 3
+    assert list(diff) == [
+        PurePosixPath("added.txt"),
+        PurePosixPath("edited.txt"),
+        PurePosixPath("gone.txt"),
+    ]
+    assert PurePosixPath("added.txt") in diff
+    assert "edited.txt" in diff
+    assert PurePosixPath("gone.txt") in diff
+    assert "kept.txt" not in diff
+    assert 42 not in diff
+
+
+def test_diff_bool_and_len_for_empty(env_root: Path) -> None:
+    diff = Checkpoint.from_root(env_root).compare(
+        Checkpoint.from_root(env_root)
+    )
+
+    assert bool(diff) is False
+    assert len(diff) == 0
+    assert list(diff) == []
+    assert diff.empty is True
 
 
 def test_filediff_unified_matches_difflib_output(env_root: Path) -> None:
@@ -390,7 +430,7 @@ def test_filediff_unified_raises_on_binary(env_root: Path) -> None:
         _ = file_diff.unified
 
 
-def test_diff_content_handles_symlink_target(env_root: Path) -> None:
+def test_filediff_symlink_targets_are_encoded_bytes(env_root: Path) -> None:
     (env_root / "a.txt").write_text("a")
     (env_root / "b.txt").write_text("b")
     (env_root / "link").symlink_to("a.txt")
@@ -398,13 +438,49 @@ def test_diff_content_handles_symlink_target(env_root: Path) -> None:
     (env_root / "link").unlink()
     (env_root / "link").symlink_to("b.txt")
 
-    diff = before.compare(Checkpoint.from_root(env_root))
+    file_diff = before.compare(Checkpoint.from_root(env_root)).diff("link")
 
-    assert diff.content("link") == b"b.txt"
-    file_diff = diff.diff("link")
     assert isinstance(file_diff, FileDiff)
     assert file_diff.before == b"a.txt"
     assert file_diff.after == b"b.txt"
+
+
+def test_checkpoint_final_states_returns_reconstructed_paths(
+    tmp_path: Path,
+) -> None:
+    baseline = tmp_path / "baseline"
+    current = tmp_path / "current"
+    baseline.mkdir()
+    current.mkdir()
+    (baseline / "keep.txt").write_bytes(b"same")
+    (current / "keep.txt").write_bytes(b"same")
+    (current / "new.txt").write_bytes(b"hello")
+    (current / "link").symlink_to("keep.txt")
+
+    states = Checkpoint.from_root(current, baseline).final_states
+
+    assert isinstance(states[PurePosixPath("new.txt")], FileState)
+    assert states[PurePosixPath("new.txt")].content == b"hello"
+    assert isinstance(states[PurePosixPath("link")], SymlinkState)
+    assert states[PurePosixPath("link")].target == "keep.txt"
+
+
+def test_checkpoint_emits_deletion_and_symlink_delta_types(
+    tmp_path: Path,
+) -> None:
+    baseline = tmp_path / "baseline"
+    current = tmp_path / "current"
+    baseline.mkdir()
+    current.mkdir()
+    (baseline / "gone.txt").write_text("bye")
+    (current / "link").symlink_to("gone.txt")
+
+    deltas = Checkpoint.from_root(current, baseline).updated_paths
+
+    by_path = {d.path: d for d in deltas}
+    assert isinstance(by_path[PurePosixPath("gone.txt")], Deletion)
+    assert isinstance(by_path[PurePosixPath("link")], SymlinkDelta)
+    assert by_path[PurePosixPath("link")].target == "gone.txt"
 
 
 def test_environment_get_checkpoint_is_side_effect_free(
