@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import difflib
+import json
 import os
+import re
 import stat
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
+
+import fast_diff_match_patch  # type: ignore[import-not-found]
+import jsonpatch  # type: ignore[import-untyped]
 
 import bsdiff4
 
@@ -133,18 +140,31 @@ class Checkpoint:
         """
         baseline_states = self._final_states()
         current_states = checkpoint._final_states()
+        added = tuple(
+            sorted(current_states.keys() - baseline_states.keys())
+        )
+        deleted = tuple(
+            sorted(baseline_states.keys() - current_states.keys())
+        )
+        modified = tuple(
+            sorted(
+                path
+                for path in baseline_states.keys() & current_states.keys()
+                if baseline_states[path] != current_states[path]
+            )
+        )
         return Diff(
-            added=tuple(sorted(current_states.keys() - baseline_states.keys())),
-            modified=tuple(
-                sorted(
-                    path
-                    for path in baseline_states.keys() & current_states.keys()
-                    if baseline_states[path] != current_states[path]
-                )
-            ),
-            deleted=tuple(
-                sorted(baseline_states.keys() - current_states.keys())
-            ),
+            added=added,
+            modified=modified,
+            deleted=deleted,
+            before_files={
+                path: _state_payload(baseline_states[path])
+                for path in (*modified, *deleted)
+            },
+            after_files={
+                path: _state_payload(current_states[path])
+                for path in (*modified, *added)
+            },
         )
 
     def _final_states(self) -> dict[PurePosixPath, UpdatedPath]:
@@ -203,6 +223,80 @@ def _read_states(root: Path | None) -> dict[PurePosixPath, UpdatedPath]:
                 )
     return states
 
+def _state_payload(state: UpdatedPath) -> bytes:
+    """Return file bytes or the UTF-8-encoded symlink target."""
+    if state.symlink:
+        return cast(str, state.target).encode()
+    return cast(bytes, state.bytes)
+
+
+@dataclass(frozen=True, slots=True)
+class FileDiff:
+    """Per-file diff rendered as unified text, word DMP, or JSON Patch."""
+
+    path: PurePosixPath
+    before: bytes
+    after: bytes
+
+    @property
+    def unified(self) -> str:
+        """Return ``difflib.unified_diff`` output as a single string."""
+        label = str(self.path)
+        return "".join(
+            difflib.unified_diff(
+                self.before.decode().splitlines(keepends=True),
+                self.after.decode().splitlines(keepends=True),
+                fromfile=label,
+                tofile=label,
+            )
+        )
+
+    @property
+    def words(self) -> tuple[tuple[str, str], ...]:
+        """Return word-level diff as raw DMP ``(op, text)`` tuples."""
+        before_chars, after_chars, vocab = _tokens_to_chars(
+            self.before.decode(),
+            self.after.decode(),
+        )
+        raw = fast_diff_match_patch.diff(
+            before_chars,
+            after_chars,
+            counts_only=False,
+            cleanup="Semantic",
+        )
+        return tuple(
+            (op, "".join(vocab[ord(c)] for c in chars)) for op, chars in raw
+        )
+
+    @property
+    def json(self) -> list[dict[str, Any]]:
+        """Return an RFC 6902 JSON Patch between ``before`` and ``after``."""
+        before = json.loads(self.before) if self.before else None
+        after = json.loads(self.after) if self.after else None
+        return list(jsonpatch.make_patch(before, after))
+
+
+def _tokens_to_chars(
+    text_a: str, text_b: str
+) -> tuple[str, str, list[str]]:
+    """Rebase whitespace/word tokens to single Unicode codepoints for DMP."""
+    vocab: list[str] = []
+    index: dict[str, int] = {}
+
+    def rebase(text: str) -> str:
+        chars: list[str] = []
+        for token in re.findall(r"\s+|\S+", text):
+            i = index.get(token)
+            if i is None:
+                i = len(vocab)
+                index[token] = i
+                vocab.append(token)
+            chars.append(chr(i))
+        return "".join(chars)
+
+    return rebase(text_a), rebase(text_b), vocab
+
+
 @dataclass(frozen=True, slots=True)
 class Diff:
     """Diff between two checkpoints."""
@@ -210,15 +304,36 @@ class Diff:
     added: tuple[PurePosixPath, ...] = ()
     modified: tuple[PurePosixPath, ...] = ()
     deleted: tuple[PurePosixPath, ...] = ()
+    before_files: Mapping[PurePosixPath, bytes] = field(default_factory=dict)
+    after_files: Mapping[PurePosixPath, bytes] = field(default_factory=dict)
 
     @property
     def empty(self) -> bool:
         """True when there are no changes."""
         return not (self.added or self.modified or self.deleted)
 
+    def diff(self, path: str | PurePosixPath) -> FileDiff:
+        """Return a per-file diff view for a changed path."""
+        key = PurePosixPath(path)
+        if key not in self.before_files and key not in self.after_files:
+            raise KeyError(key)
+        return FileDiff(
+            path=key,
+            before=self.before_files.get(key, b""),
+            after=self.after_files.get(key, b""),
+        )
+
+    def content(self, path: str | PurePosixPath) -> bytes:
+        """Return surviving bytes: after-state, or before-state for deleted."""
+        key = PurePosixPath(path)
+        if key in self.after_files:
+            return self.after_files[key]
+        return self.before_files[key]
+
 
 __all__ = [
     "Checkpoint",
     "Diff",
+    "FileDiff",
     "UpdatedPath",
 ]

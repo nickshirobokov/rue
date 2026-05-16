@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from rue.environment import sources
-from rue.environment.checkpoint import Checkpoint, Diff, UpdatedPath
+from rue.environment.checkpoint import Checkpoint, Diff, FileDiff, UpdatedPath
 from rue.environment.runtime import Environment, EnvironmentVars
 from rue.environment.sources import (
     DirSource,
@@ -24,6 +24,7 @@ __all__ = [
     "Environment",
     "EnvironmentSyncState",
     "EnvironmentVars",
+    "FileDiff",
     "GitSource",
     "Source",
     "UpdatedPath",

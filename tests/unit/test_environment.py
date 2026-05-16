@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
+import json
 import os
 import pickle
 import subprocess
@@ -21,6 +23,7 @@ from rue.environment import (
     Environment,
     EnvironmentSyncState,
     EnvironmentVars,
+    FileDiff,
     GitSource,
     UpdatedPath,
 )
@@ -253,6 +256,155 @@ def test_checkpoint_compare_uses_reconstructed_final_state(
     assert checkpoint_a.updated_paths == ()
     assert checkpoint_b.updated_paths
     assert checkpoint_a.compare(checkpoint_b).empty
+
+
+def test_diff_content_returns_after_state_for_added(env_root: Path) -> None:
+    before = Checkpoint.from_root(env_root)
+    (env_root / "added.txt").write_bytes(b"new content")
+
+    diff = before.compare(Checkpoint.from_root(env_root))
+
+    assert diff.content("added.txt") == b"new content"
+
+
+def test_diff_content_returns_after_state_for_modified(env_root: Path) -> None:
+    (env_root / "f.txt").write_bytes(b"before")
+    before = Checkpoint.from_root(env_root)
+    (env_root / "f.txt").write_bytes(b"after-after")
+
+    diff = before.compare(Checkpoint.from_root(env_root))
+
+    assert diff.content("f.txt") == b"after-after"
+
+
+def test_diff_content_returns_before_state_for_deleted(env_root: Path) -> None:
+    (env_root / "gone.txt").write_bytes(b"will be gone")
+    before = Checkpoint.from_root(env_root)
+    (env_root / "gone.txt").unlink()
+
+    diff = before.compare(Checkpoint.from_root(env_root))
+
+    assert diff.content("gone.txt") == b"will be gone"
+
+
+def test_diff_content_raises_keyerror_for_unchanged_path(
+    env_root: Path,
+) -> None:
+    (env_root / "kept.txt").write_bytes(b"same")
+    before = Checkpoint.from_root(env_root)
+    (env_root / "added.txt").write_bytes(b"new")
+
+    diff = before.compare(Checkpoint.from_root(env_root))
+
+    with pytest.raises(KeyError):
+        diff.content("kept.txt")
+
+
+def test_diff_diff_raises_keyerror_for_unchanged_path(env_root: Path) -> None:
+    (env_root / "kept.txt").write_bytes(b"same")
+    before = Checkpoint.from_root(env_root)
+    (env_root / "added.txt").write_bytes(b"new")
+
+    diff = before.compare(Checkpoint.from_root(env_root))
+
+    with pytest.raises(KeyError):
+        diff.diff("kept.txt")
+
+
+def test_filediff_unified_matches_difflib_output(env_root: Path) -> None:
+    (env_root / "doc.txt").write_text("line one\nline two\n")
+    before = Checkpoint.from_root(env_root)
+    (env_root / "doc.txt").write_text("line one\nline TWO\n")
+
+    diff = before.compare(Checkpoint.from_root(env_root))
+    expected = "".join(
+        difflib.unified_diff(
+            "line one\nline two\n".splitlines(keepends=True),
+            "line one\nline TWO\n".splitlines(keepends=True),
+            fromfile="doc.txt",
+            tofile="doc.txt",
+        )
+    )
+
+    assert diff.diff("doc.txt").unified == expected
+
+
+def test_filediff_words_returns_dmp_tuples(env_root: Path) -> None:
+    (env_root / "msg.txt").write_text("hello world")
+    before = Checkpoint.from_root(env_root)
+    (env_root / "msg.txt").write_text("hello earth")
+
+    diff = before.compare(Checkpoint.from_root(env_root))
+    words = diff.diff("msg.txt").words
+
+    assert isinstance(words, tuple)
+    assert ("-", "world") in words
+    assert ("+", "earth") in words
+    assert ("=", "hello ") in words
+    assert "".join(text for op, text in words if op != "+") == "hello world"
+    assert "".join(text for op, text in words if op != "-") == "hello earth"
+
+
+def test_filediff_json_returns_rfc6902_patch(env_root: Path) -> None:
+    (env_root / "data.json").write_text(json.dumps({"a": 1, "b": 2}))
+    before = Checkpoint.from_root(env_root)
+    (env_root / "data.json").write_text(json.dumps({"a": 1, "b": 3}))
+
+    diff = before.compare(Checkpoint.from_root(env_root))
+
+    assert diff.diff("data.json").json == [
+        {"op": "replace", "path": "/b", "value": 3}
+    ]
+
+
+def test_filediff_json_on_added_file_uses_null_before(env_root: Path) -> None:
+    before = Checkpoint.from_root(env_root)
+    (env_root / "data.json").write_text(json.dumps({"hello": "world"}))
+
+    diff = before.compare(Checkpoint.from_root(env_root))
+
+    assert diff.diff("data.json").json == [
+        {"op": "replace", "path": "", "value": {"hello": "world"}}
+    ]
+
+
+def test_filediff_json_raises_on_invalid_json(env_root: Path) -> None:
+    (env_root / "f.txt").write_text("not json at all")
+    before = Checkpoint.from_root(env_root)
+    (env_root / "f.txt").write_text("still not json")
+
+    file_diff = before.compare(Checkpoint.from_root(env_root)).diff("f.txt")
+
+    with pytest.raises(json.JSONDecodeError):
+        _ = file_diff.json
+
+
+def test_filediff_unified_raises_on_binary(env_root: Path) -> None:
+    (env_root / "bin").write_bytes(b"\xff\xfe\x00\x01")
+    before = Checkpoint.from_root(env_root)
+    (env_root / "bin").write_bytes(b"\xff\xfe\x00\x02")
+
+    file_diff = before.compare(Checkpoint.from_root(env_root)).diff("bin")
+
+    with pytest.raises(UnicodeDecodeError):
+        _ = file_diff.unified
+
+
+def test_diff_content_handles_symlink_target(env_root: Path) -> None:
+    (env_root / "a.txt").write_text("a")
+    (env_root / "b.txt").write_text("b")
+    (env_root / "link").symlink_to("a.txt")
+    before = Checkpoint.from_root(env_root)
+    (env_root / "link").unlink()
+    (env_root / "link").symlink_to("b.txt")
+
+    diff = before.compare(Checkpoint.from_root(env_root))
+
+    assert diff.content("link") == b"b.txt"
+    file_diff = diff.diff("link")
+    assert isinstance(file_diff, FileDiff)
+    assert file_diff.before == b"a.txt"
+    assert file_diff.after == b"b.txt"
 
 
 def test_environment_get_checkpoint_is_side_effect_free(

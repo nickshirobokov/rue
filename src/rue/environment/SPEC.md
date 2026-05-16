@@ -152,6 +152,35 @@ path states from `baseline + updated_paths` and derive status from those final
 states. Regular-file equality uses final mode and final bytes. Symlink equality
 uses final target.
 
+`Diff` MUST also carry the byte content of every changed path in two mappings,
+`before_files` and `after_files`, keyed by `PurePosixPath`. `before_files` holds
+pre-state bytes for `modified ∪ deleted`. `after_files` holds post-state bytes
+for `modified ∪ added`. Symlink "content" MUST be the UTF-8-encoded target.
+
+`Diff.diff(path)` MUST return a `FileDiff` for any path in
+`added ∪ modified ∪ deleted` and MUST raise `KeyError` otherwise. Missing sides
+(before-state for added, after-state for deleted) MUST default to `b""` on the
+returned `FileDiff`.
+
+`Diff.content(path)` MUST return the after-state bytes for added or modified
+paths and the before-state bytes for deleted paths. Unknown paths MUST raise
+`KeyError`.
+
+`FileDiff` exposes three views over its `before` / `after` bytes:
+
+- `FileDiff.unified` MUST return `difflib.unified_diff` output as a single
+  string, labelled with the file path on both sides.
+- `FileDiff.words` MUST return a tuple of `(op, text)` pairs produced by
+  `fast_diff_match_patch.diff` over whitespace-delimited tokens, where `op` is
+  one of `"="`, `"-"`, `"+"`.
+- `FileDiff.json` MUST return an RFC 6902 JSON Patch (list of operation
+  dictionaries) computed via `jsonpatch.make_patch`, treating an empty side as
+  JSON `null`.
+
+Decoding errors on non-UTF-8 bytes (`unified`, `words`) and parse errors on
+non-JSON bytes (`json`) MUST propagate to the caller. The tool does not paper
+over malformed inputs.
+
 ## Storage Layout
 
 ```
