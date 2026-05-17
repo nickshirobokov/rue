@@ -79,21 +79,67 @@ delegates to `path(p)` and MUST reject non-directory targets.
 
 ### Activation (`with environment:`)
 
-Activation MUST snapshot `os.environ` and `os.getcwd()`, apply
-`vars.merged(os.environ)` onto `os.environ`, and `os.chdir(self.cwd)`.
-Exit MUST restore both.
+Activation MUST bind this `Environment` as the active routing target for
+the current context by pushing a token onto a per-context stack
+(`_CURRENT_ENVIRONMENT` / `_ENVIRONMENT_TOKENS` `ContextVar`s). Exit
+MUST pop that token. Activation MUST NOT mutate process-global state
+(`os.environ`, `os.getcwd()`); a per-context dispatcher set installed at
+package import time virtualizes the chokepoint surface of
+`os` / `builtins` / `io` so reads under an active env route to the
+env's `vars` overlay and rebased `cwd`, while reads with no active env
+fast-path to the real process state.
 
-Activation MUST be exclusive across the process. A second `__enter__`
-attempt — re-entrant or from another thread — MUST raise `RuntimeError`
-immediately. The implementation uses a non-blocking `threading.Lock`
-acquire so callers never silently deadlock; "serializes via the lock"
-holds only across actually-disjoint activation windows.
+Activation MUST be concurrent-safe: two `__enter__` calls in different
+async tasks (or other contexts) each see their own binding, with no
+lock, deadlock, or `RuntimeError`. Nested activation in the same
+context is supported via the token stack — the innermost `with` block
+wins for routing; exiting it restores the next-outer binding.
+
+Activation MUST NOT propagate the overlay to subprocesses spawned with
+`env=None`: those inherit the real process environ (the C-level
+`environ` is never modified). Subprocesses spawned with `env=os.environ`
+(explicit) DO see the overlay because `os.environ` is itself routed.
+
+The dispatched chokepoint set comprises `os.environ`, `os.environb`,
+`os.putenv`, `os.unsetenv`, `os.getcwd`, `os.getcwdb`, `os.chdir`,
+`os.fchdir`, `os.stat`, `os.lstat`, `os.access`, `os.scandir`,
+`os.listdir`, `os.mkdir`, `os.rmdir`, `os.unlink` / `os.remove`,
+`os.rename`, `os.replace`, `os.link`, `os.symlink`, `os.readlink`,
+`os.chmod`, `os.chown`, `os.utime`, `os.truncate`, `os.open`,
+`builtins.open`, `io.open`, plus the platform-conditional
+`os.pathconf`, `os.statvfs`, `os.mkfifo`, `os.mknod`, `os.getxattr` /
+`setxattr` / `listxattr` / `removexattr`, `os.chflags` / `lchflags`,
+`os.fwalk`. Wrappers rebase relative path arguments under the active
+env's `cwd`; absolute paths and `int` file descriptors pass through
+unchanged. C / Rust extensions that bypass the Python `os` module
+continue to see real-process state.
+
+`os.putenv(key, value)` and `os.unsetenv(key)` MUST route to the active
+env's `vars` overlay rather than mutating the C-level `environ`. This
+preserves isolation: SUT code that calls `os.putenv` does not leak the
+key into other tests' overlays or into child processes inherited from
+the real environ. With no env active, both pass through to the real
+implementations.
+
+`os.chdir(p)` and `os.fchdir(fd)` under an active env MUST mutate only
+`env._cwd` and MUST NOT call the real `os.chdir` / `os.fchdir`.
+Relative `p` resolves against the current `env.cwd`; fd arguments
+resolve through `/dev/fd/N`. The resolved target MUST lie under
+`env.root` — escapes (absolute paths outside the sandbox, `..`
+traversal past the root) MUST raise `ValueError`. This guarantees
+`Environment.cwd` stays under `Environment.root` even when SUT code
+uses the routed `os.chdir`. `Environment.chdir(p)` (the method) keeps
+its root-relative + containment contract via `Environment.path()` and
+is the user-facing validated mover.
 
 `Environment.exec` MUST NOT require activation. It threads `cwd` and
 `env` through `asyncio.create_subprocess_exec` directly, validating cwd
 through `path()`, and applies the merge order:
-`os.environ if inherit_os else {}` → drop `vars.hidden` → apply
-`vars.overrides` → apply caller `env=`.
+`real os.environ if inherit_os else {}` → drop `vars.hidden` → apply
+`vars.overrides` → apply caller `env=`. The "real os.environ" here is
+the pre-dispatch `os._Environ` captured at install time, so the merge
+composes overrides onto the parent process environ rather than onto
+the already-routed view.
 
 ### Vars overlay
 

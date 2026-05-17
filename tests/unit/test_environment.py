@@ -648,12 +648,18 @@ def test_activation_binds_environ_and_cwd(
     assert "RUE_TEST_OVERRIDE" not in os.environ
 
 
-def test_activation_rejects_reentry(env: Environment, env_root: Path) -> None:
-    other = Environment(root=env_root.parent / "other", scope=Scope.TEST)
-    (env_root.parent / "other").mkdir()
+def test_nested_activation_routes_to_innermost(
+    env: Environment, env_root: Path
+) -> None:
+    other_root = env_root.parent / "other"
+    other_root.mkdir()
+    other = Environment(root=other_root, scope=Scope.TEST)
     with env:
-        with pytest.raises(RuntimeError, match="already active"):
-            other.__enter__()
+        assert os.getcwd() == str(env.root)
+        with other:
+            assert os.getcwd() == str(other.root)
+        # Innermost popped; routing returns to the outer env.
+        assert os.getcwd() == str(env.root)
 
 
 @pytest.mark.asyncio

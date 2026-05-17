@@ -1,17 +1,21 @@
-"""Environment handle, env-var overlay, and process activation."""
+"""Environment handle, env-var overlay, and context-routed activation."""
 
 from __future__ import annotations
 
 import asyncio
 import os
 import subprocess
-import threading
 from collections.abc import Iterator, Mapping, MutableMapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from rue.context.scopes import Scope
 from rue.environment.checkpoint import Checkpoint, Diff
+from rue.environment.dispatch.current import (
+    _CURRENT_ENVIRONMENT,
+    _ENVIRONMENT_TOKENS,
+)
+from rue.environment.dispatch.environ import real_environ
 from rue.environment.sources import Source
 from rue.environment.storage import (
     EnvironmentStorage,
@@ -19,10 +23,6 @@ from rue.environment.storage import (
     empty_tree,
 )
 from rue.environment.sync import EnvironmentSyncState
-
-
-_ACTIVATION_LOCK = threading.Lock()
-_ACTIVE_ENVIRONMENT: Environment | None = None
 
 
 class EnvironmentVars(MutableMapping[str, str]):
@@ -119,8 +119,6 @@ class Environment:
         "_cache_path",
         "_cwd",
         "_root",
-        "_saved_cwd",
-        "_saved_environ",
         "_scope",
         "_vars",
     )
@@ -189,8 +187,6 @@ class Environment:
             msg = f"chdir target is not a directory: {target}"
             raise NotADirectoryError(msg)
         self._cwd = target
-        if _ACTIVE_ENVIRONMENT is self:
-            os.chdir(target)
 
     def reset(self) -> None:
         """Restore the sandbox from its cached baseline and reset the cwd."""
@@ -199,8 +195,6 @@ class Environment:
             for child in self._cache_path.iterdir():
                 clone_tree(child, self._root / child.name)
         self._cwd = self._root
-        if _ACTIVE_ENVIRONMENT is self:
-            os.chdir(self._root)
 
     async def load(self, source: Source) -> None:
         """Materialize `source` into the sandbox and reset the cwd."""
@@ -233,7 +227,7 @@ class Environment:
             msg = f"exec cwd is not a directory: {target_cwd}"
             raise NotADirectoryError(msg)
 
-        base = dict(os.environ) if inherit_os else {}
+        base = dict(real_environ()) if inherit_os else {}
         merged_env = self._vars.merged(base)
         if env:
             merged_env.update(env)
@@ -319,41 +313,23 @@ class Environment:
             self._vars.unset(key)
 
     def __enter__(self) -> Environment:
-        """Bind this env to the current process: cwd + os.environ.
+        """Bind this env as the active routing target for the current context.
 
-        Activation is exclusive across the process: a non-blocking lock
-        acquire turns both re-entrant nesting and concurrent activation
-        from another thread into an immediate ``RuntimeError`` instead of a
-        silent deadlock.
+        Activation is context-local: nested and concurrent ``with``
+        blocks each push a token onto a per-context stack. The chokepoint
+        dispatchers (``os.environ``, ``os.getcwd``, ``open``, ...) read
+        from this binding to route per-test instead of mutating shared
+        process state.
         """
-        global _ACTIVE_ENVIRONMENT
-        if not _ACTIVATION_LOCK.acquire(blocking=False):
-            msg = (
-                "Another Environment is already active in this process. "
-                "Activation does not nest and is not concurrent-safe; keep "
-                "`with environment:` blocks tight around the call that "
-                "needs the sandbox."
-            )
-            raise RuntimeError(msg)
-        self._saved_environ = dict(os.environ)
-        self._saved_cwd = os.getcwd()
-        new_environ = self._vars.merged(self._saved_environ)
-        os.environ.clear()
-        os.environ.update(new_environ)
-        os.chdir(self._cwd)
-        _ACTIVE_ENVIRONMENT = self
+        token = _CURRENT_ENVIRONMENT.set(self)
+        _ENVIRONMENT_TOKENS.set((*_ENVIRONMENT_TOKENS.get(), token))
         return self
 
     def __exit__(self, *exc_info: object) -> None:
-        """Restore the saved cwd and os.environ; release the activation lock."""
-        global _ACTIVE_ENVIRONMENT
-        try:
-            os.chdir(self._saved_cwd)
-            os.environ.clear()
-            os.environ.update(self._saved_environ)
-        finally:
-            _ACTIVE_ENVIRONMENT = None
-            _ACTIVATION_LOCK.release()
+        """Pop this env from the per-context activation stack."""
+        tokens = _ENVIRONMENT_TOKENS.get()
+        _ENVIRONMENT_TOKENS.set(tokens[:-1])
+        _CURRENT_ENVIRONMENT.reset(tokens[-1])
 
 
 __all__ = [

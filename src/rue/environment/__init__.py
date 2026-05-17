@@ -16,6 +16,7 @@ from rue.environment.checkpoint import (
     SymlinkDelta,
     SymlinkState,
 )
+from rue.environment.dispatch import install_dispatchers
 from rue.environment.runtime import Environment, EnvironmentVars
 from rue.environment.sources import (
     DirSource,
@@ -25,6 +26,9 @@ from rue.environment.sources import (
     Source,
 )
 from rue.environment.sync import EnvironmentSyncState
+
+
+install_dispatchers()
 
 
 __all__ = [
