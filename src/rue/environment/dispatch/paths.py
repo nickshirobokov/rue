@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from rue.environment.dispatch.current import install_dispatcher
+from rue.environment.dispatch.base import install_dispatcher
 
 
 @dataclass(frozen=True, slots=True)

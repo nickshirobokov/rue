@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
+from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
+from typing import ClassVar
 
 from rue.context.scopes import Scope
 from rue.environment.checkpoint import Checkpoint, CheckpointDelta
-from rue.environment.dispatch.current import (
-    activate,
-    deactivate,
-)
-from rue.environment.dispatch.environ import real_environ
 from rue.environment.sources import Source
 from rue.environment.storage import (
     EnvironmentStorage,
@@ -22,6 +20,11 @@ from rue.environment.storage import (
 )
 from rue.environment.sync import EnvironmentSyncState
 from rue.environment.var import EnvVars
+
+
+_ACTIVE_ENVIRONMENTS: ContextVar[tuple[Environment, ...]] = ContextVar(
+    "environment_stack", default=()
+)
 
 
 class Environment:
@@ -34,6 +37,11 @@ class Environment:
 
     Each instance knows the scope owner for its filesystem root.
     """
+
+    _real_environ: ClassVar[MutableMapping[str, str]] = os.environ
+    _real_environb: ClassVar[MutableMapping[bytes, bytes] | None] = getattr(
+        os, "environb", None
+    )
 
     __slots__ = (
         "_cache_path",
@@ -60,6 +68,18 @@ class Environment:
         """Current default working directory inside the sandbox."""
         return self._cwd
 
+    @cwd.setter
+    def cwd(self, target: Path) -> None:
+        if target != self._root and not target.is_relative_to(self._root):
+            msg = (
+                f"chdir target escapes environment root: "
+                f"{target} is not inside {self._root}"
+            )
+            raise ValueError(msg)
+        if not target.is_dir():
+            raise NotADirectoryError(str(target))
+        self._cwd = target
+
     @property
     def vars(self) -> EnvVars:
         """Environment variable overlay."""
@@ -69,6 +89,8 @@ class Environment:
     def scope(self) -> Scope:
         """The scope that owns this environment."""
         return self._scope
+
+    # file system state analysis
 
     def get_checkpoint(self) -> Checkpoint:
         """Return a filesystem checkpoint without mutating environment state."""
@@ -88,6 +110,8 @@ class Environment:
             )
         return baseline.compare(self.get_checkpoint())
 
+    # file system state manipulation
+
     def path(self, p: str | Path = ".") -> Path:
         """Resolve `p` against the sandbox root and reject escapes."""
         candidate = (self._root / Path(p)).resolve()
@@ -102,11 +126,7 @@ class Environment:
 
     def chdir(self, p: str | Path = ".") -> None:
         """Set the default cwd to a sandboxed location."""
-        target = self.path(p)
-        if not target.is_dir():
-            msg = f"chdir target is not a directory: {target}"
-            raise NotADirectoryError(msg)
-        self._cwd = target
+        self.cwd = self.path(p)
 
     def reset(self) -> None:
         """Restore the sandbox from its cached baseline and reset the cwd."""
@@ -114,16 +134,9 @@ class Environment:
         if self._cache_path is not None:
             for child in self._cache_path.iterdir():
                 clone_tree(child, self._root / child.name)
-        self._cwd = self._root
+        self.cwd = self._root
 
-    async def load(self, source: Source) -> None:
-        """Materialize `source` into the sandbox and reset the cwd."""
-        storage = EnvironmentStorage()
-        self._cache_path = await source.materialize(
-            cache_root=storage.cache_dir,
-            dst=self._root,
-        )
-        self._cwd = self._root
+    # execution inside the environment
 
     async def exec(
         self,
@@ -147,7 +160,7 @@ class Environment:
             msg = f"exec cwd is not a directory: {target_cwd}"
             raise NotADirectoryError(msg)
 
-        base = dict(real_environ()) if inherit_os else {}
+        base = dict(type(self)._real_environ) if inherit_os else {}
         merged_env = dict(self._vars.view(base))
         if env:
             merged_env.update(env)
@@ -189,6 +202,46 @@ class Environment:
             completed.check_returncode()
         return completed
 
+    def __enter__(self) -> Environment:
+        """Bind this env as the active routing target for the current context.
+
+        Activation is context-local: nested and concurrent ``with`` blocks
+        each push an entry onto a per-context stack. The chokepoint
+        dispatchers (``os.environ``, ``os.getcwd``, ``open``, ...) read
+        from this binding to route per-test instead of mutating shared
+        process state.
+        """
+        _ACTIVE_ENVIRONMENTS.set((*_ACTIVE_ENVIRONMENTS.get(), self))
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        """Pop this env from the per-context activation stack."""
+        stack = _ACTIVE_ENVIRONMENTS.get()
+        if not stack:
+            raise RuntimeError("No active Environment to deactivate.")
+        if stack[-1] is not self:
+            raise RuntimeError("Cannot deactivate Environment out of order.")
+        _ACTIVE_ENVIRONMENTS.set(stack[:-1])
+
+    # environment state management
+
+    async def load(self, source: Source) -> None:
+        """Materialize `source` into the sandbox and reset the cwd."""
+        storage = EnvironmentStorage()
+        self._cache_path = await source.materialize(
+            cache_root=storage.cache_dir,
+            dst=self._root,
+        )
+        self.cwd = self._root
+
+    @classmethod
+    def current(cls) -> Environment | None:
+        """Return the innermost activated Environment in this context."""
+        stack = _ACTIVE_ENVIRONMENTS.get()
+        return stack[-1] if stack else None
+
+    # resource transport serialization (see resources.sync)
+
     def get_sync_state(self) -> EnvironmentSyncState:
         """Return object state safe for subprocess transport."""
         relative_cwd = PurePosixPath(
@@ -212,7 +265,7 @@ class Environment:
         target_cwd = (self._root / Path(state.cwd)).resolve()
         if not target_cwd.is_relative_to(self._root):
             target_cwd = self._root
-        self._cwd = target_cwd
+        self.cwd = target_cwd
 
     def merge_sync_states(
         self,
@@ -225,29 +278,12 @@ class Environment:
         target_cwd = (self._root / Path(update.cwd)).resolve()
         if not target_cwd.is_relative_to(self._root):
             target_cwd = self._root
-        self._cwd = target_cwd
+        self.cwd = target_cwd
         self._vars = EnvVars()
         for key, value in update.overrides.items():
             self._vars[key] = value
         for key in update.hidden:
             self._vars.unset(key)
-
-    def __enter__(self) -> Environment:
-        """Bind this env as the active routing target for the current context.
-
-        Activation is context-local: nested and concurrent ``with`` blocks
-        each push an entry onto a per-context stack. The chokepoint
-        dispatchers (``os.environ``, ``os.getcwd``, ``open``, ...) read
-        from this binding to route per-test instead of mutating shared
-        process state.
-        """
-        activate(self)
-        return self
-
-    def __exit__(self, *exc_info: object) -> None:
-        """Pop this env from the per-context activation stack."""
-        deactivate(self)
-
 
 __all__ = [
     "Environment",
