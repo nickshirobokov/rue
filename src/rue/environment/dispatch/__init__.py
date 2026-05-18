@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-from rue.environment.dispatch.current import (
-    activate,
-    active,
-    deactivate,
-    install_dispatcher,
-)
+from rue.environment.dispatch.base import install_dispatcher
 from rue.environment.dispatch.cwd import install_cwd_dispatchers
 from rue.environment.dispatch.environ import (
     install_environ_dispatchers,
@@ -32,9 +27,6 @@ def install_dispatchers() -> None:
 
 
 __all__ = [
-    "activate",
-    "active",
-    "deactivate",
     "install_dispatcher",
     "install_dispatchers",
     "real_environ",

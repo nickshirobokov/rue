@@ -17,7 +17,7 @@ from rue.environment.checkpoint import (
 )
 from rue.environment.diff import FileDiff
 from rue.environment.dispatch import install_dispatchers
-from rue.environment.runtime import Environment
+from rue.environment.env import Environment
 from rue.environment.sources import (
     DirSource,
     EmptySource,

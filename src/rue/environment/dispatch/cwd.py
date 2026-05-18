@@ -1,6 +1,6 @@
 """Context-routed cwd helpers: getcwd, getcwdb, chdir, fchdir.
 
-These wrappers update the active environment's tracked cwd (`env._cwd`)
+These wrappers update the active environment's tracked cwd
 instead of the real process cwd, so concurrent envs in the same process
 each see their own working directory.
 """
@@ -13,11 +13,11 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from rue.environment.dispatch.current import install_dispatcher
+from rue.environment.dispatch.base import install_dispatcher
 
 
 if TYPE_CHECKING:
-    from rue.environment.runtime import Environment
+    from rue.environment.env import Environment
 
 
 def _resolve_fd_to_path(fd: int) -> Path:
@@ -33,21 +33,6 @@ def _resolve_fd_to_path(fd: int) -> Path:
     return Path(buf.rstrip(b"\x00").decode())
 
 
-def _set_env_cwd(env: Environment, resolved: Path) -> None:
-    """Validate target lives under root and is a dir; then update env cwd."""
-    try:
-        resolved.relative_to(env.root)
-    except ValueError as exc:
-        msg = (
-            f"chdir target escapes environment root: "
-            f"{resolved} is not inside {env.root}"
-        )
-        raise ValueError(msg) from exc
-    if not resolved.is_dir():
-        raise NotADirectoryError(str(resolved))
-    env._cwd = resolved
-
-
 def _getcwd(env: Environment) -> str:
     return str(env.cwd)
 
@@ -58,7 +43,7 @@ def _getcwdb(env: Environment) -> bytes:
 
 def _chdir(env: Environment, path: Any) -> None:
     if isinstance(path, int):
-        _set_env_cwd(env, _resolve_fd_to_path(path).resolve())
+        env.cwd = _resolve_fd_to_path(path).resolve()
         return
     fspath = os.fspath(path)
     as_str = fspath.decode() if isinstance(fspath, bytes) else fspath
@@ -66,11 +51,11 @@ def _chdir(env: Environment, path: Any) -> None:
         as_str = os.path.join(str(env.cwd), as_str)
     # Resolve so subsequent `os.getcwd()` matches real-process semantics
     # (collapses `..` and `.`, follows symlinks).
-    _set_env_cwd(env, Path(as_str).resolve())
+    env.cwd = Path(as_str).resolve()
 
 
 def _fchdir(env: Environment, fd: int) -> None:
-    _set_env_cwd(env, _resolve_fd_to_path(fd).resolve())
+    env.cwd = _resolve_fd_to_path(fd).resolve()
 
 
 def install_cwd_dispatchers() -> None:

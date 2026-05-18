@@ -206,7 +206,7 @@ async def test_chdir_does_not_mutate_real_process_cwd(tmp_path: Path):
             @rue.test
             def test_real_cwd(environment: rue.Environment):
                 # Capture the parent cwd outside the with-block. The dispatcher
-                # only mutates env._cwd, not process cwd, so this stays valid.
+                # only mutates env.cwd, not process cwd, so this stays valid.
                 outer = os.getcwd()
                 with environment:
                     os.chdir(environment.root)

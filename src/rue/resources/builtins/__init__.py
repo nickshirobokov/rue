@@ -8,7 +8,7 @@ from rue.context.runtime import (
     SUITE_EXECUTION_CONTEXT,
 )
 from rue.context.scopes import CurrentProcessKind, Scope, ScopeContext
-from rue.environment.runtime import Environment
+from rue.environment.env import Environment
 from rue.environment.storage import EnvironmentStorage
 from rue.environment.sync import EnvironmentSyncState
 from rue.patching import MonkeyPatch

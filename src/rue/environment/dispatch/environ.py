@@ -4,31 +4,21 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator, Mapping, MutableMapping
-from typing import TYPE_CHECKING
 
-from rue.environment.dispatch.current import active, install_dispatcher
-
-
-if TYPE_CHECKING:
-    from rue.environment.runtime import Environment
-
-
-_REAL_ENVIRON: MutableMapping[str, str] = os.environ
-_REAL_ENVIRONB: MutableMapping[bytes, bytes] | None = getattr(
-    os, "environb", None
-)
+from rue.environment.dispatch.base import install_dispatcher
+from rue.environment.env import Environment
 
 
 def real_environ() -> MutableMapping[str, str]:
     """Return the real process `os.environ`, captured before install."""
-    return _REAL_ENVIRON
+    return Environment._real_environ
 
 
 def real_environb() -> MutableMapping[bytes, bytes]:
     """Return the real process `os.environb`, captured before install."""
-    if _REAL_ENVIRONB is None:
+    if Environment._real_environb is None:
         raise AttributeError("os.environb is not available on this platform")
-    return _REAL_ENVIRONB
+    return Environment._real_environb
 
 
 def _check_bytes(value: object) -> None:
@@ -51,7 +41,7 @@ class _EnvironRouter(MutableMapping[str, str]):
         self._real = real
 
     def _target(self) -> MutableMapping[str, str]:
-        env = active()
+        env = Environment.current()
         return env.vars.view(self._real) if env is not None else self._real
 
     def __getitem__(self, key: str) -> str:
@@ -151,9 +141,9 @@ def _unsetenv(env: Environment, key: str | bytes) -> None:
 
 def install_environ_dispatchers() -> None:
     """Replace `os.environ`, `os.environb`, `os.putenv`, `os.unsetenv`."""
-    str_router = _EnvironRouter(_REAL_ENVIRON)
+    str_router = _EnvironRouter(Environment._real_environ)
     setattr(os, "environ", str_router)  # noqa: B010
-    if _REAL_ENVIRONB is not None:
+    if hasattr(os, "environb"):
         setattr(os, "environb", _EnvironbRouter(str_router))  # noqa: B010
     install_dispatcher(os, "putenv", _putenv)
     install_dispatcher(os, "unsetenv", _unsetenv)
