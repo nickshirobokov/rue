@@ -1,12 +1,14 @@
-"""Context-routed dispatchers that virtualize cwd / env vars per `Environment`."""
+"""Context-routed dispatchers for cwd and env vars per `Environment`."""
 
 from __future__ import annotations
 
 from rue.environment.dispatch.current import (
-    _CURRENT_ENVIRONMENT,
-    _ENVIRONMENT_TOKENS,
-    current,
+    activate,
+    active,
+    deactivate,
+    install_dispatcher,
 )
+from rue.environment.dispatch.cwd import install_cwd_dispatchers
 from rue.environment.dispatch.environ import (
     install_environ_dispatchers,
     real_environ,
@@ -25,13 +27,15 @@ def install_dispatchers() -> None:
         return
     _INSTALLED = True
     install_environ_dispatchers()
+    install_cwd_dispatchers()
     install_path_dispatchers()
 
 
 __all__ = [
-    "_CURRENT_ENVIRONMENT",
-    "_ENVIRONMENT_TOKENS",
-    "current",
+    "activate",
+    "active",
+    "deactivate",
+    "install_dispatcher",
     "install_dispatchers",
     "real_environ",
     "real_environb",

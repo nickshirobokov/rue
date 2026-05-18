@@ -80,9 +80,11 @@ delegates to `path(p)` and MUST reject non-directory targets.
 ### Activation (`with environment:`)
 
 Activation MUST bind this `Environment` as the active routing target for
-the current context by pushing a token onto a per-context stack
-(`_CURRENT_ENVIRONMENT` / `_ENVIRONMENT_TOKENS` `ContextVar`s). Exit
-MUST pop that token. Activation MUST NOT mutate process-global state
+the current context through dispatcher-owned `activate(env)` /
+`deactivate(env)` APIs. The dispatcher owns the per-context activation
+stack and its `ContextVar` tokens. Exit MUST pop the matching active
+environment; empty-stack or out-of-order exits MUST raise `RuntimeError`.
+Activation MUST NOT mutate process-global state
 (`os.environ`, `os.getcwd()`); a per-context dispatcher set installed at
 package import time virtualizes the chokepoint surface of
 `os` / `builtins` / `io` so reads under an active env route to the
@@ -111,8 +113,12 @@ The dispatched chokepoint set comprises `os.environ`, `os.environb`,
 `setxattr` / `listxattr` / `removexattr`, `os.chflags` / `lchflags`,
 `os.fwalk`. Wrappers rebase relative path arguments under the active
 env's `cwd`; absolute paths and `int` file descriptors pass through
-unchanged. C / Rust extensions that bypass the Python `os` module
-continue to see real-process state.
+unchanged. For CPython APIs where `None` means "use the current
+directory" (`os.listdir(None)`, `os.scandir(None)`, and platform
+`os.listxattr(None)`), the dispatcher MUST treat explicit `None` the
+same as an omitted path and route it to the active `env.cwd`. C / Rust
+extensions that bypass the Python `os` module continue to see
+real-process state.
 
 `os.putenv(key, value)` and `os.unsetenv(key)` MUST route to the active
 env's `vars` overlay rather than mutating the C-level `environ`. This
@@ -146,7 +152,18 @@ the already-routed view.
 `EnvironmentVars` is a `MutableMapping[str, str]` over the override layer
 only. Lookups for keys that are not overridden MUST raise `KeyError`.
 `unset(key)` masks a base value; `restore(key)` removes both the override
-and the hide flag; `merged(base)` returns a fresh dict. Pickling MUST
+and the hide flag. `view(base)` returns a `MergedView` — a live
+`MutableMapping` of the overlay composed onto an arbitrary base — used by
+the routers and by `Environment.exec` to compute the effective env.
+
+`EnvironmentVars` owns all string environment validation. Keys and values
+MUST be `str`; non-string keys or values raise `TypeError("str expected,
+not <type>")`. Empty keys raise `OSError(errno.EINVAL, "Invalid
+argument")`. Keys containing `=` raise `ValueError("illegal environment
+variable name")`. Embedded NUL bytes in keys or values raise
+`ValueError("embedded null byte")`. `os.environb`, `os.putenv`, and
+`os.unsetenv` dispatchers MUST decode byte inputs before calling
+`EnvironmentVars`, so the same validation path applies. Pickling MUST
 preserve `_overrides` and `_hidden`.
 
 ### Sources

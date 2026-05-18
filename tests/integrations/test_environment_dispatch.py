@@ -160,6 +160,38 @@ async def test_chdir_subdir_resolves_against_env_cwd(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_optional_none_paths_resolve_against_env_cwd(tmp_path: Path):
+    """`os.listdir(None)` and `os.scandir(None)` use active env cwd."""
+    module_path = tmp_path / "test_optional_none_paths.py"
+    module_path.write_text(
+        dedent(
+            """
+            import os
+
+            import rue
+
+
+            @rue.test
+            def test_optional_none_paths(environment: rue.Environment):
+                (environment.root / "outer.txt").write_text("outer")
+                (environment.root / "sub").mkdir()
+                (environment.root / "sub" / "inside.txt").write_text("inside")
+                with environment:
+                    os.chdir("sub")
+                    assert set(os.listdir(None)) == {"inside.txt"}
+                    with os.scandir(None) as entries:
+                        assert {entry.name for entry in entries} == {
+                            "inside.txt",
+                        }
+            """
+        )
+    )
+
+    suite = await _run_module(module_path)
+    assert suite.result.passed == 1, _failed(suite)
+
+
+@pytest.mark.asyncio
 async def test_chdir_does_not_mutate_real_process_cwd(tmp_path: Path):
     """Exiting `with environment:` leaves the real process cwd untouched."""
     module_path = tmp_path / "test_real_cwd_intact.py"
@@ -540,7 +572,7 @@ async def test_chdir_rejects_escape_outside_env_root(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_router_rejects_non_str_keys_and_values(tmp_path: Path):
-    """`os.environ[1] = 'x'` and similar must raise TypeError, like real environ."""
+    """Routed env APIs reject invalid keys and values consistently."""
     module_path = tmp_path / "test_router_types.py"
     module_path.write_text(
         dedent(
@@ -555,11 +587,39 @@ async def test_router_rejects_non_str_keys_and_values(tmp_path: Path):
             def test_types(environment: rue.Environment):
                 with environment:
                     with pytest.raises(TypeError):
+                        environment.vars[1] = "x"
+                    with pytest.raises(TypeError):
+                        environment.vars["X"] = 1
+                    with pytest.raises(ValueError, match="illegal"):
+                        environment.vars["A=B"] = "x"
+                    with pytest.raises(ValueError, match="embedded null byte"):
+                        environment.vars["A"] = "x\\x00y"
+
+                    with pytest.raises(TypeError):
                         os.environ[1] = "x"
                     with pytest.raises(TypeError):
                         os.environ["X"] = 1
                     with pytest.raises(TypeError):
                         del os.environ[2]
+                    with pytest.raises(ValueError, match="illegal"):
+                        os.environ["A=B"] = "x"
+                    with pytest.raises(ValueError, match="embedded null byte"):
+                        os.environ["A"] = "x\\x00y"
+
+                    if hasattr(os, "environb"):
+                        with pytest.raises(ValueError, match="illegal"):
+                            os.environb[b"A=B"] = b"x"
+                        with pytest.raises(
+                            ValueError, match="embedded null byte",
+                        ):
+                            os.environb[b"A"] = b"x\\x00y"
+
+                    with pytest.raises(ValueError, match="illegal"):
+                        os.putenv("A=B", "x")
+                    with pytest.raises(ValueError, match="embedded null byte"):
+                        os.putenv("A", "x\\x00y")
+                    with pytest.raises(ValueError, match="illegal"):
+                        os.unsetenv("A=B")
             """
         )
     )

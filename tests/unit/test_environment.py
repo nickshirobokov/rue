@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import errno
 import json
 import os
 import pickle
@@ -97,18 +98,65 @@ def test_environment_vars_unset_and_restore() -> None:
     overlay["A"] = "override"
     overlay.unset("A")
     assert "A" in overlay.hidden
-    assert overlay.merged({"A": "base", "B": "stay"}) == {"B": "stay"}
+    assert dict(overlay.view({"A": "base", "B": "stay"})) == {"B": "stay"}
     overlay.restore("A")
     assert "A" not in overlay.hidden
-    assert overlay.merged({"A": "base"}) == {"A": "base"}
+    assert dict(overlay.view({"A": "base"})) == {"A": "base"}
 
 
-def test_environment_vars_merged_layers_correctly() -> None:
+def test_environment_vars_view_layers_correctly() -> None:
     overlay = EnvironmentVars()
     overlay["X"] = "ovl"
     overlay.unset("Y")
-    merged = overlay.merged({"X": "base", "Y": "base", "Z": "base"})
-    assert merged == {"X": "ovl", "Z": "base"}
+    view = overlay.view({"X": "base", "Y": "base", "Z": "base"})
+    assert dict(view) == {"X": "ovl", "Z": "base"}
+
+
+def test_environment_vars_view_operations() -> None:
+    overlay = EnvironmentVars()
+    overlay["A"] = "override"
+    overlay["D"] = "new"
+    overlay.unset("B")
+    view = overlay.view({"A": "base", "B": "hidden", "C": "base"})
+
+    assert view["A"] == "override"
+    assert view["C"] == "base"
+    with pytest.raises(KeyError):
+        view["B"]
+
+    assert "A" in view
+    assert "C" in view
+    assert "B" not in view
+    assert 1 not in view
+    assert tuple(view) == ("C", "A", "D")
+    assert len(view) == 3
+
+
+def test_environment_vars_validate_keys_and_values() -> None:
+    overlay = EnvironmentVars()
+
+    with pytest.raises(TypeError, match="str expected, not int"):
+        overlay[1] = "x"
+    with pytest.raises(TypeError, match="str expected, not int"):
+        overlay["A"] = 1
+    with pytest.raises(TypeError, match="str expected, not int"):
+        overlay[1]
+    with pytest.raises(TypeError, match="str expected, not int"):
+        del overlay[1]
+    with pytest.raises(TypeError, match="str expected, not int"):
+        overlay.unset(1)
+    with pytest.raises(TypeError, match="str expected, not int"):
+        overlay.restore(1)
+
+    with pytest.raises(OSError, match="Invalid argument") as exc_info:
+        overlay[""] = "x"
+    assert exc_info.value.errno == errno.EINVAL
+    with pytest.raises(ValueError, match="illegal environment variable name"):
+        overlay["A=B"] = "x"
+    with pytest.raises(ValueError, match="embedded null byte"):
+        overlay["A\x00B"] = "x"
+    with pytest.raises(ValueError, match="embedded null byte"):
+        overlay["A"] = "x\x00y"
 
 
 def test_environment_vars_pickles() -> None:
@@ -118,6 +166,25 @@ def test_environment_vars_pickles() -> None:
     restored: EnvironmentVars = pickle.loads(pickle.dumps(overlay))
     assert restored["A"] == "1"
     assert restored.hidden == frozenset({"B"})
+
+
+def test_environment_deactivation_rejects_out_of_order_exit(
+    env_root: Path,
+    tmp_path: Path,
+) -> None:
+    inner_root = tmp_path / "inner"
+    inner_root.mkdir()
+    outer = Environment(root=env_root, scope=Scope.TEST)
+    inner = Environment(root=inner_root, scope=Scope.TEST)
+
+    outer.__enter__()
+    inner.__enter__()
+    try:
+        with pytest.raises(RuntimeError, match="out of order"):
+            outer.__exit__(None, None, None)
+    finally:
+        inner.__exit__(None, None, None)
+        outer.__exit__(None, None, None)
 
 
 def test_diff_added_modified_deleted(env_root: Path) -> None:
