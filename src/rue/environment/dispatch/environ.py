@@ -41,7 +41,7 @@ class _EnvironRouter(MutableMapping[str, str]):
 
     With no active env, all operations pass through to the real environ.
     With an active env, the active env's `vars` overlay is composed onto
-    the real environ as a live `MergedView` — reads, writes, and deletes
+    the real environ as a live `MergedVarsView` — reads, writes, and deletes
     all flow through that view.
     """
 

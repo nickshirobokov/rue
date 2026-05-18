@@ -5,10 +5,9 @@ from __future__ import annotations
 from rue.environment import sources
 from rue.environment.checkpoint import (
     Checkpoint,
+    CheckpointDelta,
     Deletion,
-    Diff,
     FileDelta,
-    FileDiff,
     FileState,
     PathDelta,
     PathNotInDiff,
@@ -16,8 +15,9 @@ from rue.environment.checkpoint import (
     SymlinkDelta,
     SymlinkState,
 )
+from rue.environment.diff import FileDiff
 from rue.environment.dispatch import install_dispatchers
-from rue.environment.runtime import Environment, EnvironmentVars
+from rue.environment.runtime import Environment
 from rue.environment.sources import (
     DirSource,
     EmptySource,
@@ -26,6 +26,7 @@ from rue.environment.sources import (
     Source,
 )
 from rue.environment.sync import EnvironmentSyncState
+from rue.environment.var import EnvVars
 
 
 install_dispatchers()
@@ -33,14 +34,14 @@ install_dispatchers()
 
 __all__ = [
     "Checkpoint",
+    "CheckpointDelta",
     "Deletion",
-    "Diff",
     "DirSource",
     "EmptySource",
     "EnvSource",
+    "EnvVars",
     "Environment",
     "EnvironmentSyncState",
-    "EnvironmentVars",
     "FileDelta",
     "FileDiff",
     "FileState",

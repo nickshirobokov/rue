@@ -2,20 +2,15 @@
 
 from __future__ import annotations
 
-import difflib
-import json
 import os
-import re
 import stat
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any
-
-import jsonpatch  # type: ignore[import-untyped]
 
 import bsdiff4
+from rue.environment.diff import FileDiff
 
 
 # --- Storage variants (deltas relative to a baseline) ----------------------
@@ -80,7 +75,7 @@ PathState = FileState | SymlinkState
 
 
 class PathNotInDiff(KeyError):  # noqa: N818 — user-facing name, no Error suffix
-    """Raised when a path is not part of a ``Diff``."""
+    """Raised when a path is not part of a ``CheckpointDelta``."""
 
 
 # --- Filesystem walk -------------------------------------------------------
@@ -212,7 +207,7 @@ class Checkpoint:
 
         return cls(baseline=baseline, updated_paths=tuple(deltas))
 
-    def compare(self, checkpoint: Checkpoint) -> Diff:
+    def compare(self, checkpoint: Checkpoint) -> CheckpointDelta:
         """Return the diff from ``self`` to ``checkpoint``.
 
         ``self`` is the earlier/reference checkpoint. ``checkpoint`` is the
@@ -220,7 +215,7 @@ class Checkpoint:
         """
         before = self.final_states
         after = checkpoint.final_states
-        return Diff(
+        return CheckpointDelta(
             added=tuple(sorted(after.keys() - before.keys())),
             modified=tuple(
                 sorted(
@@ -267,65 +262,12 @@ class Checkpoint:
         return result
 
 
-# --- FileDiff (per-file diff views) ----------------------------------------
+# --- CheckpointDelta -------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
-class FileDiff:
-    """Per-file diff rendered as unified text, word DMP, or JSON Patch."""
-
-    path: PurePosixPath
-    before: bytes
-    after: bytes
-
-    @property
-    def unified(self) -> str:
-        """``difflib.unified_diff`` output as a single string."""
-        label = str(self.path)
-        return "".join(
-            difflib.unified_diff(
-                self.before.decode().splitlines(keepends=True),
-                self.after.decode().splitlines(keepends=True),
-                fromfile=label,
-                tofile=label,
-            )
-        )
-
-    @property
-    def words(self) -> tuple[tuple[str, str], ...]:
-        """Word-level diff as ``(op, text)`` tuples; op in ``{=, -, +}``."""
-        before_tokens = re.findall(r"\s+|\S+", self.before.decode())
-        after_tokens = re.findall(r"\s+|\S+", self.after.decode())
-        out: list[tuple[str, str]] = []
-        matcher = difflib.SequenceMatcher(
-            a=before_tokens, b=after_tokens, autojunk=False
-        )
-        for op, i1, i2, j1, j2 in matcher.get_opcodes():
-            if op == "equal":
-                out.append(("=", "".join(before_tokens[i1:i2])))
-            elif op == "delete":
-                out.append(("-", "".join(before_tokens[i1:i2])))
-            elif op == "insert":
-                out.append(("+", "".join(after_tokens[j1:j2])))
-            else:  # replace
-                out.append(("-", "".join(before_tokens[i1:i2])))
-                out.append(("+", "".join(after_tokens[j1:j2])))
-        return tuple(out)
-
-    @property
-    def json(self) -> list[dict[str, Any]]:
-        """RFC 6902 JSON Patch between ``before`` and ``after``."""
-        before = json.loads(self.before) if self.before else None
-        after = json.loads(self.after) if self.after else None
-        return list(jsonpatch.make_patch(before, after))
-
-
-# --- Diff ------------------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class Diff:
-    """Diff between two checkpoints. File content is reconstructed lazily."""
+class CheckpointDelta:
+    """Delta between two checkpoints. File content is reconstructed lazily."""
 
     added: tuple[PurePosixPath, ...] = ()
     modified: tuple[PurePosixPath, ...] = ()
@@ -366,7 +308,7 @@ class Diff:
             or key in self.deleted
         )
 
-    def diff(self, path: str | PurePosixPath) -> FileDiff:
+    def __call__(self, path: str | PurePosixPath) -> FileDiff:
         """Return a per-file diff view for a changed path."""
         key = PurePosixPath(path)
         if key not in self:
@@ -393,10 +335,9 @@ class Diff:
 
 __all__ = [
     "Checkpoint",
+    "CheckpointDelta",
     "Deletion",
-    "Diff",
     "FileDelta",
-    "FileDiff",
     "FileState",
     "PathDelta",
     "PathNotInDiff",

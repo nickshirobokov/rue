@@ -24,7 +24,7 @@ from rue.environment import (
     EmptySource,
     Environment,
     EnvironmentSyncState,
-    EnvironmentVars,
+    EnvVars,
     FileDelta,
     FileDiff,
     FileState,
@@ -84,7 +84,7 @@ def test_path_rejects_symlink_pointing_outside(
 
 
 def test_environment_vars_overlay_basic() -> None:
-    overlay = EnvironmentVars()
+    overlay = EnvVars()
     overlay["A"] = "1"
     assert overlay["A"] == "1"
     assert dict(overlay) == {"A": "1"}
@@ -94,7 +94,7 @@ def test_environment_vars_overlay_basic() -> None:
 
 
 def test_environment_vars_unset_and_restore() -> None:
-    overlay = EnvironmentVars()
+    overlay = EnvVars()
     overlay["A"] = "override"
     overlay.unset("A")
     assert "A" in overlay.hidden
@@ -105,7 +105,7 @@ def test_environment_vars_unset_and_restore() -> None:
 
 
 def test_environment_vars_view_layers_correctly() -> None:
-    overlay = EnvironmentVars()
+    overlay = EnvVars()
     overlay["X"] = "ovl"
     overlay.unset("Y")
     view = overlay.view({"X": "base", "Y": "base", "Z": "base"})
@@ -113,7 +113,7 @@ def test_environment_vars_view_layers_correctly() -> None:
 
 
 def test_environment_vars_view_operations() -> None:
-    overlay = EnvironmentVars()
+    overlay = EnvVars()
     overlay["A"] = "override"
     overlay["D"] = "new"
     overlay.unset("B")
@@ -133,7 +133,7 @@ def test_environment_vars_view_operations() -> None:
 
 
 def test_environment_vars_validate_keys_and_values() -> None:
-    overlay = EnvironmentVars()
+    overlay = EnvVars()
 
     with pytest.raises(TypeError, match="str expected, not int"):
         overlay[1] = "x"
@@ -160,10 +160,10 @@ def test_environment_vars_validate_keys_and_values() -> None:
 
 
 def test_environment_vars_pickles() -> None:
-    overlay = EnvironmentVars()
+    overlay = EnvVars()
     overlay["A"] = "1"
     overlay.unset("B")
-    restored: EnvironmentVars = pickle.loads(pickle.dumps(overlay))
+    restored: EnvVars = pickle.loads(pickle.dumps(overlay))
     assert restored["A"] == "1"
     assert restored.hidden == frozenset({"B"})
 
@@ -332,7 +332,7 @@ def test_filediff_before_after_for_added(env_root: Path) -> None:
     before = Checkpoint.from_root(env_root)
     (env_root / "added.txt").write_bytes(b"new content")
 
-    file_diff = before.compare(Checkpoint.from_root(env_root)).diff(
+    file_diff = before.compare(Checkpoint.from_root(env_root))(
         "added.txt"
     )
 
@@ -345,7 +345,7 @@ def test_filediff_before_after_for_modified(env_root: Path) -> None:
     before = Checkpoint.from_root(env_root)
     (env_root / "f.txt").write_bytes(b"after-after")
 
-    file_diff = before.compare(Checkpoint.from_root(env_root)).diff("f.txt")
+    file_diff = before.compare(Checkpoint.from_root(env_root))("f.txt")
 
     assert file_diff.before == b"before"
     assert file_diff.after == b"after-after"
@@ -356,7 +356,7 @@ def test_filediff_before_after_for_deleted(env_root: Path) -> None:
     before = Checkpoint.from_root(env_root)
     (env_root / "gone.txt").unlink()
 
-    file_diff = before.compare(Checkpoint.from_root(env_root)).diff(
+    file_diff = before.compare(Checkpoint.from_root(env_root))(
         "gone.txt"
     )
 
@@ -374,7 +374,7 @@ def test_diff_diff_raises_path_not_in_diff_for_unchanged_path(
     diff = before.compare(Checkpoint.from_root(env_root))
 
     with pytest.raises(PathNotInDiff) as excinfo:
-        diff.diff("kept.txt")
+        diff("kept.txt")
     msg = str(excinfo.value)
     assert "kept.txt" in msg
     assert "added.txt" in msg
@@ -433,7 +433,7 @@ def test_filediff_unified_matches_difflib_output(env_root: Path) -> None:
         )
     )
 
-    assert diff.diff("doc.txt").unified == expected
+    assert diff("doc.txt").unified == expected
 
 
 def test_filediff_words_returns_dmp_tuples(env_root: Path) -> None:
@@ -442,7 +442,7 @@ def test_filediff_words_returns_dmp_tuples(env_root: Path) -> None:
     (env_root / "msg.txt").write_text("hello earth")
 
     diff = before.compare(Checkpoint.from_root(env_root))
-    words = diff.diff("msg.txt").words
+    words = diff("msg.txt").words
 
     assert isinstance(words, tuple)
     assert ("-", "world") in words
@@ -459,7 +459,7 @@ def test_filediff_json_returns_rfc6902_patch(env_root: Path) -> None:
 
     diff = before.compare(Checkpoint.from_root(env_root))
 
-    assert diff.diff("data.json").json == [
+    assert diff("data.json").json == [
         {"op": "replace", "path": "/b", "value": 3}
     ]
 
@@ -470,7 +470,7 @@ def test_filediff_json_on_added_file_uses_null_before(env_root: Path) -> None:
 
     diff = before.compare(Checkpoint.from_root(env_root))
 
-    assert diff.diff("data.json").json == [
+    assert diff("data.json").json == [
         {"op": "replace", "path": "", "value": {"hello": "world"}}
     ]
 
@@ -480,7 +480,7 @@ def test_filediff_json_raises_on_invalid_json(env_root: Path) -> None:
     before = Checkpoint.from_root(env_root)
     (env_root / "f.txt").write_text("still not json")
 
-    file_diff = before.compare(Checkpoint.from_root(env_root)).diff("f.txt")
+    file_diff = before.compare(Checkpoint.from_root(env_root))("f.txt")
 
     with pytest.raises(json.JSONDecodeError):
         _ = file_diff.json
@@ -491,7 +491,7 @@ def test_filediff_unified_raises_on_binary(env_root: Path) -> None:
     before = Checkpoint.from_root(env_root)
     (env_root / "bin").write_bytes(b"\xff\xfe\x00\x02")
 
-    file_diff = before.compare(Checkpoint.from_root(env_root)).diff("bin")
+    file_diff = before.compare(Checkpoint.from_root(env_root))("bin")
 
     with pytest.raises(UnicodeDecodeError):
         _ = file_diff.unified
@@ -505,7 +505,7 @@ def test_filediff_symlink_targets_are_encoded_bytes(env_root: Path) -> None:
     (env_root / "link").unlink()
     (env_root / "link").symlink_to("b.txt")
 
-    file_diff = before.compare(Checkpoint.from_root(env_root)).diff("link")
+    file_diff = before.compare(Checkpoint.from_root(env_root))("link")
 
     assert isinstance(file_diff, FileDiff)
     assert file_diff.before == b"a.txt"
@@ -631,7 +631,7 @@ async def test_environment_get_diff_after_load_detects_modification(
     assert diff.modified == (PurePosixPath("seed.txt"),)
     assert diff.added == ()
     assert diff.deleted == ()
-    file_diff = diff.diff("seed.txt")
+    file_diff = diff("seed.txt")
     assert file_diff.before == b"seed"
     assert file_diff.after == b"changed"
 
@@ -678,7 +678,7 @@ def test_environment_get_diff_with_explicit_baseline(
     assert diff.added == (PurePosixPath("new.txt"),)
     assert diff.modified == (PurePosixPath("seed.txt"),)
     assert diff.deleted == ()
-    assert diff.diff("seed.txt").after == b"changed"
+    assert diff("seed.txt").after == b"changed"
 
 
 @pytest.mark.asyncio

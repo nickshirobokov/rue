@@ -59,7 +59,7 @@ The public symbols are:
   source constructors; pass results to `Environment.load(...)`.
 - `Environment.get_checkpoint()` — capture a fresh filesystem checkpoint.
 - `Checkpoint.compare(checkpoint)` — compare two user-owned checkpoints.
-- `rue.EnvironmentVars` (re-exported via `rue.environment`) — the env-var overlay type.
+- `rue.EnvVars` (re-exported via `rue.environment`) — the env-var overlay type.
 
 There is no new decorator. Custom env shapers use `@rue.resource`.
 
@@ -149,21 +149,21 @@ the already-routed view.
 
 ### Vars overlay
 
-`EnvironmentVars` is a `MutableMapping[str, str]` over the override layer
+`EnvVars` is a `MutableMapping[str, str]` over the override layer
 only. Lookups for keys that are not overridden MUST raise `KeyError`.
 `unset(key)` masks a base value; `restore(key)` removes both the override
-and the hide flag. `view(base)` returns a `MergedView` — a live
+and the hide flag. `view(base)` returns a `MergedVarsView` — a live
 `MutableMapping` of the overlay composed onto an arbitrary base — used by
 the routers and by `Environment.exec` to compute the effective env.
 
-`EnvironmentVars` owns all string environment validation. Keys and values
+`EnvVars` owns all string environment validation. Keys and values
 MUST be `str`; non-string keys or values raise `TypeError("str expected,
 not <type>")`. Empty keys raise `OSError(errno.EINVAL, "Invalid
 argument")`. Keys containing `=` raise `ValueError("illegal environment
 variable name")`. Embedded NUL bytes in keys or values raise
 `ValueError("embedded null byte")`. `os.environb`, `os.putenv`, and
 `os.unsetenv` dispatchers MUST decode byte inputs before calling
-`EnvironmentVars`, so the same validation path applies. Pickling MUST
+`EnvVars`, so the same validation path applies. Pickling MUST
 preserve `_overrides` and `_hidden`.
 
 ### Sources
@@ -220,24 +220,25 @@ where each value is a `FileState(path, mode, content)` or
 instance. Both variants expose a `content` attribute of type `bytes`: file
 bytes for `FileState`, UTF-8-encoded target for `SymlinkState`.
 
-`Diff.added`, `Diff.modified`, `Diff.deleted` are sorted tuples of
-`PurePosixPath`. `Checkpoint.compare(checkpoint)` MUST derive these from both
-checkpoints' `final_states()`. Regular-file equality uses final mode and final
-bytes. Symlink equality uses final target. File content for changed paths is
-reconstructed on demand through the source checkpoints — `Diff` itself does
-not eagerly materialize before/after byte maps.
+`CheckpointDelta.added`, `CheckpointDelta.modified`, `CheckpointDelta.deleted`
+are sorted tuples of `PurePosixPath`. `Checkpoint.compare(checkpoint)` MUST
+derive these from both checkpoints' `final_states()`. Regular-file equality
+uses final mode and final bytes. Symlink equality uses final target. File
+content for changed paths is reconstructed on demand through the source
+checkpoints — `CheckpointDelta` itself does not eagerly materialize
+before/after byte maps.
 
-`Diff` MUST implement the standard collection protocol:
+`CheckpointDelta` MUST implement the standard collection protocol:
 
-- `iter(diff)` yields every changed path (`added ∪ modified ∪ deleted`) in
+- `iter(delta)` yields every changed path (`added ∪ modified ∪ deleted`) in
   sorted order, exactly once each.
-- `len(diff)` is the count of changed paths.
-- `path in diff` accepts `str` or `PurePosixPath` and returns whether the path
+- `len(delta)` is the count of changed paths.
+- `path in delta` accepts `str` or `PurePosixPath` and returns whether the path
   is in any of the three sets; any other type returns `False`.
-- `bool(diff)` is `False` when there are no changes; `diff.empty` is preserved
+- `bool(delta)` is `False` when there are no changes; `delta.empty` is preserved
   as the inverse property.
 
-`Diff.diff(path)` MUST return a `FileDiff` for any path in
+`CheckpointDelta(path)` MUST return a `FileDiff` for any path in
 `added ∪ modified ∪ deleted` and MUST raise `PathNotInDiff` (a subclass of
 `KeyError`) otherwise. On the returned `FileDiff`, the missing side
 (before-state for added, after-state for deleted) MUST be `b""`. Symlink
