@@ -10,13 +10,13 @@ from typing import TYPE_CHECKING, Any, cast
 
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
-    CURRENT_RESOURCE_HOOK_CONTEXT,
+    RESOURCE_TRANSACTION_CONTEXT,
     bind,
 )
 from rue.context.scopes import Scope
 from rue.resources.metrics.metric import Metric
 from rue.resources.metrics.models import CalculatedValue, MetricResult
-from rue.resources.registry import resource
+from rue.resources.registry import registry
 
 
 if TYPE_CHECKING:
@@ -70,11 +70,11 @@ def metric[**P](
     is_async_generator = inspect.isasyncgenfunction(fn)
 
     def on_resolve_hook(m: Metric) -> Metric:
-        m.metadata.identity = CURRENT_RESOURCE_HOOK_CONTEXT.get().provider_spec
+        m.metadata.identity = RESOURCE_TRANSACTION_CONTEXT.get().provider_spec
         return m
 
     def on_injection_hook(m: Metric) -> Metric:
-        hook_context = CURRENT_RESOURCE_HOOK_CONTEXT.get()
+        hook_context = RESOURCE_TRANSACTION_CONTEXT.get()
         consumer = hook_context.consumer_spec
         if consumer not in m.metadata.consumers:
             m.metadata.consumers.append(consumer)
@@ -108,19 +108,21 @@ def metric[**P](
                         value: CalculatedValue = (
                             math.nan if final_value is None else final_value
                         )
-                        MetricResult(
+                        result = MetricResult(
                             metadata=metric_instance.metadata,
                             assertion_results=assertions_results,
                             value=value,
                         )
+                        metric_instance.result = result
                         break
 
-        return resource(
+        return registry.register_resource(
             wrapped_gen,
             scope=resource_scope,
             on_resolve=on_resolve_hook,
             on_injection=on_injection_hook,
             origin_fn=fn,
+            subprocess_sync=True,
         )
 
     if is_async_generator:
@@ -149,19 +151,21 @@ def metric[**P](
                         value: CalculatedValue = (
                             math.nan if final_value is None else final_value
                         )
-                        MetricResult(
+                        result = MetricResult(
                             metadata=metric_instance.metadata,
                             assertion_results=assertions_results,
                             value=value,
                         )
+                        metric_instance.result = result
                         break
 
-        return resource(
+        return registry.register_resource(
             wrapped_async_gen,
             scope=resource_scope,
             on_resolve=on_resolve_hook,
             on_injection=on_injection_hook,
             origin_fn=fn,
+            subprocess_sync=True,
         )
 
     msg = (

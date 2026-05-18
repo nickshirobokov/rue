@@ -16,12 +16,12 @@ from uuid import UUID
 from rue.assertions.models import AssertionResult
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
 from rue.context.runtime import (
-    CURRENT_TEST,
+    TEST_EXECUTION_CONTEXT,
     SuiteContext,
     bind,
 )
 from rue.resources import DependencyResolver
-from rue.resources.models import StateSnapshot
+from rue.resources.models import SubprocessResourceSnapshot
 from rue.telemetry.models import TelemetryArtifact
 from rue.testing.models import SetupFileRef, TestSpec
 from rue.testing.outcomes import FailTest, SkipTest, XFailTest
@@ -218,7 +218,7 @@ class LoadedTestDef:
             try:
                 kwargs = await resolver.resolve_graph_deps(
                     resolver.registry.get_graph(
-                        CURRENT_TEST.get().test_execution_id
+                        TEST_EXECUTION_CONTEXT.get().test_execution_id
                     ),
                     params,
                     consumer_spec=self.spec,
@@ -286,7 +286,7 @@ class RemoteTestExecutionPayload:
     suite_root: Path
     setup_chain: tuple[SetupFileRef, ...]
     params: dict[str, Any]
-    snapshot: StateSnapshot
+    resources: SubprocessResourceSnapshot
     context: SuiteContext
     test_execution_id: UUID
 
@@ -297,4 +297,4 @@ class RemoteTestExecutionResult:
 
     result: TestResult
     telemetry_artifacts: tuple[TelemetryArtifact, ...]
-    sync_update: bytes
+    resources: SubprocessResourceSnapshot

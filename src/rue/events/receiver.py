@@ -8,7 +8,7 @@ from types import TracebackType
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from rue.context.runtime import CURRENT_SUITE_CONTEXT
+from rue.context.runtime import SUITE_EXECUTION_CONTEXT
 from rue.events.processor import SuiteEventsProcessor
 
 
@@ -39,7 +39,7 @@ class SuiteEventsReceiver:
 
     def __enter__(self) -> SuiteEventsReceiver:
         """Bind this receiver to the current suite execution scope."""
-        config = CURRENT_SUITE_CONTEXT.get().config
+        config = SUITE_EXECUTION_CONTEXT.get().config
         for processor in self.processors:
             processor.configure(config)
         self._tokens.append(CURRENT_SUITE_EVENTS_RECEIVER.set(self))

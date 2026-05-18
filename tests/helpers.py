@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from rue.config import Config
-from rue.context.runtime import CURRENT_SUITE_CONTEXT, SuiteContext
+from rue.context.runtime import SUITE_EXECUTION_CONTEXT, SuiteContext
 from rue.context.scopes import CURRENT_SCOPE_CONTEXT, ScopeContext
 from rue.events import SuiteEventsProcessor, SuiteEventsReceiver
 from rue.telemetry import OtelTraceArtifact
@@ -112,7 +112,7 @@ def make_suite_context(
         if suite_execution_id is None
         else SuiteContext(config=config, suite_execution_id=suite_execution_id)
     )
-    CURRENT_SUITE_CONTEXT.set(context)
+    SUITE_EXECUTION_CONTEXT.set(context)
     CURRENT_SCOPE_CONTEXT.set(
         ScopeContext.for_suite(context.suite_execution_id)
     )

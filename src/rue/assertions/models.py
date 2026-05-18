@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from rue.context.collectors import CURRENT_ASSERTION_RESULTS
-from rue.context.runtime import CURRENT_SUITE_CONTEXT
+from rue.context.runtime import SUITE_EXECUTION_CONTEXT
 from rue.resources.metrics.scope import ACTIVE_ASSERTION_METRICS
 
 
@@ -74,7 +74,7 @@ class AssertionResult:
             for metric in metrics:
                 metric.add_record(self.passed)
 
-        suite_context = CURRENT_SUITE_CONTEXT.get()
+        suite_context = SUITE_EXECUTION_CONTEXT.get()
         if suite_context.config.fail_fast and not self.passed:
             msg = (
                 self.error_message

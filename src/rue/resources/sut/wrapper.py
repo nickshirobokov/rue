@@ -18,12 +18,13 @@ from pydantic_ai import ModelRequest, ModelResponse
 from pydantic_core import ArgsKwargs, SchemaValidator
 from typing_extensions import TypeVar
 
-from rue.context.runtime import CURRENT_TEST_TRACER
+from rue.context.runtime import AVAILABLE_TEST_TRACER
 from rue.resources.sut.models import CapturedOutput, CapturedStream
 from rue.resources.sut.output import (
     SUTOutputCapture,
 )
 from rue.resources.sut.tracer import SUTTracer
+from rue.resources.sync import SyncableResource, SyncState
 from rue.telemetry.otel.backend import OtelTelemetryBackend
 from rue.telemetry.otel.runtime import OtelTraceSession
 
@@ -71,7 +72,12 @@ class _CallableProxy:
         setattr(self._target, name, value)
 
 
-class SUT(Generic[InstanceT]):
+@dataclass(frozen=True, slots=True)
+class SUTSyncState(SyncState):
+    """Subprocess-safe SUT state."""
+
+
+class SUT(SyncableResource[SUTSyncState], Generic[InstanceT]):
     def __init__(
         self,
         instance: InstanceT,
@@ -93,7 +99,7 @@ class SUT(Generic[InstanceT]):
         self._output_capture = SUTOutputCapture()
         self._tracer = SUTTracer(resolved_sut_name)
         self._name = resolved_sut_name
-        test_tracer = CURRENT_TEST_TRACER.get()
+        test_tracer = AVAILABLE_TEST_TRACER.get()
         backend = (
             None
             if test_tracer is None
@@ -102,6 +108,22 @@ class SUT(Generic[InstanceT]):
         if backend is not None and backend.active_session is not None:
             self._tracer.activate(backend.active_session)
         self.instance: InstanceT = self._wrap_instance(instance)
+
+    def get_sync_state(self) -> SUTSyncState:
+        """Return subprocess-safe SUT state."""
+        return SUTSyncState()
+
+    def from_sync_state(self, state: SUTSyncState) -> None:
+        """Hydrate subprocess-safe SUT state."""
+        _ = state
+
+    def merge_sync_states(
+        self,
+        baseline: SUTSyncState,
+        update: SUTSyncState,
+    ) -> None:
+        """Merge subprocess-safe SUT state."""
+        _ = baseline, update
 
     @property
     def name(self) -> str:
@@ -169,7 +191,8 @@ class SUT(Generic[InstanceT]):
                     }
                 case value:
                     raise TypeError(
-                        "Case inputs must be a dict, mapping, BaseModel, or dataclass instance. "
+                        "Case inputs must be a dict, mapping, BaseModel, or "
+                        "dataclass instance. "
                         f"Got: {type(value).__name__}"
                     )
             parsed_args = ArgsKwargs(args=(), kwargs=input_values)

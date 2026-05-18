@@ -54,16 +54,16 @@ class SuiteView:
     @classmethod
     def from_suite(cls, suite: ExecutedSuite) -> SuiteView:
         """Project a domain suite object into terminal display fields."""
-        environment = suite.environment
+        host = suite.host
         return cls(
             suite_execution_id=str(suite.suite_execution_id),
-            platform=environment.platform,
-            python_version=environment.python_version,
-            rue_version=environment.rue_version,
-            working_directory=environment.working_directory,
-            branch=environment.branch,
-            commit_hash=environment.commit_hash,
-            dirty=environment.dirty,
+            platform=host.platform,
+            python_version=host.python_version,
+            rue_version=host.rue_version,
+            working_directory=host.working_directory,
+            branch=host.branch,
+            commit_hash=host.commit_hash,
+            dirty=host.dirty,
             passed=suite.result.passed,
             failed=suite.result.failed,
             errors=suite.result.errors,
@@ -332,8 +332,7 @@ class TestExecutionView:
             renderables.append(combined)
 
         renderables.extend(
-            subview.assertion_panel()
-            for subview in self.assertion_subviews
+            subview.assertion_panel() for subview in self.assertion_subviews
         )
         return self._panel(renderables)
 
@@ -460,6 +459,8 @@ class TestExecutionView:
         text.append(label)
         text.append("]", style="dim")
         return text
+
+
 __all__ = [
     "AssertionView",
     "SuiteView",

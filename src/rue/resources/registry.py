@@ -44,7 +44,7 @@ class ResourceRegistry:
         on_teardown: Callable[[Any], Any] | None = None,
         origin_fn: Callable[..., Any] | None = None,
         autouse: bool = False,
-        sync: bool = True,
+        subprocess_sync: bool = False,
         builtin: bool = False,
     ) -> Any:
         """Register a function as a resource for dependency injection."""
@@ -86,7 +86,7 @@ class ResourceRegistry:
                 factory_kind=factory_kind,
                 dependencies=tuple(dependencies),
                 autouse=autouse,
-                sync=sync,
+                subprocess_sync=subprocess_sync,
                 resolve_hook=on_resolve,
                 injection_hook=on_injection,
                 teardown_hook=on_teardown,
@@ -394,7 +394,6 @@ def resource[**P, T](
     on_teardown: Callable[[Any], Any] | None = None,
     origin_fn: Callable[..., Any] | None = None,
     autouse: bool = False,
-    sync: bool = True,
 ) -> Any:
     """Register a function as a resource in the default registry."""
     return registry.register_resource(
@@ -405,5 +404,4 @@ def resource[**P, T](
         on_teardown=on_teardown,
         origin_fn=origin_fn,
         autouse=autouse,
-        sync=sync,
     )

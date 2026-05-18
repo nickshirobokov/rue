@@ -11,12 +11,11 @@ from rue.resources.models import (
     ResourceGraph,
     ResourceSpec,
     ScheduledTeardown,
-    StateSnapshot,
+    SubprocessResourceSnapshot,
 )
 from rue.resources.registry import ResourceRegistry, registry, resource
 from rue.resources.resolver import DependencyResolver
 from rue.resources.store import ResourceStore
-from rue.resources.transfer import StateTransfer
 
 
 _register_builtin_resources(registry)
@@ -33,8 +32,7 @@ __all__ = [
     "ResourceStore",
     "ScheduledTeardown",
     "Scope",
-    "StateSnapshot",
-    "StateTransfer",
+    "SubprocessResourceSnapshot",
     "registry",
     "resource",
 ]

@@ -4,9 +4,9 @@ import types
 from collections.abc import Callable
 from typing import Any
 
-from rue.context.runtime import CURRENT_TEST, CURRENT_TEST_TRACER
+from rue.context.runtime import AVAILABLE_TEST_TRACER, TEST_EXECUTION_CONTEXT
 from rue.context.scopes import Scope
-from rue.resources.registry import resource
+from rue.resources.registry import registry
 from rue.resources.sut.wrapper import SUT
 from rue.telemetry.otel.backend import OtelTelemetryBackend
 
@@ -40,11 +40,11 @@ def sut(
         return sut_instance
 
     def on_injection(sut_instance: SUT) -> SUT:
-        test_ctx = CURRENT_TEST.get()
+        test_ctx = TEST_EXECUTION_CONTEXT.get()
         test_execution_id = test_ctx.test_execution_id
         sut_instance.reset_output_state(test_execution_id)
         sut_instance.reset_trace_state(test_execution_id)
-        tracer = CURRENT_TEST_TRACER.get()
+        tracer = AVAILABLE_TEST_TRACER.get()
         backend = (
             None
             if tracer is None
@@ -54,9 +54,10 @@ def sut(
             sut_instance.activate_trace(backend.active_session)
         return sut_instance
 
-    return resource(
+    return registry.register_resource(
         fn,
         scope=scope,
         on_resolve=on_resolve,
         on_injection=on_injection,
+        subprocess_sync=True,
     )

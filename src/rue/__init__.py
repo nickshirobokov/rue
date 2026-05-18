@@ -1,5 +1,6 @@
 """Rue - Testing framework for AI agents."""
 
+from .environment import Environment, sources as env
 from .events import SuiteEventsProcessor, SuiteEventsReceiver
 from .experiments.decorator import experiment
 from .patching import MonkeyPatch
@@ -44,6 +45,7 @@ __all__ = [
     "CaseFactory",
     "CaseGroup",
     "EdgeCaseFactory",
+    "Environment",
     "ExecutionBackend",
     "Metric",
     "MonkeyPatch",
@@ -51,6 +53,7 @@ __all__ = [
     "SuiteEventsProcessor",
     "SuiteEventsReceiver",
     "backend",
+    "env",
     "experiment",
     "fail",
     "iterate",

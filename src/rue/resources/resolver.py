@@ -4,22 +4,26 @@ from collections.abc import AsyncGenerator, Generator, Sequence
 from typing import Any, cast
 
 from rue.context.models import ScopeOwner
-from rue.context.runtime import CURRENT_TEST, ResourceHookContext
-from rue.context.scopes import Scope, ScopeContext
+from rue.context.runtime import (
+    SUITE_EXECUTION_CONTEXT,
+    TEST_EXECUTION_CONTEXT,
+    ResourceHookContext,
+)
+from rue.context.scopes import CurrentProcessKind, Scope, ScopeContext
 from rue.models import Spec
 from rue.patching.runtime import PatchStore
 from rue.resources.models import (
+    LoadedResourceDef,
     ResourceFactoryKind,
     ResourceGraph,
     ResourceSpec,
     ScheduledTeardown,
+    SubprocessResourceError,
+    SubprocessResourceSnapshot,
 )
 from rue.resources.registry import ResourceRegistry
 from rue.resources.store import ResourceStore
-from rue.resources.transfer import StateTransfer
-
-
-_MAIN_SYNC_ACTOR_ID = 0
+from rue.resources.sync import SyncableResource
 
 
 class DependencyResolver:
@@ -31,14 +35,10 @@ class DependencyResolver:
         *,
         resources: ResourceStore | None = None,
         patches: PatchStore | None = None,
-        sync_actor_id: int = _MAIN_SYNC_ACTOR_ID,
     ) -> None:
         self.registry = registry
-        self.resources = resources or ResourceStore.main(
-            sync_actor_id=sync_actor_id
-        )
+        self.resources = resources or ResourceStore()
         self.patches = patches or PatchStore()
-        self.transfer = StateTransfer(self)
 
     async def resolve_graph_deps(
         self,
@@ -46,35 +46,24 @@ class DependencyResolver:
         params: dict[str, Any],
         *,
         consumer_spec: Spec,
-        preload: bool = False,
     ) -> dict[str, Any]:
-        """Resolve all graph-bound dependencies into caller kwargs.
-
-        With ``preload=True``, materialize everything without injection hooks;
-        snapshot/export paths return an empty dict and ignore ``params``.
-        """
+        """Resolve all graph-bound dependencies into caller kwargs."""
         with self.patches:
-            apply_injection_hook = not preload
-            kwargs: dict[str, Any] = (
-                dict(params) if apply_injection_hook else {}
-            )
+            kwargs: dict[str, Any] = dict(params)
 
             for spec in graph.autouse:
                 await self.resolve_resource(
                     spec,
                     graph=graph,
                     consumer_spec=consumer_spec,
-                    apply_injection_hook=apply_injection_hook,
                 )
             for name, spec in graph.injections.items():
                 value = await self.resolve_resource(
                     spec,
                     graph=graph,
                     consumer_spec=consumer_spec,
-                    apply_injection_hook=apply_injection_hook,
                 )
-                if apply_injection_hook:
-                    kwargs[name] = value
+                kwargs[name] = value
 
             return kwargs
 
@@ -90,7 +79,7 @@ class DependencyResolver:
         with self.patches:
             if graph is None:
                 graph = self.registry.get_graph(
-                    CURRENT_TEST.get().test_execution_id
+                    TEST_EXECUTION_CONTEXT.get().test_execution_id
                 )
             definition = self.registry.get_definition(spec)
             direct_dependencies = graph.dependencies[spec]
@@ -133,12 +122,9 @@ class DependencyResolver:
             else:
                 owners = (ScopeContext.current_owner(scope),)
             for owner in owners:
-                if self.resources.is_shadow:
-                    self.resources.clear(owner)
-                    self.undo_patches(owner=owner)
-                    continue
                 teardown_errors.extend(
-                    await self._run_teardowns(
+                    error.error
+                    for error in await self._run_teardowns(
                         self.resources.pop_teardown_records(owner)
                     )
                 )
@@ -169,6 +155,113 @@ class DependencyResolver:
                 handles = reversed(self.patches.pop_all())
         for handle in handles:
             handle.undo()
+
+    async def get_snapshot(
+        self,
+        *,
+        consumer_spec: Spec,
+    ) -> SubprocessResourceSnapshot:
+        """Build the subprocess resource payload for one test execution."""
+        test_execution_id = TEST_EXECUTION_CONTEXT.get().test_execution_id
+        graph = self.registry.get_graph(test_execution_id)
+        states = {}
+        for spec in graph.resolution_order:
+            definition = self.registry.get_definition(spec)
+            if not definition.subprocess_sync or spec.scope is Scope.TEST:
+                continue
+            value = await self.resolve_resource(
+                spec=spec,
+                graph=graph,
+                consumer_spec=consumer_spec,
+                apply_injection_hook=False,
+            )
+            assert isinstance(value, SyncableResource)
+            states[spec] = value.get_sync_state()
+        return SubprocessResourceSnapshot(
+            graph=graph,
+            states=states,
+        )
+
+    async def update_from_snapshot(
+        self,
+        snapshot: SubprocessResourceSnapshot,
+        *,
+        consumer_spec: Spec,
+    ) -> None:
+        """Hydrate subprocess-safe resources into this resolver."""
+        test_execution_id = TEST_EXECUTION_CONTEXT.get().test_execution_id
+        graph = snapshot.graph
+        self.registry.save_graph(test_execution_id, graph)
+        for spec, state in snapshot.states.items():
+            value = await self.resolve_resource(
+                spec=spec,
+                graph=graph,
+                consumer_spec=consumer_spec,
+                apply_injection_hook=False,
+            )
+            assert isinstance(value, SyncableResource)
+            value.from_sync_state(state)
+
+    async def sync_snapshot(
+        self,
+        snapshot: SubprocessResourceSnapshot,
+    ) -> SubprocessResourceSnapshot:
+        """Collect subprocess-safe updates from this resolver."""
+        states = {}
+        errors: list[SubprocessResourceError] = []
+
+        for owner in tuple(reversed(tuple(self.resources.scope_owners()))):
+            errors.extend(
+                await self._run_teardowns(
+                    self.resources.pop_teardown_records(owner)
+                )
+            )
+            for spec in snapshot.graph.resolution_order:
+                definition = self.registry.get_definition(spec)
+                if not definition.subprocess_sync:
+                    continue
+                if (
+                    spec.scope is not Scope.TEST
+                    and spec not in snapshot.states
+                ):
+                    continue
+                if not self.resources.has(spec, owner):
+                    continue
+                value = self.resources.get(spec, owner)
+                assert isinstance(value, SyncableResource)
+                states[spec] = value.get_sync_state()
+            self.resources.clear(owner)
+            self.undo_patches(owner=owner)
+        self.undo_patches()
+        return SubprocessResourceSnapshot(
+            graph=snapshot.graph,
+            states=states,
+            errors=tuple(errors),
+        )
+
+    def update_from_transfer(
+        self,
+        snapshot: SubprocessResourceSnapshot,
+        update: SubprocessResourceSnapshot,
+    ) -> None:
+        """Merge worker resource updates into parent-owned resources."""
+        for spec, update_state in update.states.items():
+            baseline = snapshot.states.get(spec)
+            if baseline is None:
+                update_state.apply_transfer()
+                continue
+            owner = ScopeContext.current_owner(spec.scope)
+            value = self.resources.get(spec, owner)
+            assert isinstance(value, SyncableResource)
+            value.merge_sync_states(
+                baseline,
+                update_state,
+            )
+        if update.errors:
+            raise ExceptionGroup(
+                "Subprocess resource errors",
+                [error.error for error in update.errors],
+            )
 
     async def _materialize_resource(
         self,
@@ -239,36 +332,74 @@ class DependencyResolver:
     async def _run_teardowns(
         self,
         teardowns: Sequence[ScheduledTeardown],
-    ) -> list[Exception]:
-        teardown_errors: list[Exception] = []
+    ) -> list[SubprocessResourceError]:
+        teardown_errors: list[SubprocessResourceError] = []
+        process = SUITE_EXECUTION_CONTEXT.get().process
 
         for teardown in reversed(teardowns):
             spec = teardown.spec
+            definition = teardown.definition
+
             try:
-                if (
-                    teardown.definition.factory_kind
-                    is ResourceFactoryKind.ASYNC_GENERATOR
-                ):
-                    await anext(
-                        cast(
+                match definition, process:
+                    case (
+                        LoadedResourceDef(
+                            subprocess_sync=True,
+                            spec=ResourceSpec(scope=Scope.MODULE | Scope.SUITE),
+                            factory_kind=ResourceFactoryKind.ASYNC_GENERATOR,
+                        ),
+                        CurrentProcessKind.TEST_SUBPROCESS,
+                    ):
+                        await cast(
                             "AsyncGenerator[Any, None]",
                             teardown.generator,
+                        ).aclose()
+                    case (
+                        LoadedResourceDef(
+                            subprocess_sync=True,
+                            spec=ResourceSpec(scope=Scope.MODULE | Scope.SUITE),
+                            factory_kind=ResourceFactoryKind.GENERATOR,
                         ),
-                        None,
-                    )
-                else:
-                    next(
+                        CurrentProcessKind.TEST_SUBPROCESS,
+                    ):
                         cast(
                             "Generator[Any, None, None]",
                             teardown.generator,
+                        ).close()
+                    case (
+                        LoadedResourceDef(
+                            factory_kind=ResourceFactoryKind.ASYNC_GENERATOR,
                         ),
-                        None,
-                    )
+                        _,
+                    ):
+                        await anext(
+                            cast(
+                                "AsyncGenerator[Any, None]",
+                                teardown.generator,
+                            ),
+                            None,
+                        )
+                    case (
+                        LoadedResourceDef(
+                            factory_kind=ResourceFactoryKind.GENERATOR,
+                        ),
+                        _,
+                    ):
+                        next(
+                            cast(
+                                "Generator[Any, None, None]",
+                                teardown.generator,
+                            ),
+                            None,
+                        )
             except Exception as e:
                 teardown_errors.append(
-                    RuntimeError(
-                        "Generator teardown failed for resource "
-                        f"'{spec.name}': {e}"
+                    SubprocessResourceError(
+                        spec=spec,
+                        error=RuntimeError(
+                            "Generator teardown failed for resource "
+                            f"'{spec.name}': {e}"
+                        ),
                     )
                 )
 
@@ -282,5 +413,10 @@ class DependencyResolver:
                     try:
                         await teardown.definition.on_teardown(value)
                     except Exception as e:
-                        teardown_errors.append(e)
+                        teardown_errors.append(
+                            SubprocessResourceError(
+                                spec=spec,
+                                error=e,
+                            )
+                        )
         return teardown_errors

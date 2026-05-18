@@ -10,7 +10,7 @@ import cloudpickle
 import pytest
 
 from rue.config import Config
-from rue.context.runtime import CURRENT_SUITE_CONTEXT, SuiteContext
+from rue.context.runtime import SUITE_EXECUTION_CONTEXT, SuiteContext
 from rue.events import (
     QueueForwarder,
     SessionEventsReceiver,
@@ -136,7 +136,7 @@ class ContextCapturingProcessor(SuiteEventsProcessor):
         self.suite_execution_id: UUID | None = None
 
     async def on_suite_execution_start(self, suite) -> None:
-        context = CURRENT_SUITE_CONTEXT.get()
+        context = SUITE_EXECUTION_CONTEXT.get()
         self.variant = context.experiment_variant
         self.suite_execution_id = suite.suite_execution_id
 

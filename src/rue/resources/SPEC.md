@@ -49,14 +49,21 @@ Setup files (`conftest.py`, `confrue_*.py`) let users provide shared resources
 for a directory tree. Same-name providers may coexist; Rue selects the provider
 nearest to the requesting test module.
 
-Resources can cross subprocess boundaries. Syncable values are snapshotted
-before a subprocess test executes, hydrated in the worker, and merged back into
-the parent after test execution. Non-syncable resources are resolved in the
-process that needs them.
+Normal resources are process-local across subprocess boundaries. A subprocess
+worker resolves normal resources from the registered factory in that worker,
+and parent-owned normal resource state is never snapshotted or merged.
 
 Specialized user-facing APIs are still resources: `@rue.metric` records quality
 signals, `@rue.sut` wraps systems under test with tracing/output capture, and
-the built-in `monkeypatch` resource scopes patches to the active Rue owner.
+the built-in `monkeypatch` and `environment` resources scope patches and
+filesystem/env-var sandboxes to the active Rue owner. Resources that opt into
+`subprocess_sync` must resolve to `SyncableResource` instances. Rue metrics
+use that contract to aggregate records from subprocess tests. SUT resources
+use the same contract with no arbitrary wrapped-instance state transfer;
+Rue-owned trace/output state is scoped to the active test. The `environment`
+builtin uses `subprocess_sync` for process-local object state while scoped
+environment files are shared by path; see `src/rue/environment/SPEC.md` for
+the wire protocol.
 
 ## Hooks
 
@@ -70,7 +77,7 @@ dependencies.
   committed to `ResourceStore`, once per `(ResourceSpec, ScopeOwner)`.
 - `on_injection(value)` fires after a cached or newly materialized value is
   selected for a consumer, just before it is returned in kwargs. It can run many
-  times for the same cached value and is skipped when `preload=True`.
+  times for the same cached value.
 - `on_teardown(value)` fires during owner teardown for generator resources,
   after the generator's post-yield cleanup path runs and before the value leaves
   the store.
@@ -86,7 +93,6 @@ sequenceDiagram
     participant Suite as ExecutableSuite
     participant Resolver as DependencyResolver
     participant Store as ResourceStore
-    participant Transfer as StateTransfer
     participant Test as LoadedTestDef
 
     Loader->>User: import setup + test modules
@@ -115,13 +121,14 @@ sequenceDiagram
     end
     Test->>User: call test function(**kwargs)
     alt subprocess backend
-        Suite->>Resolver: preload shared graph deps
-        Resolver->>Transfer: export_snapshot(test_execution_id)
-        Transfer-->>Suite: StateSnapshot
-        Suite->>Transfer: worker hydrate(snapshot)
-        Transfer->>Resolver: resolve missing/opaque resources
-        Transfer-->>Suite: update_since(snapshot)
-        Suite->>Transfer: apply_update(snapshot, update)
+        Suite->>Resolver: get_snapshot()
+        Resolver->>Resolver: resolve subprocess-sync resources only
+        Resolver-->>Suite: SubprocessResourceSnapshot
+        Suite->>Resolver: worker update_from_snapshot(snapshot)
+        Resolver->>Resolver: hydrate subprocess-sync baselines
+        Test->>Resolver: worker resolves normal resources locally
+        Resolver-->>Suite: SubprocessResourceSnapshot
+        Suite->>Resolver: update_from_transfer(snapshot, update)
     end
     Suite->>Resolver: teardown(Scope.TEST), ModuleContext + teardown(Scope.MODULE), final teardown()
     Resolver->>Resolver: close generator teardowns
@@ -136,9 +143,9 @@ sequenceDiagram
 | `resource()` / `ResourceRegistry.register_resource()` | Register one provider function as a `LoadedResourceDef`. |
 | `ResourceSpec` | Provider identity: locator plus `Scope`. |
 | `ResourceGraph` | Per-test-execution concrete graph: autouse roots, injection roots, dependency edges, resolution order. |
-| `DependencyResolver` | Runtime resolver, teardown owner, and patch-store binder. |
-| `ResourceStore` | Cache, pending futures, teardown records, and sync graph per `ScopeOwner`. |
-| `StateTransfer` | Snapshot/hydrate/update path for subprocess test execution. |
+| `DependencyResolver` | Runtime resolver, subprocess resource sync owner, teardown owner, and patch-store binder. |
+| `ResourceStore` | Cache, pending futures, and teardown records per `ScopeOwner`. |
+| `SyncableResource` | Resource value protocol for subprocess-safe state capture, hydration, and merge. |
 | `ResourceHookContext` | Ambient metadata while resource hooks run. |
 | `ModuleContext` | Runtime module owner used for top-level module work and module teardown. |
 
@@ -157,5 +164,5 @@ sequenceDiagram
   concurrent callers wait on the pending future.
 - `PatchStore` is bound for resolution and teardown so `monkeypatch` resources
   can register handles against the active resource owner.
-- Shadow stores hydrate subprocess state and skip live teardown; the parent
-  applies worker updates back onto visible live resources.
+- Subprocess workers run normal resource resolution and teardown in the worker
+  process. Only `subprocess_sync` resource state is returned to the parent.

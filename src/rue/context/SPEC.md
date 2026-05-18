@@ -43,7 +43,7 @@ block-beta
   final["Suite result<br/>DependencyResolver.teardown()<br/>TursoSuiteRecorder.on_suite_execution_complete"]
 
   space:3
-  suite_ctx["SuiteContext<br/>CURRENT_SUITE_CONTEXT<br/>config, suite_execution_id, environment"]:9
+  suite_ctx["SuiteContext<br/>SUITE_EXECUTION_CONTEXT<br/>config, suite_execution_id, host"]:9
 
   space:3
   suite_owner["ScopeContext<br/>SUITE owner"]:9
@@ -56,7 +56,7 @@ block-beta
   space
 
   space:6
-  test_ctx["TestContext<br/>CURRENT_TEST<br/>test_execution_id"]:4
+  test_ctx["TestContext<br/>TEST_EXECUTION_CONTEXT<br/>test_execution_id"]:4
   space:2
 
   space:6
@@ -64,7 +64,7 @@ block-beta
   space:2
 
   space:6
-  tracer["CURRENT_TEST_TRACER<br/>test tracer binding"]:4
+  tracer["AVAILABLE_TEST_TRACER<br/>test tracer binding"]:4
   space:2
 
   space:7
@@ -94,7 +94,7 @@ block-beta
   space:3
 
   space:8
-  sut_spans["CURRENT_SUT_SPAN_IDS<br/>SUT tracing stack"]
+  sut_spans["SUT_SPAN_IDS<br/>SUT tracing stack"]
   space:3
 
   style cli fill:#f8fafc,stroke:#475569,color:#111827
@@ -144,17 +144,17 @@ open, and MUST NOT resolve `Scope.MODULE` unless a `ModuleContext` or
 
 | Context API | Purpose | Binder / owner | Available during | Required behavior | Main consumers |
 | --- | --- | --- | --- | --- | --- |
-| `SuiteContext` / `CURRENT_SUITE_CONTEXT` | Suite-level config, `suite_execution_id`, environment, experiment variant metadata | Opened by CLI, experiment execution, status builder, or tests before constructing/calling execution APIs | Whole Rue suite | Required; missing lookup MUST fail | `ExecutableSuite`, `SingleTest`, assertions, suite event processors, subprocess payloads |
-| `SuiteEnvironment` | Serializable metadata for the process that owns the suite | Built by `SuiteContext` | As `SuiteContext.environment` | Not a context binding | Suite result persistence and reports |
+| `SuiteContext` / `SUITE_EXECUTION_CONTEXT` | Suite-level config, `suite_execution_id`, environment, process kind, experiment variant metadata | Opened by CLI, experiment execution, status builder, or tests before constructing/calling execution APIs | Whole Rue suite | Required; missing lookup MUST fail | `ExecutableSuite`, `SingleTest`, assertions, suite event processors, subprocess payloads |
+| `SuiteHost` | Serializable metadata for the process that owns the suite | Built by `SuiteContext` | As `SuiteContext.host` | Not a context binding | Suite result persistence and reports |
 | `ModuleContext` | Current module path without test metadata | Opened by `ExecutableSuite` around top-level module work and module teardown | Top-level test dispatch and module teardown | Required for module-scoped resources and patches outside a test body | `ExecutableSuite`, `DependencyResolver`, patch dispatch |
-| `TestContext` / `CURRENT_TEST` | Current `test_execution_id` | Opened by `SingleTest._execute`, subprocess worker, and status preflight | One test execution | Required for test execution, graph lookup, SUT injection, and test-scoped resources | `LoadedTestDef`, `DependencyResolver`, SUT resources, transfer |
+| `TestContext` / `TEST_EXECUTION_CONTEXT` | Current `test_execution_id` | Opened by `SingleTest._execute`, subprocess worker, and status preflight | One test execution | Required for test execution, graph lookup, SUT injection, and test-scoped resources | `LoadedTestDef`, `DependencyResolver`, SUT resources, transfer |
 | `ScopeContext` / `CURRENT_SCOPE_CONTEXT` | Current `ScopeOwner` values for `Scope.SUITE`, `Scope.MODULE`, and `Scope.TEST` | Opened by `SuiteContext`, `ModuleContext`, and `TestContext` | Suite context for `SUITE`; module context for `MODULE`; test context for `TEST` plus active wider owners | Required for scoped resources and patches; invalid scope ownership MUST fail | Resource store, resolver, patch dispatch |
-| `ResourceHookContext` / `CURRENT_RESOURCE_HOOK_CONTEXT` | Consumer/provider metadata while resource hooks run | Opened by `DependencyResolver` around `on_resolve`, `on_injection`, and `on_teardown` | Resource hook callbacks only | Required inside hook-only APIs | Metric resource decoration and hook metadata |
+| `ResourceHookContext` / `RESOURCE_TRANSACTION_CONTEXT` | Consumer/provider metadata while resource hooks run | Opened by `DependencyResolver` around `on_resolve`, `on_injection`, and `on_teardown` | Resource hook callbacks only | Required inside hook-only APIs | Metric resource decoration and hook metadata |
 | `CURRENT_ASSERTION_RESULTS` | Optional assertion result sink | Bound with `bind` around loaded test execution or metric collection | Test body and metric collection windows | Optional; `None` means no collection | `AssertionResult.__post_init__`, metrics |
 | `CURRENT_PREDICATE_RESULTS` | Optional predicate result sink for rewritten assertions | Bound with `bind` by assertion rewrite | Predicate calls inside an assertion | Optional; `None` means no collection | `@predicate` wrappers |
 | `CURRENT_METRIC_RESULTS` | Optional suite-level metric result sink | Bound with `bind` by `ExecutableSuite.execute` | Whole executable suite body | Optional; `None` means no collection | `MetricResult.__post_init__` |
-| `CURRENT_TEST_TRACER` | Optional active test tracer | Bound with `bind` by local and subprocess test execution | Test execution | Optional; `None` means tracing is inactive | predicates, SUT resources, telemetry |
-| `CURRENT_SUT_SPAN_IDS` | Optional stack of active SUT span ids | Bound with `bind` by SUT tracing wrappers | Nested SUT calls | Optional; empty tuple means no active SUT span | OpenTelemetry runtime |
+| `AVAILABLE_TEST_TRACER` | Optional active test tracer | Bound with `bind` by local and subprocess test execution | Test execution | Optional; `None` means tracing is inactive | predicates, SUT resources, telemetry |
+| `SUT_SPAN_IDS` | Optional stack of active SUT span ids | Bound with `bind` by SUT tracing wrappers | Nested SUT calls | Optional; empty tuple means no active SUT span | OpenTelemetry runtime |
 | `LazyProcessPool` / `CURRENT_PROCESS_POOL` | ExecutableSuite-owned lazy subprocess pool | Opened by `ExecutableSuite._execute_suite` | Queue execution for a suite | Required through `LazyProcessPool.current()` when subprocess execution is requested | `SingleTest._execute_subprocess` |
 | `PatchStore` | Resolver-owned storage for context-routed monkeypatch handles | Opened by `DependencyResolver` while resolving or tearing down resources | Resource resolution and teardown | Required for `MonkeyPatch.for_scope`; missing lookup MUST fail | `MonkeyPatch`, resolver patch cleanup, dispatchers |
 | `ACTIVE_ASSERTION_METRICS` | Optional metric objects that record assertion pass/fail values | Bound by `metrics()` | User-selected assertion metric block | Optional; `None` means no metric recording | `AssertionResult.__post_init__` |
@@ -176,7 +176,7 @@ test tracer from suite config and `test_execution_id`.
 
 `ModuleContext` requires an open `SuiteContext`; entering it derives suite and
 module `ScopeOwner` values from the active suite and module path without binding
-`CURRENT_TEST`.
+`TEST_EXECUTION_CONTEXT`.
 
 `TestContext` requires an open `SuiteContext`; entering it layers a test
 `ScopeOwner` over the active scope context.
@@ -186,12 +186,16 @@ ownership is available inside `ModuleContext`. `TestContext` preserves the
 active module owner when one is already bound. `Scope.TEST` ownership is
 available only inside `TestContext`.
 
-Resource graph lookup without an explicit graph requires `CURRENT_TEST` because
+Resource graph lookup without an explicit graph requires `TEST_EXECUTION_CONTEXT` because
 graphs are keyed by `test_execution_id`.
 
 Subprocess test execution requires `LazyProcessPool` to be open in the
 executable suite and reopens serialized `SuiteContext` and `TestContext` inside
-the worker process.
+the worker process. Normal resources are resolved and torn down inside the
+process that needs them. Only resources opted into `subprocess_sync` transport
+state back to the parent resolver. `SuiteContext.process` identifies whether
+the active suite is running in the main process, a test subprocess, or an
+experiment subprocess.
 
 Module teardown opens `ModuleContext` for the completed module so
 `ScopeContext.current_owner(Scope.MODULE)` selects the correct module owner

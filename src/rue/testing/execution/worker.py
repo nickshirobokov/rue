@@ -5,15 +5,15 @@ from __future__ import annotations
 import asyncio
 
 from rue.context.runtime import (
-    CURRENT_TEST_TRACER,
+    AVAILABLE_TEST_TRACER,
     ModuleContext,
     TestContext,
     bind,
 )
+from rue.context.scopes import CurrentProcessKind
 from rue.experiments.registry import registry as default_experiment_registry
 from rue.resources import DependencyResolver
 from rue.resources.registry import registry as default_resource_registry
-from rue.resources.store import ResourceStore
 from rue.testing.discovery.loader import TestLoader
 from rue.testing.execution.test.models import (
     RemoteTestExecutionPayload,
@@ -33,14 +33,10 @@ def execute_remote_test(
 async def _execute_remote_test(
     payload: RemoteTestExecutionPayload,
 ) -> RemoteTestExecutionResult:
-    loader = TestLoader(payload.suite_root)
-    resolver = DependencyResolver(
-        default_resource_registry,
-        resources=ResourceStore.shadow(
-            sync_actor_id=payload.snapshot.actor_id,
-        ),
-    )
+    payload.context.process = CurrentProcessKind.TEST_SUBPROCESS
     with payload.context:
+        loader = TestLoader(payload.suite_root)
+        resolver = DependencyResolver(default_resource_registry)
         if payload.context.experiment_variant is not None:
             for ref in payload.context.experiment_setup_chain:
                 loader.prepare_setup(ref.path)
@@ -66,11 +62,12 @@ async def _execute_remote_test(
         payload.context,
         ModuleContext(payload.spec.locator.module_path),
         test_ctx,
-        bind(CURRENT_TEST_TRACER, tracer),
+        bind(AVAILABLE_TEST_TRACER, tracer),
     ):
+        resource_update = None
         try:
-            await resolver.transfer.hydrate(
-                payload.snapshot,
+            await resolver.update_from_snapshot(
+                payload.resources,
                 consumer_spec=definition.spec,
             )
             tracer.start(
@@ -96,11 +93,14 @@ async def _execute_remote_test(
             )
             tracer.record_result(result)
             telemetry_artifacts = tracer.finish()
-            sync_update = resolver.transfer.update_since(payload.snapshot)
+            resource_update = await resolver.sync_snapshot(
+                payload.resources,
+            )
         finally:
-            await resolver.teardown()
+            if resource_update is None:
+                await resolver.teardown()
     return RemoteTestExecutionResult(
         result=result,
         telemetry_artifacts=telemetry_artifacts,
-        sync_update=sync_update,
+        resources=resource_update,
     )

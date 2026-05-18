@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import cloudpickle  # type: ignore[import-untyped]
 
-from rue.context.runtime import CURRENT_SUITE_CONTEXT, SuiteContext
+from rue.context.runtime import SUITE_EXECUTION_CONTEXT, SuiteContext
 from rue.events.processor import SuiteEventsProcessor
 
 
@@ -89,7 +89,7 @@ class QueueForwarder(SuiteEventsProcessor):
         event = _QueuedSuiteEvent(
             method_name=method_name,
             args=args,
-            context=CURRENT_SUITE_CONTEXT.get(),
+            context=SUITE_EXECUTION_CONTEXT.get(),
         )
         self._queue.put(cloudpickle.dumps(event))
 

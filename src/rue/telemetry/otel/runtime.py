@@ -19,7 +19,7 @@ from opentelemetry.sdk.trace import (
     TracerProvider as SdkTracerProvider,
 )
 
-from rue.context.runtime import CURRENT_SUT_SPAN_IDS
+from rue.context.runtime import SUT_SPAN_IDS
 
 
 @dataclass(slots=True)
@@ -78,7 +78,7 @@ class SessionAwareSpanProcessor(SpanProcessor):
         if session is None:
             return
 
-        owner_span_ids = CURRENT_SUT_SPAN_IDS.get()
+        owner_span_ids = SUT_SPAN_IDS.get()
         if not owner_span_ids:
             return
 

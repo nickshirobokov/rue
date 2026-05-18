@@ -14,8 +14,9 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from rue.config import Config
-from rue.context.models import SuiteEnvironment
-from rue.context.scopes import ScopeContext
+from rue.context.models import SuiteHost
+from rue.context.scopes import CurrentProcessKind, ScopeContext
+from rue.environment.storage import EnvironmentStorage
 from rue.models import Spec
 
 
@@ -46,7 +47,7 @@ class TestContext:
 
     def __enter__(self) -> TestContext:
         """Bind this test context to the current test execution scope."""
-        self._tokens.append(CURRENT_TEST.set(self))
+        self._tokens.append(TEST_EXECUTION_CONTEXT.set(self))
         scope_context = ScopeContext.for_test(self.test_execution_id)
         scope_context.__enter__()
         self._scope_contexts.append(scope_context)
@@ -60,7 +61,7 @@ class TestContext:
     ) -> None:
         """Restore the previous test context."""
         self._scope_contexts.pop().__exit__(exc_type, exc, traceback)
-        CURRENT_TEST.reset(self._tokens.pop())
+        TEST_EXECUTION_CONTEXT.reset(self._tokens.pop())
 
 
 @dataclass(slots=True)
@@ -77,7 +78,7 @@ class ModuleContext:
 
     def __enter__(self) -> ModuleContext:
         """Bind this module context to the current module runtime scope."""
-        suite_context = CURRENT_SUITE_CONTEXT.get()
+        suite_context = SUITE_EXECUTION_CONTEXT.get()
         scope_context = ScopeContext.for_module(
             suite_execution_id=suite_context.suite_execution_id,
             module_path=self.module_path,
@@ -112,7 +113,7 @@ class ResourceHookContext:
 
     def __enter__(self) -> ResourceHookContext:
         """Bind this hook metadata to the current hook scope."""
-        self._tokens.append(CURRENT_RESOURCE_HOOK_CONTEXT.set(self))
+        self._tokens.append(RESOURCE_TRANSACTION_CONTEXT.set(self))
         return self
 
     def __exit__(
@@ -122,7 +123,7 @@ class ResourceHookContext:
         traceback: TracebackType | None,
     ) -> None:
         """Restore the previous resource hook metadata."""
-        CURRENT_RESOURCE_HOOK_CONTEXT.reset(self._tokens.pop())
+        RESOURCE_TRANSACTION_CONTEXT.reset(self._tokens.pop())
 
 
 class SuiteContext(BaseModel):
@@ -132,9 +133,8 @@ class SuiteContext(BaseModel):
 
     config: Config = Field(default_factory=Config)
     suite_execution_id: UUID = Field(default_factory=uuid4)
-    environment: SuiteEnvironment = Field(
-        default_factory=SuiteEnvironment.build_from_current
-    )
+    host: SuiteHost = Field(default_factory=SuiteHost.build_from_current)
+    process: CurrentProcessKind = CurrentProcessKind.MAIN
     experiment_variant: Any | None = None
     experiment_setup_chain: tuple[Any, ...] = ()
     _tokens: list[Token[SuiteContext]] = PrivateAttr(default_factory=list)
@@ -142,10 +142,12 @@ class SuiteContext(BaseModel):
 
     def __enter__(self) -> SuiteContext:
         """Bind this suite context to the current suite execution scope."""
-        self._tokens.append(CURRENT_SUITE_CONTEXT.set(self))
+        self._tokens.append(SUITE_EXECUTION_CONTEXT.set(self))
         scope_context = ScopeContext.for_suite(self.suite_execution_id)
         scope_context.__enter__()
         self._scope_contexts.append(scope_context)
+        if self.process is CurrentProcessKind.MAIN:
+            EnvironmentStorage().gc_stale()
         return self
 
     def __exit__(
@@ -156,7 +158,9 @@ class SuiteContext(BaseModel):
     ) -> None:
         """Restore the previous suite context."""
         self._scope_contexts.pop().__exit__(exc_type, exc, traceback)
-        CURRENT_SUITE_CONTEXT.reset(self._tokens.pop())
+        if self.process is CurrentProcessKind.MAIN:
+            EnvironmentStorage.release_suite(self.suite_execution_id)
+        SUITE_EXECUTION_CONTEXT.reset(self._tokens.pop())
 
     def __getstate__(self) -> dict[str, Any]:
         """Serialize suite data without process-local contextvar tokens."""
@@ -168,20 +172,20 @@ class SuiteContext(BaseModel):
         return state
 
 
-CURRENT_TEST: ContextVar[TestContext] = ContextVar("current_test")
-CURRENT_SUITE_CONTEXT: ContextVar[SuiteContext] = ContextVar(
-    "current_suite_context"
+TEST_EXECUTION_CONTEXT: ContextVar[TestContext] = ContextVar(
+    "test_execution_context"
 )
-CURRENT_TEST_TRACER: ContextVar[TestTracer | None] = ContextVar(
-    "current_test_tracer", default=None
+SUITE_EXECUTION_CONTEXT: ContextVar[SuiteContext] = ContextVar(
+    "suite_execution_context"
 )
-CURRENT_SUT_SPAN_IDS: ContextVar[tuple[int, ...]] = ContextVar(
-    "current_sut_span_ids", default=()
+AVAILABLE_TEST_TRACER: ContextVar[TestTracer | None] = ContextVar(
+    "available_test_tracer", default=None
 )
-CURRENT_RESOURCE_HOOK_CONTEXT: ContextVar[
-    ResourceHookContext
-] = ContextVar(
-    "current_resource_hook_context",
+SUT_SPAN_IDS: ContextVar[tuple[int, ...]] = ContextVar(
+    "sut_span_ids", default=()
+)
+RESOURCE_TRANSACTION_CONTEXT: ContextVar[ResourceHookContext] = ContextVar(
+    "resource_transaction_context",
 )
 
 

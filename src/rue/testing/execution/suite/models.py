@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from rue.context.models import SuiteEnvironment
+from rue.context.models import SuiteHost
 from rue.resources.metrics.models import MetricResult
 from rue.testing.execution.test.models import ExecutedTest, TestStatus
 
@@ -95,7 +95,5 @@ class ExecutedSuite:
     start_time: datetime = field(default_factory=lambda: datetime.now(UTC))
     end_time: datetime | None = None
 
-    environment: SuiteEnvironment = field(
-        default_factory=SuiteEnvironment.build_from_current
-    )
+    host: SuiteHost = field(default_factory=SuiteHost.build_from_current)
     result: SuiteResult = field(default_factory=SuiteResult)
